@@ -1,5 +1,5 @@
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
-import type { firestore as FirebaseAdminFirestore } from 'firebase-admin';
+import type { Firestore, Query } from 'firebase-admin/firestore';
 import type { GetListOverflowChainIssue } from '../../../packages/contracts/getListOverflowChain';
 import {
   buildOverflowChainRepairPlan,
@@ -8,7 +8,6 @@ import {
   type OverflowChainRepairWrite,
 } from './listOverflowChain';
 
-type Firestore = FirebaseAdminFirestore.Firestore;
 
 type Args = {
   apply: boolean;
@@ -114,7 +113,7 @@ const getCandidateListIds = async (
     return singleDoc.exists ? [singleDoc.id] : [];
   }
 
-  let query: FirebaseAdminFirestore.Query = firestore.collection('lists');
+  let query: Query = firestore.collection('lists');
   if (options.limit) {
     query = query.limit(options.limit);
   }

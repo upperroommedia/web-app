@@ -2,7 +2,7 @@ import FormControl from '@mui/material/FormControl';
 import InputLabel from '@mui/material/InputLabel';
 import MenuItem from '@mui/material/MenuItem';
 import Select from '@mui/material/Select';
-import { FormEvent, useCallback, useEffect, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { UserRole, UserRoleType } from '../types/User';
 import TextField from '@mui/material/TextField';
 import Button from '@mui/material/Button';
@@ -19,6 +19,10 @@ import TableRow from '@mui/material/TableRow';
 import Typography from '@mui/material/Typography';
 import Box from '@mui/material/Box';
 import { createFunctionV2 } from '../utils/createFunction';
+import auth, { signOut } from '../firebase/auth';
+import { useEntityJobs } from '../hooks/useDurableJobs';
+import useAuth from '../context/user/UserContext';
+import EntityJobHistory from './jobs/EntityJobHistory';
 import {
   CreateRoleRequestInputType,
   CreateRoleRequestOutputType,
@@ -36,6 +40,7 @@ const formatStatus = (value: string): string =>
 const REQUESTABLE_ROLES: UserRoleType[] = [UserRole.UPLOADER, UserRole.PUBLISHER];
 
 const RequestRoleChange = () => {
+  const { user } = useAuth();
   const defaultValue = UserRole.UPLOADER;
   const [role, setRole] = useState<UserRoleType>(defaultValue);
   const [reason, setReason] = useState('');
@@ -43,16 +48,45 @@ const RequestRoleChange = () => {
   const [loadingRequests, setLoadingRequests] = useState(false);
   const [requests, setRequests] = useState<RoleRequestSummary[]>([]);
   const [feedback, setFeedback] = useState<{ severity: AlertColor; message: string } | null>(null);
+  const { jobs: accountJobs } = useEntityJobs({ type: 'user', id: user?.uid ?? '' });
+  const refreshedRoleJobs = useRef(new Set<string>());
+  const completedRoleJob = accountJobs.find(
+    (job) => ['role.resolve', 'role.assign'].includes(job.kind) && job.state === 'succeeded'
+  );
+
+  useEffect(() => {
+    if (!completedRoleJob) return;
+    const key = `${completedRoleJob.jobId}:${completedRoleJob.revision}`;
+    if (refreshedRoleJobs.current.has(key)) return;
+    refreshedRoleJobs.current.add(key);
+    void auth.currentUser?.getIdToken(true).catch(async (error: unknown) => {
+      const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined;
+      if (['auth/user-token-expired', 'auth/invalid-user-token', 'auth/user-disabled'].includes(String(code))) {
+        setFeedback({ severity: 'info', message: 'Your account role changed. Sign in again to continue.' });
+        await signOut(auth);
+      } else {
+        setFeedback({
+          severity: 'info',
+          message: 'Your role update completed. Reconnect and refresh your account to continue.',
+        });
+      }
+    });
+  }, [completedRoleJob]);
 
   const fetchRequests = useCallback(async () => {
     setLoadingRequests(true);
     try {
-      const listRoleRequests = createFunctionV2<ListRoleRequestsInputType, ListRoleRequestsOutputType>('listrolerequests');
+      const listRoleRequests = createFunctionV2<ListRoleRequestsInputType, ListRoleRequestsOutputType>(
+        'listrolerequests'
+      );
       const response = await listRoleRequests({ limit: 25 });
       if (response.status === 'error') {
         throw new Error(response.error);
       }
       setRequests(response.data.roleRequests);
+      if (response.data.roleRequests.some((request) => request.status === 'accepted')) {
+        await auth.currentUser?.getIdToken(true);
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to load role requests.';
       setFeedback({ severity: 'error', message });
@@ -71,7 +105,9 @@ const RequestRoleChange = () => {
     setFeedback(null);
 
     try {
-      const createRoleRequest = createFunctionV2<CreateRoleRequestInputType, CreateRoleRequestOutputType>('createrolerequest');
+      const createRoleRequest = createFunctionV2<CreateRoleRequestInputType, CreateRoleRequestOutputType>(
+        'createrolerequest'
+      );
       const response = await createRoleRequest({
         requestedRole: role,
         reason,
@@ -105,11 +141,7 @@ const RequestRoleChange = () => {
 
   return (
     <Stack spacing={2} sx={{ width: 1, maxWidth: 900, mx: 'auto' }}>
-      <FormControl
-        component="form"
-        onSubmit={handleSubmit}
-        sx={{ display: 'flex', gap: 2, width: 1 }}
-      >
+      <FormControl component="form" onSubmit={handleSubmit} sx={{ display: 'flex', gap: 2, width: 1 }}>
         <InputLabel id="role-select-label">Role</InputLabel>
         <Select
           defaultValue={defaultValue}
@@ -143,15 +175,11 @@ const RequestRoleChange = () => {
         </Button>
       </FormControl>
       {feedback && <Alert severity={feedback.severity}>{feedback.message}</Alert>}
+      {user && <EntityJobHistory entity={{ type: 'user', id: user.uid }} />}
       <Stack spacing={1}>
         <Stack direction="row" justifyContent="space-between" alignItems="center">
           <Typography variant="h6">Open Requests</Typography>
-          <Button
-            size="small"
-            onClick={fetchRequests}
-            disabled={loadingRequests || submitting}
-            sx={{ minWidth: 76 }}
-          >
+          <Button size="small" onClick={fetchRequests} disabled={loadingRequests || submitting} sx={{ minWidth: 76 }}>
             {loadingRequests ? <CircularProgress size={16} color="inherit" /> : 'Refresh'}
           </Button>
         </Stack>
@@ -168,7 +196,7 @@ const RequestRoleChange = () => {
               <CircularProgress size={20} />
             </Box>
           ) : (
-          <Typography color="text.secondary">No requests submitted yet.</Typography>
+            <Typography color="text.secondary">No requests submitted yet.</Typography>
           )
         ) : (
           <Box sx={{ position: 'relative' }}>

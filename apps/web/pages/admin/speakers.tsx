@@ -1,23 +1,15 @@
-import Link from '@mui/material/Link';
 import Typography from '@mui/material/Typography';
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
 import CreateSpeakerPopup, { CreateSpeakerFormValues } from '../../components/CreateSpeakerPopup';
-import PopUp from '../../components/PopUp';
 import SpeakerTable from '../../components/SpeakerTable';
 import { Order } from '../../context/types';
 import AppLayout from '../../layout/AppLayout';
 import { ISpeaker } from '../../types/Speaker';
 import useAuth from '../../context/user/UserContext';
 import { createFunctionV2 } from '../../utils/createFunction';
-import {
-  SPEAKER_LIST_SUCCESS_INSTRUCTION,
-  SUBSPLASH_SPEAKER_LIST_LINK,
-  shouldShowSpeakerListSuccess,
-} from '../../utils/speakers/createSpeakerClient';
-import {
-  CreateSpeakerCallableInputType,
-  CreateSpeakerCallableOutputType,
-} from '@upperroom/contracts/speakers/createSpeakerTypes';
+import { submitDurableIntent, getPendingCreationId, forgetPendingCreationId } from '../../utils/durableJobs';
+import { useEntityJobs } from '../../hooks/useDurableJobs';
+import EntityJobHistory from '../../components/jobs/EntityJobHistory';
 import Box from '@mui/material/Box';
 import Alert from '@mui/material/Alert';
 import Button from '@mui/material/Button';
@@ -44,31 +36,23 @@ import firestore, {
 } from '../../firebase/firestore';
 import { speakerConverter } from '../../types/Speaker';
 import {
-  AcceptSpeakerRequestInputType,
-  AcceptSpeakerRequestOutputType,
-  DenySpeakerRequestInputType,
-  DenySpeakerRequestOutputType,
   ListSpeakerRequestsInputType,
   ListSpeakerRequestsOutputType,
   SpeakerRequestSummary,
 } from '@upperroom/contracts/speakerRequests/speakerRequestTypes';
 import { buildCreateSpeakerPayload } from '../../utils/speakers/createSpeakerClient';
 
-const createSpeakerCallable = createFunctionV2<CreateSpeakerCallableInputType, CreateSpeakerCallableOutputType>(
-  'createspeaker'
-);
 const listSpeakerRequestsCallable = createFunctionV2<ListSpeakerRequestsInputType, ListSpeakerRequestsOutputType>(
   'listspeakerrequests'
 );
-const acceptSpeakerRequestCallable = createFunctionV2<AcceptSpeakerRequestInputType, AcceptSpeakerRequestOutputType>(
-  'acceptspeakerrequest'
-);
-const denySpeakerRequestCallable = createFunctionV2<DenySpeakerRequestInputType, DenySpeakerRequestOutputType>(
-  'denyspeakerrequest'
-);
-
 const AdminSpeakers = () => {
   const { searchClient, loading: searchClientLoading, clearCache } = useAlgoliaSearch();
+  const [trackedSpeakerId, setTrackedSpeakerId] = useState('');
+  const { jobs } = useEntityJobs({ type: 'speaker', id: trackedSpeakerId });
+  const settledJobRevision = jobs
+    .filter((job) => ['succeeded', 'failed', 'cancelled', 'superseded'].includes(job.state))
+    .map((job) => `${job.jobId}:${job.revision}`)
+    .join('|');
   const [speakerInput, setSpeakerInput] = useState<string>('');
   const [debouncedSpeakerInput, setDebouncedSpeakerInput] = useState<string>('');
   const [page, setPage] = useState<number>(0);
@@ -77,14 +61,22 @@ const AdminSpeakers = () => {
   const [speakersLoading, setSpeakersLoading] = useState<boolean>(false);
   const [totalSpeakers, setTotalSpeakers] = useState<number>(0);
   const [createSpeakerPopupOpen, setCreateSpeakerPopupOpen] = useState<boolean>(false);
-  const [speakerListSuccessPopupOpen, setSpeakerListSuccessPopupOpen] = useState<boolean>(false);
   const [sortProperty, setSortProperty] = useState<keyof ISpeaker>('sermonCount');
   const [sortOrder, setSortOrder] = useState<Order>(getDefaultSpeakerSortOrder('sermonCount'));
   const [refreshNonce, setRefreshNonce] = useState<number>(0);
+  useEffect(() => {
+    if (!settledJobRevision) return;
+    void clearCache();
+    setRefreshNonce((value) => value + 1);
+  }, [clearCache, settledJobRevision]);
+
   const [speakerRequests, setSpeakerRequests] = useState<SpeakerRequestSummary[]>([]);
   const [speakerRequestsLoading, setSpeakerRequestsLoading] = useState(false);
   const [speakerRequestsExpanded, setSpeakerRequestsExpanded] = useState(false);
-  const [speakerRequestNotice, setSpeakerRequestNotice] = useState<{ severity: 'success' | 'warning' | 'error'; text: string } | null>(null);
+  const [speakerRequestNotice, setSpeakerRequestNotice] = useState<{
+    severity: 'success' | 'warning' | 'error' | 'info';
+    text: string;
+  } | null>(null);
   const [selectedSpeakerRequest, setSelectedSpeakerRequest] = useState<SpeakerRequestSummary | null>(null);
   const [declineDialogOpen, setDeclineDialogOpen] = useState(false);
   const [declineMessage, setDeclineMessage] = useState('');
@@ -267,59 +259,43 @@ const AdminSpeakers = () => {
     setPage(0);
   };
 
-  const refreshSpeakersAndRequests = async () => {
-    await clearCache();
-    setSpeakerInput('');
-    setDebouncedSpeakerInput('');
-    setPage(0);
-    setRefreshNonce((currentValue) => currentValue + 1);
-  };
-
   const handleCreateSpeaker = async (values: CreateSpeakerFormValues) => {
-    if (selectedSpeakerRequest) {
-      const response = await acceptSpeakerRequestCallable({
-        speakerRequestId: selectedSpeakerRequest.speakerRequestId,
-        speaker: {
-          name: values.name.trim(),
-          images: values.images,
-          ...(values.shortDescription?.trim() ? { shortDescription: values.shortDescription.trim() } : {}),
-          ...(values.description?.trim() ? { description: values.description.trim() } : {}),
-        },
-        createSpeakerList: values.createSpeakerList,
-      });
-
-      if (response.status === 'error') {
-        throw new Error(response.error);
-      }
-
-      setSpeakerRequestNotice({
-        severity: response.data.warning ? 'warning' : 'success',
-        text: response.data.warning
-          ? `${selectedSpeakerRequest.speakerName} was created, but the requester email could not be queued.`
-          : `${selectedSpeakerRequest.speakerName} was created and the requester has been notified.`,
-      });
-      if (response.data.speakerListCreated) {
-        setSpeakerListSuccessPopupOpen(true);
-      }
-      setSelectedSpeakerRequest(null);
-      await refreshSpeakersAndRequests();
-      return;
-    }
-
-    const payload = buildCreateSpeakerPayload({
+    const speaker = buildCreateSpeakerPayload({
       name: values.name,
       images: values.images,
       shortDescription: values.shortDescription,
       description: values.description,
       createSpeakerList: values.createSpeakerList,
     });
-
-    const response = await createSpeakerCallable(payload);
-    await refreshSpeakersAndRequests();
-
-    if (shouldShowSpeakerListSuccess(response)) {
-      setSpeakerListSuccessPopupOpen(true);
+    if (selectedSpeakerRequest) {
+      const entityId = selectedSpeakerRequest.speakerRequestId;
+      setTrackedSpeakerId(entityId);
+      await submitDurableIntent({
+        kind: 'speaker.resolve',
+        entity: { type: 'speaker', id: entityId },
+        payload: {
+          decision: 'accept',
+          requestId: entityId,
+          speaker: speaker.speaker,
+          createSpeakerList: values.createSpeakerList,
+        },
+      });
+      setSelectedSpeakerRequest(null);
+    } else {
+      const payload = { operation: 'create', input: speaker };
+      const entityId = await getPendingCreationId('speaker.mutate', payload);
+      setTrackedSpeakerId(entityId);
+      await submitDurableIntent({
+        kind: 'speaker.mutate',
+        entity: { type: 'speaker', id: entityId },
+        payload,
+      });
+      await forgetPendingCreationId('speaker.mutate', payload);
     }
+    setSpeakerRequestNotice({
+      severity: 'info',
+      text: 'Speaker creation requested. Progress and any required follow-up appear below.',
+    });
   };
 
   const handleOpenCreateSpeakerFromRequest = (request: SpeakerRequestSummary) => {
@@ -341,24 +317,20 @@ const AdminSpeakers = () => {
 
     setSpeakerRequestActionLoading('deny');
     try {
-      const response = await denySpeakerRequestCallable({
-        speakerRequestId: selectedSpeakerRequest.speakerRequestId,
-        message: declineMessage,
+      const entityId = selectedSpeakerRequest.speakerRequestId;
+      setTrackedSpeakerId(entityId);
+      await submitDurableIntent({
+        kind: 'speaker.resolve',
+        entity: { type: 'speaker', id: entityId },
+        payload: { decision: 'deny', requestId: entityId, message: declineMessage.trim() },
       });
-      if (response.status === 'error') {
-        throw new Error(response.error);
-      }
-
       setSpeakerRequestNotice({
-        severity: response.data.warning ? 'warning' : 'success',
-        text: response.data.warning
-          ? `Request for ${selectedSpeakerRequest.speakerName} was denied, but the requester email could not be queued.`
-          : `Request for ${selectedSpeakerRequest.speakerName} was denied and the requester has been notified.`,
+        severity: 'info',
+        text: 'Declining this request has been requested. The decision and notification are tracked below.',
       });
       setDeclineDialogOpen(false);
       setSelectedSpeakerRequest(null);
       setDeclineMessage('');
-      await refreshSpeakersAndRequests();
     } finally {
       setSpeakerRequestActionLoading(null);
     }
@@ -391,7 +363,11 @@ const AdminSpeakers = () => {
           severity="info"
           sx={{ mb: 2 }}
           action={
-            <Button color="inherit" size="small" onClick={() => setSpeakerRequestsExpanded((currentValue) => !currentValue)}>
+            <Button
+              color="inherit"
+              size="small"
+              onClick={() => setSpeakerRequestsExpanded((currentValue) => !currentValue)}
+            >
               {speakerRequestsExpanded ? 'Hide' : 'Show'}
             </Button>
           }
@@ -490,6 +466,7 @@ const AdminSpeakers = () => {
         }}
         loading={isLoading}
       />
+      {trackedSpeakerId && <EntityJobHistory entity={{ type: 'speaker', id: trackedSpeakerId }} />}
       <CreateSpeakerPopup
         open={createSpeakerPopupOpen}
         setOpen={handleCloseCreateSpeakerPopup}
@@ -506,14 +483,6 @@ const AdminSpeakers = () => {
         title={selectedSpeakerRequest ? 'Create Speaker From Request' : 'Add Speaker'}
         submitLabel={selectedSpeakerRequest ? 'Create Speaker' : 'Create Speaker'}
       />
-      <PopUp title="Speaker list created" open={speakerListSuccessPopupOpen} setOpen={setSpeakerListSuccessPopupOpen}>
-        <Box display="flex" flexDirection="column" gap={2} sx={{ py: 1 }}>
-          <Typography>{SPEAKER_LIST_SUCCESS_INSTRUCTION}</Typography>
-          <Link href={SUBSPLASH_SPEAKER_LIST_LINK} target="_blank" rel="noreferrer">
-            Subsplash Speaker List
-          </Link>
-        </Box>
-      </PopUp>
       <Dialog open={declineDialogOpen} onClose={handleCloseDeclineDialog} fullWidth maxWidth="sm">
         <DialogTitle>Decline Speaker Request</DialogTitle>
         <DialogContent>

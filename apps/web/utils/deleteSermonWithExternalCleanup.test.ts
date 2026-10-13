@@ -1,160 +1,26 @@
 import { deleteSermonWithExternalCleanup } from './deleteSermonWithExternalCleanup';
-
-const createFunctionV2Mock = jest.fn((name: string) => {
-  void name;
-  return undefined as unknown;
-});
-const deleteFromSubsplashMock = jest.fn();
-const deleteFromSoundCloudMock = jest.fn();
-const createOperationKeyMock = jest.fn((scope: string, entityId: string) => {
-  void scope;
-  void entityId;
-  return 'operation-key-123';
-});
-const parseLockBusyDetailsMock = jest.fn((error: unknown) => {
-  if (
-    error &&
-    typeof error === 'object' &&
-    'details' in error &&
-    error.details &&
-    typeof error.details === 'object' &&
-    'code' in error.details &&
-    error.details.code === 'SUBSPLASH_LOCK_BUSY'
-  ) {
-    return error.details;
-  }
-  return null;
-});
-const formatLockBusyRetryMessageMock = jest.fn((fallbackMessage: string, details: { retry_after_ms: number }) => {
-  const retryInSeconds = Math.max(1, Math.ceil(details.retry_after_ms / 1000));
-  return `${fallbackMessage} Retry in about ${retryInSeconds}s.`;
-});
-const deleteDocMock = jest.fn((docRef: unknown) => {
-  void docRef;
-  return Promise.resolve();
-});
-const withConverterMock = jest.fn((converter: unknown) => {
-  void converter;
-  return 'sermon-doc-ref';
-});
-const docMock = jest.fn((firestore: unknown, ...pathSegments: string[]) => {
-  void firestore;
-  const path = pathSegments.join('/');
-  if (pathSegments.length === 2 && pathSegments[0] === 'sermons') {
-    return {
-      path,
-      withConverter: withConverterMock,
-    };
-  }
-  return {
-    path,
-  };
-});
-
-jest.mock('./createFunction', () => ({
-  createFunctionV2: (...args: Parameters<typeof createFunctionV2Mock>) => createFunctionV2Mock(...args),
-}));
-
-jest.mock('./callableConcurrency', () => ({
-  createOperationKey: (...args: Parameters<typeof createOperationKeyMock>) => createOperationKeyMock(...args),
-  parseLockBusyDetails: (...args: Parameters<typeof parseLockBusyDetailsMock>) => parseLockBusyDetailsMock(...args),
-  formatLockBusyRetryMessage: (...args: Parameters<typeof formatLockBusyRetryMessageMock>) => formatLockBusyRetryMessageMock(...args),
-}));
-
-jest.mock('../firebase/firestore', () => ({
-  __esModule: true,
-  default: {},
-  deleteDoc: (...args: Parameters<typeof deleteDocMock>) => deleteDocMock(...args),
-  doc: (...args: Parameters<typeof docMock>) => docMock(...args),
-}));
-
-describe('deleteSermonWithExternalCleanup', () => {
-  beforeEach(() => {
-    jest.clearAllMocks();
-
-    deleteFromSubsplashMock.mockResolvedValue(undefined);
-    deleteFromSoundCloudMock.mockResolvedValue(undefined);
-    deleteDocMock.mockResolvedValue(undefined);
-
-    createFunctionV2Mock.mockImplementation((name: string) => {
-      if (name === 'deletefromsubsplash') {
-        return deleteFromSubsplashMock;
-      }
-      if (name === 'deletefromsoundcloud') {
-        return deleteFromSoundCloudMock;
-      }
-      throw new Error(`Unexpected callable: ${name}`);
-    });
-  });
-
-  it('passes a generated operationKey to deletefromsubsplash cleanup callable', async () => {
-    await deleteSermonWithExternalCleanup({
-      sermonId: 'sermon-1',
-      seriesId: 'series-1',
-      subsplashId: 'subsplash-1',
-    });
-
-    expect(createOperationKeyMock).toHaveBeenCalledWith('sermon-admin-delete-cleanup', 'sermon-1');
-    expect(deleteFromSubsplashMock).toHaveBeenCalledWith({
-      operationKey: 'operation-key-123',
-      subsplashId: 'subsplash-1',
-    });
-    expect(deleteDocMock).toHaveBeenNthCalledWith(1, { path: 'series/series-1/seriesItems/sermon-1' });
-    expect(deleteDocMock).toHaveBeenNthCalledWith(2, 'sermon-doc-ref');
-    expect(deleteDocMock).toHaveBeenCalledTimes(2);
-  });
-
-  it('blocks local Firestore deletion when external cleanup fails', async () => {
-    deleteFromSubsplashMock.mockRejectedValue(new Error('Subsplash delete failed'));
-
+const submit = jest.fn();
+jest.mock('./durableJobs', () => ({ submitDurableIntent: (...args: unknown[]) => submit(...args) }));
+describe('server-owned sermon deletion', () => {
+  beforeEach(() => submit.mockReset());
+  it('admits only a canonical sermon reference and leaves provider cleanup to the server', async () => {
+    submit.mockResolvedValue({ jobId: 'cleanup', admissionState: 'queued' });
     await expect(
       deleteSermonWithExternalCleanup({
-        sermonId: 'sermon-2',
-        subsplashId: 'subsplash-2',
+        sermonId: 's1',
+        subsplashId: 'untrusted',
+        soundCloudTrackId: 'untrusted',
+        seriesId: 'untrusted',
       })
-    ).rejects.toThrow('Subsplash delete failed');
-
-    expect(deleteDocMock).not.toHaveBeenCalled();
+    ).resolves.toMatchObject({ jobId: 'cleanup' });
+    expect(submit).toHaveBeenCalledWith({ kind: 'sermon.delete', entity: { type: 'sermon', id: 's1' }, payload: {} });
   });
-
-  it('removes the Firestore series item before deleting the sermon document', async () => {
-    await deleteSermonWithExternalCleanup({
-      sermonId: 'sermon-4',
-      seriesId: 'series-4',
-    });
-
-    expect(deleteDocMock).toHaveBeenNthCalledWith(1, { path: 'series/series-4/seriesItems/sermon-4' });
-    expect(deleteDocMock).toHaveBeenNthCalledWith(2, 'sermon-doc-ref');
+  it('keeps the sermon when admission is uncertain', async () => {
+    submit.mockRejectedValue(new Error('Outcome unknown'));
+    await expect(deleteSermonWithExternalCleanup({ sermonId: 's1' })).rejects.toThrow('Outcome unknown');
   });
-
-  it('preserves lock contention metadata for caller retry handling', async () => {
-    const contentionError = Object.assign(new Error('Lock busy'), {
-      code: 'resource-exhausted',
-      details: {
-        code: 'SUBSPLASH_LOCK_BUSY',
-        locked_keys: ['media-item:subsplash-3'],
-        wait_ms: 12000,
-        retry_after_ms: 2500,
-      },
-    });
-    deleteFromSubsplashMock.mockRejectedValue(contentionError);
-
-    await expect(
-      deleteSermonWithExternalCleanup({
-        sermonId: 'sermon-3',
-        subsplashId: 'subsplash-3',
-      })
-    ).rejects.toMatchObject({
-      code: 'resource-exhausted',
-      details: {
-        code: 'SUBSPLASH_LOCK_BUSY',
-        locked_keys: ['media-item:subsplash-3'],
-        wait_ms: 12000,
-        retry_after_ms: 2500,
-      },
-      message: expect.stringContaining('Retry in about 3s'),
-    });
-
-    expect(deleteDocMock).not.toHaveBeenCalled();
+  it('rejects a missing canonical identity before submission', async () => {
+    await expect(deleteSermonWithExternalCleanup({ sermonId: '' })).rejects.toThrow('Missing sermon id');
+    expect(submit).not.toHaveBeenCalled();
   });
 });

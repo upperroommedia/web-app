@@ -65,6 +65,7 @@ const toHttpsError = (error: unknown): HttpsError => {
   if (error instanceof HttpsError) {
     return error;
   }
+  if(error instanceof Error&&error.name==='ProviderMutationGuardError'&&'code' in error&&['PROVIDER_MUTATION_UNRESOLVED','PROVIDER_MUTATION_RESULT_REPAIR_REQUIRED'].includes(String(error.code))){const sessionId='mutationSessionId' in error&&typeof error.mutationSessionId==='string'&&/^[a-f0-9]{64}$/.test(error.mutationSessionId)?error.mutationSessionId:undefined;return new HttpsError('failed-precondition','An earlier provider mutation requires verified recovery.',{code:error.code,...(sessionId?{mutationSessionId:sessionId}:{})});}
   if (isAxiosError(error)) {
     const axiosError = error as AxiosError;
     const status = getAxiosStatus(axiosError);

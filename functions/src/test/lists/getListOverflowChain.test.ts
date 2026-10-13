@@ -1,3 +1,4 @@
+import { testCallableAuth, type AuthData } from '../helpers/callableAuth';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { OverflowBehavior, ListType, type List } from '@upperroom/shared/types/List';
 import getlistoverflowchain from '../../getListOverflowChain';
@@ -26,12 +27,7 @@ jest.mock('firebase-functions/v2/https', () => {
   };
 });
 
-type CallableAuthType = {
-  uid?: string;
-  token?: {
-    role?: string;
-  };
-};
+type CallableAuthType = AuthData;
 
 type TestRequestType<T> = {
   auth?: CallableAuthType;
@@ -125,7 +121,7 @@ describe('getListOverflowChain', () => {
     });
 
     const result = await getListOverflowChainHandler({
-      auth: { uid: 'publisher-1', token: { role: 'publisher' } },
+      auth: testCallableAuth('publisher', 'publisher-1'),
       data: { listId: 'overflow-list' },
     });
 
@@ -168,7 +164,7 @@ describe('getListOverflowChain', () => {
     });
 
     const result = await getListOverflowChainHandler({
-      auth: { uid: 'admin-1', token: { role: 'admin' } },
+      auth: testCallableAuth('admin', 'admin-1'),
       data: { listId: 'direct-root-list' },
     });
 

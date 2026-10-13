@@ -319,13 +319,16 @@ test("correctly uses oAuth credentials when provided", () => {
 });
 
  test("malformed TLS settings reject insecure fallback", () => {expect(() => parseTlsOptions("oops")).toThrow("Invalid TLS_OPTIONS");});
- test("TLS default keeps certificate verification enabled", () => {expect(parseTlsOptions()).toEqual({});});
+ test("TLS default keeps certificate verification enabled", () => {expect(parseTlsOptions()).toEqual({rejectUnauthorized: true, minVersion: "TLSv1.2"});});
 
 test.each(["", " ", "\t\n"])("exported blank TLS options %j retain secure defaults", tls => {
-  expect(parseTlsOptions(tls)).toEqual({});
+  expect(parseTlsOptions(tls)).toEqual({rejectUnauthorized: true, minVersion: "TLSv1.2"});
   const transport = setSmtpCredentials({database: "(default)", databaseRegion: "us-central1", location: "us-central1", mailCollection: "mail", defaultFrom: "sender@example.com", smtpConnectionUri: "smtps://sender@example.com@smtp.example.com:465", smtpPassword: "secret", tls, authenticationType: AuthenticatonType.UsernamePassword});
   expect(transport.options.host).toBe("smtp.example.com");
   expect(transport.options.auth.pass).toBe("secret");
   expect(transport.options.secure).toBe(true);
-  expect(transport.options.tls).toEqual({});
+  expect(transport.options.tls).toEqual({rejectUnauthorized: true, minVersion: "TLSv1.2"});
+});
+test.each(['{"rejectUnauthorized":false}','{"minVersion":"TLSv1"}','{"secureProtocol":"SSLv3_method"}'])('production TLS rejects insecure setting %s', input => {
+  expect(() => parseTlsOptions(input)).toThrow('Invalid TLS_OPTIONS');
 });

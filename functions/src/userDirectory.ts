@@ -1,7 +1,7 @@
-import type firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
+import type { UserRecord } from 'firebase-admin/auth';
 import { DirectoryUser, UserRoleType } from '@upperroom/shared/types/User';
 
-export const toDirectoryUser = (user: firebaseAdmin.auth.UserRecord): DirectoryUser => ({
+export const toDirectoryUser = (user: UserRecord): DirectoryUser => ({
   uid: user.uid,
   email: user.email ?? null,
   photoURL: user.photoURL ?? null,

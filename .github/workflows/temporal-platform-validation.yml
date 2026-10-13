@@ -1,0 +1,41 @@
+name: Temporal platform validation
+on:
+  pull_request:
+    paths:
+      - 'ops/temporal/**'
+      - 'scripts/*temporal*'
+      - '.github/workflows/*temporal*'
+  push:
+    branches: [staging, main]
+    paths:
+      - 'ops/temporal/**'
+      - 'scripts/*temporal*'
+      - '.github/workflows/*temporal*'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '22'
+      - name: Install QA validators
+        run: |
+          python3 -m venv /tmp/temporal-validator
+          /tmp/temporal-validator/bin/pip install pyyaml==6.0.3 jsonschema==4.25.1
+          curl -fsSL https://get.helm.sh/helm-v4.3.0-linux-amd64.tar.gz -o /tmp/helm-v4.3.0-linux-amd64.tar.gz
+          curl -fsSL https://get.helm.sh/helm-v4.3.0-linux-amd64.tar.gz.sha256sum -o /tmp/helm.sha256
+          cd /tmp
+          sha256sum -c helm.sha256
+          tar -xzf helm-v4.3.0-linux-amd64.tar.gz
+      - name: Validate fail-closed platform contracts
+        run: node --test scripts/temporal-platform.test.mjs scripts/temporal-release.test.mjs scripts/temporal-backup.test.mjs scripts/temporal-apphosting-rollout.test.mjs scripts/temporal-restore-witness.test.mjs scripts/temporal-backfill-provider-usage.test.mjs
+      - name: Validate pinned chart render and database CRDs
+        env:
+          HELM_BIN: /tmp/linux-amd64/helm
+          PYTHON_BIN: /tmp/temporal-validator/bin/python
+        run: node scripts/validate-temporal-manifests.mjs

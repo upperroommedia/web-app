@@ -1,3 +1,5 @@
+import { getApps, initializeApp } from 'firebase-admin/app';
+import { getAuth } from 'firebase-admin/auth';
 /**
  * Script to create a dev admin user in the Firebase Auth emulator.
  * Run with:
@@ -9,7 +11,7 @@
  */
 
 /* eslint-disable no-console */
-import admin from 'firebase-admin';
+
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -85,10 +87,10 @@ const getFirebaseProjectId = (): string =>
 process.env.FIREBASE_AUTH_EMULATOR_HOST = '127.0.0.1:9099';
 
 // Initialize without credentials (emulator doesn't need them)
-if (!admin.apps.length) {
+if (!getApps().length) {
   const projectId = getFirebaseProjectId();
   console.log(`[create-dev-admin] using Firebase project ${projectId}`);
-  admin.initializeApp({
+  initializeApp({
     projectId,
   });
 }
@@ -102,7 +104,7 @@ type ErrorWithCode = {
 };
 
 async function createDevAdmin() {
-  const auth = admin.auth();
+  const auth = getAuth();
   
   try {
     // Check if user already exists

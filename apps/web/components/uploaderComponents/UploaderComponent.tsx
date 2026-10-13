@@ -1,15 +1,18 @@
 /**
  * Page for uploaders to use to upload, trim, and add intro/outro to audio file
  */
-import editSermon from '../../pages/api/editSermon';
+import editSermon from '../../utils/editSermon';
 import { isSermonProcessingConflict } from '../../utils/sermonEditing';
-import { ChangeEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { ChangeEvent, useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import TextField from '@mui/material/TextField';
 import Box from '@mui/material/Box';
 
 import firestore, { collection, getDocs, query, where, doc, getDoc } from '../../firebase/firestore';
 import { createEmptySermon } from '../../types/Sermon';
 import { Sermon } from '../../types/SermonTypes';
+import Radio from '@mui/material/Radio';
+import RadioGroup from '@mui/material/RadioGroup';
+import FormLabel from '@mui/material/FormLabel';
 
 import Button from '@mui/material/Button';
 // import ImageUploader from '../components/ImageUploader';
@@ -41,14 +44,12 @@ import SubtitleSelector from '../SubtitleSelector';
 import Stack from '@mui/material/Stack';
 import CircularProgress from '@mui/material/CircularProgress';
 import Alert from '@mui/material/Alert';
-import { createFunctionV2 } from '../../utils/createFunction';
-import { AddIntroOutroInputType } from '@upperroom/contracts/addIntroOutro/types';
-import { getIntroAndOutro } from '../../utils/uploadUtils';
+import type { DurableJob } from '@upperroom/contracts/temporal';
 import { User } from '../../types/User';
 import { VerifiedUserUploaderProps } from './VerifiedUserUploaderComponent';
 import { createFormErrorMessage, getErrorMessage, showError } from './utils';
 import UploaderDatePicker from './UploaderDatePicker';
-import { UploaderFieldError, UploadProgress } from '../../context/types';
+import { UploaderFieldError } from '../../context/types';
 import SpeakerSelector from './SpeakerSelector';
 import SpeakerRequestPopup from './SpeakerRequestPopup';
 import SundayHomilyMonthSelector from './SundayHomilyMonthSelector';
@@ -59,7 +60,17 @@ import UploadButton from './UploadButton';
 import UploadProgressComponent from './UploadProgressComponent';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/router';
-import { AudioSource } from '../../pages/api/uploadFile';
+import uploadFile, {
+  AudioAdmissionReceipt,
+  AudioSource,
+  AudioTransferProgress,
+  readAudioJob,
+  sourceUploadSession,
+  transferAudioSource,
+} from '../../utils/uploadFile';
+import { useDurableJob } from '../../hooks/useDurableJobs';
+import JobStatusPanel from '../jobs/JobStatusPanel';
+import LinearProgress from '@mui/material/LinearProgress';
 import DropZone, { revokeUploadableFilePreview } from '../DropZone';
 import BundleListSelector from '../BundleListSelector';
 import { getLatestListFromBundle, getSubtitlesFromBundle } from '../../utils/bundleHelpers';
@@ -67,9 +78,9 @@ import { isDiscoverableRootList } from '../../utils/algolia/searchRecords';
 import { useAlgoliaSearch } from '../../context/search/AlgoliaSearchContext';
 import {
   canEditSermonAudio,
+  requiresSoundCloudAudioPolicy,
   canEditSermonRecord,
   isSermonProcessingLocked,
-  isSermonPublishedAnywhere,
 } from '../../utils/sermonEditing';
 import {
   clearIntentionalNavigation,
@@ -127,6 +138,9 @@ const Uploader = (props: UploaderProps) => {
   );
   // ======================== START OF STATE ========================
   const router = useRouter();
+  const resumeJobId = typeof router.query.resumeJob === 'string' ? router.query.resumeJob : undefined;
+  const { job: resumeJob, loading: resumeLoading, error: resumeError, stale: resumeStale } = useDurableJob(resumeJobId);
+  const [resumeFile, setResumeFile] = useState<File>();
   const { invalidateSermonSearch } = useAlgoliaSearch();
   const [sermon, setSermon] = useState<Sermon>(() => {
     if (props.existingSermon) {
@@ -136,10 +150,17 @@ const Uploader = (props: UploaderProps) => {
   });
   const [sermonList, setSermonList] = useState<List[]>(props.existingList || []);
   const [audioSource, setAudioSource] = useState<AudioSource | undefined>();
-  const [uploadProgress, setUploadProgress] = useState<UploadProgress>({ error: false, percent: 0, message: '' });
+  const [uploadProgress, setUploadProgress] = useState<AudioTransferProgress>({
+    error: false,
+    percent: 0,
+    message: '',
+  });
   const [invalidFormMessage, setInvalidFormMessage] = useState<string>();
   const [isUploading, setIsUploading] = useState(false);
+  const sourceRetryInFlight = useRef(false);
+  const [uploadReceipt, setUploadReceipt] = useState<AudioAdmissionReceipt>();
   const [isEditing, setIsEditing] = useState(false);
+  const [soundcloudPolicy, setSoundcloudPolicy] = useState<'recreate_track' | 'keep_existing_audio'>('recreate_track');
   const [useYouTubeUrl, setUseYouTubeUrl] = useState(false);
   const [uploadedSermon, setUploadedSermon] = useState<Sermon | null>(null);
   const [isNavigatingToSermon, setIsNavigatingToSermon] = useState(false);
@@ -323,7 +344,7 @@ const Uploader = (props: UploaderProps) => {
   useEffect(() => {
     const warningText = 'You have unsaved changes - are you sure you wish to leave this page?';
     const handleWindowClose = (e: BeforeUnloadEvent) => {
-      if (!sermonEdited && !isUploading) return;
+      if ((!sermonEdited || uploadReceipt || resumeJobId) && !isUploading) return;
       if (isIntentionalNavigation()) return;
       e.preventDefault();
       return (e.returnValue = warningText);
@@ -331,7 +352,7 @@ const Uploader = (props: UploaderProps) => {
     const handleBrowseAway = () => {
       // Skip warning if this is an intentional navigation (after successful save)
       if (isIntentionalNavigation()) return;
-      if (!sermonEdited && !isUploading) return;
+      if ((!sermonEdited || uploadReceipt || resumeJobId) && !isUploading) return;
       if (window.confirm(warningText)) return;
       router.events.emit('routeChangeError');
       const routeAbortError = Object.assign(new Error('routeChange aborted.'), { cancelled: true });
@@ -343,7 +364,7 @@ const Uploader = (props: UploaderProps) => {
       window.removeEventListener('beforeunload', handleWindowClose);
       router.events.off('routeChangeStart', handleBrowseAway);
     };
-  }, [router.events, sermonEdited, isUploading]);
+  }, [router.events, sermonEdited, isUploading, uploadReceipt, resumeJobId]);
 
   // ======================== START OF ERROR HANDLING ========================
 
@@ -696,10 +717,10 @@ const Uploader = (props: UploaderProps) => {
 
   // Handle successful upload - store sermon for the success modal
   const handleUploadSuccess = useCallback(
-    async (_sermonId: string) => {
+    async (sermonId: string) => {
       await invalidateSermonSearch();
       // Store the sermon data for the success modal
-      setUploadedSermon({ ...sermon });
+      setUploadedSermon({ ...sermon, id: sermonId });
       setIsNavigatingToSermon(false);
     },
     [invalidateSermonSearch, sermon]
@@ -714,39 +735,97 @@ const Uploader = (props: UploaderProps) => {
   }, [uploadedSermon, router]);
 
   // Navigate to sermon details when user clicks "View Sermon"
-  const navigateToSermon = useCallback(async () => {
-    if (!uploadedSermon || isNavigatingToSermon) return;
+  const navigateToSermon = useCallback(
+    async (canonicalSermonId?: string) => {
+      const sermonId = canonicalSermonId ?? uploadedSermon?.id;
+      if (!sermonId || isNavigatingToSermon) return;
 
-    const targetUrl = `/admin/sermons/${uploadedSermon.id}`;
+      const targetUrl = `/admin/sermons/${sermonId}`;
 
-    // Mark navigation as intentional to skip unsaved changes warning
-    markIntentionalNavigation();
-    setIsNavigatingToSermon(true);
+      // Mark navigation as intentional to skip unsaved changes warning
+      markIntentionalNavigation();
+      setIsNavigatingToSermon(true);
 
-    try {
-      const didNavigate = await router.push(targetUrl);
-      if (!didNavigate) {
+      try {
+        const didNavigate = await router.push(targetUrl);
+        if (!didNavigate) {
+          clearIntentionalNavigation();
+          setIsNavigatingToSermon(false);
+        }
+      } catch (error) {
+        console.error('Failed to navigate to sermon details:', error);
         clearIntentionalNavigation();
         setIsNavigatingToSermon(false);
       }
-    } catch (error) {
-      console.error('Failed to navigate to sermon details:', error);
-      clearIntentionalNavigation();
-      setIsNavigatingToSermon(false);
-    }
-  }, [uploadedSermon, isNavigatingToSermon, router]);
+    },
+    [uploadedSermon, isNavigatingToSermon, router]
+  );
+
+  const retryRetainedSource = useCallback(
+    async (job: DurableJob) => {
+      if (
+        sourceRetryInFlight.current ||
+        !audioSource ||
+        !uploadReceipt ||
+        job.jobId !== uploadReceipt.jobId ||
+        job.kind !== 'upload.create' ||
+        job.requestedBy !== props.user.uid ||
+        job.result?.mediaJobId ||
+        job.result?.mediaJobRef ||
+        !['cancelled', 'failed', 'superseded'].includes(job.state)
+      )
+        return;
+      sourceRetryInFlight.current = true;
+      setIsUploading(true);
+      try {
+        const receipt = await uploadFile({
+          retryOfJobId: job.jobId,
+          receipt: uploadReceipt,
+          audioSource,
+          setUploadProgress,
+          trimStart: sermon.sourceStartTime,
+          sermon,
+          sermonList,
+          onAdmission: (admitted) => {
+            setUploadReceipt(admitted);
+            if (admitted.sermonId) setUploadedSermon({ ...sermon, id: admitted.sermonId });
+          },
+        });
+        if (receipt.sermonId && receipt.alreadyComplete) {
+          await navigateToSermon(receipt.sermonId);
+        } else if (receipt.sermonId) {
+          await handleUploadSuccess(receipt.sermonId);
+        }
+      } catch (error) {
+        // The original source and receipt remain available until a new admission is confirmed.
+        setUploadProgress({
+          error: true,
+          percent: 0,
+          message:
+            error instanceof Error
+              ? error.message
+              : 'The new attempt could not be confirmed. Your source has been kept. Check Activity before trying again.',
+        });
+      } finally {
+        sourceRetryInFlight.current = false;
+        setIsUploading(false);
+      }
+    },
+    [audioSource, uploadReceipt, props.user.uid, sermon, sermonList, handleUploadSuccess, navigateToSermon]
+  );
 
   // Dismiss the upload modal and stay on page
   const dismissUploadModal = useCallback(() => {
-    const uploadSucceeded = !uploadProgress.error && uploadProgress.percent >= 100;
+    const hasDurableRequest = Boolean(uploadReceipt);
     setIsNavigatingToSermon(false);
     setIsUploading(false);
     setUploadedSermon(null);
+    setUploadReceipt(undefined);
     setUploadProgress({ error: false, percent: 0, message: '' });
-    if (uploadSucceeded) {
+    if (hasDurableRequest) {
       clearForm();
     }
-  }, [clearForm, uploadProgress.error, uploadProgress.percent]);
+  }, [clearForm, uploadReceipt]);
 
   const handleNewImage = useCallback(
     (image: ImageType | ImageSizeType) => {
@@ -782,8 +861,15 @@ const Uploader = (props: UploaderProps) => {
   );
 
   const canEditExistingAudio = useMemo(
-    () => (props.existingSermon ? canEditSermonAudio(props.existingSermon, props.existingList || []) : false),
-    [props.existingList, props.existingSermon]
+    () =>
+      props.existingSermon
+        ? canEditSermonAudio(
+            props.existingSermon,
+            props.existingList || [],
+            props.existingSermonUrl?.status === 'success'
+          )
+        : false,
+    [props.existingList, props.existingSermon, props.existingSermonUrl?.status]
   );
   const existingSermonHasSavedTrimSettings = useMemo(
     () =>
@@ -805,9 +891,6 @@ const Uploader = (props: UploaderProps) => {
     if (!props.existingSermon) return null;
     if (isSermonProcessingLocked(props.existingSermon)) {
       return 'This sermon cannot be edited while audio is queued or processing.';
-    }
-    if (isSermonPublishedAnywhere(props.existingSermon, props.existingList || [])) {
-      return 'Cannot edit audio when this sermon is already published anywhere.';
     }
     if (!existingSermonHasSavedTrimSettings) {
       return 'This sermon audio cannot be edited because it does not have saved trim-source settings.';
@@ -860,6 +943,88 @@ const Uploader = (props: UploaderProps) => {
     sermonList,
     sermonsEqual,
   ]);
+
+  if (resumeJobId) {
+    return (
+      <Box sx={{ maxWidth: 720, mx: 'auto', p: 3 }}>
+        <Head>
+          <title>Resume audio upload</title>
+        </Head>
+        <Typography variant="h4" sx={{ mb: 2 }}>
+          Resume audio upload
+        </Typography>
+        {resumeLoading && <Typography role="status">Loading saved upload…</Typography>}
+        {(resumeError || resumeStale) && (
+          <Alert severity="info">Reconnecting. Wait for current status before sending the file.</Alert>
+        )}
+        {resumeJob && <JobStatusPanel job={resumeJob} stale={resumeStale} />}
+        {resumeJob?.state === 'awaiting_source' && (
+          <Stack spacing={2} sx={{ mt: 2 }}>
+            <Typography>
+              Select the original audio file. We check its content before sending it to the saved upload session.
+            </Typography>
+            <input
+              type="file"
+              accept="audio/*"
+              aria-label="Original audio file"
+              disabled={isUploading}
+              onChange={(event) => {
+                setResumeFile(event.target.files?.[0]);
+                setUploadProgress({ error: false, percent: 0, message: '' });
+              }}
+            />
+            <Button
+              variant="contained"
+              disabled={!resumeFile || isUploading || resumeStale}
+              onClick={async () => {
+                if (!resumeFile || isUploading) return;
+                setIsUploading(true);
+                try {
+                  const currentJob = await readAudioJob(resumeJobId);
+                  sourceUploadSession(currentJob);
+                  await transferAudioSource(currentJob, resumeFile, setUploadProgress);
+                  setUploadProgress({
+                    error: false,
+                    percent: 100,
+                    message: 'File received. Follow processing in Activity.',
+                  });
+                } catch (error) {
+                  setUploadProgress({
+                    error: true,
+                    percent: 0,
+                    message:
+                      error instanceof Error
+                        ? error.message
+                        : 'The file transfer could not be confirmed. Your source has been retained.',
+                  });
+                } finally {
+                  setIsUploading(false);
+                }
+              }}
+            >
+              {isUploading ? 'Sending file…' : 'Send original file'}
+            </Button>
+          </Stack>
+        )}
+        {isUploading && (
+          <LinearProgress
+            aria-label="Audio file transfer"
+            variant={uploadProgress.phase === 'transferring' ? 'determinate' : 'indeterminate'}
+            value={uploadProgress.phase === 'transferring' ? uploadProgress.percent : undefined}
+            sx={{ mt: 2 }}
+          />
+        )}
+        {uploadProgress.message && (
+          <Alert severity={uploadProgress.error ? 'warning' : 'info'} sx={{ mt: 2 }}>
+            {uploadProgress.message}
+          </Alert>
+        )}
+        <Button sx={{ mt: 2 }} onClick={() => void router.push('/admin/activity')}>
+          Open Activity
+        </Button>
+      </Box>
+    );
+  }
 
   return (
     <>
@@ -1140,6 +1305,34 @@ const Uploader = (props: UploaderProps) => {
               ) : (
                 <Alert severity="info">{existingAudioEditMessage || 'This sermon audio cannot be edited.'}</Alert>
               )}
+              {audioSettingsChanged && requiresSoundCloudAudioPolicy(props.existingSermon) && (
+                <FormControl sx={{ mt: 2 }}>
+                  <FormLabel id="soundcloud-audio-policy-label">SoundCloud audio update</FormLabel>
+                  <RadioGroup
+                    aria-labelledby="soundcloud-audio-policy-label"
+                    value={soundcloudPolicy}
+                    onChange={(_event, value) => {
+                      if (value === 'recreate_track' || value === 'keep_existing_audio') setSoundcloudPolicy(value);
+                    }}
+                  >
+                    <FormControlLabel
+                      value="recreate_track"
+                      control={<Radio />}
+                      label="Replace the SoundCloud track with the updated audio"
+                    />
+                    <FormControlLabel
+                      value="keep_existing_audio"
+                      control={<Radio />}
+                      label="Keep the existing SoundCloud audio"
+                    />
+                  </RadioGroup>
+                  <Alert severity="info">
+                    {soundcloudPolicy === 'recreate_track'
+                      ? 'SoundCloud requires a new track for changed audio. Saving creates a new track link. Engagement and comments do not transfer to the new track. The existing track remains available until replacement is confirmed.'
+                      : 'SoundCloud will keep its current audio. The updated audio will be used in this app and other publication destinations.'}
+                  </Alert>
+                </FormControl>
+              )}
               <div style={{ display: 'grid', margin: 'auto', paddingTop: '20px' }}>
                 <Button
                   onClick={async () => {
@@ -1159,42 +1352,27 @@ const Uploader = (props: UploaderProps) => {
                               youtubeUrl: props.existingSermon.youtubeUrl,
                             }
                           : sermon;
-                      if (audioSettingsChanged) {
-                        const generateAddIntroOutroTask =
-                          createFunctionV2<AddIntroOutroInputType>('addintrooutrotaskgenerator');
-                        const { introRef, outroRef } = await getIntroAndOutro(sermonToPersist);
-                        const data: AddIntroOutroInputType = sermonToPersist.youtubeUrl
+                      await editSermon(sermonToPersist, sermonList, {
+                        originalSermon: props.existingSermon,
+                        ...(audioSettingsChanged
                           ? {
-                              id: sermonToPersist.id,
-                              youtubeUrl: sermonToPersist.youtubeUrl,
-                              startTime: sermonToPersist.sourceStartTime,
-                              duration: sermonToPersist.trimDurationSeconds ?? 0,
-                              deleteOriginal: false,
-                              introUrl: introRef,
-                              outroUrl: outroRef,
+                              processAudio: {
+                                startTime: sermonToPersist.sourceStartTime,
+                                duration: sermonToPersist.trimDurationSeconds ?? 0,
+                                ...(requiresSoundCloudAudioPolicy(props.existingSermon) ? { soundcloudPolicy } : {}),
+                              },
                             }
-                          : {
-                              id: sermonToPersist.id,
-                              storageFilePath: `sermons/${sermonToPersist.id}`,
-                              startTime: sermonToPersist.sourceStartTime,
-                              duration: sermonToPersist.trimDurationSeconds ?? 0,
-                              deleteOriginal: false,
-                              skipTranscode: false,
-                              introUrl: introRef,
-                              outroUrl: outroRef,
-                            };
-
-                        // Persist trim metadata before the callable flips the sermon into PENDING/PROCESSING.
-                        // Firestore rules intentionally reject client writes once processing has started.
-                        await editSermon(sermonToPersist, sermonList, { originalSermon: props.existingSermon });
-                        await generateAddIntroOutroTask(data);
-                      } else {
-                        await editSermon(sermonToPersist, sermonList, { originalSermon: props.existingSermon });
-                      }
+                          : {}),
+                      });
                       // Mark as intentional navigation to bypass unsaved changes warning
                       markIntentionalNavigation();
                       props.setEditFormOpen?.(false);
                     } catch (error) {
+                      setInvalidFormMessage(
+                        error instanceof Error
+                          ? error.message
+                          : 'The update could not be confirmed. Your changes have been kept.'
+                      );
                       if (!isSermonProcessingConflict(error)) {
                         console.error('Error editing sermon:', error);
                       }
@@ -1286,6 +1464,11 @@ const Uploader = (props: UploaderProps) => {
                     setUploadProgress={setUploadProgress}
                     setInvalidFormMessage={setInvalidFormMessage}
                     setIsUploading={setIsUploading}
+                    receipt={uploadReceipt}
+                    onAdmission={(receipt) => {
+                      setUploadReceipt(receipt);
+                      if (receipt.sermonId) setUploadedSermon({ ...sermon, id: receipt.sermonId });
+                    }}
                     onUploadSuccess={handleUploadSuccess}
                   />
                   <Button variant="outlined" color="secondary" onClick={() => clearForm()}>
@@ -1299,10 +1482,13 @@ const Uploader = (props: UploaderProps) => {
                   audioSource={audioSource}
                   isUploading={isUploading}
                   uploadProgress={uploadProgress}
+                  receipt={uploadReceipt}
                   sermon={uploadedSermon || undefined}
                   isNavigatingToSermon={isNavigatingToSermon}
                   onNavigateToSermon={navigateToSermon}
                   onDismiss={dismissUploadModal}
+                  requesterUid={props.user.uid}
+                  onRetrySource={retryRetainedSource}
                 />
               </Box>
             </>

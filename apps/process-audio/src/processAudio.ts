@@ -66,6 +66,13 @@ export class MissingSermonDocumentError extends Error {
   }
 }
 
+export class ProcessAudioCancelledError extends Error {
+  constructor() {
+    super('Audio processing was cancelled');
+    this.name = 'ProcessAudioCancelledError';
+  }
+}
+
 export const isMissingSermonDocumentError = (error: unknown): error is MissingSermonDocumentError => {
   return error instanceof MissingSermonDocumentError;
 };
@@ -227,10 +234,8 @@ async function releaseProcessAudioLock(
 ): Promise<void> {
   const lockRef = realtimeDB.ref(`processAudioLocks/${sermonId}`);
   try {
-    const snapshot = await lockRef.get();
-    const current = snapshot.val();
-    if (current?.requestId === requestId) {
-      await lockRef.remove();
+    const result = await lockRef.transaction(current => current?.requestId === requestId ? null : undefined);
+    if (result.committed) {
       log.debug('Released process-audio sermon lock', { sermonId, requestId });
     }
   } catch (error) {
@@ -411,7 +416,7 @@ export const processAudio = async (
       ctx: contextWithSermonId,
     });
 
-    if (cancelToken.isCancellationRequested) return buildResult();
+    if (cancelToken.isCancellationRequested) throw new ProcessAudioCancelledError();
     await docRef.update({
       status: {
         ...(existingStatus ?? sermonStatus),
@@ -430,7 +435,7 @@ export const processAudio = async (
       audioFilesToMerge.OUTRO = outroUrl;
       customMetadata.outroUrl = outroUrl;
     }
-    if (cancelToken.isCancellationRequested) return buildResult();
+    if (cancelToken.isCancellationRequested) throw new ProcessAudioCancelledError();
 
     const trimMessage = skipTranscode
       ? 'Trimming'
@@ -573,7 +578,7 @@ export const processAudio = async (
       log.debug('No intro or outro, skipping merge');
     }
 
-    if (cancelToken.isCancellationRequested) return buildResult();
+    if (cancelToken.isCancellationRequested) throw new ProcessAudioCancelledError();
 
     log.info('Updating status to PROCESSED');
     await docRef.update({
@@ -584,7 +589,7 @@ export const processAudio = async (
       durationSeconds: durationSeconds,
     });
 
-    if (cancelToken.isCancellationRequested) return buildResult();
+    if (cancelToken.isCancellationRequested) throw new ProcessAudioCancelledError();
     await setProcessAudioProgress(realtimeDB.ref(`addIntroOutro/${fileName}`), 100, 'completed', 'Completed').catch((err) => {
       log.error('Failed to set final progress to 100%', {
         error: err instanceof Error ? err.message : String(err),
@@ -592,7 +597,7 @@ export const processAudio = async (
     });
 
     // delete original audio file
-    if (cancelToken.isCancellationRequested) return buildResult();
+    if (cancelToken.isCancellationRequested) throw new ProcessAudioCancelledError();
     log.info('Audio processing completed successfully');
     return buildResult();
   } catch (error) {

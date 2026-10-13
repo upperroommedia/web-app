@@ -1,18 +1,44 @@
+import type { AuthData } from '../helpers/callableAuth';
+import { testCallableAuth } from '../helpers/callableAuth';
+jest.mock('../../temporal/legacyAdmissionLease', () => ({
+  withLegacyAdmissionLease: async (
+    _db: unknown,
+    _options: unknown,
+    run: (lease: { markEffectsStarted: () => Promise<void> }) => Promise<unknown>
+  ) => run({ markEffectsStarted: async () => undefined }),
+}));
+jest.mock('../../notifications/emitOperationalAlert', () => ({
+  emitOperationalAlert: jest.fn(),
+  hasOperationalAlertBeenEmitted: () => false,
+}));
+jest.mock('../../temporal/publishing/providerReceipts', () => ({
+  executeProviderCreate: jest.fn(
+    async (options: { prepare?: () => Promise<void>; execute: () => Promise<unknown> }) => {
+      await options.prepare?.();
+      return options.execute();
+    }
+  ),
+}));
 import {
   mockUploadTrack,
   mockNormalizeSoundCloudApiError,
+  mockPrepareMultipartUpload,
+  mockDisposePreparedUpload,
 } from './mocks';
-import uploadToSoundCloud from '../../uploadToSoundCloud';
+import uploadToSoundCloud, { uploadToSoundCloudDomain } from '../../uploadToSoundCloud';
+import { executeProviderCreate } from '../../temporal/publishing/providerReceipts';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import type { UploadToSoundCloudInputType, UploadToSoundCloudReturnType } from '../../uploadToSoundCloud';
 
 const handler = uploadToSoundCloud as unknown as (req: {
-  auth?: { token?: { role?: string } };
+  auth?: AuthData;
   data: UploadToSoundCloudInputType;
 }) => Promise<UploadToSoundCloudReturnType>;
 
 describe('uploadToSoundCloud', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    jest.spyOn(firebaseAdmin, 'firestore').mockReturnValue({} as ReturnType<typeof firebaseAdmin.firestore>);
     mockUploadTrack.mockResolvedValue({
       trackIdentifier: 'sc-track-123',
       permalinkUrl: 'https://soundcloud.com/upper-room-media/test-sermon',
@@ -24,7 +50,7 @@ describe('uploadToSoundCloud', () => {
 
   it('returns soundCloudTrackId when authenticated and upload succeeds', async () => {
     const result = await handler({
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         audioStoragePath: 'intro-outro-sermons/sermon-1',
         title: 'Test Sermon',
@@ -51,20 +77,22 @@ describe('uploadToSoundCloud', () => {
 
   it('includes imageSource when provided', async () => {
     await handler({
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         audioStoragePath: 'intro-outro-sermons/sermon-1',
         title: 'Test',
         speakers: [],
         tags: [],
         description: '',
-        imageSource: 'https://firebasestorage.googleapis.com/v0/b/urm-app-prod.firebasestorage.app/o/speaker-images%2Fsome.jpg?alt=media&token=abc',
+        imageSource:
+          'https://firebasestorage.googleapis.com/v0/b/urm-app-prod.firebasestorage.app/o/speaker-images%2Fsome.jpg?alt=media&token=abc',
       },
     });
     expect(mockUploadTrack).toHaveBeenCalledWith(
       'fake-soundcloud-token',
       expect.objectContaining({
-        imageSource: 'https://firebasestorage.googleapis.com/v0/b/urm-app-prod.firebasestorage.app/o/speaker-images%2Fsome.jpg?alt=media&token=abc',
+        imageSource:
+          'https://firebasestorage.googleapis.com/v0/b/urm-app-prod.firebasestorage.app/o/speaker-images%2Fsome.jpg?alt=media&token=abc',
       })
     );
   });
@@ -88,7 +116,7 @@ describe('uploadToSoundCloud', () => {
   it('throws when role cannot publish', async () => {
     await expect(
       handler({
-        auth: { token: { role: 'user' } },
+        auth: testCallableAuth('user'),
         data: {
           audioStoragePath: 'intro-outro-sermons/sermon-1',
           title: 'Test',
@@ -108,7 +136,7 @@ describe('uploadToSoundCloud', () => {
     });
 
     await handler({
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         audioStoragePath: 'intro-outro-sermons/sermon-1',
         title: 'Test',
@@ -116,7 +144,7 @@ describe('uploadToSoundCloud', () => {
         tags: [],
         description: '',
       },
-      })
+    })
       .then(() => {
         throw new Error('Expected handler to reject');
       })
@@ -125,4 +153,87 @@ describe('uploadToSoundCloud', () => {
         expect(error.message).toBe('Invalid SoundCloud token');
       });
   });
+  it('does not start a provider creation when safe preparation fails', async () => {
+    mockPrepareMultipartUpload.mockRejectedValueOnce(new Error('Storage metadata unavailable'));
+    await expect(
+      uploadToSoundCloudDomain({
+        operationKey: 'durable:urm-app:job1:track',
+        audioStoragePath: 'audio.mp3',
+        title: 'Track',
+        speakers: [],
+        tags: [],
+        description: '',
+      })
+    ).rejects.toThrow('Storage metadata unavailable');
+    expect(executeProviderCreate).toHaveBeenCalledWith(expect.objectContaining({ prepare: expect.any(Function) }));
+    expect(mockUploadTrack).not.toHaveBeenCalled();
+  });
+  it('does not reopen sources when a confirmed receipt returns its cached result', async () => {
+    jest.mocked(executeProviderCreate).mockResolvedValueOnce({ trackIdentifier: 'cached-track' });
+    expect(
+      await uploadToSoundCloudDomain({
+        operationKey: 'durable:urm-app:job1:track',
+        audioStoragePath: 'audio.mp3',
+        title: 'Track',
+        speakers: [],
+        tags: [],
+        description: '',
+      })
+    ).toEqual({ soundCloudTrackId: 'cached-track' });
+    expect(mockUploadTrack).not.toHaveBeenCalled();
+    expect(mockDisposePreparedUpload).not.toHaveBeenCalled();
+    expect(mockPrepareMultipartUpload).not.toHaveBeenCalled();
+  });
+  it('disposes source streams when receipt ownership is lost after safe preparation', async () => {
+    (executeProviderCreate as unknown as jest.Mock).mockImplementationOnce(
+      async (options: { prepare: () => Promise<void> }) => {
+        await options.prepare();
+        throw new Error('Claim lost');
+      }
+    );
+    await expect(
+      uploadToSoundCloudDomain({
+        operationKey: 'durable:urm-app:job1:track',
+        audioStoragePath: 'audio.mp3',
+        title: 'Track',
+        speakers: [],
+        tags: [],
+        description: '',
+      })
+    ).rejects.toThrow('Claim lost');
+    expect(mockUploadTrack).not.toHaveBeenCalled();
+    expect(mockDisposePreparedUpload).toHaveBeenCalledTimes(1);
+  });
+});
+
+it('binds the authenticated account prepared with the actual SoundCloud POST token', async () => {
+  jest.clearAllMocks();
+  mockUploadTrack.mockResolvedValue({ trackIdentifier: 'soundcloud:tracks:123' });
+  (executeProviderCreate as unknown as jest.Mock).mockImplementationOnce(
+    async (options: {
+      prepare: () => Promise<void>;
+      getProviderAccount: () => unknown;
+      execute: () => Promise<unknown>;
+    }) => {
+      await options.prepare();
+      expect(options.getProviderAccount()).toEqual({ provider: 'soundcloud', account: 'soundcloud:users:42' });
+      return options.execute();
+    }
+  );
+  await uploadToSoundCloudDomain({
+    operationKey: 'durable:urm-app:job1:track',
+    audioStoragePath: 'audio.mp3',
+    title: 'Track',
+    speakers: [],
+    tags: [],
+    description: '',
+  });
+  expect(mockUploadTrack).toHaveBeenCalledWith('fake-soundcloud-token', expect.any(Object));
+});
+
+it('blocks replacement allocation if the actual POST token belongs to a changed account',async()=>{
+  jest.clearAllMocks();
+  await expect(uploadToSoundCloudDomain({operationKey:'durable:urm-app:job1:replacement',audioStoragePath:'audio.mp3',title:'Track',speakers:[],tags:[],description:''},{expectedProviderAccount:'soundcloud:users:99'})).rejects.toBeDefined();
+  expect(mockPrepareMultipartUpload).not.toHaveBeenCalled();
+  expect(mockUploadTrack).not.toHaveBeenCalled();
 });

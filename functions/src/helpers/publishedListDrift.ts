@@ -1,3 +1,5 @@
+import { providerPayloadFingerprint } from '../temporal/publishing/providerReceipts';
+import { createDurableWriteBatch, isDurablePublishingOperation, commitDurableProjection } from '../temporal/publishing/durableOperationContext';
 import axios from 'axios';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { FieldValue } from 'firebase-admin/firestore';
@@ -676,7 +678,9 @@ const resolveImportedImages = async (images: SubsplashImage[] | undefined): Prom
       continue;
     }
 
-    const imageRef = firestore.collection('images').doc();
+    const imageRef = isDurablePublishingOperation()
+      ? firestore.collection('images').doc(`subsplash-image-${providerPayloadFingerprint([image.id,image.type]).slice(0,32)}`)
+      : firestore.collection('images').doc();
     const importedImage: ImageType = {
       id: imageRef.id,
       size: 'original',
@@ -691,7 +695,8 @@ const resolveImportedImages = async (images: SubsplashImage[] | undefined): Prom
       ...(image.vibrant_color_hex ? { vibrantColorHex: image.vibrant_color_hex } : {}),
     };
 
-    await imageRef.withConverter(firestoreAdminImagesConverter).set(importedImage);
+    const convertedImageRef=imageRef.withConverter(firestoreAdminImagesConverter);
+    await commitDurableProjection(async tx=>{tx.set(convertedImageRef,importedImage);},async()=>{await convertedImageRef.set(importedImage);});
     resolvedImages.push(importedImage);
   }
 
@@ -703,7 +708,9 @@ const buildImportedSermon = async (
   token: string
 ): Promise<Sermon> => {
   const details = await getSubsplashMediaItemDetails(mediaItemId, token);
-  const sermonRef = firestore.collection('sermons').doc();
+  const sermonRef = isDurablePublishingOperation()
+    ? firestore.collection('sermons').doc(`subsplash-media-${providerPayloadFingerprint(mediaItemId).slice(0,32)}`)
+    : firestore.collection('sermons').doc();
   const now = Date.now();
   const images = await resolveImportedImages(details._embedded?.images);
 
@@ -860,11 +867,9 @@ export const resolvePublishedListDrift = async ({
     if (!sermon) {
       sermon = await buildImportedSermon(remoteItem.mediaItemId, token);
       importedSermonIds.push(sermon.id);
-      await firestore
-        .collection('sermons')
-        .doc(sermon.id)
-        .withConverter(firestoreAdminSermonConverter)
-        .set(omitUndefinedValues(sermon as unknown as Record<string, unknown>) as unknown as Sermon);
+      const importedRef=firestore.collection('sermons').doc(sermon.id).withConverter(firestoreAdminSermonConverter);
+      const imported=omitUndefinedValues(sermon as unknown as Record<string, unknown>) as unknown as Sermon;
+      await commitDurableProjection(async tx=>{tx.set(importedRef,imported);},async()=>{await importedRef.set(imported);});
     }
 
     resolvedPublishedSermons.push({
@@ -878,7 +883,7 @@ export const resolvePublishedListDrift = async ({
 
   const mergedOrder = mergePublishedSubsetOrder(driftState.localItems, resolvedPublishedSermons.map((sermon) => sermon.id));
   const resolvedById = new Map(resolvedPublishedSermons.map((sermon) => [sermon.id, sermon]));
-  const batch = firestore.batch();
+  const batch = createDurableWriteBatch(firestore);
 
   mergedOrder.forEach((sermonId, index) => {
     const resolvedRemoteItem = driftState.remotePublishedItems.find((item) => item.matchedSermonId === sermonId)

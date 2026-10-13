@@ -1,3 +1,4 @@
+import { testCallableAuth } from '../helpers/callableAuth';
 import { subsplashSeriesMock, networkFailureInjector, TestRequest } from './mocks';
 import { clearFirestore, createSeriesDocument, getSeriesById } from './firestoreHelpers';
 import updateSeriesMetadata from '../../updateSeriesMetadata';
@@ -53,7 +54,7 @@ describe('updateSeriesMetadata', () => {
     });
 
     const result = await updateSeriesMetadataHandler({
-      auth: { token: { role: 'publisher' } },
+      auth: testCallableAuth('publisher'),
       data: {
         firestoreId,
         title: 'Updated Series',
@@ -109,7 +110,7 @@ describe('updateSeriesMetadata', () => {
     });
 
     const result = await updateSeriesMetadataHandler({
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         firestoreId,
         title: 'Series With Summary',

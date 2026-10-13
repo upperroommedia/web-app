@@ -1,3 +1,5 @@
+import {assertSynchronousProviderMutationCompleted} from './temporal/publishing/providerMutationCompletion';
+import {assertProviderMutationTransportAllowed} from './temporal/publishing/providerTransportPolicy';
 /**
  * SoundCloud API client for upload, update, and delete of tracks.
  * Uses OAuth 2.1 access token (Authorization: OAuth <token>).
@@ -24,6 +26,25 @@ function authHeaders(accessToken: string): Record<string, string> {
   };
 }
 
+/** Stable original owner binding for a provider creation, independent of later OAuth reconnects. */
+export const normalizeSoundCloudAccountId = (account: { urn?: unknown; id?: unknown; id_str?: unknown }): string => {
+  const urn = typeof account.urn === 'string' ? /^soundcloud:users:([0-9]+)$/.exec(account.urn.trim())?.[1] : undefined;
+  const numeric =
+    urn ??
+    (typeof account.id_str === 'string' && /^[0-9]+$/.test(account.id_str) ? account.id_str : undefined) ??
+    (typeof account.id === 'number' && Number.isSafeInteger(account.id) && account.id >= 0
+      ? String(account.id)
+      : typeof account.id === 'string' && /^[0-9]+$/.test(account.id)
+      ? account.id
+      : undefined);
+  if (!numeric) throw new Error('SoundCloud account response is missing a stable user identifier.');
+  return `soundcloud:users:${numeric}`;
+};
+export const getAuthenticatedSoundCloudAccountId = async (accessToken: string): Promise<string> =>
+  normalizeSoundCloudAccountId(
+    (await axios.get(`${SOUNDCLOUD_API_BASE}/me`, { headers: authHeaders(accessToken), timeout: 30_000 })).data ?? {}
+  );
+
 export interface UploadTrackParams {
   bucket: Bucket;
   audioStoragePath: string;
@@ -31,6 +52,8 @@ export interface UploadTrackParams {
   title: string;
   tags: string[];
   description: string;
+  /** Authenticated provider metadata copied during an explicitly approved replacement. */
+  providerMetadata?: Record<string, string | boolean | number>;
 }
 
 type SoundCloudTrackResponse = {
@@ -95,7 +118,7 @@ function getTrackIdentifier(track: SoundCloudTrackResponse | undefined): string 
 /**
  * SoundCloud tag_list is space-separated. Multi-word tags are often quoted.
  */
-function formatTagList(tags: string[]): string {
+export function formatTagList(tags: string[]): string {
   return tags.map((t) => (t.includes(' ') ? `"${t}"` : t)).join(' ');
 }
 
@@ -182,7 +205,7 @@ async function createBucketStreamSource(
 
 async function createImageSourceStream(bucket: Bucket, source: string): Promise<MultipartStreamSource> {
   if (/^https?:\/\//i.test(source)) {
-    const response = await axios.get<Readable>(source, { responseType: 'stream' });
+    const response = await axios.get<Readable>(source, { responseType: 'stream', timeout: 60_000 });
     const filename = inferFilenameFromUrl(source, 'artwork.jpg');
     return {
       stream: response.data,
@@ -197,55 +220,113 @@ async function createImageSourceStream(bucket: Bucket, source: string): Promise<
   return createBucketStreamSource(bucket, source, 'artwork.jpg', inferImageContentTypeFromFilename(source));
 }
 
-/**
- * Upload a track to SoundCloud. Downloads audio (and optional image) from
- * Firebase Storage, then POSTs multipart/form-data to SoundCloud.
- */
-export async function uploadTrack(accessToken: string, params: UploadTrackParams): Promise<SoundCloudTrackResult> {
-  const audioSource = await createBucketStreamSource(
-    params.bucket,
-    params.audioStoragePath,
-    'audio.mp3',
-    'audio/mpeg'
-  );
+/** Preparation performs only source reads. A provider creation receipt must wrap post(), not this function. */
+export interface PreparedSoundCloudUpload {
+  post(accessToken: string): Promise<SoundCloudTrackResult>;
+  dispose(): void;
+}
+export async function prepareMultipartUpload(params: UploadTrackParams): Promise<PreparedSoundCloudUpload> {
+  const streams: Readable[] = [];
   const form = new FormData();
-  form.append('track[title]', params.title);
-  form.append('track[asset_data]', audioSource.stream, {
-    filename: audioSource.filename,
-    contentType: audioSource.contentType,
-    knownLength: audioSource.knownLength,
-  });
-  form.append('track[tag_list]', formatTagList(params.tags));
-  form.append('track[description]', params.description);
-
-  if (params.imageSource) {
-    const imageSource = await createImageSourceStream(params.bucket, params.imageSource);
-    form.append('track[artwork_data]', imageSource.stream, {
-      filename: imageSource.filename,
-      contentType: imageSource.contentType,
-      knownLength: imageSource.knownLength,
-    });
-  }
-
-  const resp = await axios.post(`${SOUNDCLOUD_API_BASE}/tracks`, form, {
-    headers: {
-      ...authHeaders(accessToken),
-      ...form.getHeaders(),
-    },
-    maxBodyLength: Infinity,
-    maxContentLength: Infinity,
-  });
-
-  const trackIdentifier = getTrackIdentifier(resp.data);
-  if (trackIdentifier == null) {
-    throw new Error('SoundCloud upload response missing track identifier');
-  }
-  return {
-    trackIdentifier,
-    ...(typeof resp.data?.permalink_url === 'string' && resp.data.permalink_url.trim().length > 0
-      ? { permalinkUrl: resp.data.permalink_url.trim() }
-      : {}),
+  let disposed = false;
+  let posted = false;
+  const dispose = (): void => {
+    if (disposed) return;
+    disposed = true;
+    for (const stream of streams) stream.destroy();
+    // FormData's delayed wrappers can keep source listeners alive after a cached receipt replay.
+    form.destroy();
   };
+  try {
+    const audioSource = await createBucketStreamSource(
+      params.bucket,
+      params.audioStoragePath,
+      'audio.mp3',
+      'audio/mpeg'
+    );
+    streams.push(audioSource.stream);
+    form.append('track[title]', params.title);
+    form.append('track[asset_data]', audioSource.stream, {
+      filename: audioSource.filename,
+      contentType: audioSource.contentType,
+      knownLength: audioSource.knownLength,
+    });
+    form.append('track[tag_list]', formatTagList(params.tags));
+    form.append('track[description]', params.description);
+    const preservable = [
+      'sharing',
+      'embeddable_by',
+      'purchase_url',
+      'genre',
+      'label_name',
+      'release',
+      'release_date',
+      'streamable',
+      'downloadable',
+      'license',
+      'commentable',
+      'reveal_stats',
+      'reveal_comments',
+      'isrc',
+      'artist',
+    ];
+    for (const field of preservable) {
+      const value = params.providerMetadata?.[field];
+      if (value !== undefined) form.append(`track[${field}]`, String(value));
+    }
+
+    if (params.imageSource) {
+      const imageSource = await createImageSourceStream(params.bucket, params.imageSource);
+      streams.push(imageSource.stream);
+      form.append('track[artwork_data]', imageSource.stream, {
+        filename: imageSource.filename,
+        contentType: imageSource.contentType,
+        knownLength: imageSource.knownLength,
+      });
+    }
+
+    return {
+      dispose,
+      async post(accessToken) {
+        if (disposed || posted) throw new Error('A prepared SoundCloud upload can only be posted once.');
+        posted = true;
+        assertProviderMutationTransportAllowed('soundcloud');
+        const resp = await axios.post(`${SOUNDCLOUD_API_BASE}/tracks`, form, {
+          headers: {
+            ...authHeaders(accessToken),
+            ...form.getHeaders(),
+          },
+          maxBodyLength: Infinity,
+          maxContentLength: Infinity,
+          timeout: 540_000,
+        });
+
+        const trackIdentifier = getTrackIdentifier(resp.data);
+        if (trackIdentifier == null) {
+          throw new Error('SoundCloud upload response missing track identifier');
+        }
+        return {
+          trackIdentifier,
+          ...(typeof resp.data?.permalink_url === 'string' && resp.data.permalink_url.trim().length > 0
+            ? { permalinkUrl: resp.data.permalink_url.trim() }
+            : {}),
+        };
+      },
+    };
+  } catch (error) {
+    dispose();
+    throw error;
+  }
+}
+
+/** Backwards-compatible direct upload; every allocated source stream is closed on all outcomes. */
+export async function uploadTrack(accessToken: string, params: UploadTrackParams): Promise<SoundCloudTrackResult> {
+  const upload = await prepareMultipartUpload(params);
+  try {
+    return await upload.post(accessToken);
+  } finally {
+    upload.dispose();
+  }
 }
 
 export interface UpdateTrackParams {
@@ -265,6 +346,7 @@ export async function updateTrack(
   trackId: string,
   params: UpdateTrackParams
 ): Promise<SoundCloudTrackResult | undefined> {
+  assertProviderMutationTransportAllowed('soundcloud');
   const trackIdentifier = trackId.trim();
   const hasArtwork = params.imageSource && params.bucket;
   if (hasArtwork) {
@@ -285,7 +367,10 @@ export async function updateTrack(
       },
       maxBodyLength: Infinity,
       maxContentLength: Infinity,
+      timeout: 60_000,
+      maxRedirects:0,
     });
+    assertSynchronousProviderMutationCompleted(response);
     return {
       trackIdentifier,
       ...(typeof response.data?.permalink_url === 'string' && response.data.permalink_url.trim().length > 0
@@ -305,8 +390,11 @@ export async function updateTrack(
           ...authHeaders(accessToken),
           'Content-Type': 'application/json',
         },
+        timeout: 60_000,
+        maxRedirects:0,
       }
     );
+    assertSynchronousProviderMutationCompleted(response);
     return {
       trackIdentifier,
       ...(typeof response.data?.permalink_url === 'string' && response.data.permalink_url.trim().length > 0
@@ -319,10 +407,15 @@ export async function updateTrack(
 /**
  * Delete a track by id.
  */
-export async function deleteTrack(accessToken: string, trackId: string): Promise<void> {
-  await axios.delete(`${SOUNDCLOUD_API_BASE}/tracks/${encodeTrackIdentifier(trackId)}`, {
+export async function deleteTrack(accessToken: string, trackId: string, options?: { onResponse?: (response: { status: number }) => void }): Promise<void> {
+  assertProviderMutationTransportAllowed('soundcloud');
+  const response = await axios.delete(`${SOUNDCLOUD_API_BASE}/tracks/${encodeTrackIdentifier(trackId)}`, {
     headers: authHeaders(accessToken),
+    timeout: 30_000,
+    maxRedirects: 0,
   });
+  assertSynchronousProviderMutationCompleted(response);
+  options?.onResponse?.({ status: response.status });
 }
 
 /**

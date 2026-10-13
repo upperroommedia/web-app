@@ -1,3 +1,4 @@
+import type { AuthData } from '../helpers/callableAuth';
 import {
   SubsplashList,
   SubsplashListRow,
@@ -32,11 +33,7 @@ export interface MockSubsplashMediaItem {
 
 // Type for the handler function (what onCall wraps)
 export type TestRequest = {
-  auth?: {
-    token?: {
-      role?: string;
-    };
-  };
+  auth?: AuthData;
   data: AddtoListInputType;
 };
 
@@ -504,7 +501,7 @@ jest.mock('axios', () => {
           toJSON: () => ({ message: 'Request failed with status code 502', name: 'AxiosError' })
         });
       }
-      return Promise.resolve({ data: updatedList });
+      return Promise.resolve({ status: 200, data: updatedList });
     }
     
     if (method === 'POST' && url.includes('/builder/v1/lists')) {

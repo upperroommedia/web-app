@@ -1,3 +1,4 @@
+import { testCallableAuth } from '../helpers/callableAuth';
 import { OverflowBehavior } from '@upperroom/shared/types/List';
 import { SubsplashListRow } from '../../types/Subsplash';
 import {
@@ -90,7 +91,7 @@ describe('addToList - post-patch row identity', () => {
     subsplashMock.returnStaleListRowsAfterNextPatch(rootListId);
 
     const request: TestRequest = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         destinationListIds: [rootListId],
         mediaItem: { id: 'sermon-5', type: 'media-item' },
@@ -163,7 +164,7 @@ describe('addToList - post-patch row identity', () => {
     for (const mediaItemId of addedIds) {
       subsplashMock.returnStaleListRowsAfterNextPatch(rootListId);
       const request: TestRequest = {
-        auth: { token: { role: 'admin' } },
+        auth: testCallableAuth('admin'),
         data: {
           destinationListIds: [rootListId],
           mediaItem: { id: mediaItemId, type: 'media-item' },
@@ -230,7 +231,7 @@ describe('addToList - post-patch row identity', () => {
     subsplashMock.returnStaleListRowsAfterNextPatch(rootListId, 4);
 
     const request: TestRequest = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         destinationListIds: [rootListId],
         mediaItem: { id: 'sermon-retry', type: 'media-item' },
@@ -294,7 +295,7 @@ describe('addToList - post-patch row identity', () => {
     subsplashMock.returnStaleListRowsAfterNextPatch(rootListId, 6);
 
     const request: TestRequest = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         destinationListIds: [rootListId],
         mediaItem: { id: 'sermon-chain-recovery', type: 'media-item' },

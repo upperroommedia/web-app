@@ -23,9 +23,16 @@ type TAG_ITEMS_IN_LIST_INCOMING_DATA =
 
 const tagItemsInList = onCall(
   { secrets: subsplashSecretsWithRuntimeAlerts },
-  async (request: CallableRequest<TAG_ITEMS_IN_LIST_INCOMING_DATA>): Promise<HttpsError | number> => {
-    const data = request.data;
-    try {
+  async (request: CallableRequest<TAG_ITEMS_IN_LIST_INCOMING_DATA>): Promise<HttpsError | number> =>{
+const data = request.data;
+if (!request.auth?.uid) {
+ const { HttpsError } = await import('firebase-functions/v2/https');
+ throw new HttpsError('unauthenticated', 'Authentication is required.');
+}
+const { withLegacyAdmissionLease } = await import('../temporal/legacyAdmissionLease');
+return withLegacyAdmissionLease(firebaseAdmin.firestore(), {domain:'publishing',actorUid:request.auth.uid,operation:"Scrapers/tagItemsInList",projectId:firebaseAdmin.app().options.projectId || ''}, async lease => {
+ await lease.markEffectsStarted();
+try {
       //gets all sermons
       if (!data.listId) {
         throw new HttpsError('invalid-argument', 'listId is required');
@@ -133,6 +140,7 @@ const tagItemsInList = onCall(
       logger.error(httpsError);
       throw httpsError;
     }
-  }
+});
+}
 );
 export default tagItemsInList;

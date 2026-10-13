@@ -7,7 +7,15 @@
 import Box from '@mui/material/Box';
 import AppLayout from '../../layout/AppLayout';
 import Button from '@mui/material/Button';
-import firestore, { collection, limit, orderBy, query, where, getDocs, QueryConstraint } from '../../firebase/firestore';
+import firestore, {
+  collection,
+  limit,
+  orderBy,
+  query,
+  where,
+  getDocs,
+  QueryConstraint,
+} from '../../firebase/firestore';
 import DeleteEntityPopup from '../../components/DeleteEntityPopup';
 import { memo, useCallback, useEffect, useState } from 'react';
 import NewSeriesPopup from '../../components/NewSeriesPopup';
@@ -15,7 +23,9 @@ import AvatarWithDefaultImage from '../../components/AvatarWithDefaultImage';
 import Typography from '@mui/material/Typography';
 import CircularProgress from '@mui/material/CircularProgress';
 import { createFunctionV2 } from '../../utils/createFunction';
-import { DeleteSeriesInputType, DeleteSeriesOutputType } from '@upperroom/contracts/deleteSeries';
+import { useEntityJobs } from '../../hooks/useDurableJobs';
+import { submitDurableIntent } from '../../utils/durableJobs';
+import EntityJobHistory from '../../components/jobs/EntityJobHistory';
 import Link from 'next/link';
 import Card from '@mui/material/Card';
 import Divider from '@mui/material/Divider';
@@ -42,11 +52,7 @@ import { alpha, useTheme } from '@mui/material/styles';
 import UserAvatar from '../../components/UserAvatar';
 import type { DirectoryUser as AppUser } from '../../types/User';
 import type { GetUsersByIdsInputType, GetUsersByIdsOutputType } from '@upperroom/contracts/getUsersByIds';
-import {
-  createOperationKey,
-  formatLockBusyRetryMessage,
-  parseLockBusyDetails,
-} from '../../utils/callableConcurrency';
+import { formatLockBusyRetryMessage, parseLockBusyDetails } from '../../utils/callableConcurrency';
 import { reportHandledError } from '../../utils/reportHandledError';
 
 const ITEMS_PER_PAGE = 20;
@@ -90,11 +96,12 @@ const SeriesListItemRow = memo(function SeriesListItemRow({
 }: SeriesListItemRowProps) {
   const theme = useTheme();
   const compactSeriesRow = theme.breakpoints.down(750);
-  const seriesImage = series.images?.find((image) => image.type === 'wide')
-    || series.images?.find((image) => image.type === 'banner')
-    || series.images?.find((image) => image.type === 'square');
+  const seriesImage =
+    series.images?.find((image) => image.type === 'wide') ||
+    series.images?.find((image) => image.type === 'banner') ||
+    series.images?.find((image) => image.type === 'square');
   const ownerDisplayName = owner
-    ? (`${owner.firstName ?? ''} ${owner.lastName ?? ''}`.trim() || owner.displayName || owner.email || owner.uid)
+    ? `${owner.firstName ?? ''} ${owner.lastName ?? ''}`.trim() || owner.displayName || owner.email || owner.uid
     : series.ownerId;
   return (
     <Box>
@@ -250,13 +257,13 @@ const SeriesListItemRow = memo(function SeriesListItemRow({
                 )}
                 {isAdmin && series.ownerId !== currentUserId && (
                   <Chip
-                    avatar={(
+                    avatar={
                       <UserAvatar
                         user={owner}
                         fallbackLabel={ownerDisplayName}
                         sx={{ width: { xs: 18, sm: 20 }, height: { xs: 18, sm: 20 } }}
                       />
-                    )}
+                    }
                     label={ownerDisplayName}
                     size="small"
                     variant="outlined"
@@ -400,6 +407,12 @@ const AdminSeriesPage = () => {
 
   const isAdmin = user?.isAdmin() ?? false;
 
+  const { jobs } = useEntityJobs({ type: 'series', id: selectedSeries?.id ?? '' });
+  const completedRevision = jobs
+    .filter((job) => ['succeeded', 'failed', 'cancelled', 'superseded'].includes(job.state))
+    .map((job) => `${job.jobId}:${job.revision}`)
+    .join('|');
+
   const fetchSeries = useCallback(async () => {
     if (!user) return;
 
@@ -417,10 +430,7 @@ const AdminSeriesPage = () => {
         queryConstraints.push(where('ownerId', '==', user.uid));
       }
 
-      const seriesQuery = query(
-        collection(firestore, 'series'),
-        ...queryConstraints
-      ).withConverter(seriesConverter);
+      const seriesQuery = query(collection(firestore, 'series'), ...queryConstraints).withConverter(seriesConverter);
 
       const snapshot = await getDocs(seriesQuery);
       const allSeries = snapshot.docs.map((doc) => doc.data());
@@ -432,6 +442,10 @@ const AdminSeriesPage = () => {
 
     setLoading(false);
   }, [user, isAdmin]);
+
+  useEffect(() => {
+    if (completedRevision) void fetchSeries();
+  }, [completedRevision, fetchSeries]);
 
   useEffect(() => {
     fetchSeries();
@@ -488,14 +502,11 @@ const AdminSeriesPage = () => {
     try {
       setIsDeleting(true);
 
-      // Always route through callable to enforce consistent remote/local deletion semantics.
-      const deleteSeries = createFunctionV2<DeleteSeriesInputType, DeleteSeriesOutputType>('deleteseries');
-      await deleteSeries({
-        firestoreId: selectedSeries.id,
-        operationKey: createOperationKey('series-admin-delete', selectedSeries.id),
+      await submitDurableIntent({
+        kind: 'series.delete',
+        entity: { type: 'series', id: selectedSeries.id },
+        payload: { input: {} },
       });
-
-      setSeriesList((prev) => prev.filter((s) => s.id !== selectedSeries.id));
       setDeleteSeriesPopup(false);
     } catch (err: unknown) {
       console.error('Error deleting series:', err);
@@ -528,22 +539,22 @@ const AdminSeriesPage = () => {
   }, []);
 
   // Filter series based on search query and filter type
-  const filteredSeries = seriesList.filter((series) => {
-    // Search filter
-    const matchesSearch = searchQuery
-      ? series.name.toLowerCase().includes(searchQuery.toLowerCase())
-      : true;
+  const filteredSeries = seriesList
+    .filter((series) => {
+      // Search filter
+      const matchesSearch = searchQuery ? series.name.toLowerCase().includes(searchQuery.toLowerCase()) : true;
 
-    // Status filter
-    let matchesFilter = true;
-    if (filter === 'published') {
-      matchesFilter = !!series.subsplashId;
-    } else if (filter === 'draft') {
-      matchesFilter = !series.subsplashId;
-    }
+      // Status filter
+      let matchesFilter = true;
+      if (filter === 'published') {
+        matchesFilter = !!series.subsplashId;
+      } else if (filter === 'draft') {
+        matchesFilter = !series.subsplashId;
+      }
 
-    return matchesSearch && matchesFilter;
-  }).slice(0, ITEMS_PER_PAGE);
+      return matchesSearch && matchesFilter;
+    })
+    .slice(0, ITEMS_PER_PAGE);
 
   if (!user) {
     return (
@@ -594,11 +605,7 @@ const AdminSeriesPage = () => {
               <Typography variant="h4" fontWeight={700}>
                 Manage Series
               </Typography>
-              <Button
-                variant="contained"
-                startIcon={<AddIcon />}
-                onClick={() => setNewSeriesPopup(true)}
-              >
+              <Button variant="contained" startIcon={<AddIcon />} onClick={() => setNewSeriesPopup(true)}>
                 Add Series
               </Button>
             </Box>
@@ -656,9 +663,7 @@ const AdminSeriesPage = () => {
               >
                 <CollectionsIcon sx={{ fontSize: 48, color: 'text.disabled', mb: 2 }} />
                 <Typography variant="h6" color="text.secondary" gutterBottom>
-                  {searchQuery || filter !== 'all'
-                    ? 'No series found matching your filters'
-                    : 'No series yet'}
+                  {searchQuery || filter !== 'all' ? 'No series found matching your filters' : 'No series yet'}
                 </Typography>
                 <Typography variant="body2" color="text.disabled" sx={{ mb: 3 }}>
                   {searchQuery || filter !== 'all'
@@ -666,11 +671,7 @@ const AdminSeriesPage = () => {
                     : 'Create your first series to organize your content'}
                 </Typography>
                 {!searchQuery && filter === 'all' && (
-                  <Button
-                    variant="contained"
-                    startIcon={<AddIcon />}
-                    onClick={() => setNewSeriesPopup(true)}
-                  >
+                  <Button variant="contained" startIcon={<AddIcon />} onClick={() => setNewSeriesPopup(true)}>
                     Create Your First Series
                   </Button>
                 )}
@@ -705,18 +706,11 @@ const AdminSeriesPage = () => {
         isDeleting={isDeleting}
       />
 
-      <NewSeriesPopup
-        open={newSeriesPopup}
-        setOpen={setNewSeriesPopup}
-        onSeriesCreated={handleSeriesCreated}
-      />
+      {selectedSeries && <EntityJobHistory entity={{ type: 'series', id: selectedSeries.id }} />}
+      <NewSeriesPopup open={newSeriesPopup} setOpen={setNewSeriesPopup} onSeriesCreated={handleSeriesCreated} />
 
       {editSeriesPopup && selectedSeries && (
-        <NewSeriesPopup
-          open={editSeriesPopup}
-          setOpen={setEditSeriesPopup}
-          existingSeries={selectedSeries}
-        />
+        <NewSeriesPopup open={editSeriesPopup} setOpen={setEditSeriesPopup} existingSeries={selectedSeries} />
       )}
     </>
   );
@@ -736,9 +730,7 @@ const ProtectedAdminSeriesPage = () => {
           minHeight: '50vh',
         }}
       >
-        <Typography color="text.secondary">
-          You don&apos;t have permission to view this page.
-        </Typography>
+        <Typography color="text.secondary">You don&apos;t have permission to view this page.</Typography>
       </Box>
     );
   }

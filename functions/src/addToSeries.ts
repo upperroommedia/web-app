@@ -1,3 +1,4 @@
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 /**
  * Firebase callable function to add a media item to a series
  * Note: A media item can only belong to one series at a time,
@@ -32,37 +33,36 @@ export interface AddToSeriesOutputType {
 
 const addToSeries = onCall(
   { secrets: subsplashSecretsWithRuntimeAlerts },
-  async (request: CallableRequest<AddToSeriesInputType>): Promise<AddToSeriesOutputType> => {
-    logger.log('addToSeries');
-
-    // Authentication check
-    if (!canUserRolePublish(request.auth?.token.role)) {
+  async (request: CallableRequest<AddToSeriesInputType>): Promise<AddToSeriesOutputType> =>{
+logger.log('addToSeries');
+if (!canUserRolePublish(request.auth?.token.role)) {
       throw new HttpsError('unauthenticated', 'The function must be called while authenticated with publish permissions.');
     }
-
-    const { seriesSubsplashId, mediaItemId, position, operationKey } = request.data;
-
-    // Validation
-    if (!seriesSubsplashId || !seriesSubsplashId.trim()) {
+const { seriesSubsplashId, mediaItemId, position, operationKey } = request.data;
+if (!seriesSubsplashId || !seriesSubsplashId.trim()) {
       throw new HttpsError('invalid-argument', 'Series Subsplash ID is required.');
     }
-
-    if (!mediaItemId || !mediaItemId.trim()) {
+if (!mediaItemId || !mediaItemId.trim()) {
       throw new HttpsError('invalid-argument', 'Media Item ID is required.');
     }
-
-    const normalizedSeriesSubsplashId = seriesSubsplashId.trim();
-    const normalizedMediaItemId = mediaItemId.trim();
-    const normalizedOperationKey = operationKey?.trim() || `add-to-series:${normalizedSeriesSubsplashId}:${normalizedMediaItemId}:${randomUUID()}`;
-    logger.log('addToSeries.request', {
+const normalizedSeriesSubsplashId = seriesSubsplashId.trim();
+const normalizedMediaItemId = mediaItemId.trim();
+const normalizedOperationKey = operationKey?.trim() || `add-to-series:${normalizedSeriesSubsplashId}:${normalizedMediaItemId}:${randomUUID()}`;
+logger.log('addToSeries.request', {
       seriesSubsplashId: normalizedSeriesSubsplashId,
       mediaItemId: normalizedMediaItemId,
       hasPosition: typeof position === 'number',
       position: typeof position === 'number' ? position : undefined,
       operationKey: normalizedOperationKey,
     });
-
-    try {
+if (!request.auth?.uid) {
+ const { HttpsError } = await import('firebase-functions/v2/https');
+ throw new HttpsError('unauthenticated', 'Authentication is required.');
+}
+const { withLegacyAdmissionLease } = await import('./temporal/legacyAdmissionLease');
+return withLegacyAdmissionLease(firebaseAdmin.firestore(), {domain:'publishing',actorUid:request.auth.uid,operation:"addToSeries",projectId:firebaseAdmin.app().options.projectId || ''}, async lease => {
+ await lease.markEffectsStarted();
+try {
       return await withIdempotency(normalizedOperationKey, async () => {
         return withSubsplashLocks(
           [`series:${normalizedSeriesSubsplashId}`, `media-item:${normalizedMediaItemId}`],
@@ -107,7 +107,8 @@ const addToSeries = onCall(
       });
       throw handleError(err);
     }
-  }
+});
+}
 );
 
 export default addToSeries;

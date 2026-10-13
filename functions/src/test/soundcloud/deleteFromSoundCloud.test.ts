@@ -1,9 +1,11 @@
+import type { AuthData } from '../helpers/callableAuth';
+import { testCallableAuth } from '../helpers/callableAuth';
 import { mockDeleteTrack, mockNormalizeSoundCloudApiError } from './mocks';
 import deleteFromSoundCloud from '../../deleteFromSoundCloud';
 import type { DeleteFromSoundCloudInputType } from '../../deleteFromSoundCloud';
 
 const handler = deleteFromSoundCloud as unknown as (req: {
-  auth?: { token?: { role?: string } };
+  auth?: AuthData;
   data: DeleteFromSoundCloudInputType;
 }) => Promise<void>;
 
@@ -18,7 +20,7 @@ describe('deleteFromSoundCloud', () => {
 
   it('calls deleteTrack with soundCloudTrackId when authenticated', async () => {
     await handler({
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: { soundCloudTrackId: 'sc-789' },
     });
     expect(mockDeleteTrack).toHaveBeenCalledTimes(1);
@@ -38,7 +40,7 @@ describe('deleteFromSoundCloud', () => {
   it('throws when role cannot publish', async () => {
     await expect(
       handler({
-        auth: { token: { role: 'user' } },
+        auth: testCallableAuth('user'),
         data: { soundCloudTrackId: 'sc-789' },
       })
     ).rejects.toMatchObject({ code: 'unauthenticated' });
@@ -52,7 +54,7 @@ describe('deleteFromSoundCloud', () => {
     });
 
     await handler({
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: { soundCloudTrackId: 'sc-789' },
     })
       .then(() => {

@@ -1,0 +1,180 @@
+diff --git a/lib/app.js b/lib/app.js
+index 23f6abb1cf5ea8507ef02f009f82df3bdd13f640..a42190a2c96c8fdbd8a5975576d24ab9850fbbcd 100644
+--- a/lib/app.js
++++ b/lib/app.js
+@@ -22,7 +22,7 @@
+ // SOFTWARE.
+ Object.defineProperty(exports, "__esModule", { value: true });
+ exports.testApp = void 0;
+-const firebase = require("firebase-admin");
++const firebase = require("firebase-admin/app");
+ /** @internal */
+ function testApp() {
+     if (typeof testApp.singleton === 'undefined') {
+@@ -49,8 +49,9 @@ exports.testApp = testApp;
+         }
+         deleteApp() {
+             if (this.appSingleton) {
+-                this.appSingleton.delete();
++                const app = this.appSingleton;
+                 delete this.appSingleton;
++                return firebase.deleteApp(app);
+             }
+         }
+     }
+diff --git a/lib/index.d.ts b/lib/index.d.ts
+index db0c0930653e18228e1312e4d49a683f5ebe83ab..a0391ad33d6bc311b489b56f21bc78298b307ede 100644
+--- a/lib/index.d.ts
++++ b/lib/index.d.ts
+@@ -1,4 +1,4 @@
+-import { AppOptions } from 'firebase-admin';
++import { AppOptions } from 'firebase-admin/app';
+ import { FeaturesList } from './features';
+ declare const _default: (firebaseConfig?: AppOptions, pathToServiceAccountKey?: string) => FeaturesList;
+ export = _default;
+diff --git a/lib/lifecycle.d.ts b/lib/lifecycle.d.ts
+index eae9169319f0415800f7e44dbaec5bb67b4e99e7..9ed7057ff8e0681a2b87f7c56ed11f1dcad75c0a 100644
+--- a/lib/lifecycle.d.ts
++++ b/lib/lifecycle.d.ts
+@@ -1,4 +1,4 @@
+-import { AppOptions } from 'firebase-admin';
++import { AppOptions } from 'firebase-admin/app';
+ export declare class FirebaseFunctionsTest {
+     private _oldEnv;
+     constructor();
+@@ -14,5 +14,5 @@ export declare class FirebaseFunctionsTest {
+     /** Path to a service account key file to be used when initializing the Firebase app. */
+     pathToServiceAccountKey?: string): void;
+     /** Complete clean up tasks. */
+-    cleanup(): void;
++    cleanup(): Promise<void> | undefined;
+ }
+diff --git a/lib/lifecycle.js b/lib/lifecycle.js
+index 7199b70fd35e09752c5009360b47aa2fbd94d87b..e4696b94b97ccf26e38211ae4d4c1dc6c0f839ef 100644
+--- a/lib/lifecycle.js
++++ b/lib/lifecycle.js
+@@ -71,7 +71,7 @@ class FirebaseFunctionsTest {
+                 delete process.env[varName];
+             }
+         });
+-        (0, app_1.testApp)().deleteApp();
++        return (0, app_1.testApp)().deleteApp();
+     }
+ }
+ exports.FirebaseFunctionsTest = FirebaseFunctionsTest;
+diff --git a/lib/providers/database.d.ts b/lib/providers/database.d.ts
+index ed46b61f1d9b6c3868c28cc9d1ded99ab45b7f6e..002fc2fcab7d41f3cc29f885b9446f01fe38aa86 100644
+--- a/lib/providers/database.d.ts
++++ b/lib/providers/database.d.ts
+@@ -1,5 +1,5 @@
+ import { database, Change } from 'firebase-functions/v1';
+-import { app } from 'firebase-admin';
++import { App } from 'firebase-admin/app';
+ /** Create a DataSnapshot. */
+ export declare function makeDataSnapshot(
+ /** Value of data for the snapshot. */
+@@ -11,7 +11,7 @@ refPath: string,
+  * You do not need to supply this parameter if you supplied Firebase config values when initializing
+  * firebase-functions-test.
+  */
+-firebaseApp?: app.App, 
++firebaseApp?: App, 
+ /**
+  * The RTDB instance to use when creating snapshot. This will override the `firebaseApp` parameter.
+  * If omitted the default RTDB instance is used.
+diff --git a/lib/providers/firestore.d.ts b/lib/providers/firestore.d.ts
+index 804b933649c1337348d46a5e9916fab2163658cd..5281adccc751d4a327deb79ebcfcb65633192c0f 100644
+--- a/lib/providers/firestore.d.ts
++++ b/lib/providers/firestore.d.ts
+@@ -1,5 +1,6 @@
+ import { Change } from 'firebase-functions/v1';
+-import { firestore, app } from 'firebase-admin';
++import { DocumentSnapshot } from 'firebase-admin/firestore';
++import { App } from 'firebase-admin/app';
+ /** Optional parameters for creating a DocumentSnapshot. */
+ export interface DocumentSnapshotOptions {
+     /** ISO timestamp string for the snapshot was read, default is current time.  */
+@@ -11,7 +12,7 @@ export interface DocumentSnapshotOptions {
+     /** The Firebase app that the Firestore database belongs to. You do not need to supply
+      * this parameter if you supplied Firebase config values when initializing firebase-functions-test.
+      */
+-    firebaseApp?: app.App;
++    firebaseApp?: App;
+ }
+ /** Create a DocumentSnapshot. */
+ export declare function makeDocumentSnapshot(
+@@ -26,11 +27,11 @@ refPath: string, options?: DocumentSnapshotOptions): any;
+ /** Fetch an example document snapshot already populated with data. Can be passed into a wrapped
+  * Firestore onCreate or onDelete function.
+  */
+-export declare function exampleDocumentSnapshot(): firestore.DocumentSnapshot;
++export declare function exampleDocumentSnapshot(): DocumentSnapshot;
+ /** Fetch an example Change object of document snapshots already populated with data.
+  * Can be passed into a wrapped Firestore onUpdate or onWrite function.
+  */
+-export declare function exampleDocumentSnapshotChange(): Change<firestore.DocumentSnapshot>;
++export declare function exampleDocumentSnapshotChange(): Change<DocumentSnapshot>;
+ /** Clears all data in firestore. Works only in offline mode.
+  */
+ export declare function clearFirestoreData(options: {
+diff --git a/lib/providers/firestore.js b/lib/providers/firestore.js
+index 9489521d9533ce22e2bdf5cb47f3d73d73658749..45922400a9e5c3688a584fe3e739f02a1708f345 100644
+--- a/lib/providers/firestore.js
++++ b/lib/providers/firestore.js
+@@ -23,7 +23,7 @@
+ Object.defineProperty(exports, "__esModule", { value: true });
+ exports.clearFirestoreData = exports.objectToValueProto = exports.exampleDocumentSnapshotChange = exports.exampleDocumentSnapshot = exports.makeDocumentSnapshot = void 0;
+ const v1_1 = require("firebase-functions/v1");
+-const firebase_admin_1 = require("firebase-admin");
++const firebase_admin_1 = require("firebase-admin/firestore");
+ const lodash_1 = require("lodash");
+ const app_1 = require("../app");
+ const http = require("http");
+@@ -51,12 +51,12 @@ data,
+ refPath, options) {
+     let firestoreService;
+     let project;
+-    if ((0, lodash_1.has)(options, 'app')) {
+-        firestoreService = (0, firebase_admin_1.firestore)(options.firebaseApp);
+-        project = (0, lodash_1.get)(options, 'app.options.projectId');
++    if ((0, lodash_1.has)(options, 'firebaseApp')) {
++        firestoreService = (0, firebase_admin_1.getFirestore)(options.firebaseApp);
++        project = (0, lodash_1.get)(options, 'firebaseApp.options.projectId');
+     }
+     else {
+-        firestoreService = (0, firebase_admin_1.firestore)((0, app_1.testApp)().getApp());
++        firestoreService = (0, firebase_admin_1.getFirestore)((0, app_1.testApp)().getApp());
+         project = process.env.GCLOUD_PROJECT;
+     }
+     const resource = `projects/${project}/databases/(default)/documents/${refPath}`;
+@@ -162,24 +162,20 @@ function objectToValueProto(data) {
+                 bytesValue: val,
+             };
+         }
+-        if (val instanceof firebase_admin_1.firestore.DocumentReference) {
+-            const projectId = (0, lodash_1.get)(val, '_referencePath.projectId');
+-            const database = (0, lodash_1.get)(val, '_referencePath.databaseId');
++        if (val instanceof firebase_admin_1.DocumentReference) {
++            const projectId = val.firestore.projectId;
++            const database = val.firestore.databaseId;
+             const referenceValue = [
+-                'projects',
+-                projectId,
+-                'databases',
+-                database,
+-                val.path,
++                'projects', projectId, 'databases', database, 'documents', val.path,
+             ].join('/');
+             return { referenceValue };
+         }
+-        if (val instanceof firebase_admin_1.firestore.Timestamp) {
++        if (val instanceof firebase_admin_1.Timestamp) {
+             return {
+                 timestampValue: val.toDate().toISOString(),
+             };
+         }
+-        if (val instanceof firebase_admin_1.firestore.GeoPoint) {
++        if (val instanceof firebase_admin_1.GeoPoint) {
+             return {
+                 geoPointValue: {
+                     latitude: val.latitude,

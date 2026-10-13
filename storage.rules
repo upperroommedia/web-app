@@ -1,10 +1,46 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
-    match /{allPaths=**} {
-    allow write: if request.auth != null && 
+    function legacyMediaWritesAllowed() {
+      return !firestore.exists(/databases/(default)/documents/_control/temporalRelease)
+        || (firestore.get(/databases/(default)/documents/_control/temporalRelease).data.admission == 'open'
+          && firestore.get(/databases/(default)/documents/_control/temporalRelease).data.domains.media.owner == 'legacy'
+          && firestore.get(/databases/(default)/documents/_control/temporalRelease).data.domains.media.admission == 'open');
+    }
+    match /durable-upload-sources/{uid}/{jobId}/source {
+      allow create: if resource == null && request.auth != null && request.auth.uid == uid
+        && request.resource.metadata.durableJobId == jobId
+        && request.resource.size > 0 && request.resource.size <= 21474836480
+        && firestore.exists(/databases/(default)/documents/durableJobs/$(jobId))
+        && firestore.get(/databases/(default)/documents/durableJobs/$(jobId)).data.requestedBy == uid
+        && firestore.get(/databases/(default)/documents/durableJobs/$(jobId)).data.state == 'awaiting_source'
+        && firestore.get(/databases/(default)/documents/durableJobs/$(jobId)).data.result.sourceUpload.expectedFile.size == request.resource.size;
+      allow read: if request.auth != null && (request.auth.uid == uid || request.auth.token.role == 'admin');
+      allow update, delete: if false;
+    }
+    match /durable-image-sources/{uid}/{requestId}/source {
+      allow create: if resource == null && request.auth != null && request.auth.uid == uid
+        && request.auth.token.role in ['uploader', 'publisher', 'admin']
+        && request.resource.metadata.ownerUID == uid
+        && request.resource.metadata.durableRequestId == requestId
+        && request.resource.size > 0 && request.resource.size <= 26214400
+        && request.resource.contentType.matches('image/(jpeg|png|webp|gif|tiff)');
+      allow read: if request.auth != null && (request.auth.uid == uid || request.auth.token.role == 'admin');
+      allow update, delete: if false;
+    }
+    match /sermons/{sermonId} {
+      allow create: if resource == null && request.auth != null
+        && firestore.exists(/databases/(default)/documents/sermons/$(sermonId))
+        && firestore.get(/databases/(default)/documents/sermons/$(sermonId)).data.uploaderId == request.auth.uid
+        && firestore.get(/databases/(default)/documents/sermons/$(sermonId)).data.status.audioStatus == 'PENDING'
+        && (!firestore.exists(/databases/(default)/documents/_control/temporalRelease)
+          || firestore.get(/databases/(default)/documents/_control/temporalRelease).data.domains.media.owner == 'legacy');
+    }
+    match /{topLevel}/{remaining=**} {
+    allow write: if !(topLevel in ['durable-upload-sources', 'durable-image-sources', 'workflow-audio'])
+                    && (!(topLevel in ['sermons', 'processed-sermons', 'intro-outro-sermons']) || legacyMediaWritesAllowed()) && request.auth != null &&
                     (request.auth.token.role == 'uploader' || request.auth.token.role == 'admin' || request.auth.token.role == 'publisher');
-    allow read;
+    allow read: if !(topLevel in ['durable-upload-sources', 'durable-image-sources']);
     }
   }
 }

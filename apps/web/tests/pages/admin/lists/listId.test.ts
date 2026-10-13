@@ -17,6 +17,7 @@ import {
   type LoadListDetailsPageItem,
 } from '../../../../pages/admin/lists/[listId]';
 import { collection, doc, updateDoc, writeBatch } from '../../../../firebase/firestore';
+import { submitDurableIntent } from '../../../../utils/durableJobs';
 
 jest.mock('../../../../context/user/UserContext', () => ({
   __esModule: true,
@@ -54,6 +55,9 @@ jest.mock('../../../../firebase/firestore', () => ({
 jest.mock('../../../../utils/createFunction', () => ({
   createFunctionV2: jest.fn(() => jest.fn()),
 }));
+
+jest.mock('../../../../utils/durableJobs', () => ({ submitDurableIntent: jest.fn() }));
+jest.mock('../../../../components/jobs/EntityJobHistory', () => ({ __esModule: true, default: () => null }));
 
 const buildChain = (overrides: Partial<GetListOverflowChainOutputType> = {}): GetListOverflowChainOutputType => ({
   requestedListId: 'overflow-list',
@@ -149,6 +153,7 @@ const mockedUpdateDoc = updateDoc as jest.Mock;
 const mockedWriteBatch = writeBatch as jest.Mock;
 
 beforeEach(() => {
+  (submitDurableIntent as jest.Mock).mockReset();
   mockedDoc.mockReset();
   mockedUpdateDoc.mockReset();
   mockedWriteBatch.mockReset();
@@ -269,9 +274,7 @@ describe('mergeRootItemsWithCanonicalMemberships', () => {
           uploadStatus: { status: uploadStatus.UPLOADED, listItemId: 'stale-row' },
         },
       ],
-      canonicalMembershipBySermonId: new Map([
-        ['sermon-a', { uploadStatus: { status: uploadStatus.NOT_UPLOADED } }],
-      ]),
+      canonicalMembershipBySermonId: new Map([['sermon-a', { uploadStatus: { status: uploadStatus.NOT_UPLOADED } }]]),
     });
 
     expect(mergedItems[0].uploadStatus).toEqual({ status: uploadStatus.NOT_UPLOADED });
@@ -421,7 +424,8 @@ describe('persistListDetailsPageOrder', () => {
         hasCoverageGap: false,
         localMirroredCount: 1,
         expectedPhysicalCount: 1,
-        warningMessage: 'This logical list is currently read-only because the overflow chain audit reported diagnostics.',
+        warningMessage:
+          'This logical list is currently read-only because the overflow chain audit reported diagnostics.',
       },
       reorderListItems,
     });
@@ -483,92 +487,88 @@ describe('persistListDetailsPageOrder', () => {
     expect(reorderListItems).not.toHaveBeenCalled();
   });
 
-  it('returns updated list item page tags after a successful reorder save', async () => {
-    const reorderListItems = jest.fn<Promise<ReorderListItemsOutputType>, [unknown]>().mockResolvedValue({
-      status: 'success',
-      message: 'ok',
+  it('keeps the current draft and page placement until server snapshots confirm a durable reorder', async () => {
+    const items = [
+      {
+        ...buildDetailItem({ id: 'sermon-a', title: 'A', subsplashId: 'media-a', position: 1 }),
+        rowId: 'row-a',
+        logicalPosition: 1,
+        sourceListId: 'root-list',
+        sourceListName: 'Root List',
+        sourceDepth: 0,
+      },
+    ];
+    const chainView = {
       rootListId: 'root-list',
-      subsplashListId: 'subsplash-root',
-      assignments: [
-        {
-          mediaItemId: 'media-a',
-          firestoreListId: 'overflow-list',
-          subsplashListId: 'subsplash-overflow',
-          overflowDepth: 1,
-          position: 1,
-        },
-      ],
-    });
-
-    const persistedItems = await persistListDetailsPageOrder({
+      items: [],
+      boundaryMarkers: [],
+      nodes: [],
+      diagnostics: [],
+      canSaveOrder: true,
+      canMutate: true,
+      isReadOnly: false,
+      hasCoverageGap: false,
+      localMirroredCount: 1,
+      expectedPhysicalCount: 1,
+    };
+    const reorderListItems = jest.fn();
+    (submitDurableIntent as jest.Mock).mockResolvedValue({ jobId: 'job', admissionState: 'accepted' });
+    const result = await persistListDetailsPageOrder({
       rootListId: 'root-list',
       rootSubsplashId: 'subsplash-root',
-      items: [
-        {
-          ...buildDetailItem({
-            id: 'sermon-a',
-            title: 'A',
-            subsplashId: 'media-a',
-            position: 1,
-          }),
-          logicalPosition: 1,
-          sourceListId: 'root-list',
-          sourceListName: 'Root List',
-          sourceDepth: 0,
-          uploadStatus: { status: uploadStatus.UPLOADED, listItemId: 'row-a' },
-        },
-      ],
-      chainView: {
-        rootListId: 'root-list',
-        items: [],
-        boundaryMarkers: [],
-        nodes: [
-          {
-            firestoreListId: 'root-list',
-            subsplashId: 'subsplash-root',
-            name: 'Root List',
-            depth: 0,
-            isRoot: true,
-            physicalCount: 0,
-            localCount: 0,
-            missingMirroredCount: 0,
-            hasCoverageGap: false,
-          },
-          {
-            firestoreListId: 'overflow-list',
-            subsplashId: 'subsplash-overflow',
-            name: 'More Root List sermons',
-            depth: 1,
-            isRoot: false,
-            physicalCount: 1,
-            localCount: 1,
-            missingMirroredCount: 0,
-            hasCoverageGap: false,
-          },
-        ],
-        diagnostics: [],
-        canSaveOrder: true,
-        canMutate: true,
-        isReadOnly: false,
-        hasCoverageGap: false,
-        localMirroredCount: 1,
-        expectedPhysicalCount: 1,
-      },
+      items,
+      chainView,
       reorderListItems,
     });
-
-    expect(reorderListItems).toHaveBeenCalled();
-    expect(persistedItems[0]).toMatchObject({
-      sourceListId: 'overflow-list',
-      sourceListName: 'More Root List sermons',
-      sourceDepth: 1,
-      physicalPlacement: {
-        firestoreListId: 'overflow-list',
-        subsplashListId: 'subsplash-overflow',
-        overflowDepth: 1,
-        position: 1,
+    expect(submitDurableIntent).toHaveBeenCalledWith({
+      kind: 'list.reorder',
+      entity: { type: 'list', id: 'root-list' },
+      payload: {
+        input: {
+          rootListId: 'root-list',
+          logicalItemOrder: [{ rowId: 'row-a', mediaItemId: 'media-a', sermonId: 'sermon-a', position: 1 }],
+        },
       },
     });
+    expect(result).toBe(items);
+    expect(result[0].sourceListId).toBe('root-list');
+    expect(reorderListItems).not.toHaveBeenCalled();
+    expect(updateDoc).not.toHaveBeenCalled();
+    expect(writeBatch).not.toHaveBeenCalled();
+  });
+
+  it('preserves the draft on an ambiguous admission error instead of attempting remote mutations', async () => {
+    const items = [
+      {
+        ...buildDetailItem({ id: 'sermon-a', title: 'A', position: 1 }),
+        logicalPosition: 1,
+        sourceListId: 'root-list',
+        sourceListName: 'Root List',
+        sourceDepth: 0,
+      },
+    ];
+    const chainView = {
+      rootListId: 'root-list',
+      items: [],
+      boundaryMarkers: [],
+      nodes: [],
+      diagnostics: [],
+      canSaveOrder: true,
+      canMutate: true,
+      isReadOnly: false,
+      hasCoverageGap: false,
+      localMirroredCount: 1,
+      expectedPhysicalCount: 1,
+    };
+    const before = JSON.stringify(items);
+    const error = new Error('Request may already be running');
+    (submitDurableIntent as jest.Mock).mockRejectedValue(error);
+    await expect(
+      persistListDetailsPageOrder({ rootListId: 'root-list', items, chainView, reorderListItems: jest.fn() })
+    ).rejects.toBe(error);
+    expect(JSON.stringify(items)).toBe(before);
+    expect(updateDoc).not.toHaveBeenCalled();
+    expect(writeBatch).not.toHaveBeenCalled();
   });
 });
 

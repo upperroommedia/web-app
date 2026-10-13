@@ -61,7 +61,19 @@ export const initFunctionsSentry = (): void => {
     release: getFunctionsRelease(),
     tracesSampleRate: parseSampleRate(process.env.SENTRY_TRACES_SAMPLE_RATE, process.env.NODE_ENV === 'development' ? 1 : 0.1),
     includeLocalVariables: false,
-    sendDefaultPii: false,
+    dataCollection: {
+      userInfo: false,
+      cookies: false,
+      httpHeaders: { request: false, response: false },
+      httpBodies: [],
+      urlQueryParams: false,
+      genAI: { inputs: false, outputs: false },
+      databaseQueryData: false,
+      queues: false,
+      graphQL: { document: false, variables: false },
+      stackFrameVariables: false,
+    },
+    beforeSendLog: () => null,
     initialScope: {
       tags: {
         service: 'firebase-functions',

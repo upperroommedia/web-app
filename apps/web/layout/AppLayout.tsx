@@ -15,16 +15,19 @@ import LogoutIcon from '@mui/icons-material/Logout';
 import RequestRoleChange from '../components/RequestUploadPrivalige';
 import UserAvatar from '../components/UserAvatar';
 import SidebarLayout from './SidebarLayout';
+import { useEffect } from 'react';
 
-const MAIN_SCROLL_BOTTOM_INSET =
-  'calc(var(--floating-player-offset, 0px) + env(safe-area-inset-bottom, 0px))';
+const MAIN_SCROLL_BOTTOM_INSET = 'calc(var(--floating-player-offset, 0px) + env(safe-area-inset-bottom, 0px))';
 
 const AppLayout = ({ children }: { children: React.ReactNode }) => {
-  const { user, logoutUser } = useAuth();
+  const { user, logoutUser, loading } = useAuth();
   const router = useRouter();
 
-  if (!user) {
-    router.push(`/login?callbackurl=${encodeURIComponent(router.asPath)}`);
+  useEffect(() => {
+    if (!loading && !user) void router.replace(`/login?callbackurl=${encodeURIComponent(router.asPath)}`);
+  }, [loading, user, router]);
+
+  if (loading || !user) {
     return (
       <Stack
         sx={{
@@ -118,8 +121,8 @@ const AppLayout = ({ children }: { children: React.ReactNode }) => {
               Access Restricted
             </Typography>
             <Typography color="text.secondary" sx={{ maxWidth: 680 }}>
-              You don&apos;t have permission to access the admin area.
-              If you think you should have admin privileges, please request permission below.
+              You don&apos;t have permission to access the admin area. If you think you should have admin privileges,
+              please request permission below.
             </Typography>
           </Stack>
           <Box sx={{ mt: 2, width: '100%' }}>
@@ -144,7 +147,9 @@ const AppLayout = ({ children }: { children: React.ReactNode }) => {
             maxWidth: '100%',
             overflow: 'auto',
             scrollbarGutter: 'stable',
-            // Keep all trailing content reachable above the fixed floating player.
+            minHeight: 0,
+            // The visible controls occupy space even while paused or waiting for their source.
+            pb: MAIN_SCROLL_BOTTOM_INSET,
             scrollPaddingBottom: MAIN_SCROLL_BOTTOM_INSET,
           }}
         >
@@ -152,11 +157,7 @@ const AppLayout = ({ children }: { children: React.ReactNode }) => {
             sx={{
               px: { xs: 2, sm: 3, md: 4 },
               pt: { xs: 2, sm: 3, md: 4 },
-              pb: {
-                xs: `calc(16px + ${MAIN_SCROLL_BOTTOM_INSET})`,
-                sm: `calc(24px + ${MAIN_SCROLL_BOTTOM_INSET})`,
-                md: `calc(32px + ${MAIN_SCROLL_BOTTOM_INSET})`,
-              },
+              pb: { xs: 2, sm: 3, md: 4 },
               maxWidth: '100%',
             }}
           >

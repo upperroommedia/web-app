@@ -1,3 +1,4 @@
+import { testCallableAuth } from '../helpers/callableAuth';
 import { OverflowBehavior } from '@upperroom/shared/types/List';
 import { 
   subsplashMock, 
@@ -54,12 +55,12 @@ describe('addToList - Concurrent Access with Firestore Transactions (Real Firest
     const item2 = { id: 'item-2', type: 'media-item' as const };
 
     const request1: TestRequest = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: { destinationListIds: [listId], mediaItem: item1, maxListSize: 10 }
     };
 
     const request2: TestRequest = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: { destinationListIds: [listId], mediaItem: item2, maxListSize: 10 }
     };
 
@@ -128,7 +129,7 @@ describe('addToList - Concurrent Access with Firestore Transactions (Real Firest
     ];
 
     const requests: TestRequest[] = items.map(item => ({
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: { destinationListIds: [listId], mediaItem: item, maxListSize: 10 }
     }));
 
@@ -200,12 +201,12 @@ describe('addToList - Concurrent Access with Firestore Transactions (Real Firest
     const item2 = { id: 'conflict-item-2', type: 'media-item' as const };
 
     const request1: TestRequest = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: { destinationListIds: [listId], mediaItem: item1, maxListSize: 10 }
     };
 
     const request2: TestRequest = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: { destinationListIds: [listId], mediaItem: item2, maxListSize: 10 }
     };
 
@@ -270,12 +271,12 @@ describe('addToList - Concurrent Access with Firestore Transactions (Real Firest
     const item2 = { id: 'item-2', type: 'media-item' as const };
 
     const request1: TestRequest = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: { destinationListIds: [listId1], mediaItem: item1, maxListSize: 10 }
     };
 
     const request2: TestRequest = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: { destinationListIds: [listId2], mediaItem: item2, maxListSize: 10 }
     };
 
@@ -326,7 +327,7 @@ describe('addToList - Concurrent Access with Firestore Transactions (Real Firest
     ];
 
     const requests: TestRequest[] = items.map(item => ({
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: { destinationListIds: [listId], mediaItem: item, maxListSize: 10 }
     }));
 
@@ -361,7 +362,7 @@ describe('addToList - Concurrent Access with Firestore Transactions (Real Firest
     });
 
     const request: TestRequest = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         destinationListIds: [listId],
         mediaItem,

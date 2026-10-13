@@ -1,3 +1,4 @@
+import {assertProviderMutationTransportAllowed} from './temporal/publishing/providerTransportPolicy';
 // Utils file for subsplash functions
 
 import { randomUUID } from 'node:crypto';
@@ -54,6 +55,7 @@ axios.interceptors?.response?.use(undefined, async (error: unknown) => {
     !(config?.providerRelayOriginalUrl || config?.url)?.trim().startsWith(`${SUBSPLASH_API_ORIGIN}/`) ||
     (config.providerRelayOriginalUrl || config.url || '').endsWith('/accounts/v1/oauth/token') ||
     config.skipSubsplashEdgeRetry ||
+    config.method?.toUpperCase() === 'POST' ||
     config.data instanceof FormData
   ) {
     throw error;
@@ -347,6 +349,7 @@ export const createAxiosConfig = (
   /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
   additionalHeaders?: any
 ): AxiosRequestConfig => {
+  if(['POST','PUT','PATCH','DELETE'].includes(method))assertProviderMutationTransportAllowed('subsplash');
   const headers: Headers = {
     'Cache-Control': 'no-cache',
     Authority: 'core.subsplash.com',
@@ -362,6 +365,8 @@ export const createAxiosConfig = (
     method: method,
     url: endpoint_url,
     headers: headers,
+    timeout: 60_000,
+    ...(['POST','PUT','PATCH','DELETE'].includes(method)?{maxRedirects:0,skipSubsplashEdgeRetry:true}:{}),
     data,
   };
 };

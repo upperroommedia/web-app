@@ -8,9 +8,10 @@ Sentry.init({
   environment: process.env.SENTRY_ENVIRONMENT?.trim() || webSentryConfig.environment,
   release: process.env.SENTRY_RELEASE?.trim() || webSentryConfig.release,
   tracesSampleRate: webSentryConfig.tracesSampleRate,
-  includeLocalVariables: true,
+  dataCollection: webSentryConfig.dataCollection,
+  beforeSendLog: webSentryConfig.beforeSendLog,
+  includeLocalVariables: false,
   beforeSend(event) {
     return shouldDropClientSentryEvent(event) ? null : event;
   },
-  sendDefaultPii: false,
 });

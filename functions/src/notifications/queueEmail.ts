@@ -1,5 +1,7 @@
+import { createHash } from 'node:crypto';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { logger } from 'firebase-functions/v2';
+import { runDurableTransaction } from '../temporal/publishing/durableOperationContext';
 import { QueueEmailInput } from './notificationTypes';
 
 const MAIL_COLLECTION = 'mail';
@@ -28,14 +30,14 @@ const applyStagingSubjectPrefix = (subject: string): string => {
   return `${STAGING_SUBJECT_PREFIX} ${subject}`;
 };
 
-export const queueEmail = async (input: QueueEmailInput): Promise<string> => {
+export const prepareQueuedEmail = (input: QueueEmailInput) => {
   const recipients = normalizeRecipients(input.to);
   if (recipients.length === 0) {
     throw new Error('queueEmail requires at least one recipient.');
   }
 
   const queuedAtMs = Date.now();
-  const mailRef = await firebaseAdmin.firestore().collection(MAIL_COLLECTION).add({
+  return {
     to: recipients,
     message: {
       ...input.message,
@@ -46,9 +48,24 @@ export const queueEmail = async (input: QueueEmailInput): Promise<string> => {
       alertType: input.alertType,
       alertCode: input.alertCode ?? null,
       queuedAtMs,
+      ...(input.temporalParentJobRef ? { temporalParentJobRef: input.temporalParentJobRef } : {}),
       ...(input.metadata ? { metadata: input.metadata } : {}),
     },
-  });
+  };
+};
+
+export const queueEmail = async (input: QueueEmailInput): Promise<string> => {
+  const payload = prepareQueuedEmail(input);
+  const recipients = payload.to;
+  const collection = firebaseAdmin.firestore().collection(MAIL_COLLECTION);
+  const mailRef = input.idempotencyKey
+    ? collection.doc(`notification-${createHash('sha256').update(input.idempotencyKey).digest('hex')}`)
+    : await collection.add(payload);
+  if (input.idempotencyKey) {
+    await runDurableTransaction(firebaseAdmin.firestore(), async (transaction) => {
+      if (!(await transaction.get(mailRef)).exists) transaction.create(mailRef, payload);
+    });
+  }
 
   logger.info('notification email queued', {
     mailId: mailRef.id,

@@ -1,3 +1,4 @@
+import { testCallableAuth } from '../helpers/callableAuth';
 import { OverflowBehavior } from '@upperroom/shared/types/List';
 import { 
   subsplashMock,
@@ -39,7 +40,7 @@ describe('addToList - Page Number Incrementation', () => {
     for (let i = 1; i <= 5; i++) {
       const mediaItem = { id: `item-${i}`, type: 'media-item' as const };
       const request: TestRequest = {
-        auth: { token: { role: 'admin' } },
+        auth: testCallableAuth('admin'),
         data: {
           destinationListIds: [rootListId],
           mediaItem,
@@ -56,7 +57,7 @@ describe('addToList - Page Number Incrementation', () => {
     // Add one more item to trigger overflow - should create Page 1
     const overflowItem1 = { id: 'overflow-item-1', type: 'media-item' as const };
     const request1: TestRequest = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         destinationListIds: [rootListId],
         mediaItem: overflowItem1,
@@ -94,7 +95,7 @@ describe('addToList - Page Number Incrementation', () => {
     for (let i = 2; i <= 4; i++) {
       const mediaItem = { id: `overflow-item-${i}`, type: 'media-item' as const };
       const request: TestRequest = {
-        auth: { token: { role: 'admin' } },
+        auth: testCallableAuth('admin'),
         data: {
           destinationListIds: [rootListId],
           mediaItem,
@@ -111,7 +112,7 @@ describe('addToList - Page Number Incrementation', () => {
     // Add one more item to root to trigger overflow from Page 1 - should create Page 2
     const overflowItem5 = { id: 'overflow-item-5', type: 'media-item' as const };
     const request2: TestRequest = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         destinationListIds: [rootListId],
         mediaItem: overflowItem5,
@@ -149,7 +150,7 @@ describe('addToList - Page Number Incrementation', () => {
     for (let i = 6; i <= 8; i++) {
       const mediaItem = { id: `overflow-item-${i}`, type: 'media-item' as const };
       const request: TestRequest = {
-        auth: { token: { role: 'admin' } },
+        auth: testCallableAuth('admin'),
         data: {
           destinationListIds: [rootListId],
           mediaItem,
@@ -162,7 +163,7 @@ describe('addToList - Page Number Incrementation', () => {
     // Add one more to trigger Page 3
     const overflowItem9 = { id: 'overflow-item-9', type: 'media-item' as const };
     const request3: TestRequest = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         destinationListIds: [rootListId],
         mediaItem: overflowItem9,

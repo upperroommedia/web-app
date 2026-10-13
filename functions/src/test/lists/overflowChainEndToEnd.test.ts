@@ -1,3 +1,5 @@
+import type { AuthData } from '../helpers/callableAuth';
+import { testCallableAuth } from '../helpers/callableAuth';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { OverflowBehavior } from '@upperroom/shared/types/List';
 import { sermonStatusType, uploadStatus } from '@upperroom/shared/types/SermonTypes';
@@ -18,11 +20,7 @@ import type {
 import type { RemoveFromListInputType, RemoveFromListOutputType } from '../../removeFromList';
 
 type ReorderTestRequest = {
-  auth?: {
-    token?: {
-      role?: string;
-    };
-  };
+  auth?: AuthData;
   data: ReorderListItemsInputType;
 };
 
@@ -31,11 +29,7 @@ type ReorderListItemsHandler = (
 ) => Promise<ReorderListItemsOutputType>;
 
 type RemoveFromListTestRequest = {
-  auth?: {
-    token?: {
-      role?: string;
-    };
-  };
+  auth?: AuthData;
   data: RemoveFromListInputType;
 };
 
@@ -347,7 +341,7 @@ describe('overflow chain end-to-end regression', () => {
 
     for (let index = 1; index <= 13; index += 1) {
       const result = await addToListHandler({
-        auth: { token: { role: 'admin' } },
+        auth: testCallableAuth('admin'),
         data: {
           destinationListIds: [rootSubsplashListId],
           mediaItem: { id: buildSermonId(index), type: 'media-item' },
@@ -401,7 +395,7 @@ describe('overflow chain end-to-end regression', () => {
 
       for (let index = 1; index <= 6; index += 1) {
         const result = await addToListHandler({
-          auth: { token: { role: 'admin' } },
+          auth: testCallableAuth('admin'),
           data: {
             destinationListIds: [rootSubsplashListId],
             mediaItem: { id: buildSermonId(index), type: 'media-item' },
@@ -419,7 +413,7 @@ describe('overflow chain end-to-end regression', () => {
       subsplashMock.clearHistory();
 
       const removeResult = await removeFromListHandler({
-        auth: { token: { role: 'admin' } },
+        auth: testCallableAuth('admin'),
         data: {
           listIds: [rootSubsplashListId],
           listItemIds: [rootLocation.rowId],
@@ -502,7 +496,7 @@ describe('overflow chain end-to-end regression', () => {
 
       for (let index = 1; index <= 6; index += 1) {
         const result = await addToListHandler({
-          auth: { token: { role: 'admin' } },
+          auth: testCallableAuth('admin'),
           data: {
             destinationListIds: [rootSubsplashListId],
             mediaItem: { id: buildSermonId(index), type: 'media-item' },
@@ -520,7 +514,7 @@ describe('overflow chain end-to-end regression', () => {
       subsplashMock.clearHistory();
 
       const firstRemoveResult = await removeFromListHandler({
-        auth: { token: { role: 'admin' } },
+        auth: testCallableAuth('admin'),
         data: {
           listIds: [rootSubsplashListId],
           listItemIds: [rootRemovalLocation.rowId],
@@ -538,7 +532,7 @@ describe('overflow chain end-to-end regression', () => {
       subsplashMock.clearHistory();
 
       const secondRemoveResult = await removeFromListHandler({
-        auth: { token: { role: 'admin' } },
+        auth: testCallableAuth('admin'),
         data: {
           listIds: [rootSubsplashListId],
           listItemIds: [overflowRemovalLocation.rowId],
@@ -635,7 +629,7 @@ describe('overflow chain end-to-end regression', () => {
 
     for (let index = 1; index <= 50; index += 1) {
       const request: AddToListTestRequest = {
-        auth: { token: { role: 'admin' } },
+        auth: testCallableAuth('admin'),
         data: {
           destinationListIds: [rootSubsplashListId],
           mediaItem: { id: buildSermonId(index), type: 'media-item' },
@@ -665,7 +659,7 @@ describe('overflow chain end-to-end regression', () => {
     const ascendingOrder = Array.from({ length: 50 }, (_, index) => buildSermonId(index + 1));
     subsplashMock.clearHistory();
     const reorderResult = await reorderListItemsHandler({
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         rootListId: rootFirestoreListId,
         logicalItemOrder: ascendingOrder.map((mediaItemId, index) => ({
@@ -701,7 +695,7 @@ describe('overflow chain end-to-end regression', () => {
     const frontLocation = getMediaLocation(rootSubsplashListId, buildSermonId(1));
     subsplashMock.clearHistory();
     const frontDeleteResult = await removeFromListHandler({
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         listIds: [frontLocation.subsplashListId],
         listItemIds: [frontLocation.rowId],
@@ -715,7 +709,7 @@ describe('overflow chain end-to-end regression', () => {
 
     subsplashMock.clearHistory();
     const middleDeleteResult = await removeFromListHandler({
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         listIds: [rootSubsplashListId],
         listItemIds: ['missing-sermon-25-row'],
@@ -729,7 +723,7 @@ describe('overflow chain end-to-end regression', () => {
 
     subsplashMock.clearHistory();
     const endDeleteResult = await removeFromListHandler({
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         listIds: [rootSubsplashListId],
         listItemIds: ['missing-sermon-50-row'],

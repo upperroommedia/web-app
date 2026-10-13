@@ -1,5 +1,5 @@
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
-import axios from 'axios';
+import axios, { type AxiosRequestConfig } from 'axios';
 import deleteSubsplashList from '../../deleteSubsplashList';
 import { authenticateSubsplash } from '../../subsplashUtils';
 import type {
@@ -13,7 +13,7 @@ jest.mock('firebase-functions/v2/https', () => {
   return {
     ...actual,
     onCall: jest.fn((optsOrHandler: unknown, maybeHandler?: unknown) =>
-      (typeof optsOrHandler === 'function' ? optsOrHandler : maybeHandler)
+      typeof optsOrHandler === 'function' ? optsOrHandler : maybeHandler
     ),
   };
 });
@@ -79,10 +79,75 @@ describe('deleteSubsplashList cascade deletion', () => {
     jest.clearAllMocks();
     process.env.SUBSPLASH_EMAIL = 'test@example.com';
     process.env.SUBSPLASH_PASSWORD = 'test-password';
-    mockAxios.mockResolvedValue({ status: 204, data: null } as never);
+    const deletedRemoteLists = new Set<string>();
+    mockAxios.mockImplementation(async (request) => {
+      const config = request as unknown as AxiosRequestConfig;
+      const url = config.url ?? '';
+      const method = config.method?.toUpperCase();
+      const match = url.match(/^https:\/\/core\.subsplash\.com\/builder\/v1\/lists\/([a-zA-Z0-9-]+)$/);
+      if (!match || config.headers?.Authorization !== 'Bearer subsplash-token') {
+        throw new Error(`Unexpected or unauthenticated provider request: ${method} ${url}`);
+      }
+      if (method === 'DELETE') {
+        deletedRemoteLists.add(match[1]);
+        return { status: 204, data: null };
+      }
+      if (method === 'GET' && deletedRemoteLists.has(match[1])) {
+        return { status: 404, data: null };
+      }
+      throw new Error(`Unexpected provider request: ${method} ${url}`);
+    });
     mockAuthenticateSubsplash.mockResolvedValue('subsplash-token');
     await clearCollection('lists');
   });
+
+  it.each([
+    { deleteStatus: 202, expectedError: 'PROVIDER_MUTATION_COMPLETION_UNCONFIRMED', expectedReads: 0 },
+    { deleteStatus: 204, expectedError: 'PROVIDER_LIST_ABSENCE_NOT_CONFIRMED', expectedReads: 1 },
+  ])(
+    'preserves canonical state when remote deletion is unconfirmed ($deleteStatus)',
+    async ({ deleteStatus, expectedError, expectedReads }) => {
+      await firestore.collection('lists').doc('unconfirmed-root').set({
+        id: 'unconfirmed-root',
+        name: 'Root List',
+        type: ListType.SPEAKER_LIST,
+        images: [],
+        overflowBehavior: OverflowBehavior.CREATENEWLIST,
+        createdAtMillis: Date.now(),
+        updatedAtMillis: Date.now(),
+        count: 1,
+        logicalCount: 1,
+        hasOverflowPages: false,
+        subsplashId: 'unconfirmed-remote',
+        isRootList: true,
+        isMoreSermonsList: false,
+        rootListId: 'unconfirmed-root',
+        overflowDepth: 0,
+      });
+      mockAxios.mockImplementation(async (request) => {
+        const config = request as unknown as AxiosRequestConfig;
+        if (
+          config.url !== 'https://core.subsplash.com/builder/v1/lists/unconfirmed-remote' ||
+          config.headers?.Authorization !== 'Bearer subsplash-token'
+        ) {
+          throw new Error('Unexpected or unauthenticated provider request');
+        }
+        if (config.method === 'DELETE') return { status: deleteStatus, data: null };
+        if (config.method === 'GET') return { status: 200, data: { id: 'unconfirmed-remote', app_key: '9XTSHD' } };
+        throw new Error('Unexpected provider method');
+      });
+      await expect(
+        deleteSubsplashListHandler({
+          auth: defaultAuth,
+          data: { listId: 'unconfirmed-root', operationKey: `unconfirmed-${deleteStatus}` },
+        })
+      ).rejects.toThrow(expectedError);
+      expect((await firestore.collection('lists').doc('unconfirmed-root').get()).exists).toBe(true);
+      const requests = mockAxios.mock.calls.map(([request]) => request as unknown as AxiosRequestConfig);
+      expect(requests.filter((request) => request.method === 'DELETE')).toHaveLength(1);
+      expect(requests.filter((request) => request.method === 'GET')).toHaveLength(expectedReads);
+    }
+  );
 
   it('deletes the full overflow chain remotely and locally when deleting the root list', async () => {
     const now = Date.now();

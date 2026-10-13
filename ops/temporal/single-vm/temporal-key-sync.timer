@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh mounted Temporal Cloud keys every two minutes
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=120s
+Persistent=true
+Unit=temporal-key-sync.service
+
+[Install]
+WantedBy=timers.target

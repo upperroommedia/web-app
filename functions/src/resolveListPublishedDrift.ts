@@ -1,3 +1,4 @@
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { canUserRolePublish } from '@upperroom/shared/types/User';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
 import type {
@@ -14,21 +15,26 @@ const resolvelistpublisheddrift = onCall(
   { secrets: subsplashSecretsWithRuntimeAlerts },
   async (
     request: CallableRequest<ResolveListPublishedDriftInputType>
-  ): Promise<ResolveListPublishedDriftOutputType> => {
-    listDebugLog('resolveListPublishedDrift.callable.start', {
+  ): Promise<ResolveListPublishedDriftOutputType> =>{
+listDebugLog('resolveListPublishedDrift.callable.start', {
       uid: request.auth?.uid,
       listId: request.data?.listId,
       strategy: request.data?.strategy,
     });
-
-    if (!canUserRolePublish(request.auth?.token.role)) {
+if (!canUserRolePublish(request.auth?.token.role)) {
       throw new HttpsError(
         'unauthenticated',
         'The function must be called while authenticated with publish permissions.'
       );
     }
-
-    try {
+if (!request.auth?.uid) {
+ const { HttpsError } = await import('firebase-functions/v2/https');
+ throw new HttpsError('unauthenticated', 'Authentication is required.');
+}
+const { withLegacyAdmissionLease } = await import('./temporal/legacyAdmissionLease');
+return withLegacyAdmissionLease(firebaseAdmin.firestore(), {domain:'publishing',actorUid:request.auth.uid,operation:"resolveListPublishedDrift",projectId:firebaseAdmin.app().options.projectId || ''}, async lease => {
+ await lease.markEffectsStarted();
+try {
       const token = await authenticateSubsplash();
       const output = await resolvePublishedListDrift({
         listId: request.data?.listId ?? '',
@@ -49,7 +55,8 @@ const resolvelistpublisheddrift = onCall(
       });
       throw handleError(error);
     }
-  }
+});
+}
 );
 
 export default resolvelistpublisheddrift;

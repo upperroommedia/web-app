@@ -6,12 +6,15 @@ async function loginAsDevAdmin(page: import('@playwright/test').Page) {
   const devLoginButton = page.getByRole('button', { name: /Dev Login/i });
   await expect(devLoginButton).toBeVisible();
   await devLoginButton.click();
-  await expect(page.getByLabel('Upload from Youtube Url toggle')).toBeVisible();
+  await expect(page.getByRole('switch', { name: 'Upload from Youtube Url', exact: true })).toBeVisible();
 }
 
 async function playSermonFromSearch(page: import('@playwright/test').Page, sermonTitle: string) {
   const searchBox = page.getByRole('searchbox').first();
   await expect(searchBox).toBeVisible();
+  // Wait for the authenticated initial query before exercising a refinement.
+  // The seeded newest sermon must be visible; a stalled or denied query still fails here.
+  await expect(page.getByText(sermonTitle)).toBeVisible({ timeout: 15_000 });
   await searchBox.fill(sermonTitle);
   await expect(page.getByText(sermonTitle)).toBeVisible({ timeout: 10_000 });
 
@@ -23,9 +26,7 @@ async function playSermonFromSearch(page: import('@playwright/test').Page, sermo
 test.describe('Audio player (floating bar)', () => {
   test.setTimeout(30_000);
 
-  test('player visible and main content has bottom padding when playing on admin sermons', async ({
-    page,
-  }) => {
+  test('player visible and main content has bottom padding when playing on admin sermons', async ({ page }) => {
     const seededSermon = await seedPlayableSermon();
     try {
       await loginAsDevAdmin(page);
@@ -51,9 +52,7 @@ test.describe('Audio player (floating bar)', () => {
     }
   });
 
-  test('player visible and bottom spacing on mobile viewport', async ({
-    page,
-  }) => {
+  test('player visible and bottom spacing on mobile viewport', async ({ page }) => {
     const seededSermon = await seedPlayableSermon();
     try {
       await page.setViewportSize({ width: 375, height: 667 });

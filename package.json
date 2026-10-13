@@ -5,7 +5,7 @@
   "private": true,
   "scripts": {
     "postinstall": "pnpm run build:packages",
-    "build:packages": "./scripts/with-node22.sh pnpm exec turbo run build --filter=@upperroom/shared --filter=@upperroom/contracts --continue",
+    "build:packages": "./scripts/with-node22.sh pnpm exec turbo run build --filter=@upperroom/shared --filter=@upperroom/contracts --filter=@upperroom/orchestration --continue",
     "build-functions": "./scripts/with-node22.sh bash -c 'pnpm --dir functions run build && pnpm run build-functions-codebases'",
     "build-functions-watch": "pnpm run functions-watch",
     "build-functions-codebases": "./scripts/with-node22.sh pnpm exec turbo run build --filter=functions-core --filter=functions-media --filter=functions-image --filter=functions-integrations --continue --force",
@@ -45,7 +45,12 @@
     "make-pretty": "pnpm --dir apps/web run make-pretty",
     "import-from-prod": "gsutil rm -r gs://urm-app.appspot.com/firestore_export && gcloud firestore export gs://urm-app.appspot.com/firestore_export && gsutil -m cp -r gs://urm-app.appspot.com/firestore_export ./dir",
     "test:e2e": "pnpm --dir apps/web run test:e2e",
-    "test:e2e:headed": "pnpm --dir apps/web run test:e2e:headed"
+    "test:e2e:headed": "pnpm --dir apps/web run test:e2e:headed",
+    "build:temporal": "./scripts/with-node22.sh pnpm exec turbo run build --filter=@upperroom/temporal-worker...",
+    "test:temporal": "./scripts/with-node22.sh bash -c 'pnpm --dir functions run test:temporal && pnpm --dir apps/temporal-worker run test:ci && pnpm run test:temporal:integration && pnpm run test:temporal:media && pnpm --dir apps/web run test:frontend:unit && pnpm run test:temporal:contracts'",
+    "test:temporal:contracts": "node --test scripts/temporal-*.test.mjs scripts/tests/legacy-image-source.test.mjs",
+    "test:temporal:media": "./scripts/with-node22.sh pnpm --dir apps/temporal-worker exec jest --config ../../functions-media/src/temporal/jest.config.cjs --runInBand --watchman=false",
+    "test:temporal:integration": "./scripts/with-node22.sh pnpm --dir functions exec firebase emulators:exec --only auth,firestore,database,storage --config ../firebase.test.json \"NODE_OPTIONS=--experimental-vm-modules pnpm --dir ../apps/temporal-worker exec jest --config src/integration/jest.config.cjs --runInBand --watchman=false --forceExit\""
   },
   "dependencies": {
     "@types/node": "catalog:",
@@ -53,15 +58,15 @@
     "typescript": "catalog:"
   },
   "devDependencies": {
-    "@firebase/rules-unit-testing": "^5.0.0",
+    "@firebase/rules-unit-testing": "^6.0.0",
     "concurrently": "^9.2.1",
     "firebase-admin": "catalog:",
     "firebase-tools": "^15.33.0",
     "mocha": "^10.2.0",
-    "tsc-alias": "^1.8.16",
-    "ts-node": "^10.9.2"
+    "ts-node": "^10.9.2",
+    "tsc-alias": "^1.8.16"
   },
-  "packageManager": "pnpm@11.28.2",
+  "packageManager": "pnpm@12.11.2",
   "engines": {
     "node": "22"
   }

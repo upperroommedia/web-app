@@ -114,8 +114,7 @@ export const listInvitesHandler = async (
             lifecycleStatus === InviteLifecycleStatus.CLAIMING ||
             lifecycleStatus === InviteLifecycleStatus.CLAIM_FAILED,
           canResend:
-            lifecycleStatus === InviteLifecycleStatus.EXPIRED ||
-            lifecycleStatus === InviteLifecycleStatus.SEND_FAILED,
+            lifecycleStatus === InviteLifecycleStatus.EXPIRED || lifecycleStatus === InviteLifecycleStatus.SEND_FAILED,
         },
       ];
     });

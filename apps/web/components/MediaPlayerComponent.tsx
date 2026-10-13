@@ -4,6 +4,7 @@ import { getDownloadURL, getStorage, ref } from '../firebase/storage';
 import { MediaPlayer } from '@vidstack/react';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/router';
+import firestore, { doc, onSnapshot } from '../firebase/firestore';
 
 const DynamicBottomAudioBar = dynamic(() => import('./BottomAudioBar'));
 
@@ -19,42 +20,58 @@ function MediaPlayerComponent({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let cancelled = false;
+    let selectedAudioPath: string | undefined;
+    let requestRevision = 0;
 
     if (!sermonId) {
-      setSrc('');
-      setResolvedSrcSermonId(undefined);
       return () => {
         cancelled = true;
       };
     }
 
     if (sermonUrl) {
-      setSrc('');
-      setResolvedSrcSermonId(undefined);
       return () => {
         cancelled = true;
       };
     }
 
-    // Clear the previously resolved URL immediately so a newly selected sermon
-    // can't momentarily reuse stale audio while its storage URL is loading.
-    setSrc('');
-    setResolvedSrcSermonId(undefined);
+    // The render guard below excludes a previous sermon's URL without another
+    // effect-driven render. A current source stays playable until its replacement resolves.
 
-    getDownloadURL(ref(storage, `intro-outro-sermons/${sermonId}`))
-      .then((url) => {
+    const stop = onSnapshot(
+      doc(firestore, 'sermons', sermonId),
+      (snapshot) => {
+        const artifacts = snapshot.data()?.audioArtifacts as { finalPath?: string } | undefined;
+        const selectedPath = artifacts?.finalPath || `intro-outro-sermons/${sermonId}`;
+        if (selectedAudioPath === selectedPath) return;
+        selectedAudioPath = selectedPath;
+        const revision = ++requestRevision;
+        void getDownloadURL(ref(storage, selectedPath))
+          .then((url) => {
+            if (!cancelled && revision === requestRevision) {
+              setSrc((prevSrc) => (prevSrc === url ? prevSrc : url));
+              setResolvedSrcSermonId(sermonId);
+            }
+          })
+          .catch((error) => {
+            if (cancelled || revision !== requestRevision) return;
+            selectedAudioPath = undefined;
+            setSrc('');
+            setResolvedSrcSermonId(undefined);
+            // eslint-disable-next-line no-console
+            console.log(error);
+          });
+      },
+      () => {
         if (!cancelled) {
-          setSrc((prevSrc) => (prevSrc === url ? prevSrc : url));
-          setResolvedSrcSermonId(sermonId);
+          setSrc('');
+          setResolvedSrcSermonId(undefined);
         }
-      })
-      .catch((error) => {
-        // eslint-disable-next-line no-console
-        console.log(error);
-      });
-
+      }
+    );
     return () => {
       cancelled = true;
+      stop();
     };
   }, [sermonId, sermonUrl]);
 
@@ -62,7 +79,7 @@ function MediaPlayerComponent({ children }: { children: React.ReactNode }) {
 
   return (
     <MediaPlayer
-      load="eager"
+      load={currentSermon ? 'eager' : 'play'}
       autoplay
       title={currentSermon?.title}
       style={{ height: '100dvh', display: 'flex', flexDirection: 'column' }}

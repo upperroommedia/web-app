@@ -1,4 +1,6 @@
-import admin from 'firebase-admin';
+import { getApp, initializeApp, deleteApp } from 'firebase-admin/app';
+import { getFirestore, FieldValue } from 'firebase-admin/firestore';
+
 
 // Usage: node scripts/backfillBibleBookMetadata.mjs [--apply]
 // Requires Application Default Credentials with Firestore write access to urm-app.
@@ -41,10 +43,10 @@ if (projectId !== 'urm-app') {
   throw new Error(`Refusing to target unexpected Firebase project: ${projectId}`);
 }
 
-admin.initializeApp({ projectId });
+initializeApp({ projectId });
 
 try {
-  const db = admin.firestore();
+  const db = getFirestore();
   const collection = db.collection('lists');
   const taggedSnapshot = await collection.where('listTagAndPosition.listTag', '==', 'bible-chapter').get();
   const updates = new Map();
@@ -54,7 +56,7 @@ try {
     if (name === 'Character Studies') {
       updates.set(doc.ref.path, {
         ref: doc.ref,
-        data: { listTagAndPosition: admin.firestore.FieldValue.delete() },
+        data: { listTagAndPosition: FieldValue.delete() },
         removeFromBibleBookBundle: true,
       });
       continue;
@@ -144,5 +146,5 @@ try {
     console.log('Dry run only. Re-run with --apply to write these changes.');
   }
 } finally {
-  await admin.app().delete();
+  await deleteApp(getApp());
 }

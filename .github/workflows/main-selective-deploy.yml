@@ -217,7 +217,7 @@ jobs:
               deploy_storage=true
             fi
 
-            if contains_path '^(apps/web/|packages/contracts/|packages/shared/|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig\.json|turbo\.json|\.npmrc)'; then
+            if contains_path '^(apps/web/|packages/contracts/|packages/shared/|packages/orchestration/|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig\.json|turbo\.json|\.npmrc)'; then
               deploy_web_app=true
             fi
 
@@ -248,7 +248,7 @@ jobs:
               deploy_functions_integrations=true
             fi
 
-            if contains_path '^(packages/contracts/|packages/shared/|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig\.json|turbo\.json)'; then
+            if contains_path '^(packages/contracts/|packages/shared/|packages/orchestration/|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig\.json|turbo\.json)'; then
               deploy_functions_core=true
               deploy_functions_media=true
               deploy_functions_image=true
@@ -435,6 +435,9 @@ jobs:
       - name: Isolate legacy deployment config from function kit hooks
         run: node scripts/create-kit-deploy-config.mjs --legacy
 
+      - name: Preserve active task ownership in deployed function environments
+        run: node scripts/temporal-function-env.mjs --project "$FIREBASE_PROJECT" --from-control --apply
+
       - name: Deploy functions:core
         if: needs.detect-changes.outputs.deploy_functions_core == 'true'
         run: ./scripts/firebase-deploy-with-quota-retry.sh deploy --project "$FIREBASE_PROJECT" --config firebase.legacy.json --only functions:core --non-interactive
@@ -479,6 +482,9 @@ jobs:
 
       - name: Install locked standalone kit dependencies and isolate deployment config
         run: node scripts/create-kit-deploy-config.mjs --install
+
+      - name: Preserve active task ownership in deployed kit environments
+        run: node scripts/temporal-function-env.mjs --project "$FIREBASE_PROJECT" --from-control --apply
 
       - name: Deploy function kits
         run: ./scripts/firebase-deploy-with-quota-retry.sh deploy --project "$FIREBASE_PROJECT" --config firebase.kits.json --only functions --non-interactive --force

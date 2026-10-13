@@ -17,8 +17,6 @@ import auth from '../../firebase/auth';
 import { SignupForm, userCredentials } from '../types';
 import nookies from 'nookies';
 import { canUserRolePublish, canUserRoleUpload, isUserRoleAdmin, User, UserRoleType } from '../../types/User';
-import Stack from '@mui/material/Stack';
-import Image from 'next/image';
 import { getFirebaseAuthDomain } from '../../shared/firebaseProjectConfig';
 import { shouldPreferFirebaseRedirectAuth } from '../../utils/authRedirect';
 
@@ -46,12 +44,14 @@ export const UserProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<User>();
   const [loading, setLoading] = useState<boolean>(true);
   const authHydratedRef = useRef(false);
+  const authRevisionRef = useRef(0);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
       (window as Window & { nookies?: typeof nookies }).nookies = nookies;
     }
     const unsubscribe = onIdTokenChanged(auth, async (user) => {
+      const revision = ++authRevisionRef.current;
       if (!authHydratedRef.current) {
         setLoading(true);
       }
@@ -65,6 +65,7 @@ export const UserProvider = ({ children }: { children: React.ReactNode }) => {
       } else {
         try {
           const tokenResult = await user.getIdTokenResult();
+          if (revision !== authRevisionRef.current || auth.currentUser?.uid !== user.uid) return;
           const role = tokenResult.claims.role as UserRoleType;
           Sentry.setUser({
             id: user.uid,
@@ -92,6 +93,7 @@ export const UserProvider = ({ children }: { children: React.ReactNode }) => {
           nookies.set(null, 'token', tokenResult.token, { path: '/' });
           // router.reload();
         } catch (e) {
+          if (revision !== authRevisionRef.current) return;
           setUser(undefined);
           nookies.destroy(null, 'token');
           nookies.set(null, 'token', '', { path: '/' });
@@ -105,7 +107,46 @@ export const UserProvider = ({ children }: { children: React.ReactNode }) => {
     });
 
     return () => {
+      authRevisionRef.current += 1;
       unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    let refreshing = false;
+    let lastRefresh = 0;
+    const refresh = async () => {
+      if (
+        document.visibilityState !== 'visible' ||
+        refreshing ||
+        Date.now() - lastRefresh < 60_000 ||
+        !auth.currentUser
+      )
+        return;
+      refreshing = true;
+      lastRefresh = Date.now();
+      try {
+        await auth.currentUser.getIdToken(true);
+      } catch (error) {
+        // Revoked sessions require login; an offline refresh does not log the user out.
+        if (
+          ['auth/user-token-expired', 'auth/invalid-user-token', 'auth/user-disabled'].includes(
+            getAuthErrorCode(error) ?? ''
+          )
+        )
+          await signOut(auth);
+      } finally {
+        refreshing = false;
+      }
+    };
+    const onForeground = () => {
+      void refresh();
+    };
+    window.addEventListener('focus', onForeground);
+    document.addEventListener('visibilitychange', onForeground);
+    return () => {
+      window.removeEventListener('focus', onForeground);
+      document.removeEventListener('visibilitychange', onForeground);
     };
   }, []);
 
@@ -135,8 +176,8 @@ export const UserProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const loginWithGoogle = async () => {
-      const provider = new GoogleAuthProvider();
-      return signInWithProvider(provider);
+    const provider = new GoogleAuthProvider();
+    return signInWithProvider(provider);
   };
 
   // const loginWithFacebook = async () => {
@@ -149,13 +190,13 @@ export const UserProvider = ({ children }: { children: React.ReactNode }) => {
   // };
 
   const loginWithApple = async () => {
-      const provider = new OAuthProvider('apple.com');
-      return signInWithProvider(provider);
+    const provider = new OAuthProvider('apple.com');
+    return signInWithProvider(provider);
   };
 
   const loginWithMicrosoft = async () => {
-      const provider = new OAuthProvider('microsoft.com');
-      return signInWithProvider(provider);
+    const provider = new OAuthProvider('microsoft.com');
+    return signInWithProvider(provider);
   };
 
   const signup = async (loginForm: SignupForm) => {
@@ -177,23 +218,6 @@ export const UserProvider = ({ children }: { children: React.ReactNode }) => {
       return error;
     }
   };
-
-  if (loading) {
-    return (
-      <Stack
-        sx={{
-          width: '100vw',
-          height: '100dvh',
-          // bgcolor: 'rgb(31 41 55)',
-
-          justifyContent: 'center',
-          alignItems: 'center',
-        }}
-      >
-        <Image src="/URM_icon.png" alt="Upper Room Media Logo" width={100} height={100} priority />
-      </Stack>
-    );
-  }
 
   return (
     <UserContext.Provider

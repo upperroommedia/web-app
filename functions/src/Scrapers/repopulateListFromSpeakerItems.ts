@@ -1,3 +1,4 @@
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 // add sermon to series and handle condition when list is full
 import axios from 'axios';
 import { logger } from 'firebase-functions/v2';
@@ -154,15 +155,21 @@ async function getSpeakerItems(speakerId: string, token: string): Promise<MediaI
 
 const repopulateListFromSpeakerItems = onCall(
   { secrets: subsplashSecretsWithRuntimeAlerts },
-  async (request: CallableRequest<repopulateListFromSpeakerItemsInputType>): Promise<void> => {
-    // logger.log('repopulateListFromSpeakerItems', request);
-    if (request.auth?.token.role !== 'admin') {
+  async (request: CallableRequest<repopulateListFromSpeakerItemsInputType>): Promise<void> =>{
+if (request.auth?.token.role !== 'admin') {
       throw new HttpsError('unauthenticated', 'The function must be called while authenticated.');
     }
-    const data = request.data;
-    const maxListCount = 200;
-    const token = await authenticateSubsplash();
-    try {
+const data = request.data;
+const maxListCount = 200;
+if (!request.auth?.uid) {
+ const { HttpsError } = await import('firebase-functions/v2/https');
+ throw new HttpsError('unauthenticated', 'Authentication is required.');
+}
+const { withLegacyAdmissionLease } = await import('../temporal/legacyAdmissionLease');
+return withLegacyAdmissionLease(firebaseAdmin.firestore(), {domain:'publishing',actorUid:request.auth.uid,operation:"Scrapers/repopulateListFromSpeakerItems",projectId:firebaseAdmin.app().options.projectId || ''}, async lease => {
+ await lease.markEffectsStarted();
+const token = await authenticateSubsplash();
+try {
       await withSubsplashLocks([`list:${data.listId}`], async () => {
         const mediaItemIds: MediaItem[] = await getSpeakerItems(data.speakerId, token);
         await addToSingleList(data.listId, mediaItemIds, maxListCount, token);
@@ -170,7 +177,8 @@ const repopulateListFromSpeakerItems = onCall(
     } catch (err) {
       throw handleError(err);
     }
-  }
+});
+}
 );
 
 export default repopulateListFromSpeakerItems;

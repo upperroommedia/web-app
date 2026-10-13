@@ -13,7 +13,9 @@ import PopUp from '../../components/PopUp';
 import useAuth from '../../context/user/UserContext';
 import { useAlgoliaSearch } from '../../context/search/AlgoliaSearchContext';
 import { Order } from '../../context/types';
-import { createFunctionV2 } from '../../utils/createFunction';
+import { useEntityJobs } from '../../hooks/useDurableJobs';
+import { submitDurableIntent } from '../../utils/durableJobs';
+import EntityJobHistory from '../../components/jobs/EntityJobHistory';
 import {
   getListDiscoveryCount,
   getListOverflowIndicator,
@@ -22,15 +24,7 @@ import {
 } from '../../utils/algolia/searchRecords';
 import { getDefaultListSortOrder } from '../../utils/algolia/listSorting';
 import type { ListSortableProperty } from '../../utils/algolia/listSorting';
-import {
-  DeleteSubsplashListInputType,
-  DeleteSubsplashListOutputType,
-} from '@upperroom/contracts/deleteSubsplashList';
 import { List, ListType } from '../../types/List';
-
-const createDeleteSubsplashList = createFunctionV2<DeleteSubsplashListInputType, DeleteSubsplashListOutputType>(
-  'deletesubsplashlist'
-);
 
 const AdminList = () => {
   const { searchClient, loading: searchClientLoading, error: searchClientError, clearCache } = useAlgoliaSearch();
@@ -52,6 +46,16 @@ const AdminList = () => {
   const [deleteConfirmed, setDeleteConfirmed] = useState<boolean>(false);
   const [deleteErrorMessage, setDeleteErrorMessage] = useState<string>('');
   const [refreshNonce, setRefreshNonce] = useState<number>(0);
+
+  const { jobs } = useEntityJobs({ type: 'list', id: selectedList?.id ?? '' });
+  const completedRevision = jobs
+    .filter((job) => ['succeeded', 'failed', 'cancelled', 'superseded'].includes(job.state))
+    .map((job) => `${job.jobId}:${job.revision}`)
+    .join('|');
+  useEffect(() => {
+    if (!completedRevision) return;
+    void clearCache().then(() => setRefreshNonce((value) => value + 1));
+  }, [clearCache, completedRevision]);
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -126,14 +130,12 @@ const AdminList = () => {
 
     try {
       setIsDeleting(true);
-      const deleteResult = await createDeleteSubsplashList({ listId: selectedList.id });
-      await clearCache();
-      const deletedIdSet = new Set(deleteResult.deletedFirestoreListIds);
-      setLists((previousLists) => previousLists.filter((list) => !deletedIdSet.has(list.id)));
-      setTotalLists((previousTotal) => Math.max(0, previousTotal - deleteResult.deletedFirestoreListIds.length));
-      setRefreshNonce((currentValue) => currentValue + 1);
+      await submitDurableIntent({
+        kind: 'list.delete',
+        entity: { type: 'list', id: selectedList.id },
+        payload: { input: { listId: selectedList.id } },
+      });
       closeDeleteListPopup();
-      setSelectedList(undefined);
     } catch (error) {
       console.error(error);
       setDeleteErrorMessage(error instanceof Error ? error.message : 'Error deleting list');
@@ -204,9 +206,7 @@ const AdminList = () => {
         )}
       </Box>
       <PopUp
-        title={
-          'Are you sure you want to permanently delete this list?'
-        }
+        title={'Are you sure you want to permanently delete this list?'}
         open={deleteListPopup}
         setOpen={(open) => {
           if (!open) {
@@ -246,15 +246,13 @@ const AdminList = () => {
           ) : null}
           <FormControlLabel
             control={
-              <Checkbox
-                checked={deleteConfirmed}
-                onChange={(event) => setDeleteConfirmed(event.target.checked)}
-              />
+              <Checkbox checked={deleteConfirmed} onChange={(event) => setDeleteConfirmed(event.target.checked)} />
             }
             label="I understand that deleting is permanent and cannot be undone"
           />
         </Box>
       </PopUp>
+      {selectedList && <EntityJobHistory entity={{ type: 'list', id: selectedList.id }} />}
       {newListPopup ? (
         <NewListPopup
           newListPopup={newListPopup}

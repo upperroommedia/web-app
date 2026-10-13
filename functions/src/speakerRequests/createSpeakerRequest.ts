@@ -1,3 +1,6 @@
+import type { LegacyAdmissionLease } from '../temporal/legacyAdmissionLease';
+import { isDomainTemporalEnabled } from '../temporal/ownership';
+import { createRequestWithEmails } from '../notifications/createRequestWithEmails';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { logger } from 'firebase-functions/v2';
 import { CallableRequest, onCall } from 'firebase-functions/v2/https';
@@ -138,240 +141,338 @@ const listExistingSpeakerRequests = async (
   return snapshot.docs.map((doc) => ({ id: doc.id, data: doc.data() as PersistedSpeakerRequestDocument }));
 };
 
-const createSpeakerRequest = onCall(
-  { secrets: adminRequestSecretsWithRuntimeAlerts },
-  async (request: CallableRequest<CreateSpeakerRequestInputType>): Promise<CreateSpeakerRequestOutputType> => {
-    const requesterUid = request.auth?.uid;
-    if (!requesterUid) {
-      return { status: 'error', error: 'Unauthorized.' };
-    }
+export const createSpeakerRequestHandler = async (
+  request: CallableRequest<CreateSpeakerRequestInputType>,
+  lease?: LegacyAdmissionLease
+): Promise<CreateSpeakerRequestOutputType> => {
+  const requesterUid = request.auth?.uid;
+  if (!requesterUid) {
+    return { status: 'error', error: 'Unauthorized.' };
+  }
 
-    const requesterEmail = readRequesterEmail(request);
-    if (!requesterEmail) {
-      return { status: 'error', error: 'Requester email is required.' };
-    }
+  const requesterEmail = readRequesterEmail(request);
+  if (!requesterEmail) {
+    return { status: 'error', error: 'Requester email is required.' };
+  }
 
-    const validation = validateCreateSpeakerRequestInput(request.data);
-    if (!validation.ok) {
-      return { status: 'error', error: validation.error };
-    }
+  const validation = validateCreateSpeakerRequestInput(request.data);
+  if (!validation.ok) {
+    return { status: 'error', error: validation.error };
+  }
 
-    const requesterDisplayName = readRequesterDisplayName(request);
-    const adminUrl = buildSpeakerRequestAdminUrl(getAdminBaseUrl());
-    const createdAtMs = Date.now();
+  const requesterDisplayName = readRequesterDisplayName(request);
+  const adminUrl = buildSpeakerRequestAdminUrl(getAdminBaseUrl());
+  const createdAtMs = Date.now();
 
-    const existingRequests = await listExistingSpeakerRequests(requesterUid);
-    const normalizedName = normalizeSpeakerRequestNameForDuplicateCheck(validation.value.speakerName);
-    const existing = existingRequests.find(
-      ({ data }) =>
-        data.status === SPEAKER_REQUEST_STATUS_PENDING &&
-        normalizeSpeakerRequestNameForDuplicateCheck(data.speakerName) === normalizedName
-    );
+  const existingRequests = await listExistingSpeakerRequests(requesterUid);
+  const normalizedName = normalizeSpeakerRequestNameForDuplicateCheck(validation.value.speakerName);
+  const existing = existingRequests.find(
+    ({ data }) =>
+      data.status === SPEAKER_REQUEST_STATUS_PENDING &&
+      normalizeSpeakerRequestNameForDuplicateCheck(data.speakerName) === normalizedName
+  );
 
-    if (existing) {
-      return {
-        status: 'success',
-        data: {
-          speakerRequestId: existing.id,
-          requestStatus: 'existing',
-          notification: {
-            ...existing.data.notification,
-            status: 'skipped_existing',
-          },
-          confirmationNotification: {
-            ...existing.data.notification,
-            status: 'skipped_existing',
-          },
-        },
-      };
-    }
-
-    const persistedRequest: PersistedSpeakerRequestDocument = {
-      requesterUid,
-      requesterEmail,
-      ...(requesterDisplayName ? { requesterDisplayName } : {}),
-      speakerName: validation.value.speakerName,
-      description: validation.value.description,
-      image: validation.value.image,
-      status: SPEAKER_REQUEST_STATUS_PENDING,
-      createdAtMs,
-      updatedAtMs: createdAtMs,
-      adminUrl,
-      notification: {
-        status: 'not_attempted',
-      },
-    };
-
-    const speakerRequestRef = await firestore.collection(SPEAKER_REQUESTS_COLLECTION).add(persistedRequest);
-
-    const notificationPayload: SpeakerRequestNotificationPayload = {
-      requesterUid,
-      requesterEmail,
-      ...(requesterDisplayName ? { requesterDisplayName } : {}),
-      speakerName: validation.value.speakerName,
-      description: validation.value.description,
-      image: validation.value.image,
-      requestedAtMs: createdAtMs,
-      adminUrl,
-    };
-
-    let adminNotificationState: SpeakerRequestNotificationState = { status: 'not_attempted' };
-    let confirmationNotificationState: SpeakerRequestNotificationState = { status: 'not_attempted' };
-    const warnings: string[] = [];
-
-    const adminRequestRecipients = getAdminRequestRecipients();
-
-    try {
-      const adminMailId = await queueEmail({
-        to: adminRequestRecipients,
-        source: 'speaker-request',
-        alertType: 'speaker-request-created',
-        metadata: {
-          speakerRequestId: speakerRequestRef.id,
-          requesterUid,
-          requesterEmail,
-          speakerName: validation.value.speakerName,
-          description: validation.value.description,
-          imageUrl: validation.value.image.downloadLink,
-          requestedAtMs: createdAtMs,
-          adminUrl,
-        },
-        message: {
-          subject: `[URM] Speaker request: ${validation.value.speakerName}`,
-          text: buildAdminMessageText(notificationPayload),
-          html: buildAdminMessageHtml(notificationPayload),
-        },
-      });
-
-      adminNotificationState = {
-        status: 'queued',
-        attemptedAtMs: Date.now(),
-        queueMailId: adminMailId,
-      };
-    } catch (error) {
-      const queueErrorMessage = error instanceof Error ? error.message : 'Unknown queue error';
-      adminNotificationState = {
-        status: 'queue_failed',
-        attemptedAtMs: Date.now(),
-        queueErrorMessage,
-        warningCode: SPEAKER_REQUEST_EMAIL_ENQUEUE_FAILED,
-      };
-      warnings.push('admin');
-      try {
-        await emitOperationalAlert({
-          alertCode: SPEAKER_REQUEST_EMAIL_ENQUEUE_FAILED,
-          summary: 'Failed to enqueue speaker-request admin notification email.',
-          error,
-          context: {
-            functionName: 'createSpeakerRequest',
-            speakerRequestId: speakerRequestRef.id,
-            requesterUid,
-            requesterEmail,
-            speakerName: validation.value.speakerName,
-            requestedAtMs: createdAtMs,
-          },
-        });
-      } catch (alertError) {
-        logger.error('failed to emit speaker-request admin queue failure alert', {
-          speakerRequestId: speakerRequestRef.id,
-          queueErrorMessage,
-          alertError: alertError instanceof Error ? alertError.message : String(alertError),
-        });
-      }
-    }
-
-    try {
-      const confirmationMailId = await queueEmail({
-        to: [requesterEmail],
-        source: 'speaker-request',
-        alertType: 'speaker-request-confirmation',
-        metadata: {
-          speakerRequestId: speakerRequestRef.id,
-          requesterUid,
-          requesterEmail,
-          speakerName: validation.value.speakerName,
-          requestedAtMs: createdAtMs,
-        },
-        message: {
-          subject: 'UpperRoom Media speaker request received',
-          text: buildConfirmationMessageText({
-            requesterEmail,
-            speakerName: validation.value.speakerName,
-            description: validation.value.description,
-            requestedAtMs: createdAtMs,
-            image: validation.value.image,
-          }),
-          html: buildConfirmationMessageHtml({
-            requesterEmail,
-            speakerName: validation.value.speakerName,
-            description: validation.value.description,
-            requestedAtMs: createdAtMs,
-            image: validation.value.image,
-          }),
-        },
-      });
-
-      confirmationNotificationState = {
-        status: 'queued',
-        attemptedAtMs: Date.now(),
-        queueMailId: confirmationMailId,
-      };
-    } catch (error) {
-      const queueErrorMessage = error instanceof Error ? error.message : 'Unknown queue error';
-      confirmationNotificationState = {
-        status: 'queue_failed',
-        attemptedAtMs: Date.now(),
-        queueErrorMessage,
-        warningCode: SPEAKER_REQUEST_EMAIL_ENQUEUE_FAILED,
-      };
-      warnings.push('confirmation');
-      try {
-        await emitOperationalAlert({
-          alertCode: SPEAKER_REQUEST_EMAIL_ENQUEUE_FAILED,
-          summary: 'Failed to enqueue speaker-request confirmation email.',
-          error,
-          context: {
-            functionName: 'createSpeakerRequest',
-            speakerRequestId: speakerRequestRef.id,
-            requesterUid,
-            requesterEmail,
-            speakerName: validation.value.speakerName,
-            requestedAtMs: createdAtMs,
-          },
-        });
-      } catch (alertError) {
-        logger.error('failed to emit speaker-request confirmation queue failure alert', {
-          speakerRequestId: speakerRequestRef.id,
-          queueErrorMessage,
-          alertError: alertError instanceof Error ? alertError.message : String(alertError),
-        });
-      }
-    }
-
-    await speakerRequestRef.update({
-      updatedAtMs: Date.now(),
-      notification: adminNotificationState,
-      confirmationNotification: confirmationNotificationState,
-    });
-
+  if (existing) {
     return {
       status: 'success',
       data: {
-        speakerRequestId: speakerRequestRef.id,
-        requestStatus: 'created',
-        notification: adminNotificationState,
-        confirmationNotification: confirmationNotificationState,
-        ...(warnings.length > 0
-          ? {
-              warning: {
-                code: SPEAKER_REQUEST_EMAIL_ENQUEUE_FAILED,
-                message: 'Speaker request persisted, but one or more emails could not be queued.',
-              },
-            }
-          : {}),
+        speakerRequestId: existing.id,
+        requestStatus: 'existing',
+        notification: {
+          ...existing.data.notification,
+          status: 'skipped_existing',
+        },
+        confirmationNotification: {
+          ...existing.data.notification,
+          status: 'skipped_existing',
+        },
       },
     };
   }
-);
 
+  if (!isDomainTemporalEnabled('accounts')) {
+    await (
+      await import('../temporal/releaseControl')
+    ).assertLegacyAdmissionAllowed(firebaseAdmin.firestore(), 'accounts', { continuation: Boolean(lease) });
+  }
+
+  const persistedRequest: PersistedSpeakerRequestDocument = {
+    requesterUid,
+    requesterEmail,
+    ...(requesterDisplayName ? { requesterDisplayName } : {}),
+    speakerName: validation.value.speakerName,
+    description: validation.value.description,
+    image: validation.value.image,
+    status: SPEAKER_REQUEST_STATUS_PENDING,
+    createdAtMs,
+    updatedAtMs: createdAtMs,
+    adminUrl,
+    notification: {
+      status: 'not_attempted',
+    },
+  };
+
+  if (!isDomainTemporalEnabled('accounts')) await lease?.markEffectsStarted();
+  const speakerRequestRef = isDomainTemporalEnabled('accounts')
+    ? firestore.collection(SPEAKER_REQUESTS_COLLECTION).doc()
+    : await firestore.collection(SPEAKER_REQUESTS_COLLECTION).add(persistedRequest);
+
+  const notificationPayload: SpeakerRequestNotificationPayload = {
+    requesterUid,
+    requesterEmail,
+    ...(requesterDisplayName ? { requesterDisplayName } : {}),
+    speakerName: validation.value.speakerName,
+    description: validation.value.description,
+    image: validation.value.image,
+    requestedAtMs: createdAtMs,
+    adminUrl,
+  };
+
+  let adminNotificationState: SpeakerRequestNotificationState = { status: 'not_attempted' };
+  let confirmationNotificationState: SpeakerRequestNotificationState = { status: 'not_attempted' };
+  const warnings: string[] = [];
+
+  const adminRequestRecipients = getAdminRequestRecipients();
+
+  if (isDomainTemporalEnabled('accounts')) {
+    const committed = await createRequestWithEmails({
+      target: speakerRequestRef,
+      document: persistedRequest,
+      pendingKey: `speaker:${requesterUid}:${normalizedName}`,
+      emails: [
+        {
+          field: 'notification',
+          input: {
+            to: adminRequestRecipients,
+            source: 'speaker-request',
+            alertType: 'speaker-request-created',
+            metadata: {
+              speakerRequestId: speakerRequestRef.id,
+              requesterUid,
+              requesterEmail,
+              speakerName: validation.value.speakerName,
+              description: validation.value.description,
+              imageUrl: validation.value.image.downloadLink,
+              requestedAtMs: createdAtMs,
+              adminUrl,
+            },
+            message: {
+              subject: `[URM] Speaker request: ${validation.value.speakerName}`,
+              text: buildAdminMessageText(notificationPayload),
+              html: buildAdminMessageHtml(notificationPayload),
+            },
+          },
+        },
+        {
+          field: 'confirmationNotification',
+          input: {
+            to: [requesterEmail],
+            source: 'speaker-request',
+            alertType: 'speaker-request-confirmation',
+            metadata: {
+              speakerRequestId: speakerRequestRef.id,
+              requesterUid,
+              requesterEmail,
+              speakerName: validation.value.speakerName,
+              requestedAtMs: createdAtMs,
+            },
+            message: {
+              subject: 'UpperRoom Media speaker request received',
+              text: buildConfirmationMessageText({
+                requesterEmail,
+                speakerName: validation.value.speakerName,
+                description: validation.value.description,
+                requestedAtMs: createdAtMs,
+                image: validation.value.image,
+              }),
+              html: buildConfirmationMessageHtml({
+                requesterEmail,
+                speakerName: validation.value.speakerName,
+                description: validation.value.description,
+                requestedAtMs: createdAtMs,
+                image: validation.value.image,
+              }),
+            },
+          },
+        },
+      ],
+    });
+    return {
+      status: 'success',
+      data: {
+        speakerRequestId: committed.id,
+        requestStatus: committed.created ? 'created' : 'existing',
+        notification: committed.document.notification,
+        confirmationNotification: (
+          committed.document as PersistedSpeakerRequestDocument & {
+            confirmationNotification: SpeakerRequestNotificationState;
+          }
+        ).confirmationNotification,
+      },
+    };
+  }
+
+  try {
+    const adminMailId = await queueEmail({
+      to: adminRequestRecipients,
+      source: 'speaker-request',
+      alertType: 'speaker-request-created',
+      metadata: {
+        speakerRequestId: speakerRequestRef.id,
+        requesterUid,
+        requesterEmail,
+        speakerName: validation.value.speakerName,
+        description: validation.value.description,
+        imageUrl: validation.value.image.downloadLink,
+        requestedAtMs: createdAtMs,
+        adminUrl,
+      },
+      message: {
+        subject: `[URM] Speaker request: ${validation.value.speakerName}`,
+        text: buildAdminMessageText(notificationPayload),
+        html: buildAdminMessageHtml(notificationPayload),
+      },
+    });
+
+    adminNotificationState = {
+      status: 'queued',
+      attemptedAtMs: Date.now(),
+      queueMailId: adminMailId,
+    };
+  } catch (error) {
+    const queueErrorMessage = error instanceof Error ? error.message : 'Unknown queue error';
+    adminNotificationState = {
+      status: 'queue_failed',
+      attemptedAtMs: Date.now(),
+      queueErrorMessage,
+      warningCode: SPEAKER_REQUEST_EMAIL_ENQUEUE_FAILED,
+    };
+    warnings.push('admin');
+    try {
+      await emitOperationalAlert({
+        alertCode: SPEAKER_REQUEST_EMAIL_ENQUEUE_FAILED,
+        summary: 'Failed to enqueue speaker-request admin notification email.',
+        error,
+        context: {
+          functionName: 'createSpeakerRequest',
+          speakerRequestId: speakerRequestRef.id,
+          requesterUid,
+          requesterEmail,
+          speakerName: validation.value.speakerName,
+          requestedAtMs: createdAtMs,
+        },
+      });
+    } catch (alertError) {
+      logger.error('failed to emit speaker-request admin queue failure alert', {
+        speakerRequestId: speakerRequestRef.id,
+        queueErrorMessage,
+        alertError: alertError instanceof Error ? alertError.message : String(alertError),
+      });
+    }
+  }
+
+  try {
+    const confirmationMailId = await queueEmail({
+      to: [requesterEmail],
+      source: 'speaker-request',
+      alertType: 'speaker-request-confirmation',
+      metadata: {
+        speakerRequestId: speakerRequestRef.id,
+        requesterUid,
+        requesterEmail,
+        speakerName: validation.value.speakerName,
+        requestedAtMs: createdAtMs,
+      },
+      message: {
+        subject: 'UpperRoom Media speaker request received',
+        text: buildConfirmationMessageText({
+          requesterEmail,
+          speakerName: validation.value.speakerName,
+          description: validation.value.description,
+          requestedAtMs: createdAtMs,
+          image: validation.value.image,
+        }),
+        html: buildConfirmationMessageHtml({
+          requesterEmail,
+          speakerName: validation.value.speakerName,
+          description: validation.value.description,
+          requestedAtMs: createdAtMs,
+          image: validation.value.image,
+        }),
+      },
+    });
+
+    confirmationNotificationState = {
+      status: 'queued',
+      attemptedAtMs: Date.now(),
+      queueMailId: confirmationMailId,
+    };
+  } catch (error) {
+    const queueErrorMessage = error instanceof Error ? error.message : 'Unknown queue error';
+    confirmationNotificationState = {
+      status: 'queue_failed',
+      attemptedAtMs: Date.now(),
+      queueErrorMessage,
+      warningCode: SPEAKER_REQUEST_EMAIL_ENQUEUE_FAILED,
+    };
+    warnings.push('confirmation');
+    try {
+      await emitOperationalAlert({
+        alertCode: SPEAKER_REQUEST_EMAIL_ENQUEUE_FAILED,
+        summary: 'Failed to enqueue speaker-request confirmation email.',
+        error,
+        context: {
+          functionName: 'createSpeakerRequest',
+          speakerRequestId: speakerRequestRef.id,
+          requesterUid,
+          requesterEmail,
+          speakerName: validation.value.speakerName,
+          requestedAtMs: createdAtMs,
+        },
+      });
+    } catch (alertError) {
+      logger.error('failed to emit speaker-request confirmation queue failure alert', {
+        speakerRequestId: speakerRequestRef.id,
+        queueErrorMessage,
+        alertError: alertError instanceof Error ? alertError.message : String(alertError),
+      });
+    }
+  }
+
+  await speakerRequestRef.update({
+    updatedAtMs: Date.now(),
+    notification: adminNotificationState,
+    confirmationNotification: confirmationNotificationState,
+  });
+
+  return {
+    status: 'success',
+    data: {
+      speakerRequestId: speakerRequestRef.id,
+      requestStatus: 'created',
+      notification: adminNotificationState,
+      confirmationNotification: confirmationNotificationState,
+      ...(warnings.length > 0
+        ? {
+            warning: {
+              code: SPEAKER_REQUEST_EMAIL_ENQUEUE_FAILED,
+              message: 'Speaker request persisted, but one or more emails could not be queued.',
+            },
+          }
+        : {}),
+    },
+  };
+};
+export const createSpeakerRequestSource = async (
+  request: CallableRequest<CreateSpeakerRequestInputType>
+): Promise<CreateSpeakerRequestOutputType> => {
+  if (isDomainTemporalEnabled('accounts') || !request.auth?.uid) return createSpeakerRequestHandler(request);
+  return (await import('../temporal/accounts/sourceAdmission')).withLegacyAccountSource(
+    firebaseAdmin.firestore(),
+    request.auth.uid,
+    'speaker.request-create',
+    (lease) => createSpeakerRequestHandler(request, lease)
+  );
+};
+const createSpeakerRequest = onCall({ secrets: adminRequestSecretsWithRuntimeAlerts }, createSpeakerRequestSource);
 export default createSpeakerRequest;

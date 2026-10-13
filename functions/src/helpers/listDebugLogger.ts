@@ -1,10 +1,14 @@
 import { logger } from 'firebase-functions/v2';
 import type { PublishedListDriftIssue } from '../../../packages/contracts/getListPublishedDrift';
-import type { GetListOverflowChainIssue, GetListOverflowChainNode } from '../../../packages/contracts/getListOverflowChain';
+import type {
+  GetListOverflowChainIssue,
+  GetListOverflowChainNode,
+} from '../../../packages/contracts/getListOverflowChain';
 import type { ReorderListItemsAssignment } from '../../../packages/contracts/reorderListItems';
 import type { SubsplashListRow } from '../types/Subsplash';
 
-const LIST_DEBUG_ENABLED = process.env.LIST_DEBUG_LOGS !== '0';
+const LIST_DEBUG_ENABLED = process.env.LIST_DEBUG_LOGS === '1';
+const MAX_DIAGNOSTIC_ENTRIES = 20;
 
 const normalizeString = (value: unknown): string | undefined => {
   if (typeof value !== 'string') {
@@ -27,15 +31,19 @@ export const summarizeSubsplashRows = (rows: SubsplashListRow[]): Record<string,
   total: rows.length,
   contentCount: rows.filter((row) => row.type !== 'list').length,
   linkCount: rows.filter((row) => row.type === 'list').length,
-  rows: rows.map(summarizeSubsplashRow),
+  rows: rows.slice(0, MAX_DIAGNOSTIC_ENTRIES).map(summarizeSubsplashRow),
+  truncated: rows.length > MAX_DIAGNOSTIC_ENTRIES,
 });
 
-type SummarizableNode = Pick<GetListOverflowChainNode, 'firestoreListId' | 'subsplashId' | 'depth' | 'count' | 'nextSubsplashListId'> & {
+type SummarizableNode = Pick<
+  GetListOverflowChainNode,
+  'firestoreListId' | 'subsplashId' | 'depth' | 'count' | 'nextSubsplashListId'
+> & {
   currentItemCount?: number;
 };
 
 export const summarizeOverflowNodes = (nodes: SummarizableNode[]): Record<string, unknown>[] =>
-  nodes.map((node) => ({
+  nodes.slice(0, MAX_DIAGNOSTIC_ENTRIES).map((node) => ({
     firestoreListId: node.firestoreListId,
     subsplashId: node.subsplashId,
     depth: node.depth,
@@ -47,7 +55,7 @@ export const summarizeOverflowNodes = (nodes: SummarizableNode[]): Record<string
 export const summarizeOverflowIssues = (
   issues: Array<GetListOverflowChainIssue | PublishedListDriftIssue>
 ): Record<string, unknown>[] =>
-  issues.map((issue) => ({
+  issues.slice(0, MAX_DIAGNOSTIC_ENTRIES).map((issue) => ({
     code: issue.code,
     severity: issue.severity,
     firestoreListId: issue.firestoreListId,
@@ -60,7 +68,7 @@ export const summarizeOverflowIssues = (
   }));
 
 export const summarizeAssignments = (assignments: ReorderListItemsAssignment[]): Record<string, unknown>[] =>
-  assignments.map((assignment) => ({
+  assignments.slice(0, MAX_DIAGNOSTIC_ENTRIES).map((assignment) => ({
     rowId: assignment.rowId,
     mediaItemId: assignment.mediaItemId,
     matchedSermonId: assignment.matchedSermonId,
@@ -111,17 +119,9 @@ export const listDebugLog = (event: string, payload?: Record<string, unknown>): 
 };
 
 export const listDebugWarn = (event: string, payload?: Record<string, unknown>): void => {
-  if (!LIST_DEBUG_ENABLED) {
-    return;
-  }
-
   logger.warn(`[list-debug] ${event}`, toSerializable(payload ?? {}));
 };
 
 export const listDebugError = (event: string, payload?: Record<string, unknown>): void => {
-  if (!LIST_DEBUG_ENABLED) {
-    return;
-  }
-
   logger.error(`[list-debug] ${event}`, toSerializable(payload ?? {}));
 };

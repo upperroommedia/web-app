@@ -516,11 +516,22 @@ export async function queueOrReplaceProcessAudioRequest(args: {
   targetUri: string;
   ownerId: string;
   onlyIfMissing?: boolean;
+  actorUid?: string;
+  requestId?: string;
 }): Promise<QueueMutationResult> {
   const { database, payload, targetUri, ownerId, onlyIfMissing = false } = args;
   const sanitizedPayload = sanitizeProcessAudioPayload(payload);
   const requestVersion = computeProcessAudioRequestVersion(sanitizedPayload);
   const sourceType = getProcessAudioSourceType(sanitizedPayload);
+  // Only the explicit cutover flag changes orchestration ownership. Never fallback after admission fails.
+  if (process.env.TASK_ORCHESTRATOR_MEDIA === 'temporal') {
+    const { admitMedia } = await import('../../functions/src/temporal/bridge');
+    const result = await admitMedia(sanitizedPayload, args.actorUid ?? 'system:firebase-event',
+      args.requestId ?? ownerId, undefined, undefined, onlyIfMissing);
+    return result.action === 'queued'
+      ? { action: 'queued', requestVersion: result.ref.requestVersion, taskId: result.ref.jobId, sourceType }
+      : { action: 'unchanged', requestVersion: result.ref.requestVersion, sourceType };
+  }
   const queue = getFunctions().taskQueue<AddIntroOutroInputType>(getProcessAudioTaskQueueNameForSource(sourceType));
 
   return await withProcessAudioQueueClaim(database, sanitizedPayload.id, ownerId, async () => {

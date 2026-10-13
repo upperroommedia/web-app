@@ -6,6 +6,7 @@ import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import { useCallback, useEffect, useRef, useState, memo, useLayoutEffect } from 'react';
 import { useTrimmerStore } from '../../context/trimmerStore';
 import { logTrimmerDebug } from '@/utils/trimmerDebug';
+import { secondsToFixedFormat, fixedFormatToSeconds } from './timeFormatting';
 
 interface EditableTimeInputProps {
   /** Which time value this input controls */
@@ -26,39 +27,6 @@ interface EditableTimeInputProps {
 const TIME_FORMAT = '00:00:00.0';
 const DIGIT_POSITIONS = [0, 1, 3, 4, 6, 7, 9]; // Character indices of editable digits
 const INVALID_CURSOR_POSITIONS = [3, 6, 9]; // Cursor positions right after separators (: and .)
-
-/**
- * Convert seconds to fixed format HH:MM:SS.m
- */
-function secondsToFixedFormat(seconds: number): string {
-  if (!isFinite(seconds) || seconds < 0) return TIME_FORMAT;
-
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  const secs = Math.floor(seconds % 60);
-  const tenths = Math.floor((seconds % 1) * 10);
-
-  // Clamp hours to 99
-  const h = Math.min(hours, 99);
-
-  return `${String(h).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}.${tenths}`;
-}
-
-/**
- * Convert fixed format HH:MM:SS.m to seconds
- */
-function fixedFormatToSeconds(str: string): number {
-  // Extract digits only
-  const digits = str.replace(/[^\d]/g, '');
-  if (digits.length < 7) return 0;
-
-  const hours = parseInt(digits.slice(0, 2), 10) || 0;
-  const minutes = parseInt(digits.slice(2, 4), 10) || 0;
-  const seconds = parseInt(digits.slice(4, 6), 10) || 0;
-  const tenths = parseInt(digits.slice(6, 7), 10) || 0;
-
-  return hours * 3600 + minutes * 60 + seconds + tenths / 10;
-}
 
 /**
  * Check if a character position is a digit (not a separator)
@@ -109,6 +77,8 @@ function EditableTimeInput({ type, label, sx, disabled, onCommitSeek, resetValue
   // Use getState() for the other bound in validation/handlers.
   const storeValue = useTrimmerStore((state) => (type === 'start' ? state.trimStart : state.trimEnd));
   const duration = useTrimmerStore((state) => state.duration);
+  const isReady = useTrimmerStore((state) => state.isReady);
+  const isDisabled = Boolean(disabled) || !isReady || !Number.isFinite(duration) || duration <= 0;
   const setTrimStart = useTrimmerStore((state) => state.setTrimStart);
   const setTrimEnd = useTrimmerStore((state) => state.setTrimEnd);
   const setCurrentTime = useTrimmerStore((state) => state.setCurrentTime);
@@ -149,8 +119,7 @@ function EditableTimeInput({ type, label, sx, disabled, onCommitSeek, resetValue
   // Reset handler. Read trimStart for end-type from store to avoid subscribing.
   const handleReset = useCallback(() => {
     const trimStart = type === 'end' ? useTrimmerStore.getState().trimStart : 0;
-    const previewTime =
-      type === 'end' ? Math.max(trimStart, originalValue - 5) : originalValue;
+    const previewTime = type === 'end' ? Math.max(trimStart, originalValue - 5) : originalValue;
     logTrimmerDebug('time-input-reset', {
       type,
       originalValue,
@@ -186,13 +155,8 @@ function EditableTimeInput({ type, label, sx, disabled, onCommitSeek, resetValue
   const handleFocus = useCallback(() => {
     setIsFocused(true);
     isEditingRef.current = true;
-    // Position cursor at the end on focus
-    setTimeout(() => {
-      if (inputRef.current) {
-        const len = inputRef.current.value.length;
-        inputRef.current.setSelectionRange(len, len);
-      }
-    }, 0);
+    // Preserve the caret or selection chosen by the user. A deferred cursor move
+    // races with Select All and can make every subsequent digit a no-op.
   }, []);
 
   const handleBlur = useCallback(() => {
@@ -222,7 +186,7 @@ function EditableTimeInput({ type, label, sx, disabled, onCommitSeek, resetValue
   const updateValue = useCallback(
     (newValue: string, cursorPos: number) => {
       const input = inputRef.current;
-      
+
       // If value hasn't changed, just move cursor directly
       if (newValue === inputValue && input) {
         input.setSelectionRange(cursorPos, cursorPos);
@@ -263,6 +227,12 @@ function EditableTimeInput({ type, label, sx, disabled, onCommitSeek, resetValue
       const input = inputRef.current;
       if (!input) return;
 
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
+        e.preventDefault();
+        input.setSelectionRange(0, input.value.length);
+        return;
+      }
+
       const selStart = input.selectionStart ?? 0;
       const selEnd = input.selectionEnd ?? 0;
       const hasSelection = selEnd > selStart;
@@ -276,7 +246,7 @@ function EditableTimeInput({ type, label, sx, disabled, onCommitSeek, resetValue
         if (hasSelection) {
           let newValue = currentValue;
           let firstDigitReplaced = false;
-          
+
           for (let i = selStart; i < selEnd; i++) {
             if (isDigitPosition(i)) {
               if (!firstDigitReplaced) {
@@ -289,7 +259,7 @@ function EditableTimeInput({ type, label, sx, disabled, onCommitSeek, resetValue
               }
             }
           }
-          
+
           // Find the first digit position in selection and move cursor to next digit
           let firstDigitPos = selStart;
           while (firstDigitPos < selEnd && !isDigitPosition(firstDigitPos)) {
@@ -437,16 +407,19 @@ function EditableTimeInput({ type, label, sx, disabled, onCommitSeek, resetValue
   );
 
   // Prevent default change behavior - we handle everything in keydown
-  const handleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    // For paste operations, try to parse and apply
-    const newValue = e.target.value;
-    if (newValue.length !== inputValue.length) {
-      // This was likely a paste - try to extract digits and apply
-      const digits = newValue.replace(/[^\d]/g, '').slice(0, 7).padEnd(7, '0');
-      const formatted = `${digits.slice(0, 2)}:${digits.slice(2, 4)}:${digits.slice(4, 6)}.${digits.slice(6, 7)}`;
-      updateValue(formatted, formatted.length);
-    }
-  }, [inputValue, updateValue]);
+  const handleChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      // For paste operations, try to parse and apply
+      const newValue = e.target.value;
+      if (newValue.length !== inputValue.length) {
+        // This was likely a paste - try to extract digits and apply
+        const digits = newValue.replace(/[^\d]/g, '').slice(0, 7).padEnd(7, '0');
+        const formatted = `${digits.slice(0, 2)}:${digits.slice(2, 4)}:${digits.slice(4, 6)}.${digits.slice(6, 7)}`;
+        updateValue(formatted, formatted.length);
+      }
+    },
+    [inputValue, updateValue]
+  );
 
   const defaultLabel = type === 'start' ? 'Start Time' : 'End Time';
 
@@ -460,7 +433,7 @@ function EditableTimeInput({ type, label, sx, disabled, onCommitSeek, resetValue
         onFocus={handleFocus}
         onBlur={handleBlur}
         onKeyDown={handleKeyDown}
-        disabled={disabled}
+        disabled={isDisabled}
         error={isInvalid}
         size="small"
         inputProps={{
@@ -485,27 +458,34 @@ function EditableTimeInput({ type, label, sx, disabled, onCommitSeek, resetValue
         }}
       />
       {/* Reset button - absolutely positioned, fades in/out */}
-      <Tooltip title={`Reset to ${resetValue === undefined ? (type === 'start' ? 'beginning' : 'end') : `saved ${type}`}`}>
-        <IconButton
-          size="small"
-          onClick={handleReset}
-          aria-label={hasChanged ? `Reset to ${type === 'start' ? 'start' : 'end'}` : undefined}
-          aria-hidden={!hasChanged}
-          tabIndex={hasChanged ? 0 : -1}
+      <Tooltip
+        title={`Reset to ${resetValue === undefined ? (type === 'start' ? 'beginning' : 'end') : `saved ${type}`}`}
+      >
+        <Box
+          component="span"
           sx={{
+            display: 'inline-flex',
             position: 'absolute',
             right: -28,
             top: '50%',
             transform: 'translateY(-50%)',
-            padding: '4px',
             opacity: hasChanged ? 1 : 0,
             pointerEvents: hasChanged ? 'auto' : 'none',
             transition: 'opacity 0.2s ease',
-            '& .MuiSvgIcon-root': { fontSize: '1.1rem' },
           }}
         >
-          <RestartAltIcon />
-        </IconButton>
+          <IconButton
+            size="small"
+            onClick={handleReset}
+            disabled={isDisabled}
+            aria-label={hasChanged ? `Reset to ${type === 'start' ? 'start' : 'end'}` : undefined}
+            aria-hidden={!hasChanged}
+            tabIndex={hasChanged ? 0 : -1}
+            sx={{ padding: '4px', '& .MuiSvgIcon-root': { fontSize: '1.1rem' } }}
+          >
+            <RestartAltIcon />
+          </IconButton>
+        </Box>
       </Tooltip>
     </Box>
   );

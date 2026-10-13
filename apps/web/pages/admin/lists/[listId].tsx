@@ -47,10 +47,6 @@ import {
   GetListOverflowChainRemoteItem,
 } from '@upperroom/contracts/getListOverflowChain';
 import type {
-  MarkListOverflowLinkInputType,
-  MarkListOverflowLinkOutputType,
-} from '@upperroom/contracts/markListOverflowLink';
-import type {
   GetListPublishedDriftInputType,
   GetListPublishedDriftOutputType,
   PublishedListDriftIssue,
@@ -74,8 +70,6 @@ import firestore, {
   limit,
   onSnapshot,
   query,
-  writeBatch,
-  updateDoc,
   where,
   type Unsubscribe,
 } from '../../../firebase/firestore';
@@ -86,8 +80,9 @@ import { sermonConverter } from '../../../types/Sermon';
 import { Sermon, uploadStatus } from '../../../types/SermonTypes';
 import type { ImageType } from '../../../types/Image';
 import { ISpeaker, speakerConverter } from '../../../types/Speaker';
-import { createOperationKey } from '../../../utils/callableConcurrency';
 import { createFunctionV2 } from '../../../utils/createFunction';
+import { submitDurableIntent } from '../../../utils/durableJobs';
+import EntityJobHistory from '../../../components/jobs/EntityJobHistory';
 import {
   buildListOverflowChainView,
   ListOverflowChainView,
@@ -149,7 +144,7 @@ interface PersistListDetailsPageOrderDependencies {
   items: ListPageItem[];
   chainView: ListOverflowChainView<ListDetailItem> | null;
   publishedDrift?: GetListPublishedDriftOutputType | null;
-  reorderListItems: (input: ReorderListItemsInputType) => Promise<ReorderListItemsOutputType>;
+  reorderListItems?: (input: ReorderListItemsInputType) => Promise<ReorderListItemsOutputType>;
 }
 
 interface SubscribeToListDetailsLiveUpdatesDependencies {
@@ -164,22 +159,12 @@ interface SubscribeToListDetailsLiveUpdatesDependencies {
   whereImpl?: typeof where;
 }
 
-const createGetListOverflowChain = createFunctionV2<
-  GetListOverflowChainInputType,
-  GetListOverflowChainOutputType
->('getlistoverflowchain');
-const createGetListPublishedDrift = createFunctionV2<
-  GetListPublishedDriftInputType,
-  GetListPublishedDriftOutputType
->('getlistpublisheddrift');
-const createMarkListOverflowLink = createFunctionV2<
-  MarkListOverflowLinkInputType,
-  MarkListOverflowLinkOutputType
->('marklistoverflowlink');
-const createReorderListItems = createFunctionV2<ReorderListItemsInputType, ReorderListItemsOutputType>(
-  'reorderlistitems'
+const createGetListOverflowChain = createFunctionV2<GetListOverflowChainInputType, GetListOverflowChainOutputType>(
+  'getlistoverflowchain'
 );
-
+const createGetListPublishedDrift = createFunctionV2<GetListPublishedDriftInputType, GetListPublishedDriftOutputType>(
+  'getlistpublisheddrift'
+);
 const getErrorMessage = (error: unknown, fallbackMessage: string): string =>
   error instanceof Error && error.message ? error.message : fallbackMessage;
 
@@ -214,16 +199,18 @@ const buildRemoteListPageItems = ({
 
     const remoteImage: ImageType | undefined = remoteItem.imageUrl
       ? {
-        id: `remote-image-${remoteItem.rowId}`,
-        size: 'original',
-        type: (remoteItem.imageType === 'wide' || remoteItem.imageType === 'banner' ? remoteItem.imageType : 'square') as ImageType['type'],
-        height: 0,
-        width: 0,
-        downloadLink: remoteItem.imageUrl,
-        name: `Subsplash ${remoteItem.rowType}`,
-        dateAddedMillis: 0,
-        ...(remoteItem.imageAverageColorHex ? { averageColorHex: remoteItem.imageAverageColorHex } : {}),
-      }
+          id: `remote-image-${remoteItem.rowId}`,
+          size: 'original',
+          type: (remoteItem.imageType === 'wide' || remoteItem.imageType === 'banner'
+            ? remoteItem.imageType
+            : 'square') as ImageType['type'],
+          height: 0,
+          width: 0,
+          downloadLink: remoteItem.imageUrl,
+          name: `Subsplash ${remoteItem.rowType}`,
+          dateAddedMillis: 0,
+          ...(remoteItem.imageAverageColorHex ? { averageColorHex: remoteItem.imageAverageColorHex } : {}),
+        }
       : undefined;
 
     return {
@@ -293,7 +280,11 @@ const buildSortableListRowViewModel = (item: ListPageItem): SortableListRowViewM
     rowId: item.rowId,
     title: item.title || `Sermon ${item.id}`,
     dateString: item.dateString,
-    speakerSummary: item.speakers?.map((speaker) => speaker.name).filter(Boolean).join(', ') || undefined,
+    speakerSummary:
+      item.speakers
+        ?.map((speaker) => speaker.name)
+        .filter(Boolean)
+        .join(', ') || undefined,
     rowTypeLabel: item.rowType && item.rowType !== 'media-item' ? formatListType(item.rowType) : undefined,
     statusLabel: isPlaceholder ? 'Subsplash only' : isSyncedToList ? 'Synced' : 'Local only',
     statusColor: isSyncedToList ? 'success' : isPlaceholder ? 'warning' : 'default',
@@ -310,9 +301,7 @@ const buildSortableListRowViewModel = (item: ListPageItem): SortableListRowViewM
   };
 };
 
-export const canAutoResolvePublishedDrift = (
-  publishedDrift?: GetListPublishedDriftOutputType | null
-): boolean => {
+export const canAutoResolvePublishedDrift = (publishedDrift?: GetListPublishedDriftOutputType | null): boolean => {
   if (!publishedDrift || publishedDrift.inSync) {
     return false;
   }
@@ -322,9 +311,7 @@ export const canAutoResolvePublishedDrift = (
   );
 };
 
-export const getPublishedDriftIssueMessages = (
-  publishedDrift?: GetListPublishedDriftOutputType | null
-): string[] => {
+export const getPublishedDriftIssueMessages = (publishedDrift?: GetListPublishedDriftOutputType | null): string[] => {
   if (!publishedDrift || publishedDrift.inSync) {
     return [];
   }
@@ -375,10 +362,7 @@ const normalizeListItemPositions = (items: ListPageItem[]): ListPageItem[] =>
     logicalPosition: index + 1,
   }));
 
-const buildPendingLocalListItems = (
-  list: List,
-  rootItems: LoadListDetailsPageItem[]
-): ListPageItem[] =>
+const buildPendingLocalListItems = (list: List, rootItems: LoadListDetailsPageItem[]): ListPageItem[] =>
   normalizeListItemPositions(
     rootItems.map((item, index) => ({
       ...item,
@@ -433,67 +417,6 @@ const resolveAssignmentForItem = (
   return undefined;
 };
 
-const buildFirestoreOrderUpdatePlan = ({
-  rootListId,
-  items,
-  assignments,
-}: {
-  rootListId: string;
-  items: ListPageItem[];
-  assignments: ReorderListItemsAssignment[];
-}) => {
-  return items
-    .filter((item) => item.isTrackedInFirebase !== false)
-    .map((item, index) => {
-      const rowAssignment = resolveAssignmentForItem(item, assignments);
-      const targetListId = rowAssignment?.firestoreListId ?? item.sourceListId ?? rootListId;
-
-      return {
-        item,
-        sourceListId: item.sourceListId ?? rootListId,
-        targetListId,
-        logicalPosition: index + 1,
-      };
-    });
-};
-
-const syncFirestoreListItemsOrder = async ({
-  rootListId,
-  items,
-  assignments,
-}: {
-  rootListId: string;
-  items: ListPageItem[];
-  assignments: ReorderListItemsAssignment[];
-}): Promise<void> => {
-  const batch = writeBatch(firestore);
-  const updatePlan = buildFirestoreOrderUpdatePlan({ rootListId, items, assignments });
-
-  updatePlan.forEach(({ item, targetListId, logicalPosition }) => {
-    const assignment = resolveAssignmentForItem(item, assignments);
-    const physicalPlacement =
-      assignment
-        ? {
-          firestoreListId: targetListId,
-          subsplashListId: assignment.subsplashListId,
-          overflowDepth: assignment.overflowDepth,
-          position: assignment.position,
-        }
-        : undefined;
-
-    batch.set(
-      doc(firestore, 'lists', rootListId, 'listItems', item.id),
-      {
-        position: logicalPosition,
-        ...(physicalPlacement ? { physicalPlacement } : {}),
-      },
-      { merge: true }
-    );
-  });
-
-  await batch.commit();
-};
-
 export const applyReorderAssignmentsToItems = ({
   items,
   assignments,
@@ -533,71 +456,30 @@ export const applyReorderAssignmentsToItems = ({
   );
 };
 
+/** Admit order changes; this deliberately returns the unchanged draft, never a fabricated remote result. */
 export const persistListDetailsPageOrder = async ({
   rootListId,
-  rootSubsplashId,
   items,
   chainView,
   publishedDrift,
-  reorderListItems,
 }: PersistListDetailsPageOrderDependencies): Promise<ListPageItem[]> => {
-  if (!chainView || chainView.canSaveOrder === false || (publishedDrift && !publishedDrift.canReorder)) {
-    return items;
-  }
-
-  if (!rootSubsplashId) {
-    await Promise.all(
-      items.map((item, index) =>
-        updateDoc(doc(firestore, 'lists', rootListId, 'listItems', item.id), {
-          position: index + 1,
-        })
-      )
-    );
-    return normalizeListItemPositions(items);
-  }
-
-  const itemsMissingRemoteRowId = items.filter(
-    (item) => !item.rowId && !item.subsplashId
-  );
-
-  if (itemsMissingRemoteRowId.length > 0) {
-    throw new Error('One or more remote rows are missing row IDs. Refresh and try again.');
-  }
-
-  const reorderResult =
-    items.length > 0
-      ? await reorderListItems({
+  if (!chainView || chainView.canSaveOrder === false || (publishedDrift && !publishedDrift.canReorder)) return items;
+  await submitDurableIntent({
+    kind: 'list.reorder',
+    entity: { type: 'list', id: rootListId },
+    payload: {
+      input: {
         rootListId,
         logicalItemOrder: items.map((item, index) => ({
           ...(item.rowId ? { rowId: item.rowId } : {}),
           ...(item.subsplashId ? { mediaItemId: item.subsplashId } : {}),
+          ...(item.isTrackedInFirebase !== false ? { sermonId: item.id } : {}),
           position: index + 1,
         })),
-        operationKey: createOperationKey('list-admin-reorder', rootListId),
-      })
-      : {
-        status: 'success' as const,
-        message: 'No remote items to reorder.',
-        rootListId,
-        subsplashListId: rootSubsplashId,
-        assignments: [],
-      };
-
-  if (reorderResult.status !== 'success') {
-    throw new Error(reorderResult.message || 'Subsplash reorder failed.');
-  }
-
-  await syncFirestoreListItemsOrder({
-    rootListId,
-    items,
-    assignments: reorderResult.assignments,
+      },
+    },
   });
-
-  return applyReorderAssignmentsToItems({
-    items,
-    assignments: reorderResult.assignments,
-    chainView,
-  });
+  return items;
 };
 
 export const subscribeToListDetailsLiveUpdates = ({
@@ -725,14 +607,12 @@ export const loadListDetailsPageData = async ({
   const [listData, rootItems] =
     prefetchedRoot && 'rootListId' in prefetchedRoot && prefetchedRoot.rootListId === chainState.rootListId
       ? [prefetchedRoot.list, prefetchedRoot.items]
-      : await Promise.all([
-          getListDoc(chainState.rootListId),
-          getRootItems(chainState.rootListId),
-        ]);
+      : await Promise.all([getListDoc(chainState.rootListId), getRootItems(chainState.rootListId)]);
 
-  const displayItems = chainState.remoteItems && chainState.remoteItems.length > 0
-    ? buildRemoteListPageItems({ remoteItems: chainState.remoteItems, rootItems })
-    : rootItems;
+  const displayItems =
+    chainState.remoteItems && chainState.remoteItems.length > 0
+      ? buildRemoteListPageItems({ remoteItems: chainState.remoteItems, rootItems })
+      : rootItems;
   const chainView = buildListOverflowChainView(chainState, {
     [chainState.rootListId]: displayItems,
   });
@@ -821,15 +701,13 @@ const ListDetailsPage = () => {
       };
 
       const getRootItems = async (rootListId: string): Promise<LoadListDetailsPageItem[]> => {
-        const listItemsRef = collection(
-          firestore,
-          'lists',
-          rootListId,
-          'listItems'
-        ).withConverter(sermonConverter);
+        const listItemsRef = collection(firestore, 'lists', rootListId, 'listItems').withConverter(sermonConverter);
         const [canonicalMembershipSnapshot, listItemsSnapshot] = await Promise.all([
           getDocs(
-            query(collectionGroup(firestore, 'sermonLists').withConverter(sermonListConverter), where('id', '==', rootListId))
+            query(
+              collectionGroup(firestore, 'sermonLists').withConverter(sermonListConverter),
+              where('id', '==', rootListId)
+            )
           ),
           getDocs(listItemsRef),
         ]);
@@ -850,9 +728,7 @@ const ListDetailsPage = () => {
               const data = itemDoc.data() as Partial<ListDetailItem>;
               const derivedUploadStatus =
                 data.uploadStatus ??
-                (data.subsplashId
-                  ? ({ status: uploadStatus.UPLOADED } as listUploadStatus)
-                  : undefined);
+                (data.subsplashId ? ({ status: uploadStatus.UPLOADED } as listUploadStatus) : undefined);
 
               return {
                 ...data,
@@ -898,17 +774,14 @@ const ListDetailsPage = () => {
       });
 
       try {
-        const result = await loadListDetailsPageDataSingleFlight(
-          `${listId}:${reloadNonce}`,
-          {
-            listId,
-            getListOverflowChain: createGetListOverflowChain,
-            getListDoc,
-            getRootItems,
-            localRootLoad,
-            replaceRoute: (href) => router.replace(href),
-          }
-        );
+        const result = await loadListDetailsPageDataSingleFlight(`${listId}:${reloadNonce}`, {
+          listId,
+          getListOverflowChain: createGetListOverflowChain,
+          getListDoc,
+          getRootItems,
+          localRootLoad,
+          replaceRoute: (href) => router.replace(href),
+        });
 
         remoteResolved = true;
 
@@ -1023,7 +896,13 @@ const ListDetailsPage = () => {
   }, [listId, publishedDrift?.rootListId, publishedDrift?.inSync]);
 
   useEffect(() => {
-    if (!isAdvancedDebugOpen || !list?.subsplashId || !chainView?.rootListId || publishedDrift || isPublishedDriftLoading) {
+    if (
+      !isAdvancedDebugOpen ||
+      !list?.subsplashId ||
+      !chainView?.rootListId ||
+      publishedDrift ||
+      isPublishedDriftLoading
+    ) {
       return;
     }
 
@@ -1093,8 +972,7 @@ const ListDetailsPage = () => {
   const modifiers = useMemo(() => [restrictToVerticalAxis, restrictToContainer], [restrictToContainer]);
 
   const hasOrderChanges =
-    items.length !== originalItems.length ||
-    items.some((item, index) => item.id !== originalItems[index]?.id);
+    items.length !== originalItems.length || items.some((item, index) => item.id !== originalItems[index]?.id);
   // Only committed order state should affect external subscription callbacks.
   useEffect(() => {
     hasOrderChangesRef.current = hasOrderChanges;
@@ -1129,10 +1007,7 @@ const ListDetailsPage = () => {
     [renderedItems]
   );
   const physicalListHasOverflowLink = useMemo(
-    () =>
-      new Map(
-        (chainView?.nodes ?? []).map((node) => [node.firestoreListId, Boolean(node.nextSubsplashListId)])
-      ),
+    () => new Map((chainView?.nodes ?? []).map((node) => [node.firestoreListId, Boolean(node.nextSubsplashListId)])),
     [chainView?.nodes]
   );
   const hasMoreVisibleItems = renderedItems.length < items.length;
@@ -1140,24 +1015,27 @@ const ListDetailsPage = () => {
     ? `https://dashboard.subsplash.com/-d/#/library/lists/standard/${list.subsplashId}`
     : undefined;
 
-  const handleDragEnd = useCallback((event: DragEndEvent) => {
-    if (isReadOnlySurface) {
-      return;
-    }
+  const handleDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      if (isReadOnlySurface) {
+        return;
+      }
 
-    const { active, over } = event;
+      const { active, over } = event;
 
-    if (!over || active.id === over.id) {
-      return;
-    }
+      if (!over || active.id === over.id) {
+        return;
+      }
 
-    setItems((previousItems) => {
-      const oldIndex = previousItems.findIndex((item) => item.id === active.id);
-      const newIndex = previousItems.findIndex((item) => item.id === over.id);
+      setItems((previousItems) => {
+        const oldIndex = previousItems.findIndex((item) => item.id === active.id);
+        const newIndex = previousItems.findIndex((item) => item.id === over.id);
 
-      return normalizeListItemPositions(arrayMove(previousItems, oldIndex, newIndex));
-    });
-  }, [isReadOnlySurface]);
+        return normalizeListItemPositions(arrayMove(previousItems, oldIndex, newIndex));
+      });
+    },
+    [isReadOnlySurface]
+  );
 
   const revertOrder = useCallback(() => {
     setItems(cloneListItems(originalItems));
@@ -1168,25 +1046,21 @@ const ListDetailsPage = () => {
       return;
     }
 
-    const previousItems = cloneListItems(originalItems);
     isSavingRef.current = true;
     setIsSaving(true);
 
     try {
-      const persistedItems = await persistListDetailsPageOrder({
+      await persistListDetailsPageOrder({
         rootListId: chainView?.rootListId ?? listId,
         rootSubsplashId: list.subsplashId,
         items,
         chainView,
         publishedDrift,
-        reorderListItems: createReorderListItems,
       });
 
-      setItems(cloneListItems(persistedItems));
-      setOriginalItems(cloneListItems(persistedItems));
+      // Keep the draft until the server-authored membership snapshots confirm it.
     } catch (error) {
       console.error('Failed to save list order', error);
-      setItems(previousItems);
       reportHandledError(error, {
         area: 'admin-list-details',
         action: 'save-order',
@@ -1195,43 +1069,48 @@ const ListDetailsPage = () => {
           rootListId: chainView?.rootListId ?? listId,
         },
       });
-      alert(getErrorMessage(error, 'Failed to save list order. The view was reset to the last synced order.'));
+      alert(getErrorMessage(error, 'Unable to confirm the request. Your order draft has been kept.'));
     } finally {
       isSavingRef.current = false;
       setIsSaving(false);
     }
-  }, [chainView, hasOrderChanges, isReadOnlySurface, items, list, listId, originalItems, publishedDrift]);
+  }, [chainView, hasOrderChanges, isReadOnlySurface, items, list, listId, publishedDrift]);
 
-  const markOverflowLink = useCallback(async (item: ListPageItem) => {
-    if (!chainView || !item.rowId || isReadOnlySurface) {
-      return;
-    }
+  const markOverflowLink = useCallback(
+    async (item: ListPageItem) => {
+      if (!chainView || !item.rowId || isReadOnlySurface) {
+        return;
+      }
 
-    setMarkingOverflowRowId(item.rowId);
-    try {
-      await createMarkListOverflowLink({
-        rootListId: chainView.rootListId,
-        physicalFirestoreListId: item.sourceListId,
-        rowId: item.rowId,
-      });
-      setReloadNonce((value) => value + 1);
-    } catch (error) {
-      console.error('Failed to mark overflow list row', error);
-      reportHandledError(error, {
-        area: 'admin-list-details',
-        action: 'mark-overflow-link',
-        extras: {
-          listId,
-          rootListId: chainView.rootListId,
-          rowId: item.rowId,
-          sourceListId: item.sourceListId,
-        },
-      });
-      alert(getErrorMessage(error, 'Failed to mark this list row as the overflow page.'));
-    } finally {
-      setMarkingOverflowRowId(null);
-    }
-  }, [chainView, isReadOnlySurface, listId]);
+      setMarkingOverflowRowId(item.rowId);
+      try {
+        await submitDurableIntent({
+          kind: 'list.reconcile',
+          entity: { type: 'list', id: chainView.rootListId },
+          payload: {
+            operation: 'markOverflow',
+            input: { rootListId: chainView.rootListId, physicalFirestoreListId: item.sourceListId, rowId: item.rowId },
+          },
+        });
+      } catch (error) {
+        console.error('Failed to mark overflow list row', error);
+        reportHandledError(error, {
+          area: 'admin-list-details',
+          action: 'mark-overflow-link',
+          extras: {
+            listId,
+            rootListId: chainView.rootListId,
+            rowId: item.rowId,
+            sourceListId: item.sourceListId,
+          },
+        });
+        alert(getErrorMessage(error, 'Failed to mark this list row as the overflow page.'));
+      } finally {
+        setMarkingOverflowRowId(null);
+      }
+    },
+    [chainView, isReadOnlySurface, listId]
+  );
 
   const handleOpenSermon = useCallback(
     (sermonId: string) => {
@@ -1268,14 +1147,11 @@ const ListDetailsPage = () => {
       <Head>
         <title>{title}</title>
         <meta property="og:title" content={title} key="title" />
-        <meta
-          name="description"
-          content={`Manage sermons in the ${title} list.`}
-          key="description"
-        />
+        <meta name="description" content={`Manage sermons in the ${title} list.`} key="description" />
       </Head>
 
       <Box sx={{ maxWidth: 1200, mx: 'auto', px: { xs: 2, sm: 3 }, py: { xs: 3, sm: 4 } }}>
+        <EntityJobHistory entity={{ type: 'list', id: chainView?.rootListId ?? listId }} />
         <Box sx={{ mb: 3 }}>
           <Box>
             <Breadcrumbs separator={<NavigateNextIcon fontSize="small" />} sx={{ mb: 1 }}>
@@ -1303,14 +1179,16 @@ const ListDetailsPage = () => {
           <>
             {loadError ? (
               <Alert severity="error" sx={{ mb: 3 }}>
-                {loadError} The local list is shown for reference; reorder and overflow actions remain locked until verification succeeds.
+                {loadError} The local list is shown for reference; reorder and overflow actions remain locked until
+                verification succeeds.
                 <Button color="inherit" size="small" onClick={() => setReloadNonce((value) => value + 1)}>
                   Retry verification
                 </Button>
               </Alert>
             ) : isVerifyingRemote ? (
               <Alert severity="info" sx={{ mb: 3 }}>
-                Showing local list data while verifying the full Subsplash overflow chain. Reorder and overflow actions will unlock after verification.
+                Showing local list data while verifying the full Subsplash overflow chain. Reorder and overflow actions
+                will unlock after verification.
               </Alert>
             ) : null}
             {hasPendingReload ? (
@@ -1354,7 +1232,7 @@ const ListDetailsPage = () => {
                           component={Link}
                           href={`/admin/speakers/${associatedSpeaker.id}`}
                           clickable
-                          avatar={(
+                          avatar={
                             <AvatarWithDefaultImage
                               altName={associatedSpeaker.name}
                               image={associatedSpeaker.images?.find((image) => image.type === 'square')}
@@ -1362,7 +1240,7 @@ const ListDetailsPage = () => {
                               height={20}
                               borderRadius={999}
                             />
-                          )}
+                          }
                           label={associatedSpeaker.name}
                           size="small"
                           variant="outlined"
@@ -1429,7 +1307,14 @@ const ListDetailsPage = () => {
                         </Box>
                       </Box>
 
-                      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: { xs: 'flex-start', sm: 'flex-end' }, gap: 1 }}>
+                      <Box
+                        sx={{
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: { xs: 'flex-start', sm: 'flex-end' },
+                          gap: 1,
+                        }}
+                      >
                         {list.subsplashId ? (
                           <Chip
                             icon={<CheckCircleIcon />}
@@ -1438,12 +1323,7 @@ const ListDetailsPage = () => {
                             size="small"
                           />
                         ) : (
-                          <Chip
-                            icon={<PendingIcon />}
-                            label="Local only"
-                            color="warning"
-                            size="small"
-                          />
+                          <Chip icon={<PendingIcon />} label="Local only" color="warning" size="small" />
                         )}
                         {subsplashListUrl ? (
                           <Button

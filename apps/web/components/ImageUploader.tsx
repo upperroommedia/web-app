@@ -1,3 +1,4 @@
+import Alert from '@mui/material/Alert';
 import Button from '@mui/material/Button';
 import Box from '@mui/material/Box';
 import Chip from '@mui/material/Chip';
@@ -8,10 +9,7 @@ import Stack from '@mui/material/Stack';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import getCroppedImg, {
-  CroppedImageData,
-  resolveImageBackgroundColorHex,
-} from '../utils/cropImage';
+import getCroppedImg, { CroppedImageData, resolveImageBackgroundColorHex } from '../utils/cropImage';
 
 import Cropper, { Area, MediaSize, Size } from 'react-easy-crop';
 import styles from '../styles/Cropper.module.css';
@@ -90,6 +88,8 @@ const ImageUploader = (props: Props) => {
   const [backgroundFillMode, setBackgroundFillMode] = useState<BackgroundFillMode>('auto');
   const [customBackgroundColorHex, setCustomBackgroundColorHex] = useState('#000000');
   const [isCropping, setIsCropping] = useState(false);
+  const [cropError, setCropError] = useState<string>();
+  const ownedSourceUrlRef = useRef<string | undefined>(undefined);
   const [isPickingColor, setIsPickingColor] = useState(false);
   const [mediaSize, setMediaSize] = useState<MediaSize | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -103,10 +103,7 @@ const ImageUploader = (props: Props) => {
   }, []);
 
   useEffect(() => {
-    if (!imgSrc) {
-      setAutoBackgroundColorHex('#9fccb9');
-      return;
-    }
+    if (!imgSrc) return;
 
     let cancelled = false;
     resolveImageBackgroundColorHex(imgSrc)
@@ -157,6 +154,7 @@ const ImageUploader = (props: Props) => {
 
   useEffect(() => {
     return () => {
+      if (ownedSourceUrlRef.current) URL.revokeObjectURL(ownedSourceUrlRef.current);
       previewResizeObserverRef.current?.disconnect();
       if (rotationFrameRef.current !== null) {
         window.cancelAnimationFrame(rotationFrameRef.current);
@@ -226,10 +224,12 @@ const ImageUploader = (props: Props) => {
       setZoom(1);
       setMediaSize(null);
       setBackgroundFillMode('auto');
+      setAutoBackgroundColorHex('#9fccb9');
       setCustomBackgroundColorHex('#000000');
-      const reader = new FileReader();
-      reader.addEventListener('load', () => setImgSrc(reader.result?.toString() || ''));
-      reader.readAsDataURL(e.target.files[0]);
+      if (ownedSourceUrlRef.current) URL.revokeObjectURL(ownedSourceUrlRef.current);
+      ownedSourceUrlRef.current = URL.createObjectURL(e.target.files[0]);
+      setImgSrc(ownedSourceUrlRef.current);
+      setCropError(undefined);
       if (props.title === '') {
         props.setTitle(e.target.files[0].name.split('.')[0]);
       }
@@ -242,14 +242,20 @@ const ImageUploader = (props: Props) => {
   };
 
   const handleClose = useCallback(() => {
+    if (ownedSourceUrlRef.current) URL.revokeObjectURL(ownedSourceUrlRef.current);
+    ownedSourceUrlRef.current = undefined;
     setImgSrc(undefined);
     setIsCropping(false);
     props.onCancel?.();
   }, [props]);
 
   const handleMediaLoaded = useCallback((loadedMediaSize: MediaSize) => {
-    setMediaSize((currentMediaSize) => (areMediaSizesEqual(currentMediaSize, loadedMediaSize) ? currentMediaSize : loadedMediaSize));
-    setCrop((currentCrop) => (Math.abs(currentCrop.x) < 1 && Math.abs(currentCrop.y) < 1 ? currentCrop : { x: 0, y: 0 }));
+    setMediaSize((currentMediaSize) =>
+      areMediaSizesEqual(currentMediaSize, loadedMediaSize) ? currentMediaSize : loadedMediaSize
+    );
+    setCrop((currentCrop) =>
+      Math.abs(currentCrop.x) < 1 && Math.abs(currentCrop.y) < 1 ? currentCrop : { x: 0, y: 0 }
+    );
   }, []);
 
   const scheduleRotationUpdate = useCallback((nextRotation: number) => {
@@ -307,7 +313,7 @@ const ImageUploader = (props: Props) => {
       title="Crop Image"
       open={true}
       setOpen={(bool) => {
-        if (!bool) {
+        if (!bool && !isCropping) {
           handleClose();
         }
       }}
@@ -322,6 +328,7 @@ const ImageUploader = (props: Props) => {
 
             try {
               setIsCropping(true);
+              setCropError(undefined);
               const croppedImage = await getCroppedImg(
                 imgSrc,
                 croppedAreaPixels,
@@ -329,10 +336,20 @@ const ImageUploader = (props: Props) => {
                 props.type,
                 backgroundColorHex
               );
+              if (!croppedImage)
+                throw new Error('This browser could not prepare the image. Try another image or browser.');
               if (croppedImage) {
-                await props.onFinish(croppedImage, `${props.title}-${props.type}.${imageType}`);
-                handleClose();
+                try {
+                  await props.onFinish(croppedImage, `${props.title}-${props.type}.${imageType}`);
+                  handleClose();
+                } finally {
+                  if (croppedImage.url.startsWith('blob:')) URL.revokeObjectURL(croppedImage.url);
+                }
               }
+            } catch (error) {
+              setCropError(
+                error instanceof Error ? error.message : 'Unable to prepare this image. Your selection has been kept.'
+              );
             } finally {
               setIsCropping(false);
             }
@@ -347,6 +364,11 @@ const ImageUploader = (props: Props) => {
       }
     >
       <div>
+        {cropError && (
+          <Alert severity="error" sx={{ mb: 1 }}>
+            {cropError}
+          </Alert>
+        )}
         <Box
           ref={previewContainerRef}
           className={styles.cropContainer}
@@ -431,6 +453,7 @@ const ImageUploader = (props: Props) => {
                 backdropFilter: 'blur(2px)',
                 zIndex: 2,
                 animation: 'cropPulse 1.4s ease-in-out infinite',
+                '@media (prefers-reduced-motion: reduce)': { animation: 'none' },
                 '@keyframes cropPulse': {
                   '0%': { opacity: 0.8 },
                   '50%': { opacity: 1 },
@@ -482,7 +505,9 @@ const ImageUploader = (props: Props) => {
                 }}
               />
               <Typography variant="body2" color="text.secondary">
-                {backgroundFillMode === 'auto' ? `Auto ${autoBackgroundColorHex}` : `Custom ${customBackgroundColorHex}`}
+                {backgroundFillMode === 'auto'
+                  ? `Auto ${autoBackgroundColorHex}`
+                  : `Custom ${customBackgroundColorHex}`}
               </Typography>
             </Stack>
             <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap' }}>

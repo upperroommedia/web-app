@@ -8,7 +8,17 @@ import type {
   SearchForFacetValuesProps,
   SearchResponses,
 } from 'algoliasearch';
-import firestore, { collection, query, getDocs, where, orderBy, QueryConstraint } from '../firebase/firestore';
+import firestore, {
+  collection,
+  query,
+  getDocs,
+  where,
+  orderBy,
+  limit,
+  startAfter,
+  QueryConstraint,
+  QueryDocumentSnapshot,
+} from '../firebase/firestore';
 import { listConverter } from '../types/List';
 import { sermonConverter } from '../types/Sermon';
 import { speakerConverter } from '../types/Speaker';
@@ -33,6 +43,29 @@ type QueryRequestParamContainer = Record<string, unknown> & {
  */
 export function createMockAlgoliaSearchClient(options: MockAlgoliaClientOptions): SearchClient {
   const { userId, canSearchAllSermons } = options;
+  // Bound each emulator listen response; large catalog streams can stall before CURRENT.
+  const loadSermons = async (constraints: QueryConstraint[]) => {
+    const sermons = [];
+    let cursor: QueryDocumentSnapshot<ReturnType<typeof sermonConverter.fromFirestore>> | undefined;
+    const sermonsRef = collection(firestore, 'sermons').withConverter(sermonConverter);
+    for (;;) {
+      const snapshot = await getDocs(
+        query(sermonsRef, ...constraints, limit(50), ...(cursor ? [startAfter(cursor)] : []))
+      );
+      sermons.push(...snapshot.docs.map((doc) => doc.data()));
+      if (snapshot.size < 50) return sermons;
+      cursor = snapshot.docs[snapshot.docs.length - 1];
+    }
+  };
+  const pendingSermonReads = new Map<string, ReturnType<typeof loadSermons>>();
+  // Share only overlapping scans in this authenticated client; later searches remain fresh.
+  const readSermons = (constraints: QueryConstraint[], key: string) => {
+    const pending = pendingSermonReads.get(key);
+    if (pending) return pending;
+    const request = loadSermons(constraints).finally(() => pendingSermonReads.delete(key));
+    pendingSermonReads.set(key, request);
+    return request;
+  };
   return {
     search: async <T = Record<string, unknown>>(
       searchMethodParams: SearchMethodParams | LegacySearchMethodProps
@@ -259,10 +292,7 @@ export function createMockAlgoliaSearchClient(options: MockAlgoliaClientOptions)
             constraints.push(orderBy('createdAtMillis', 'desc'));
 
             // Get all sermons first (we'll filter and paginate in memory)
-            const sermonsRef = collection(firestore, 'sermons');
-            const baseQuery = query(sermonsRef.withConverter(sermonConverter), ...constraints);
-            const allSermonsSnapshot = await getDocs(baseQuery);
-            let allSermons = allSermonsSnapshot.docs.map((doc) => doc.data());
+            let allSermons = await readSermons(constraints, JSON.stringify({ filters, facetFilters }));
 
             // Apply text search if query is provided
             if (searchQuery) {
@@ -380,10 +410,7 @@ export function createMockAlgoliaSearchClient(options: MockAlgoliaClientOptions)
         facetConstraints.push(orderBy('createdAtMillis', 'desc'));
 
         // Get sermons to calculate facets
-        const sermonsRef = collection(firestore, 'sermons');
-        const sermonsQuery = query(sermonsRef.withConverter(sermonConverter), ...facetConstraints);
-        const sermonsSnapshot = await getDocs(sermonsQuery);
-        const allSermons = sermonsSnapshot.docs.map((doc) => doc.data());
+        const allSermons = await readSermons(facetConstraints, 'facet-values');
 
         // Calculate facet values based on attribute
         const facetMap = new Map<string, number>();

@@ -1,3 +1,5 @@
+import { FieldValue } from 'firebase-admin/firestore';
+import { createDurableWriteBatch } from './temporal/publishing/durableOperationContext';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { canUserRolePublish } from '@upperroom/shared/types/User';
 import { OverflowBehavior, type List } from '@upperroom/shared/types/List';
@@ -62,188 +64,209 @@ const findListRecordBySubsplashId = async (
   };
 };
 
-const marklistoverflowlink = onCall(
-  { secrets: subsplashSecretsWithRuntimeAlerts },
-  async (request: CallableRequest<MarkListOverflowLinkInputType>): Promise<MarkListOverflowLinkOutputType> => {
-    if (!canUserRolePublish(request.auth?.token.role)) {
+export const markListOverflowLinkDomain = async (
+  request: Pick<CallableRequest<MarkListOverflowLinkInputType>, 'data' | 'auth'>
+): Promise<MarkListOverflowLinkOutputType> => {
+  if (!canUserRolePublish(request.auth?.token.role)) {
+    throw new HttpsError(
+      'unauthenticated',
+      'The function must be called while authenticated with publish permissions.'
+    );
+  }
+
+  const rootListId = normalizeString(request.data?.rootListId);
+  const physicalFirestoreListId = normalizeString(request.data?.physicalFirestoreListId);
+  const rowId = normalizeString(request.data?.rowId);
+  const clear = request.data?.clear === true;
+
+  if (!rootListId || !physicalFirestoreListId || !rowId) {
+    throw new HttpsError(
+      'invalid-argument',
+      'rootListId, physicalFirestoreListId, and rowId are required.'
+    );
+  }
+
+  try {
+    const chainState = await getOverflowChainState(rootListId);
+    if (chainState.rootListId !== rootListId) {
+      throw new HttpsError('failed-precondition', `List ${rootListId} is not the logical root.`);
+    }
+
+    const physicalNode = chainState.nodes.find((node) => node.firestoreListId === physicalFirestoreListId);
+    if (!physicalNode) {
       throw new HttpsError(
-        'unauthenticated',
-        'The function must be called while authenticated with publish permissions.'
+        'failed-precondition',
+        `List ${physicalFirestoreListId} is not part of the overflow chain for ${rootListId}.`
       );
     }
 
-    const rootListId = normalizeString(request.data?.rootListId);
-    const physicalFirestoreListId = normalizeString(request.data?.physicalFirestoreListId);
-    const rowId = normalizeString(request.data?.rowId);
-    const clear = request.data?.clear === true;
-
-    if (!rootListId || !physicalFirestoreListId || !rowId) {
+    const physicalSubsplashListId = normalizeString(physicalNode.subsplashId);
+    if (!physicalSubsplashListId) {
       throw new HttpsError(
-        'invalid-argument',
-        'rootListId, physicalFirestoreListId, and rowId are required.'
+        'failed-precondition',
+        `List ${physicalFirestoreListId} is not linked to Subsplash.`
       );
     }
 
-    try {
-      const chainState = await getOverflowChainState(rootListId);
-      if (chainState.rootListId !== rootListId) {
-        throw new HttpsError('failed-precondition', `List ${rootListId} is not the logical root.`);
-      }
-
-      const physicalNode = chainState.nodes.find((node) => node.firestoreListId === physicalFirestoreListId);
-      if (!physicalNode) {
+    return await withSubsplashLocks([`list:${physicalSubsplashListId}`], async () => {
+      const token = await authenticateSubsplash();
+      const currentRows = await getFullListRows(physicalSubsplashListId, token);
+      const currentRow = currentRows.find((row) => normalizeString(row.id) === rowId);
+      if (!currentRow) {
         throw new HttpsError(
           'failed-precondition',
-          `List ${physicalFirestoreListId} is not part of the overflow chain for ${rootListId}.`
+          `Row ${rowId} does not exist on Subsplash list ${physicalSubsplashListId}.`
         );
       }
 
-      const physicalSubsplashListId = normalizeString(physicalNode.subsplashId);
-      if (!physicalSubsplashListId) {
-        throw new HttpsError(
-          'failed-precondition',
-          `List ${physicalFirestoreListId} is not linked to Subsplash.`
-        );
-      }
+      const physicalRecord = await getListRecordById(physicalFirestoreListId);
+      const rootRecord = await getListRecordById(rootListId);
 
-      return await withSubsplashLocks([`list:${physicalSubsplashListId}`], async () => {
-        const token = await authenticateSubsplash();
-        const currentRows = await getFullListRows(physicalSubsplashListId, token);
-        const currentRow = currentRows.find((row) => normalizeString(row.id) === rowId);
-        if (!currentRow) {
-          throw new HttpsError(
-            'failed-precondition',
-            `Row ${rowId} does not exist on Subsplash list ${physicalSubsplashListId}.`
-          );
-        }
-
-        const physicalRecord = await getListRecordById(physicalFirestoreListId);
-        const rootRecord = await getListRecordById(rootListId);
-
-        if (clear) {
-          await firestore.collection('lists').doc(physicalFirestoreListId).set(
-            {
-              moreSermonsRef: firebaseAdmin.firestore.FieldValue.delete(),
-              manualOverflowRowId: firebaseAdmin.firestore.FieldValue.delete(),
-              manualOverflowTargetSubsplashId: firebaseAdmin.firestore.FieldValue.delete(),
-              updatedAtMillis: Date.now(),
-            },
-            { merge: true }
-          );
-
-          await syncOverflowChainMetadata(rootRecord.data.subsplashId!, token);
-
-          return {
-            status: 'success',
-            rootListId,
-            physicalFirestoreListId,
-            cleared: true,
-          };
-        }
-
-        if (currentRow.type !== 'list') {
-          throw new HttpsError('failed-precondition', `Row ${rowId} is not a list row.`);
-        }
-
-        const linkedSubsplashListId = normalizeString(currentRow._embedded?.list?.id);
-        const linkedListTitle =
-          normalizeString(currentRow._embedded?.list?.title) ??
-          normalizeString((currentRow._embedded?.list as { name?: string } | undefined)?.name);
-        if (!linkedSubsplashListId) {
-          throw new HttpsError(
-            'failed-precondition',
-            `List row ${rowId} does not expose a linked Subsplash list id.`
-          );
-        }
-
-        const existingTargetSubsplashId = normalizeString(physicalRecord.data.moreSermonsRef);
-        if (existingTargetSubsplashId && existingTargetSubsplashId !== linkedSubsplashListId) {
-          throw new HttpsError(
-            'failed-precondition',
-            `List ${physicalFirestoreListId} already links to a different overflow page. Clear it first before selecting a new one.`
-          );
-        }
-
-        const targetRecord = await findListRecordBySubsplashId(linkedSubsplashListId);
-        if (targetRecord?.data.rootListId && targetRecord.data.rootListId !== rootListId) {
-          throw new HttpsError(
-            'failed-precondition',
-            `Subsplash list ${linkedSubsplashListId} already belongs to a different logical root in Firestore.`
-          );
-        }
-
-        const reorderedRows =
-          currentRows[currentRows.length - 1]?.id === currentRow.id
-            ? currentRows
-            : [
-                ...currentRows.filter((row) => row.id !== currentRow.id),
-                currentRow,
-              ];
-
-        if (reorderedRows !== currentRows) {
-          await patchListRows(physicalSubsplashListId, reorderedRows, token);
-        }
-
-        const now = Date.now();
-        const batch = firestore.batch();
-        batch.set(
-          firestore.collection('lists').doc(physicalFirestoreListId),
+      if (clear) {
+        await firestore.collection('lists').doc(physicalFirestoreListId).set(
           {
-            moreSermonsRef: linkedSubsplashListId,
-            manualOverflowRowId: rowId,
-            manualOverflowTargetSubsplashId: linkedSubsplashListId,
-            updatedAtMillis: now,
+            moreSermonsRef: FieldValue.delete(),
+            manualOverflowRowId: FieldValue.delete(),
+            manualOverflowTargetSubsplashId: FieldValue.delete(),
+            updatedAtMillis: Date.now(),
           },
           { merge: true }
         );
 
-        let linkedFirestoreListId = targetRecord?.id;
-        if (!targetRecord) {
-          const newOverflowRef = firestore.collection('lists').doc();
-          linkedFirestoreListId = newOverflowRef.id;
-          batch.set(newOverflowRef, {
-            id: newOverflowRef.id,
-            name: buildOverflowListTitle(rootRecord.data.name || rootRecord.data.title || rootListId),
-            title: linkedListTitle ?? buildOverflowListTitle(rootRecord.data.name || rootRecord.data.title || rootListId),
-            subsplashId: linkedSubsplashListId,
-            overflowBehavior: rootRecord.data.overflowBehavior ?? OverflowBehavior.CREATENEWLIST,
-            count: 0,
-            logicalCount: 0,
-            hasOverflowPages: false,
-            maxListSize: rootRecord.data.maxListSize ?? 200,
-            images: [],
-            type: rootRecord.data.type,
-            createdAtMillis: now,
-            updatedAtMillis: now,
-            ...buildOverflowListMetadata({
-              rootListId,
-              overflowDepth: physicalNode.depth + 1,
-            }),
-          });
-        }
-
-        await batch.commit();
-
-        if (!rootRecord.data.subsplashId) {
-          throw new HttpsError('failed-precondition', `Root list ${rootListId} is not linked to Subsplash.`);
-        }
-
-        await syncOverflowChainMetadata(rootRecord.data.subsplashId, token);
+        await syncOverflowChainMetadata(rootRecord.data.subsplashId!, token);
 
         return {
           status: 'success',
           rootListId,
           physicalFirestoreListId,
-          linkedSubsplashListId,
-          linkedFirestoreListId,
-          overflowDepth: physicalNode.depth + 1,
-          cleared: false,
+          cleared: true,
         };
-      });
-    } catch (error) {
-      throw handleError(error);
-    }
+      }
+
+      if (currentRow.type !== 'list') {
+        throw new HttpsError('failed-precondition', `Row ${rowId} is not a list row.`);
+      }
+
+      const linkedSubsplashListId = normalizeString(currentRow._embedded?.list?.id);
+      const linkedListTitle =
+        normalizeString(currentRow._embedded?.list?.title) ??
+        normalizeString((currentRow._embedded?.list as { name?: string } | undefined)?.name);
+      if (!linkedSubsplashListId) {
+        throw new HttpsError(
+          'failed-precondition',
+          `List row ${rowId} does not expose a linked Subsplash list id.`
+        );
+      }
+
+      const existingTargetSubsplashId = normalizeString(physicalRecord.data.moreSermonsRef);
+      if (existingTargetSubsplashId && existingTargetSubsplashId !== linkedSubsplashListId) {
+        throw new HttpsError(
+          'failed-precondition',
+          `List ${physicalFirestoreListId} already links to a different overflow page. Clear it first before selecting a new one.`
+        );
+      }
+
+      const targetRecord = await findListRecordBySubsplashId(linkedSubsplashListId);
+      if (targetRecord?.data.rootListId && targetRecord.data.rootListId !== rootListId) {
+        throw new HttpsError(
+          'failed-precondition',
+          `Subsplash list ${linkedSubsplashListId} already belongs to a different logical root in Firestore.`
+        );
+      }
+
+      const reorderedRows =
+        currentRows[currentRows.length - 1]?.id === currentRow.id
+          ? currentRows
+          : [
+              ...currentRows.filter((row) => row.id !== currentRow.id),
+              currentRow,
+            ];
+
+      if (reorderedRows !== currentRows) {
+        await patchListRows(physicalSubsplashListId, reorderedRows, token);
+      }
+
+      const now = Date.now();
+      const batch = createDurableWriteBatch(firestore);
+      batch.set(
+        firestore.collection('lists').doc(physicalFirestoreListId),
+        {
+          moreSermonsRef: linkedSubsplashListId,
+          manualOverflowRowId: rowId,
+          manualOverflowTargetSubsplashId: linkedSubsplashListId,
+          updatedAtMillis: now,
+        },
+        { merge: true }
+      );
+
+      let linkedFirestoreListId = targetRecord?.id;
+      if (!targetRecord) {
+        const newOverflowRef = firestore.collection('lists').doc();
+        linkedFirestoreListId = newOverflowRef.id;
+        batch.set(newOverflowRef, {
+          id: newOverflowRef.id,
+          name: buildOverflowListTitle(rootRecord.data.name || rootRecord.data.title || rootListId),
+          title: linkedListTitle ?? buildOverflowListTitle(rootRecord.data.name || rootRecord.data.title || rootListId),
+          subsplashId: linkedSubsplashListId,
+          overflowBehavior: rootRecord.data.overflowBehavior ?? OverflowBehavior.CREATENEWLIST,
+          count: 0,
+          logicalCount: 0,
+          hasOverflowPages: false,
+          maxListSize: rootRecord.data.maxListSize ?? 200,
+          images: [],
+          type: rootRecord.data.type,
+          createdAtMillis: now,
+          updatedAtMillis: now,
+          ...buildOverflowListMetadata({
+            rootListId,
+            overflowDepth: physicalNode.depth + 1,
+          }),
+        });
+      }
+
+      await batch.commit();
+
+      if (!rootRecord.data.subsplashId) {
+        throw new HttpsError('failed-precondition', `Root list ${rootListId} is not linked to Subsplash.`);
+      }
+
+      await syncOverflowChainMetadata(rootRecord.data.subsplashId, token);
+
+      return {
+        status: 'success',
+        rootListId,
+        physicalFirestoreListId,
+        linkedSubsplashListId,
+        linkedFirestoreListId,
+        overflowDepth: physicalNode.depth + 1,
+        cleared: false,
+      };
+    });
+  } catch (error) {
+    throw handleError(error);
   }
+};
+
+const marklistoverflowlink = onCall(
+  { secrets: subsplashSecretsWithRuntimeAlerts },
+  async (request: Parameters<typeof markListOverflowLinkDomain>[0]) =>{
+
+if (!canUserRolePublish(request.auth?.token.role)) {
+    throw new HttpsError(
+      'unauthenticated',
+      'The function must be called while authenticated with publish permissions.'
+    );
+  }
+if (!request.auth?.uid) {
+ const { HttpsError } = await import('firebase-functions/v2/https');
+ throw new HttpsError('unauthenticated', 'Authentication is required.');
+}
+const { withLegacyAdmissionLease } = await import('./temporal/legacyAdmissionLease');
+return withLegacyAdmissionLease(firebaseAdmin.firestore(), {domain:'publishing',actorUid:request.auth.uid,operation:"markListOverflowLink",projectId:firebaseAdmin.app().options.projectId || ''}, async lease => {
+ await lease.markEffectsStarted();
+return markListOverflowLinkDomain(request);
+});
+}
 );
 
 export default marklistoverflowlink;

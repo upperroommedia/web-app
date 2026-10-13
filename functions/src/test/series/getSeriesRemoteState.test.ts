@@ -1,3 +1,4 @@
+import { testCallableAuth } from '../helpers/callableAuth';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { subsplashSeriesMock, networkFailureInjector, TestRequest } from './mocks';
 import getSeriesRemoteState from '../../getSeriesRemoteState';
@@ -73,7 +74,7 @@ describe('getSeriesRemoteState', () => {
       });
 
     const request: TestRequest<GetSeriesRemoteStateInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         firestoreSeriesId,
       },

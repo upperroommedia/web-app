@@ -11,6 +11,9 @@
       ],
       "@upperroom/shared/*": [
         "../packages/shared/*"
+      ],
+      "@upperroom/orchestration/*": [
+        "../packages/orchestration/src/*"
       ]
     },
     "rootDir": "..",
@@ -28,5 +31,10 @@
     "../functions/src/**/*.ts",
     "../packages/shared/**/*.ts",
     "../packages/contracts/**/*.ts"
+  ],
+  "exclude": [
+    "../functions/src/test/**",
+    "../functions/src/**/*.test.ts",
+    "../packages/**/*.test.ts"
   ]
 }

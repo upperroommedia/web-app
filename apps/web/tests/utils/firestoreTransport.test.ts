@@ -12,7 +12,7 @@ jest.mock('../../firebase/firebase', () => {
 });
 
 type InspectableFirestore = Firestore & {
-  _getSettings(): { useFetchStreams: boolean };
+  _getSettings(): { useFetchStreams: boolean; experimentalForceLongPolling: boolean };
 };
 
 describe('browser Firestore transport', () => {
@@ -36,6 +36,7 @@ describe('browser Firestore transport', () => {
     // Verify the installed SDK consumes the compatibility option, not just that
     // our adapter passes it to a mock. Firebase omits it from its public types.
     expect((firestore as InspectableFirestore)._getSettings().useFetchStreams).toBe(false);
+    expect((firestore as InspectableFirestore)._getSettings().experimentalForceLongPolling).toBe(false);
   });
 
   it('reuses the configured browser singleton across module reloads', async () => {

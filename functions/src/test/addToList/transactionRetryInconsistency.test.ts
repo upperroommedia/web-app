@@ -1,3 +1,4 @@
+import { testCallableAuth } from '../helpers/callableAuth';
 /**
  * Test to verify the transaction retry inconsistency bug
  * 
@@ -85,7 +86,7 @@ describe('addToList - Transaction Retry Inconsistency Bug', () => {
     
     const mediaItem = { id: 'new-item-trigger-overflow', type: 'media-item' as const };
     const request: TestRequest = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         destinationListIds: [listId],
         mediaItem,
@@ -251,7 +252,7 @@ describe('addToList - Transaction Retry Inconsistency Bug', () => {
     // The exists check should return true, but we should still ensure
     // the Firestore document exists
     const request: TestRequest = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         destinationListIds: [listId],
         mediaItem,
@@ -313,7 +314,7 @@ describe('addToList - Transaction Retry Inconsistency Bug', () => {
     });
 
     const request: TestRequest = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         destinationListIds: [listId],
         mediaItem: { id: 'replay-inconsistency-item', type: 'media-item' as const },

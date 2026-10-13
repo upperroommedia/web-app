@@ -2,6 +2,7 @@ import { CancelToken } from './CancelToken';
 import { YouTubeUrl } from './types';
 import { ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { Writable } from 'stream';
 import fs from 'fs';
 import path from 'path';
@@ -32,6 +33,16 @@ import type {
 } from '@upperroom/contracts/browserFallback';
 import type { YouTubeMediaByteCanaryReport } from './youtubeReadiness';
 import { isValidBrowserPoToken, isYouTubeMedia403, mergeBrowserPoTokenExtractorArg } from './youtubeBrowserPoToken';
+
+// Each acquisition owns cancellation without affecting simultaneous downloads/canaries.
+const acquisitionCancellation = new AsyncLocalStorage<CancelToken>();
+export const withYouTubeCancellation = <T>(token: CancelToken, run: () => Promise<T>): Promise<T> =>
+  acquisitionCancellation.run(token, run);
+const youtubeFetch: typeof fetch = (input, init) => {
+  const token = acquisitionCancellation.getStore();
+  const signal = token ? AbortSignal.any([token.signal, ...(init?.signal ? [init.signal] : [])]) : init?.signal;
+  return globalThis.fetch(input, { ...init, ...(signal ? { signal } : {}) });
+};
 
 interface ObservedOutboundIdentity {
   ipv4: string | null;
@@ -408,7 +419,7 @@ async function fetchPublicIp(url: string): Promise<string | null> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 2500);
   try {
-    const response = await fetch(url, {
+    const response = await youtubeFetch(url, {
       headers: { 'User-Agent': YTDLP_HTTP_USER_AGENT },
       signal: controller.signal,
     });
@@ -900,7 +911,7 @@ async function fetchWithIdToken(url: string, init: RequestInit): Promise<Respons
   try {
     const parsed = new URL(url);
     if (parsed.protocol !== 'https:') {
-      return await fetch(url, init);
+      return await youtubeFetch(url, init);
     }
     audience = `${parsed.protocol}//${parsed.host}`;
   } catch {
@@ -918,14 +929,14 @@ async function fetchWithIdToken(url: string, init: RequestInit): Promise<Respons
     process.env.FUNCTIONS_EMULATOR === 'true' ||
     !shouldUseGoogleIdToken(url, audience)
   ) {
-    return await fetch(url, {
+    return await youtubeFetch(url, {
       ...init,
       headers,
     });
   }
 
   if (!audience) {
-    return await fetch(url, init);
+    return await youtubeFetch(url, init);
   }
 
   const auth = new GoogleAuth();
@@ -937,7 +948,7 @@ async function fetchWithIdToken(url: string, init: RequestInit): Promise<Respons
     }
   });
 
-  return await fetch(url, {
+  return await youtubeFetch(url, {
     ...init,
     headers,
   });
@@ -960,7 +971,7 @@ async function fetchBrowserFallbackDownload(url: string, init: RequestInit): Pro
     }
   }
 
-  return await fetch(url, init);
+  return await youtubeFetch(url, init);
 }
 
 function getRetryDelayMs(): number {
@@ -1143,7 +1154,7 @@ async function triggerBrowserYoutubeRefresh(
       await Promise.all([unlink(requestPath).catch(() => undefined), unlink(resultPath).catch(() => undefined)]);
     }
   } else {
-    const refreshResponse = await fetch(refreshUrl!, {
+    const refreshResponse = await youtubeFetch(refreshUrl!, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1202,6 +1213,7 @@ async function runCommandWithCapture(
   const execute = (): Promise<{ stdout: string; stderr: string }> =>
     new Promise((resolve, reject) => {
       const proc = spawn(command, args);
+      acquisitionCancellation.getStore()?.trackProcess(proc);
       let stdout = '';
       let stderr = '';
 
@@ -1264,6 +1276,7 @@ async function runSystemCommand(
 ): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     const proc = spawn(command, args);
+      acquisitionCancellation.getStore()?.trackProcess(proc);
     let stdout = '';
     let stderr = '';
 
@@ -1809,6 +1822,7 @@ async function runBoundedMediaByteCanaryCommand(
 ): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const proc = spawn(ytdlpPath, args);
+    acquisitionCancellation.getStore()?.trackProcess(proc);
     let stderr = '';
     let timedOut = false;
     let settled = false;
@@ -3439,6 +3453,7 @@ export const processYouTubeUrl = async (
   const command = `${ytdlpPath} ${args.join(' ')}`;
   log.debug('Executing yt-dlp streaming command', { command, formatId, extractionMode });
   const ytdlp = spawn(ytdlpPath, args);
+      cancelToken.trackProcess(ytdlp);
 
   ytdlp.on('error', (err) => {
     cleanupCookiesFile(cookieContext?.cookiesFilePath, cleaned);
@@ -3701,7 +3716,7 @@ async function resolvePreferredAudioFormatId(
   return { ...parseSelectedFormat(stdout), extractionMode: 'public_provider' };
 }
 
-export const downloadYouTubeAudioToFile = async (
+const downloadYouTubeAudioToFileInternal = async (
   ytdlpPath: string,
   url: YouTubeUrl,
   outputFilePath: string,
@@ -3843,6 +3858,7 @@ export const downloadYouTubeAudioToFile = async (
       });
 
       const ytdlp = spawn(ytdlpPath, args);
+      cancelToken.trackProcess(ytdlp);
       let stderrBuffer = '';
       let stdoutBuffer = '';
       let settled = false;
@@ -4702,7 +4718,7 @@ async function downloadYouTubeSectionFromFragments(
       const outputName = `frag-${String(index).padStart(6, '0')}.m4a`;
       const outputPath = path.join(workDir, outputName);
 
-      const response = await fetch(fragmentUrl, {
+      const response = await youtubeFetch(fragmentUrl, {
         headers: {
           'User-Agent': YTDLP_HTTP_USER_AGENT,
           Accept: '*/*',
@@ -4990,6 +5006,7 @@ export const downloadYouTubeSection = async (
       });
 
       const ytdlp = spawn(ytdlpPath, attemptArgs);
+      cancelToken.trackProcess(ytdlp);
 
       ytdlp.on('error', (err) => {
         log.error('yt-dlp spawn error', { error: err, attempt: mode, usedCookies: mode === 'cookie_provider' });
@@ -5504,3 +5521,7 @@ export const downloadYouTubeSection = async (
     cleanupCookiesFile(cookieContext?.cookiesFilePath, cleaned);
   }
 };
+
+/** Binds provider probes, HTTP requests and native download children to one cancellation lifetime. */
+export const downloadYouTubeAudioToFile = (...args: Parameters<typeof downloadYouTubeAudioToFileInternal>): Promise<string> =>
+  withYouTubeCancellation(args[3], () => downloadYouTubeAudioToFileInternal(...args));

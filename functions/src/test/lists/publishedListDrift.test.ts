@@ -1,3 +1,4 @@
+import { FieldValue } from 'firebase-admin/firestore';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { OverflowBehavior } from '@upperroom/shared/types/List';
 import { sermonStatusType, uploadStatus, type Sermon } from '@upperroom/shared/types/SermonTypes';
@@ -383,7 +384,7 @@ describe('published list drift', () => {
       batch.set(
         docSnapshot.ref,
         {
-          uploadStatus: firebaseAdmin.firestore.FieldValue.delete(),
+          uploadStatus: FieldValue.delete(),
         },
         { merge: true }
       );

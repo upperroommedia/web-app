@@ -1,3 +1,4 @@
+import { FieldValue } from 'firebase-admin/firestore';
 import { DocumentData, QuerySnapshot } from 'firebase-admin/firestore';
 import { firestore, logger } from 'firebase-functions/v2';
 import { isEqual } from 'lodash';
@@ -71,7 +72,7 @@ async function acknowledgeAlgoliaSync({
     await sermonRef.update({
       searchPending: false,
       searchIndexedAtMillis: Date.now(),
-      searchSyncError: firebaseAdmin.firestore.FieldValue.delete(),
+      searchSyncError: FieldValue.delete(),
     });
     return;
   }

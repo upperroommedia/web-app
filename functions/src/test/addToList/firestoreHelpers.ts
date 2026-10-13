@@ -1,3 +1,4 @@
+import { Timestamp } from 'firebase-admin/firestore';
 /**
  * Helper functions for setting up Firestore in tests
  */
@@ -99,7 +100,7 @@ export async function createSermonDocument(sermon: Sermon): Promise<void> {
   const payload = Object.fromEntries(
     Object.entries({
       ...sermon,
-      date: firebaseAdmin.firestore.Timestamp.fromMillis(sermon.dateMillis),
+      date: Timestamp.fromMillis(sermon.dateMillis),
     }).filter(([, value]) => value !== undefined)
   );
 

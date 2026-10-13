@@ -1,3 +1,4 @@
+import type { LegacyAdmissionLease } from '../temporal/legacyAdmissionLease';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { CallableRequest, onCall } from 'firebase-functions/v2/https';
 import { adminBaseUrlSecretsWithRuntimeAlerts } from '../notifications/notificationSecrets';
@@ -18,7 +19,8 @@ const isAdmin = (request: CallableRequest<unknown>): boolean =>
   request.auth?.token.role === 'admin' && typeof request.auth.uid === 'string';
 
 export const denyRoleRequestHandler = async (
-  request: CallableRequest<DenyRoleRequestInputType>
+  request: CallableRequest<DenyRoleRequestInputType>,
+  lease?: LegacyAdmissionLease
 ): Promise<DenyRoleRequestOutputType> => {
   if (!isAdmin(request)) {
     return { status: 'error', error: 'Not Authorized' };
@@ -57,6 +59,7 @@ export const denyRoleRequestHandler = async (
         ? request.auth.token.email.trim().toLowerCase()
         : null;
 
+    await lease?.markEffectsStarted();
     const outcomeEmailResult = await queueRoleRequestOutcomeEmail({
       roleRequestId,
       requesterEmail: roleRequest.requesterEmail,
@@ -121,6 +124,18 @@ export const denyRoleRequestHandler = async (
   }
 };
 
-const denyrolerequest = onCall({ secrets: adminBaseUrlSecretsWithRuntimeAlerts }, denyRoleRequestHandler);
+export const denyRoleRequestHandlerSource = async (
+  request: Parameters<typeof denyRoleRequestHandler>[0]
+): Promise<DenyRoleRequestOutputType> => {
+  if (!(request.auth?.uid && request.auth.token.role === 'admin')) return denyRoleRequestHandler(request);
+  return (await import('../temporal/accounts/sourceAdmission')).withLegacyAccountSource(
+    firebaseAdmin.firestore(),
+    request.auth!.uid,
+    'role.deny',
+    (lease) => denyRoleRequestHandler(request, lease)
+  );
+};
+
+const denyrolerequest = onCall({ secrets: adminBaseUrlSecretsWithRuntimeAlerts }, denyRoleRequestHandlerSource);
 
 export default denyrolerequest;

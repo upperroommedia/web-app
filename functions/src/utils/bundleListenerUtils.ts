@@ -4,6 +4,7 @@ import handleError from '../handleError';
 import { BundleConfig } from '@upperroom/shared/shared/bundleConfigs';
 import { generateAndStoreBundle } from './bundleCreationUtils';
 import { randomUUID } from 'crypto';
+import { isDomainTemporalEnabled } from '../temporal/ownership';
 
 const database = firebaseAdmin.database();
 const BUNDLE_REGEN_DEBOUNCE_MS = 2_500;
@@ -20,8 +21,7 @@ const delay = async (ms: number): Promise<void> =>
     setTimeout(resolve, ms);
   });
 
-const getRegenerationStateRef = (metadataDocPath: string) =>
-  database.ref(`${metadataDocPath}/_regeneration`);
+const getRegenerationStateRef = (metadataDocPath: string) => database.ref(`${metadataDocPath}/_regeneration`);
 
 async function claimBundleRegeneration(metadataDocPath: string): Promise<{
   isOwner: boolean;
@@ -86,7 +86,7 @@ async function shouldRunAnotherBundleCycle(
 }
 
 export function createBundleDocumentListener<T>(config: BundleConfig<T>) {
-  return firestore.onDocumentWritten(config.collectionPath, async (event) => {
+  return firestore.onDocumentWritten({ document: config.collectionPath, retry: true }, async (event) => {
     // Get the data from before and after
     const beforeData = event.data?.before?.data() as T | undefined;
     const afterData = event.data?.after?.data() as T | undefined;
@@ -101,6 +101,16 @@ export function createBundleDocumentListener<T>(config: BundleConfig<T>) {
       return;
     }
 
+    if (isDomainTemporalEnabled('bundles')) {
+      await (
+        await import('../temporal/bundles/admission')
+      ).admitBundleRegeneration(config.bundleType, event.id, { continuation: true });
+      return;
+    }
+
+    await (
+      await import('../temporal/releaseControl')
+    ).assertLegacyAdmissionAllowed(firebaseAdmin.firestore(), 'bundles', { continuation: true });
     logger.info(`Regenerating ${config.displayName} bundle.`, dataDiff);
 
     let ownedProcessorToken: string | null = null;
@@ -154,12 +164,17 @@ export function createBundleDocumentListener<T>(config: BundleConfig<T>) {
           return;
         }
 
-        logger.info(`${config.displayName} bundle received another queued mutation during regeneration; running another cycle.`, {
-          cycle: cycles,
-        });
+        logger.info(
+          `${config.displayName} bundle received another queued mutation during regeneration; running another cycle.`,
+          {
+            cycle: cycles,
+          }
+        );
       }
 
-      logger.warn(`${config.displayName} bundle regeneration hit the cycle cap; releasing the lock for a future mutation to retry.`);
+      logger.warn(
+        `${config.displayName} bundle regeneration hit the cycle cap; releasing the lock for a future mutation to retry.`
+      );
     } catch (error) {
       logger.error(`Error regenerating ${config.displayName} bundle after operation:`, error);
       throw handleError(error);

@@ -8,8 +8,14 @@
 !apps
 !apps/process-audio
 !apps/process-audio/**
+!apps/browser-fallback
+!apps/browser-fallback/**
 !packages
 !packages/contracts
 !packages/contracts/**
 !packages/shared
 !packages/shared/**
+!packages/orchestration
+!packages/orchestration/**
+!patches
+!patches/**

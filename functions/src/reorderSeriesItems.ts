@@ -42,165 +42,186 @@ export interface ReorderSeriesItemsOutputType {
   subsplashSeriesId?: string;
 }
 
-const reorderSeriesItems = onCall(
-  { secrets: subsplashSecretsWithRuntimeAlerts },
-  async (request: CallableRequest<ReorderSeriesItemsInputType>): Promise<ReorderSeriesItemsOutputType> => {
-    logger.log('reorderSeriesItems');
+export const reorderSeriesItemsDomain = async (
+  request: Pick<CallableRequest<ReorderSeriesItemsInputType>, 'data' | 'auth'>
+): Promise<ReorderSeriesItemsOutputType> => {
+  logger.log('reorderSeriesItems');
 
-    // Authentication check
-    if (!canUserRolePublish(request.auth?.token.role)) {
-      throw new HttpsError(
-        'unauthenticated',
-        'The function must be called while authenticated with publish permissions.'
-      );
-    }
+  // Authentication check
+  if (!canUserRolePublish(request.auth?.token.role)) {
+    throw new HttpsError(
+      'unauthenticated',
+      'The function must be called while authenticated with publish permissions.'
+    );
+  }
 
-    const { firestoreSeriesId, expectedRemoteMembershipHash, itemOrder, operationKey } = request.data;
+  const { firestoreSeriesId, expectedRemoteMembershipHash, itemOrder, operationKey } = request.data;
 
-    // Validation
-    if (!firestoreSeriesId || !firestoreSeriesId.trim()) {
-      throw new HttpsError('invalid-argument', 'firestoreSeriesId is required.');
-    }
+  // Validation
+  if (!firestoreSeriesId || !firestoreSeriesId.trim()) {
+    throw new HttpsError('invalid-argument', 'firestoreSeriesId is required.');
+  }
 
-    const normalizedFirestoreSeriesId = firestoreSeriesId.trim();
-    const normalizedOperationKey =
-      operationKey?.trim() || `reorder-series-items:${normalizedFirestoreSeriesId}:${randomUUID()}`;
+  const normalizedFirestoreSeriesId = firestoreSeriesId.trim();
+  const normalizedOperationKey =
+    operationKey?.trim() || `reorder-series-items:${normalizedFirestoreSeriesId}:${randomUUID()}`;
 
-    try {
-      return await withIdempotency(normalizedOperationKey, async () => {
-        // Resolve Subsplash series id up front so lock keys are always based on remote ids.
-        const seriesDoc = await firestoreDB
-          .collection('series')
-          .doc(normalizedFirestoreSeriesId)
-          .withConverter(firestoreAdminSeriesConverter)
-          .get();
+  try {
+    return await withIdempotency(normalizedOperationKey, async () => {
+      // Resolve Subsplash series id up front so lock keys are always based on remote ids.
+      const seriesDoc = await firestoreDB
+        .collection('series')
+        .doc(normalizedFirestoreSeriesId)
+        .withConverter(firestoreAdminSeriesConverter)
+        .get();
 
-        if (!seriesDoc.exists) {
-          throw new HttpsError('not-found', `Series with firestoreId ${normalizedFirestoreSeriesId} not found.`);
-        }
+      if (!seriesDoc.exists) {
+        throw new HttpsError('not-found', `Series with firestoreId ${normalizedFirestoreSeriesId} not found.`);
+      }
 
-        const seriesData = seriesDoc.data()!;
-        const subsplashSeriesId = seriesData.subsplashId;
-        if (!subsplashSeriesId) {
-          throw new HttpsError(
-            'failed-precondition',
-            `Series ${normalizedFirestoreSeriesId} is not linked to Subsplash and cannot be reordered remotely.`
-          );
-        }
+      const seriesData = seriesDoc.data()!;
+      const subsplashSeriesId = seriesData.subsplashId;
+      if (!subsplashSeriesId) {
+        throw new HttpsError(
+          'failed-precondition',
+          `Series ${normalizedFirestoreSeriesId} is not linked to Subsplash and cannot be reordered remotely.`
+        );
+      }
 
-        return withSubsplashLocks(
-          [`series:${subsplashSeriesId}`],
-          async () => {
-            // If no items to reorder, return success.
-            if (!itemOrder || itemOrder.length === 0) {
-              return {
-                status: 'success',
-                message: 'No items to reorder.',
-                firestoreSeriesId: normalizedFirestoreSeriesId,
-                subsplashSeriesId,
-              };
-            }
-
-            const normalizedExpectedRemoteMembershipHash = expectedRemoteMembershipHash?.trim();
-
-            // Authenticate with Subsplash.
-            const token = await authenticateSubsplash();
-
-            // Subsplash is source-of-truth: fetch current membership before patching.
-            const [remoteItems, remoteSeries] = await Promise.all([
-              getAllSeriesItemsAcrossStatuses(subsplashSeriesId, token),
-              getSeriesDetails(subsplashSeriesId, token),
-            ]);
-            const remoteMembershipHash = createSeriesRemoteMembershipHash(
-              [...remoteItems]
-                .sort((left, right) => (right.position ?? Number.NEGATIVE_INFINITY) - (left.position ?? Number.NEGATIVE_INFINITY))
-                .map((item) => ({ id: item.id, status: item.status }))
-            );
-
-            if (
-              normalizedExpectedRemoteMembershipHash &&
-              normalizedExpectedRemoteMembershipHash !== remoteMembershipHash
-            ) {
-              throw new HttpsError(
-                'failed-precondition',
-                'Series membership changed in Subsplash. Refresh and retry.'
-              );
-            }
-
-            const remoteItemsById = new Map<string, { id: string; position: number | null }>();
-            remoteItems.forEach((item) => {
-              remoteItemsById.set(item.id, { id: item.id, position: item.position ?? null });
-            });
-
-            // Validate every requested item exists remotely.
-            itemOrder.forEach(({ mediaItemId }) => {
-              if (!remoteItemsById.has(mediaItemId)) {
-                throw new HttpsError(
-                  'failed-precondition',
-                  `Cannot reorder media item ${mediaItemId}; it does not exist in Subsplash series ${subsplashSeriesId}.`
-                );
-              }
-            });
-
-            if (normalizedExpectedRemoteMembershipHash && itemOrder.length !== remoteItemsById.size) {
-              throw new HttpsError(
-                'failed-precondition',
-                'Reorder request must include every media item currently in the Subsplash series.'
-              );
-            }
-
-            const requestedPositions = new Map(itemOrder.map((entry) => [entry.mediaItemId, entry.position]));
-            if (normalizedExpectedRemoteMembershipHash && requestedPositions.size !== remoteItemsById.size) {
-              throw new HttpsError(
-                'failed-precondition',
-                'Reorder request must be a full permutation of current Subsplash series membership.'
-              );
-            }
-
-            const itemsToUpdate = Array.from(remoteItemsById.values()).map((item) => {
-              const requestedPosition = requestedPositions.get(item.id);
-              return {
-                id: item.id,
-                position: normalizedExpectedRemoteMembershipHash
-                  ? (requestedPosition ?? null)
-                  : (requestedPosition ?? item.position),
-              };
-            });
-
-            await patchSeriesItemPositions(subsplashSeriesId, itemsToUpdate, token);
-            await withSubsplashLocks(
-              remoteItems.map((item) => `media-item:${item.id}`),
-              () => syncSeriesItemSubtitles(
-                subsplashSeriesId,
-                remoteSeries.title,
-                remoteItems.map((item) => ({
-                  id: item.id,
-                  position: requestedPositions.get(item.id) ?? item.position ?? null,
-                  subtitle: item.subtitle,
-                })),
-                token
-              ),
-              { operationKey: normalizedOperationKey }
-            );
-
-            logger.log(`Successfully reordered ${itemOrder.length} items in series ${subsplashSeriesId}`);
-
+      return withSubsplashLocks(
+        [`series:${subsplashSeriesId}`],
+        async () => {
+          // If no items to reorder, return success.
+          if (!itemOrder || itemOrder.length === 0) {
             return {
               status: 'success',
-              message: `Successfully reordered ${itemOrder.length} items in series.`,
+              message: 'No items to reorder.',
               firestoreSeriesId: normalizedFirestoreSeriesId,
               subsplashSeriesId,
             };
-          },
-          {
-            operationKey: normalizedOperationKey,
           }
-        );
-      });
-    } catch (err) {
-      throw handleError(err);
-    }
+
+          const normalizedExpectedRemoteMembershipHash = expectedRemoteMembershipHash?.trim();
+
+          // Authenticate with Subsplash.
+          const token = await authenticateSubsplash();
+
+          // Subsplash is source-of-truth: fetch current membership before patching.
+          const [remoteItems, remoteSeries] = await Promise.all([
+            getAllSeriesItemsAcrossStatuses(subsplashSeriesId, token),
+            getSeriesDetails(subsplashSeriesId, token),
+          ]);
+          const remoteMembershipHash = createSeriesRemoteMembershipHash(
+            [...remoteItems]
+              .sort((left, right) => (right.position ?? Number.NEGATIVE_INFINITY) - (left.position ?? Number.NEGATIVE_INFINITY))
+              .map((item) => ({ id: item.id, status: item.status }))
+          );
+
+          if (
+            normalizedExpectedRemoteMembershipHash &&
+            normalizedExpectedRemoteMembershipHash !== remoteMembershipHash
+          ) {
+            throw new HttpsError(
+              'failed-precondition',
+              'Series membership changed in Subsplash. Refresh and retry.'
+            );
+          }
+
+          const remoteItemsById = new Map<string, { id: string; position: number | null }>();
+          remoteItems.forEach((item) => {
+            remoteItemsById.set(item.id, { id: item.id, position: item.position ?? null });
+          });
+
+          // Validate every requested item exists remotely.
+          itemOrder.forEach(({ mediaItemId }) => {
+            if (!remoteItemsById.has(mediaItemId)) {
+              throw new HttpsError(
+                'failed-precondition',
+                `Cannot reorder media item ${mediaItemId}; it does not exist in Subsplash series ${subsplashSeriesId}.`
+              );
+            }
+          });
+
+          if (normalizedExpectedRemoteMembershipHash && itemOrder.length !== remoteItemsById.size) {
+            throw new HttpsError(
+              'failed-precondition',
+              'Reorder request must include every media item currently in the Subsplash series.'
+            );
+          }
+
+          const requestedPositions = new Map(itemOrder.map((entry) => [entry.mediaItemId, entry.position]));
+          if (normalizedExpectedRemoteMembershipHash && requestedPositions.size !== remoteItemsById.size) {
+            throw new HttpsError(
+              'failed-precondition',
+              'Reorder request must be a full permutation of current Subsplash series membership.'
+            );
+          }
+
+          const itemsToUpdate = Array.from(remoteItemsById.values()).map((item) => {
+            const requestedPosition = requestedPositions.get(item.id);
+            return {
+              id: item.id,
+              position: normalizedExpectedRemoteMembershipHash
+                ? (requestedPosition ?? null)
+                : (requestedPosition ?? item.position),
+            };
+          });
+
+          await patchSeriesItemPositions(subsplashSeriesId, itemsToUpdate, token);
+          await withSubsplashLocks(
+            remoteItems.map((item) => `media-item:${item.id}`),
+            () => syncSeriesItemSubtitles(
+              subsplashSeriesId,
+              remoteSeries.title,
+              remoteItems.map((item) => ({
+                id: item.id,
+                position: requestedPositions.get(item.id) ?? item.position ?? null,
+                subtitle: item.subtitle,
+              })),
+              token
+            ),
+            { operationKey: normalizedOperationKey }
+          );
+
+          logger.log(`Successfully reordered ${itemOrder.length} items in series ${subsplashSeriesId}`);
+
+          return {
+            status: 'success',
+            message: `Successfully reordered ${itemOrder.length} items in series.`,
+            firestoreSeriesId: normalizedFirestoreSeriesId,
+            subsplashSeriesId,
+          };
+        },
+        {
+          operationKey: normalizedOperationKey,
+        }
+      );
+    });
+  } catch (err) {
+    throw handleError(err);
   }
+};
+
+const reorderSeriesItems = onCall(
+  { secrets: subsplashSecretsWithRuntimeAlerts },
+  async (request: Parameters<typeof reorderSeriesItemsDomain>[0]) =>{
+
+if (!canUserRolePublish(request.auth?.token.role)) {
+    throw new HttpsError(
+      'unauthenticated',
+      'The function must be called while authenticated with publish permissions.'
+    );
+  }
+if (!request.auth?.uid) {
+ const { HttpsError } = await import('firebase-functions/v2/https');
+ throw new HttpsError('unauthenticated', 'Authentication is required.');
+}
+const { withLegacyAdmissionLease } = await import('./temporal/legacyAdmissionLease');
+return withLegacyAdmissionLease(firebaseAdmin.firestore(), {domain:'publishing',actorUid:request.auth.uid,operation:"reorderSeriesItems",projectId:firebaseAdmin.app().options.projectId || ''}, async lease => {
+ await lease.markEffectsStarted();
+return reorderSeriesItemsDomain(request);
+});
+}
 );
 
 export default reorderSeriesItems;

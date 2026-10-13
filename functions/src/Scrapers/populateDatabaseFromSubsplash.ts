@@ -30,11 +30,18 @@ export interface populateDatabaseFromSubsplashOutputType {
 
 const populateDatabaseFromSubsplash = onCall(
   { timeoutSeconds: 540, memory: '1GiB', secrets: subsplashSecretsWithRuntimeAlerts },
-  async (request: CallableRequest<populateDatabaseFromSubsplashInputType>): Promise<string> => {
-    if (request.auth?.token.role !== 'admin') {
+  async (request: CallableRequest<populateDatabaseFromSubsplashInputType>): Promise<string> =>{
+if (request.auth?.token.role !== 'admin') {
       throw new HttpsError('failed-precondition', 'The function must be called while authenticated.');
     }
-    try {
+if (!request.auth?.uid) {
+ const { HttpsError } = await import('firebase-functions/v2/https');
+ throw new HttpsError('unauthenticated', 'Authentication is required.');
+}
+const { withLegacyAdmissionLease } = await import('../temporal/legacyAdmissionLease');
+return withLegacyAdmissionLease(firebaseAdmin.firestore(), {domain:'publishing',actorUid:request.auth.uid,operation:"Scrapers/populateDatabaseFromSubsplash",projectId:firebaseAdmin.app().options.projectId || ''}, async lease => {
+ await lease.markEffectsStarted();
+try {
       logger.log('Populating Database from Subsplash');
       const imageIds = new Set<string>();
       const firestoreImagesMap = new Map<string, ImageType>();
@@ -82,7 +89,8 @@ const populateDatabaseFromSubsplash = onCall(
     } catch (error) {
       throw handleError(error);
     }
-  }
+});
+}
 );
 
 export default populateDatabaseFromSubsplash;

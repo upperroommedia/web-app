@@ -10,31 +10,17 @@ import IconButton from '@mui/material/IconButton';
 import Typography from '@mui/material/Typography';
 import CloseIcon from '@mui/icons-material/Close';
 import { Sermon } from '../types/SermonTypes';
-import type { DestinationActivityState } from '../utils/sermonPublishActions';
 
 interface ManagePublishingPopupProps {
   sermon: Sermon;
   open: boolean;
   onClose: () => void;
   onUpdate?: () => void;
-  onBusyStateChange?: (activity: DestinationActivityState) => void;
 }
 
-const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
-  sermon,
-  open,
-  onClose,
-  onUpdate,
-  onBusyStateChange,
-}) => {
+const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({ sermon, open, onClose, onUpdate }) => {
   return (
-    <Dialog
-      open={open}
-      onClose={onClose}
-      maxWidth="md"
-      fullWidth
-      PaperProps={{ sx: { borderRadius: 2 } }}
-    >
+    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth PaperProps={{ sx: { borderRadius: 2 } }}>
       <DialogTitle sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', pb: 1 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
           <AvatarWithDefaultImage
@@ -45,7 +31,9 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
             borderRadius={8}
           />
           <Box>
-            <Typography variant="h6" fontWeight={600}>Publish Sermon</Typography>
+            <Typography variant="h6" fontWeight={600}>
+              Publish Sermon
+            </Typography>
             <Typography
               variant="body2"
               color="text.secondary"
@@ -63,12 +51,7 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
       <Divider />
 
       <DialogContent sx={{ p: 3 }}>
-        <SermonPublishPanel
-          sermon={sermon}
-          onUpdate={onUpdate}
-          onBusyStateChange={onBusyStateChange}
-          initialAdvancedOpen={false}
-        />
+        <SermonPublishPanel sermon={sermon} onUpdate={onUpdate} initialAdvancedOpen={false} />
       </DialogContent>
     </Dialog>
   );

@@ -21,9 +21,21 @@ Sentry.init({
   environment: runtimeEnv,
   release,
   tracesSampleRate: sentryTracesSampleRate,
-  enableLogs: sentryLogsEnabled,
-  includeLocalVariables: true,
-  sendDefaultPii: false,
+  // v11 logging is enabled by usage; the hook also gates direct logger calls.
+  beforeSendLog: (log) => sentryLogsEnabled ? log : null,
+  includeLocalVariables: false,
+  dataCollection: {
+    userInfo: false,
+    cookies: false,
+    httpHeaders: { request: false, response: false },
+    httpBodies: [],
+    urlQueryParams: false,
+    genAI: { inputs: false, outputs: false },
+    databaseQueryData: false,
+    queues: false,
+    graphQL: { document: false, variables: false },
+    stackFrameVariables: false,
+  },
   initialScope: {
     tags: {
       service: 'process-audio',

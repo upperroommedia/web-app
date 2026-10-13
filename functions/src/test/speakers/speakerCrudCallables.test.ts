@@ -22,7 +22,7 @@ jest.mock('firebase-functions/v2/https', () => {
   return {
     ...actual,
     onCall: jest.fn((optsOrHandler: unknown, maybeHandler?: unknown) =>
-      (typeof optsOrHandler === 'function' ? optsOrHandler : maybeHandler)
+      typeof optsOrHandler === 'function' ? optsOrHandler : maybeHandler
     ),
   };
 });
@@ -139,10 +139,12 @@ describe('speaker CRUD callables', () => {
     jest.clearAllMocks();
     mockCreateNewSubsplashList.mockResolvedValue({ listId: 'subsplash-list-1' });
     mockAuthenticateSubsplash.mockResolvedValue('subsplash-token');
+    const deletedRemoteLists = new Set<string>();
     mockAxios.mockImplementation(async (...args: unknown[]) => {
-      const requestConfig = (typeof args[0] === 'string'
-        ? { ...(args[1] as Record<string, unknown> | undefined), url: args[0] }
-        : (args[0] as Record<string, unknown> | undefined)) ?? {};
+      const requestConfig =
+        (typeof args[0] === 'string'
+          ? { ...(args[1] as Record<string, unknown> | undefined), url: args[0] }
+          : (args[0] as Record<string, unknown> | undefined)) ?? {};
       const method = typeof requestConfig.method === 'string' ? requestConfig.method : undefined;
       const url = typeof requestConfig.url === 'string' ? requestConfig.url : undefined;
 
@@ -170,11 +172,19 @@ describe('speaker CRUD callables', () => {
         };
       }
 
+      const listMatch = url?.match(/^https:\/\/core\.subsplash\.com\/builder\/v1\/lists\/([a-zA-Z0-9-]+)$/);
       if (
-        typeof url === 'string' &&
-        url.startsWith('https://core.subsplash.com/builder/v1/lists/') &&
-        method === 'DELETE'
+        listMatch &&
+        (method === 'GET' || method === 'DELETE') &&
+        (requestConfig.headers as { Authorization?: string } | undefined)?.Authorization !== 'Bearer subsplash-token'
       ) {
+        throw new Error(`Unauthenticated provider request: ${method} ${url}`);
+      }
+      if (listMatch && method === 'GET' && deletedRemoteLists.has(listMatch[1])) {
+        return { status: 404, data: null, headers: {}, config: requestConfig };
+      }
+      if (listMatch && method === 'DELETE') {
+        deletedRemoteLists.add(listMatch[1]);
         return {
           data: {},
           status: 204,
@@ -346,15 +356,13 @@ describe('speaker CRUD callables', () => {
       },
     };
 
-    mockAxios
-      .mockRejectedValueOnce(duplicateError)
-      .mockResolvedValueOnce({
-        data: {
-          count: 0,
-          total: 0,
-          _embedded: { tags: [] },
-        },
-      });
+    mockAxios.mockRejectedValueOnce(duplicateError).mockResolvedValueOnce({
+      data: {
+        count: 0,
+        total: 0,
+        _embedded: { tags: [] },
+      },
+    });
 
     await expect(
       createSpeakerHandler({
@@ -572,6 +580,32 @@ describe('speaker CRUD callables', () => {
     );
   });
 
+  it('preserves the associated list unless deletion is explicitly requested', async () => {
+    await speakersCollection.doc('speaker-preserve-list').set({
+      id: 'speaker-preserve-list',
+      name: 'Keep List',
+      images: [],
+      sermonCount: 0,
+      listId: 'preserved-speaker-list',
+    });
+    await listsCollection.doc('preserved-speaker-list').set({
+      id: 'preserved-speaker-list',
+      name: 'Keep List',
+      type: ListType.SPEAKER_LIST,
+      overflowBehavior: OverflowBehavior.CREATENEWLIST,
+      images: [],
+      createdAtMillis: Date.now(),
+      updatedAtMillis: Date.now(),
+      count: 0,
+      subsplashId: 'preserved-remote-list',
+    });
+    const result = await deleteSpeakerHandler({ auth: defaultAuth, data: { speakerId: 'speaker-preserve-list' } });
+    expect(result).toMatchObject({ status: 'success', listDeleted: false });
+    expect((await speakersCollection.doc('speaker-preserve-list').get()).exists).toBe(false);
+    expect((await listsCollection.doc('preserved-speaker-list').get()).exists).toBe(true);
+    expect(mockAxios).not.toHaveBeenCalled();
+  });
+
   it('deletes subsplash tag/list and removes speaker references from sermon speaker arrays', async () => {
     await speakersCollection.doc('speaker-delete-list').set({
       id: 'speaker-delete-list',
@@ -592,44 +626,54 @@ describe('speaker CRUD callables', () => {
       count: 0,
       subsplashId: 'subsplash-list-delete',
     });
-    await firestore.collection('sermons').doc('sermon-1').set({
-      id: 'sermon-1',
-      speakers: [
-        {
-          id: 'speaker-delete-list',
-          name: 'Speaker Delete',
-        },
-        {
-          id: 'speaker-keep',
-          name: 'Speaker Keep',
-        },
-      ],
-      editedAtMillis: 1,
-    });
-    await firestore.collection('sermons').doc('sermon-2').set({
-      id: 'sermon-2',
-      speakers: [
-        {
-          id: 'speaker-keep',
-          name: 'Speaker Keep',
-        },
-      ],
-      editedAtMillis: 1,
-    });
-    await firestore.collection('sermons').doc('sermon-3').set({
-      id: 'sermon-3',
-      speakers: [
-        {
-          name: 'Speaker Delete',
-        },
-      ],
-      editedAtMillis: 1,
-    });
+    await firestore
+      .collection('sermons')
+      .doc('sermon-1')
+      .set({
+        id: 'sermon-1',
+        speakers: [
+          {
+            id: 'speaker-delete-list',
+            name: 'Speaker Delete',
+          },
+          {
+            id: 'speaker-keep',
+            name: 'Speaker Keep',
+          },
+        ],
+        editedAtMillis: 1,
+      });
+    await firestore
+      .collection('sermons')
+      .doc('sermon-2')
+      .set({
+        id: 'sermon-2',
+        speakers: [
+          {
+            id: 'speaker-keep',
+            name: 'Speaker Keep',
+          },
+        ],
+        editedAtMillis: 1,
+      });
+    await firestore
+      .collection('sermons')
+      .doc('sermon-3')
+      .set({
+        id: 'sermon-3',
+        speakers: [
+          {
+            name: 'Speaker Delete',
+          },
+        ],
+        editedAtMillis: 1,
+      });
 
     const deleteResult = await deleteSpeakerHandler({
       auth: defaultAuth,
       data: {
         speakerId: 'speaker-delete-list',
+        deleteAssociatedList: true,
       },
     });
 
@@ -642,7 +686,9 @@ describe('speaker CRUD callables', () => {
     expect((await speakersCollection.doc('speaker-delete-list').get()).exists).toBe(false);
     expect((await listsCollection.doc('speaker-list-delete').get()).exists).toBe(false);
 
-    const sermonOne = (await firestore.collection('sermons').doc('sermon-1').get()).data() as { speakers: Array<{ id?: string; name?: string }> };
+    const sermonOne = (await firestore.collection('sermons').doc('sermon-1').get()).data() as {
+      speakers: Array<{ id?: string; name?: string }>;
+    };
     expect(sermonOne.speakers).toEqual([
       {
         id: 'speaker-keep',
@@ -650,7 +696,9 @@ describe('speaker CRUD callables', () => {
       },
     ]);
 
-    const sermonTwo = (await firestore.collection('sermons').doc('sermon-2').get()).data() as { speakers: Array<{ id?: string; name?: string }> };
+    const sermonTwo = (await firestore.collection('sermons').doc('sermon-2').get()).data() as {
+      speakers: Array<{ id?: string; name?: string }>;
+    };
     expect(sermonTwo.speakers).toEqual([
       {
         id: 'speaker-keep',
@@ -658,7 +706,9 @@ describe('speaker CRUD callables', () => {
       },
     ]);
 
-    const sermonThree = (await firestore.collection('sermons').doc('sermon-3').get()).data() as { speakers: Array<{ id?: string; name?: string }> };
+    const sermonThree = (await firestore.collection('sermons').doc('sermon-3').get()).data() as {
+      speakers: Array<{ id?: string; name?: string }>;
+    };
     expect(sermonThree.speakers).toEqual([]);
 
     expect(mockAxios).toHaveBeenCalledWith(
@@ -739,6 +789,7 @@ describe('speaker CRUD callables', () => {
       auth: defaultAuth,
       data: {
         speakerId: 'speaker-delete-overflow',
+        deleteAssociatedList: true,
       },
     });
 

@@ -1,3 +1,4 @@
+import { testCallableAuth, type AuthData } from '../helpers/callableAuth';
 import { createHash } from 'node:crypto';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 
@@ -24,7 +25,7 @@ const SOUND_CLOUD_PENDING_AUTH_COLLECTION = 'pendingOAuthSessions';
 const TEST_REDIRECT_URI = 'https://staging.uploader.upperroommedia.org/auth/soundcloud/callback';
 
 type CreateSoundCloudAuthSessionRequest = {
-  auth?: { uid?: string; token?: { role?: string } };
+  auth?: AuthData;
   data: CreateSoundCloudAuthSessionInput;
 };
 
@@ -80,7 +81,7 @@ describe('createSoundCloudAuthSession', () => {
 
     await expect(
       handler({
-        auth: { uid: 'admin-1', token: { role: 'admin' } },
+        auth: testCallableAuth('admin', 'admin-1'),
         data: { redirectUri: TEST_REDIRECT_URI },
       })
     ).resolves.toEqual({
@@ -97,7 +98,7 @@ describe('createSoundCloudAuthSession', () => {
   it('rejects non-admin callers', async () => {
     await expect(
       handler({
-        auth: { uid: 'publisher-1', token: { role: 'publisher' } },
+        auth: testCallableAuth('publisher', 'publisher-1'),
         data: { redirectUri: TEST_REDIRECT_URI },
       })
     ).rejects.toMatchObject({ code: 'permission-denied' });

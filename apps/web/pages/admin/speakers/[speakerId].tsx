@@ -28,30 +28,14 @@ import SaveIcon from '@mui/icons-material/Save';
 import AppLayout from '../../../layout/AppLayout';
 import DeleteEntityPopup from '../../../components/DeleteEntityPopup';
 import ImageViewer from '../../../components/ImageViewer';
-import PopUp from '../../../components/PopUp';
 import firestore, { doc } from '../../../firebase/firestore';
 import useAuth from '../../../context/user/UserContext';
 import { ImageSizeType, ImageType, isImageType } from '../../../types/Image';
 import { listConverter } from '../../../types/List';
 import { ISpeaker, speakerConverter } from '../../../types/Speaker';
-import { createFunctionV2 } from '../../../utils/createFunction';
-import {
-  DeleteSpeakerCallableInputType,
-  DeleteSpeakerCallableOutputType,
-  UpdateSpeakerCallableInputType,
-  UpdateSpeakerCallableOutputType,
-} from '@upperroom/contracts/speakers/createSpeakerTypes';
+import { submitDurableIntent } from '../../../utils/durableJobs';
+import EntityJobHistory from '../../../components/jobs/EntityJobHistory';
 import { buildUpdateSpeakerPayload } from '../../../utils/speakers/updateSpeakerClient';
-import {
-  SPEAKER_LIST_SUCCESS_INSTRUCTION,
-  SUBSPLASH_SPEAKER_LIST_LINK,
-  shouldShowSpeakerListSuccess,
-} from '../../../utils/speakers/createSpeakerClient';
-import { useAlgoliaSearch } from '../../../context/search/AlgoliaSearchContext';
-
-const updateSpeakerCallable = createFunctionV2<UpdateSpeakerCallableInputType, UpdateSpeakerCallableOutputType>('updatespeaker');
-const deleteSpeakerCallable = createFunctionV2<DeleteSpeakerCallableInputType, DeleteSpeakerCallableOutputType>('deletespeaker');
-
 interface SpeakerFormState {
   name: string;
   shortDescription: string;
@@ -86,8 +70,7 @@ const SpeakerImageSummary = ({ images }: { images: ImageType[] }) => {
                   <Box
                     sx={{
                       width: '100%',
-                      aspectRatio:
-                        type === 'square' ? '1 / 1' : type === 'wide' ? '16 / 9' : '1920 / 692',
+                      aspectRatio: type === 'square' ? '1 / 1' : type === 'wide' ? '16 / 9' : '1920 / 692',
                       borderRadius: 2,
                       border: '1px solid',
                       borderColor: 'divider',
@@ -129,7 +112,6 @@ const SpeakerImageSummary = ({ images }: { images: ImageType[] }) => {
 const SpeakerDetailsPage = () => {
   const router = useRouter();
   const { user, loading } = useAuth();
-  const { clearCache } = useAlgoliaSearch();
   const speakerId = router.query.speakerId as string;
   const [isEditing, setIsEditing] = useState(false);
   const [formState, setFormState] = useState<SpeakerFormState | null>(null);
@@ -138,7 +120,6 @@ const SpeakerDetailsPage = () => {
   const [savePending, setSavePending] = useState(false);
   const [deletePopup, setDeletePopup] = useState(false);
   const [deletePending, setDeletePending] = useState(false);
-  const [speakerListSuccessPopupOpen, setSpeakerListSuccessPopupOpen] = useState(false);
 
   const [speaker, speakerLoading, speakerError] = useDocumentData(
     speakerId ? doc(firestore, 'speakers', speakerId).withConverter(speakerConverter) : null
@@ -216,12 +197,14 @@ const SpeakerDetailsPage = () => {
 
     setDeletePending(true);
     try {
-      await deleteSpeakerCallable({
-        speakerId: speaker.id,
-        deleteAssociatedList: true,
+      await submitDurableIntent({
+        kind: 'speaker.mutate',
+        entity: { type: 'speaker', id: speaker.id },
+        payload: { operation: 'delete', input: { speakerId: speaker.id, deleteAssociatedList: true } },
       });
-      await clearCache();
-      await router.push('/admin/speakers');
+      setDeletePopup(false);
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : 'Unable to request speaker deletion.');
     } finally {
       setDeletePending(false);
     }
@@ -241,24 +224,23 @@ const SpeakerDetailsPage = () => {
     setSavePending(true);
     setSubmitError('');
     try {
-      const response = await updateSpeakerCallable(
-        buildUpdateSpeakerPayload({
-          speakerId: speaker.id,
-          name: normalizedName,
-          images: formState.images,
-          shortDescription: formState.shortDescription,
-          description: formState.description,
-          createSpeakerList: formState.createSpeakerList,
-          deleteAssociatedList: formState.deleteAssociatedList,
-        })
-      );
-
-      await clearCache();
+      await submitDurableIntent({
+        kind: 'speaker.mutate',
+        entity: { type: 'speaker', id: speaker.id },
+        payload: {
+          operation: 'update',
+          input: buildUpdateSpeakerPayload({
+            speakerId: speaker.id,
+            name: normalizedName,
+            images: formState.images,
+            shortDescription: formState.shortDescription,
+            description: formState.description,
+            createSpeakerList: formState.createSpeakerList,
+            deleteAssociatedList: formState.deleteAssociatedList,
+          }),
+        },
+      });
       setIsEditing(false);
-      setFormState(buildInitialFormState(response.speaker));
-      if (shouldShowSpeakerListSuccess(response)) {
-        setSpeakerListSuccessPopupOpen(true);
-      }
     } catch (error) {
       setSubmitError(error instanceof Error ? error.message : 'Unable to update speaker.');
     } finally {
@@ -304,7 +286,14 @@ const SpeakerDetailsPage = () => {
       </Head>
       <Box sx={{ maxWidth: 1280, mx: 'auto', width: '100%', px: { xs: 1, sm: 2, md: 3 }, py: 3 }}>
         <Stack spacing={3}>
-          <Box display="flex" justifyContent="space-between" alignItems={{ xs: 'flex-start', md: 'center' }} flexDirection={{ xs: 'column', md: 'row' }} gap={2}>
+          <EntityJobHistory entity={{ type: 'speaker', id: speaker.id }} />
+          <Box
+            display="flex"
+            justifyContent="space-between"
+            alignItems={{ xs: 'flex-start', md: 'center' }}
+            flexDirection={{ xs: 'column', md: 'row' }}
+            gap={2}
+          >
             <Stack spacing={1}>
               <Breadcrumbs separator="›" aria-label="breadcrumb">
                 <Link href="/admin/speakers" style={{ textDecoration: 'none' }}>
@@ -343,7 +332,12 @@ const SpeakerDetailsPage = () => {
                   <Button variant="outlined" startIcon={<EditIcon />} onClick={startEditing}>
                     Edit speaker
                   </Button>
-                  <Button variant="contained" color="error" startIcon={<DeleteIcon />} onClick={() => setDeletePopup(true)}>
+                  <Button
+                    variant="contained"
+                    color="error"
+                    startIcon={<DeleteIcon />}
+                    onClick={() => setDeletePopup(true)}
+                  >
                     Delete speaker
                   </Button>
                 </>
@@ -354,13 +348,27 @@ const SpeakerDetailsPage = () => {
           <Card>
             <CardContent>
               <Stack spacing={2}>
-                <Box display="flex" justifyContent="space-between" alignItems={{ xs: 'flex-start', md: 'center' }} flexDirection={{ xs: 'column', md: 'row' }} gap={2}>
+                <Box
+                  display="flex"
+                  justifyContent="space-between"
+                  alignItems={{ xs: 'flex-start', md: 'center' }}
+                  flexDirection={{ xs: 'column', md: 'row' }}
+                  gap={2}
+                >
                   <Box>
                     <Typography variant="h4">{speaker.name}</Typography>
                     <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ mt: 1 }}>
                       <Chip label={`${speaker.sermonCount || 0} sermons`} />
-                      <Chip label={speaker.listId ? 'Has speaker list' : 'No speaker list'} color={speaker.listId ? 'success' : 'default'} variant="outlined" />
-                      <Chip label={speaker.tagId ? 'Subsplash tag linked' : 'No tag'} color={speaker.tagId ? 'success' : 'default'} variant="outlined" />
+                      <Chip
+                        label={speaker.listId ? 'Has speaker list' : 'No speaker list'}
+                        color={speaker.listId ? 'success' : 'default'}
+                        variant="outlined"
+                      />
+                      <Chip
+                        label={speaker.tagId ? 'Subsplash tag linked' : 'No tag'}
+                        color={speaker.tagId ? 'success' : 'default'}
+                        variant="outlined"
+                      />
                     </Stack>
                   </Box>
                   {speaker.tagId && (
@@ -383,7 +391,9 @@ const SpeakerDetailsPage = () => {
                 {isEditing ? (
                   <Stack spacing={2}>
                     <TextField
-                      label={nameTouched && formState.name.trim().length === 0 ? 'Speaker name is required' : 'Speaker name'}
+                      label={
+                        nameTouched && formState.name.trim().length === 0 ? 'Speaker name is required' : 'Speaker name'
+                      }
                       value={formState.name}
                       fullWidth
                       required
@@ -401,7 +411,9 @@ const SpeakerDetailsPage = () => {
                       value={formState.shortDescription}
                       fullWidth
                       onChange={(event) =>
-                        setFormState((current) => (current ? { ...current, shortDescription: event.target.value } : current))
+                        setFormState((current) =>
+                          current ? { ...current, shortDescription: event.target.value } : current
+                        )
                       }
                     />
                     <TextField
@@ -431,7 +443,10 @@ const SpeakerDetailsPage = () => {
                         <CardContent>
                           <Stack spacing={1.5}>
                             <Typography variant="subtitle1">Current speaker list</Typography>
-                            <Link href={`/admin/lists/${speakerList.id}?count=${speakerList.count || 0}`} style={{ textDecoration: 'none' }}>
+                            <Link
+                              href={`/admin/lists/${speakerList.id}?count=${speakerList.count || 0}`}
+                              style={{ textDecoration: 'none' }}
+                            >
                               <MuiLink component="span" underline="hover">
                                 {speakerList.name}
                               </MuiLink>
@@ -475,13 +490,18 @@ const SpeakerDetailsPage = () => {
                             }
                           />
                         }
-                        label={showingListAsRemoved ? 'Create a replacement speaker list' : 'Create and associate a speaker list'}
+                        label={
+                          showingListAsRemoved
+                            ? 'Create a replacement speaker list'
+                            : 'Create and associate a speaker list'
+                        }
                       />
                     )}
 
                     {showingListAsRemoved && (
                       <Alert severity="warning">
-                        The existing speaker list will be deleted from Subsplash and removed from Firebase when you save.
+                        The existing speaker list will be deleted from Subsplash and removed from Firebase when you
+                        save.
                       </Alert>
                     )}
 
@@ -519,7 +539,10 @@ const SpeakerDetailsPage = () => {
                             </Box>
                             {speakerList ? (
                               <>
-                                <Link href={`/admin/lists/${speakerList.id}?count=${speakerList.count || 0}`} style={{ textDecoration: 'none' }}>
+                                <Link
+                                  href={`/admin/lists/${speakerList.id}?count=${speakerList.count || 0}`}
+                                  style={{ textDecoration: 'none' }}
+                                >
                                   <MuiLink component="span" underline="hover">
                                     {speakerList.name}
                                   </MuiLink>
@@ -582,15 +605,6 @@ const SpeakerDetailsPage = () => {
         setDeleteConfirmationPopup={setDeletePopup}
         isDeleting={deletePending}
       />
-
-      <PopUp title="Speaker list created" open={speakerListSuccessPopupOpen} setOpen={setSpeakerListSuccessPopupOpen}>
-        <Box display="flex" flexDirection="column" gap={2} sx={{ py: 1 }}>
-          <Typography>{SPEAKER_LIST_SUCCESS_INSTRUCTION}</Typography>
-          <MuiLink href={SUBSPLASH_SPEAKER_LIST_LINK} target="_blank" rel="noreferrer">
-            Subsplash Speaker List
-          </MuiLink>
-        </Box>
-      </PopUp>
     </>
   );
 };

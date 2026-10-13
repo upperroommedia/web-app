@@ -155,6 +155,8 @@ export const sermonConverter: FirestoreDataConverter<Sermon> = {
     const convertedSermon: Sermon = {
       ...createEmptySermon(),
       ...data,
+      // A legacy missing revision is a stable sentinel, never the time this tab read it.
+      editedAtMillis: typeof data.editedAtMillis === 'number' ? data.editedAtMillis : 0,
       ...(date && {
         dateMillis,
         dateString: getDateString(new Date(dateMillis)),

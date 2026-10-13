@@ -1,0 +1,23 @@
+{
+  "environment": "staging",
+  "mode": "initial-cutover",
+  "projectId": "urm-app-staging",
+  "backendId": "web-staging",
+  "location": "us-central1",
+  "releaseId": "REQUIRED_RELEASE_UUID",
+  "compatibilityCommit": "REQUIRED_FULL_BACKEND_COMMIT",
+  "uiCommit": "REQUIRED_FULL_UI_COMMIT",
+  "domains": ["media", "publishing", "images", "emails", "accounts", "bundles"],
+  "platformConfig": "REQUIRED_PATH_TO_PLATFORM_DESCRIPTOR",
+  "platformPeerConfig": "REQUIRED_PATH_TO_PEER_PLATFORM_DESCRIPTOR",
+  "databaseUrl": "https://urm-app-staging-default-rtdb.firebaseio.com",
+  "mailCollection": "mail",
+  "legacyQueues": ["processaudiofiletask", "processaudioyoutubetask"],
+  "additionalLegacyQueues": [],
+  "compatibilityEvidence": "REQUIRED_PATH_TO_BACKEND_RULES_PAUSE_SMOKE_REPORT",
+  "backendEvidence": "REQUIRED_PATH_TO_COMPLETE_BACKEND_DEPLOYMENT_REPORT",
+  "smokeEvidence": "REQUIRED_PATH_TO_POST_UI_RELEASE_SMOKE_REPORT",
+  "legacyExecutionGraceSeconds": 3600,
+  "promotionApprovalEvidence": "REQUIRED_FOR_PRODUCTION_PATH_TO_STAGING_E2E_AND_HUMAN_APPROVAL",
+  "providerUsageBackfillTimeoutMs": 1800000
+}

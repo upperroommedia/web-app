@@ -1,0 +1,80 @@
+groups:
+  - name: urm-temporal-platform
+    rules:
+      - alert: TemporalServerScrapeUnavailable
+        expr: up{platform="urm-temporal",job="temporal-server"} == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Temporal server metrics unavailable for {{ $labels.component }} in {{ $labels.environment }}'
+      - alert: TemporalPersistenceErrors
+        expr: sum by (environment) (rate(persistence_errors{platform="urm-temporal"}[5m])) > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Temporal persistence is returning errors'
+      - alert: TemporalPersistenceLatency
+        expr: histogram_quantile(0.99, sum by (le, environment) (rate(persistence_latency_bucket{platform="urm-temporal"}[5m]))) > 1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Temporal persistence p99 exceeds one second'
+      - alert: TemporalPostgresScrapeUnavailable
+        expr: up{platform="urm-temporal",job="temporal-postgres"} == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Temporal PostgreSQL metrics unavailable'
+      - alert: TemporalWorkerScheduleLatency
+        expr: histogram_quantile(0.95, sum by (le, environment, task_queue) (rate(temporal_activity_schedule_to_start_latency_bucket{platform="urm-temporal"}[5m]))) > 30
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Temporal activity queue p95 wait exceeds30 seconds'
+      - alert: TemporalWorkerTaskFailures
+        expr: sum by (environment, task_queue) (rate(temporal_workflow_task_execution_failed{platform="urm-temporal"}[5m])) > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Temporal workflow tasks repeatedly fail; check determinism and worker compatibility'
+      - alert: TemporalPersistentVolumeAlmostFull
+        expr: kubelet_volume_stats_available_bytes{persistentvolumeclaim=~"temporal-postgres.*"} / kubelet_volume_stats_capacity_bytes{persistentvolumeclaim=~"temporal-postgres.*"} < 0.15
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Temporal PostgreSQL persistent volume has less than15% free space'
+      - alert: TemporalMetricsMissing
+        expr: absent(up{platform="urm-temporal",job="temporal-server"})
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Temporal monitoring discovery has no server targets'
+      - alert: TemporalMediaScratchAlmostFull
+        expr: kubelet_volume_stats_available_bytes{persistentvolumeclaim=~"urm-worker-media-.*"} / kubelet_volume_stats_capacity_bytes{persistentvolumeclaim=~"urm-worker-media-.*"} < 0.15
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Media scratch has less than15% free; stop new admission and inspect native reservations'
+      - alert: TemporalMediaScratchInodesAlmostFull
+        expr: kubelet_volume_stats_inodes_free{persistentvolumeclaim=~"urm-worker-media-.*"} / kubelet_volume_stats_inodes{persistentvolumeclaim=~"urm-worker-media-.*"} < 0.15
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Media scratch inode capacity is almost exhausted'
+      - alert: TemporalMediaScratchQuotaPressure
+        expr: kube_resourcequota{resourcequota="temporal-media-scratch",type="used"} / ignoring(type) kube_resourcequota{resourcequota="temporal-media-scratch",type="hard"} > 0.85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Media scratch CSI quota has little room for retained versions and release surge'

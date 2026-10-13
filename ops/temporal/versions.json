@@ -1,0 +1,21 @@
+{
+  "chart": "1.7.0",
+  "chartSha256": "f7b443f637b71fcbddd12900e5be9fe4c18cf741495d7b2cb247670681bf57d4",
+  "chartUrl": "https://github.com/temporalio/helm-charts/releases/download/temporal-1.7.0/temporal-1.7.0.tgz",
+  "server": "1.32.1",
+  "ui": "2.55.0",
+  "cli": "1.9.1",
+  "cloudNativePg": "1.30.1",
+  "cloudNativePgManifestSha256": "37237f145d8138256ea25ae830f87759255665ff08f8d552fdd8224a5ec032fb",
+  "barmanCloud": "0.15.1",
+  "barmanCloudManifestSha256": "8f377ff4a7d0d3f74fc64b0f7ac4f449fc38ca9e83a40107cca2f9315a9bd920",
+  "certManager": "1.21.2",
+  "k3s": "v1.36.5+k3s1",
+  "postgresImage": "ghcr.io/cloudnative-pg/postgresql:18.6-standard-trixie@sha256:c7747d8d1049fff9cf30d9cd83d14d609c957afb5ffbcd114145f393ea1850e1",
+  "serverDigest": "sha256:acecbab5b0b8ae9cf4012b508866ca97feda3709577bf157b537239f40029049",
+  "adminToolsDigest": "sha256:9ef0dc5b063bf4ffd5c1512de72e0e73e225bd2c7006a18ce69bd592a8862a83",
+  "uiDigest": "sha256:3899d5cf749b5555c9f798d46f2423b1d6190ea391ca713db5d1bba961759e58",
+  "certManagerManifestSha256": "e03b668ec8675214af6b0a671699d088f2601fa3878e0dbe1b41d3feafd1879f",
+  "helm": "4.3.0",
+  "cliImage": "temporalio/temporal:1.9.1@sha256:ad4c82c97bd12b417d1ea942610dbcd511afb250c4d5ed26c694009533df447e"
+}

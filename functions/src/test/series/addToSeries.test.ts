@@ -1,3 +1,4 @@
+import { testCallableAuth } from '../helpers/callableAuth';
 /**
  * Tests for addToSeries Firebase function
  * TDD approach: Tests written first
@@ -35,7 +36,7 @@ describe('addToSeries - Basic Functionality', () => {
     const mediaItem = subsplashSeriesMock.createMediaItem('Sermon 1');
 
     const request: TestRequest<AddToSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         seriesSubsplashId: subsplashSeries.id,
         mediaItemId: mediaItem.id,
@@ -56,7 +57,7 @@ describe('addToSeries - Basic Functionality', () => {
     const mediaItem = subsplashSeriesMock.createMediaItem('Ungated Sermon');
 
     const request: TestRequest<AddToSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         seriesSubsplashId: subsplashSeries.id,
         mediaItemId: mediaItem.id,
@@ -89,7 +90,7 @@ describe('addToSeries - Basic Functionality', () => {
     const newItem = subsplashSeriesMock.createMediaItem('New Item');
 
     const request: TestRequest<AddToSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         seriesSubsplashId: subsplashSeries.id,
         mediaItemId: newItem.id,
@@ -130,7 +131,7 @@ describe('addToSeries - Basic Functionality', () => {
     });
 
     const request: TestRequest<AddToSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         seriesSubsplashId: series2.id,
         mediaItemId: mediaItem.id,
@@ -168,7 +169,7 @@ describe('addToSeries - Basic Functionality', () => {
     });
 
     const request: TestRequest<AddToSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         seriesSubsplashId: subsplashSeries.id,
         mediaItemId: mediaItem.id,
@@ -194,7 +195,7 @@ describe('addToSeries - Basic Functionality', () => {
     const mediaItem = subsplashSeriesMock.createMediaItem('Positioned Item');
 
     const request: TestRequest<AddToSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         seriesSubsplashId: subsplashSeries.id,
         mediaItemId: mediaItem.id,
@@ -246,7 +247,7 @@ describe('addToSeries - Authentication', () => {
     const mediaItem = subsplashSeriesMock.createMediaItem('Item');
 
     const request: TestRequest<AddToSeriesInputType> = {
-      auth: { token: { role: 'viewer' } },
+      auth: testCallableAuth('viewer'),
       data: {
         seriesSubsplashId: subsplashSeries.id,
         mediaItemId: mediaItem.id,
@@ -265,7 +266,7 @@ describe('addToSeries - Authentication', () => {
     const mediaItem = subsplashSeriesMock.createMediaItem('Item');
 
     const request: TestRequest<AddToSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         seriesSubsplashId: subsplashSeries.id,
         mediaItemId: mediaItem.id,
@@ -288,7 +289,7 @@ describe('addToSeries - Validation', () => {
     const mediaItem = subsplashSeriesMock.createMediaItem('Item');
 
     const request: TestRequest<AddToSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         seriesSubsplashId: '',
         mediaItemId: mediaItem.id,
@@ -306,7 +307,7 @@ describe('addToSeries - Validation', () => {
     });
 
     const request: TestRequest<AddToSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         seriesSubsplashId: subsplashSeries.id,
         mediaItemId: '',
@@ -336,7 +337,7 @@ describe('addToSeries - Error Handling', () => {
     networkFailureInjector.registerFailure(`patchMediaItem:${mediaItem.id}`, () => true);
 
     const request: TestRequest<AddToSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         seriesSubsplashId: subsplashSeries.id,
         mediaItemId: mediaItem.id,
@@ -354,7 +355,7 @@ describe('addToSeries - Error Handling', () => {
     });
 
     const request: TestRequest<AddToSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         seriesSubsplashId: subsplashSeries.id,
         mediaItemId: 'non-existent-item',
@@ -386,7 +387,7 @@ describe('addToSeries - Locking and Idempotency', () => {
       });
 
     const request: TestRequest<AddToSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         seriesSubsplashId: subsplashSeries.id,
         mediaItemId: mediaItem.id,
@@ -413,7 +414,7 @@ describe('addToSeries - Locking and Idempotency', () => {
     const patchSpy = jest.spyOn(seriesHelpers, 'patchMediaItemSeries');
 
     const request: TestRequest<AddToSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         seriesSubsplashId: subsplashSeries.id,
         mediaItemId: mediaItem.id,
@@ -435,7 +436,7 @@ describe('addToSeries - Locking and Idempotency', () => {
     await claimOperation('add-op-busy-1');
 
     const request: TestRequest<AddToSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         seriesSubsplashId: subsplashSeries.id,
         mediaItemId: mediaItem.id,

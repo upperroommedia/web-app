@@ -57,10 +57,7 @@ const getDeleteIntentPayloadFromRoute = (
 const getDeleteFailureMessage = (error: unknown): string => {
   const busyDetails = parseLockBusyDetails(error);
   if (busyDetails) {
-    return formatLockBusyRetryMessage(
-      'Failed to delete sermon because another cleanup is in progress.',
-      busyDetails
-    );
+    return formatLockBusyRetryMessage('Failed to delete sermon because another cleanup is in progress.', busyDetails);
   }
 
   if (error instanceof Error && error.message.trim().length > 0) {
@@ -147,15 +144,10 @@ const AdminSermons = () => {
       try {
         await deleteSermonWithExternalCleanup(deleteIntentPayload);
         await clearCache();
-        setHiddenSermonIds((currentIds) =>
-          currentIds.includes(deleteIntentPayload.sermonId)
-            ? currentIds
-            : [...currentIds, deleteIntentPayload.sermonId]
-        );
         setDeleteToast({
           open: true,
           severity: 'success',
-          message: 'Sermon deleted successfully.',
+          message: 'Deletion queued. Follow cleanup in Activity.',
           id: Date.now(),
         });
       } catch (error) {

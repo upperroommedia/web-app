@@ -17,6 +17,7 @@
 import * as sgMail from "@sendgrid/mail";
 import {
   SendGridTransportOptions,
+  SendGridProviderClient,
   Address,
   MailSource,
   SendGridInfo,
@@ -37,6 +38,7 @@ export class SendGridTransport {
   public readonly version = "0.0.1";
   /** The SendGrid transport options */
   private readonly options: SendGridTransportOptions;
+  private readonly client: SendGridProviderClient;
 
   /**
    * Creates a new SendGridTransport instance.
@@ -45,8 +47,12 @@ export class SendGridTransport {
    */
   constructor(options: SendGridTransportOptions = {}) {
     this.options = options;
+    this.client = options.client || {
+      setApiKey: key => sgMail.setApiKey(key),
+      send: async data => {const [response] = await sgMail.send(data as sgMail.MailDataRequired); return [response];},
+    };
     if (options.apiKey) {
-      sgMail.setApiKey(options.apiKey);
+      this.client.setApiKey(options.apiKey);
     }
   }
 
@@ -192,7 +198,7 @@ export class SendGridTransport {
         }
       }
 
-      sgMail
+      this.client
         .send(msg as sgMail.MailDataRequired)
         .then(([response]) => {
           // Internal SendGrid queue-ID from HTTP header

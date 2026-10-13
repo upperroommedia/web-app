@@ -270,6 +270,8 @@ export const updateSubsplashTag = onRequest({
     timeoutSeconds: 3600,
     secrets: subsplashSecretsWithRuntimeAlerts
 }, async (req, res) => {
+    const { guardLegacyPublishingHttpMutation } = await import('../temporal/publishing/legacyHttpGuard');
+    await guardLegacyPublishingHttpMutation(req, res, async () => {
     const db = firebaseAdmin.firestore();
 
     try {
@@ -449,5 +451,8 @@ export const updateSubsplashTag = onRequest({
             error: error instanceof Error ? error.message : String(error),
             message: 'Failed to complete sermon topics update'
         });
+        return { success: false };
     }
+    return { success: true };
+    });
 });

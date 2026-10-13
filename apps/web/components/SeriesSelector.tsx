@@ -49,29 +49,21 @@ const SeriesSelector: FunctionComponent<SeriesSelectorProps> = (props) => {
       setLoading(true);
       try {
         const targetLimit = 10;
-        const queryConstraints: QueryConstraint[] = [
-          limit(targetLimit),
-          orderBy('updatedAt', 'desc'),
-        ];
+        const queryConstraints: QueryConstraint[] = [limit(targetLimit), orderBy('updatedAt', 'desc')];
 
         // Non-admins can only see their own series
         if (!isAdmin) {
           queryConstraints.push(where('ownerId', '==', user.uid));
         }
 
-        const seriesQuery = query(
-          collection(firestore, 'series'),
-          ...queryConstraints
-        ).withConverter(seriesConverter);
-        
+        const seriesQuery = query(collection(firestore, 'series'), ...queryConstraints).withConverter(seriesConverter);
+
         const seriesSnapshot = await getDocs(seriesQuery);
         const seriesList = seriesSnapshot.docs.map((doc) => doc.data());
-        
+
         // Filter by input value if provided
         const filtered = inputValue
-          ? seriesList.filter((s) => 
-              s.name.toLowerCase().includes(inputValue.toLowerCase())
-            )
+          ? seriesList.filter((s) => s.name.toLowerCase().includes(inputValue.toLowerCase()))
           : seriesList;
 
         setAllSeriesArray(filtered);
@@ -162,7 +154,7 @@ const SeriesSelector: FunctionComponent<SeriesSelectorProps> = (props) => {
             />
           )}
         />
-        
+
         {/* Link to series details page if a series is selected */}
         {props.selectedSeries && (
           <Tooltip title="View series details">
@@ -176,22 +168,20 @@ const SeriesSelector: FunctionComponent<SeriesSelectorProps> = (props) => {
 
         {/* Add new series button */}
         <Tooltip title="Create new series">
-          <IconButton
-            size="small"
-            sx={{ flexShrink: 0 }}
-            onClick={() => setNewSeriesPopup(true)}
-            disabled={props.disabled}
-          >
-            <AddIcon />
-          </IconButton>
+          <Box component="span" sx={{ display: 'inline-flex', flexShrink: 0 }}>
+            <IconButton
+              size="small"
+              aria-label="Create new series"
+              onClick={() => setNewSeriesPopup(true)}
+              disabled={props.disabled}
+            >
+              <AddIcon />
+            </IconButton>
+          </Box>
         </Tooltip>
       </Box>
 
-      <NewSeriesPopup
-        open={newSeriesPopup}
-        setOpen={setNewSeriesPopup}
-        onSeriesCreated={handleSeriesCreated}
-      />
+      <NewSeriesPopup open={newSeriesPopup} setOpen={setNewSeriesPopup} onSeriesCreated={handleSeriesCreated} />
     </>
   );
 };

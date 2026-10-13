@@ -18,6 +18,28 @@ describe('functions sentry', () => {
     process.env.SENTRY_DSN = originalSentryDsn;
   });
 
+  it('keeps v11 automatic sensitive data and logging disabled', async () => {
+    const init = jest.fn();
+    jest.doMock('@sentry/node', () => ({ init }));
+    const sentryModule = await import('../sentry');
+    sentryModule.initFunctionsSentry();
+    const options = init.mock.calls[0][0];
+    expect(options.dataCollection).toEqual({
+      userInfo: false,
+      cookies: false,
+      httpHeaders: { request: false, response: false },
+      httpBodies: [],
+      urlQueryParams: false,
+      genAI: { inputs: false, outputs: false },
+      databaseQueryData: false,
+      queues: false,
+      graphQL: { document: false, variables: false },
+      stackFrameVariables: false,
+    });
+    expect(options.includeLocalVariables).toBe(false);
+    expect(options.beforeSendLog({ body: 'must not ship' })).toBeNull();
+  });
+
   it('flushes handled exceptions after capture', async () => {
     const setTag = jest.fn();
     const setExtra = jest.fn();

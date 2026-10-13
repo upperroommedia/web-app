@@ -1,3 +1,6 @@
+import { getApps, initializeApp } from 'firebase-admin/app';
+import { getFirestore } from 'firebase-admin/firestore';
+import type { QueryDocumentSnapshot, Query } from 'firebase-admin/firestore';
 /**
  * Backfill script for strict series published flags.
  *
@@ -13,7 +16,7 @@
  */
 
 import axios from 'axios';
-import * as admin from 'firebase-admin';
+
 import FormData from 'form-data';
 
 const APP_KEY = '9XTSHD';
@@ -157,10 +160,10 @@ async function run(): Promise<void> {
     return;
   }
 
-  if (!admin.apps.length) {
-    admin.initializeApp();
+  if (!getApps().length) {
+    initializeApp();
   }
-  const firestore = admin.firestore();
+  const firestore = getFirestore();
   const token = await authenticateSubsplash();
 
   const counters: BackfillCounters = {
@@ -182,12 +185,12 @@ async function run(): Promise<void> {
     sermonSubsplashId: string | null;
   }> = [];
 
-  let seriesDocs: admin.firestore.QueryDocumentSnapshot[];
+  let seriesDocs: QueryDocumentSnapshot[];
   if (args.seriesId) {
     const singleSeriesDoc = await firestore.collection('series').doc(args.seriesId).get();
-    seriesDocs = singleSeriesDoc.exists ? [singleSeriesDoc as admin.firestore.QueryDocumentSnapshot] : [];
+    seriesDocs = singleSeriesDoc.exists ? [singleSeriesDoc as QueryDocumentSnapshot] : [];
   } else {
-    let seriesQuery: admin.firestore.Query = firestore.collection('series');
+    let seriesQuery: Query = firestore.collection('series');
     if (args.limit) {
       seriesQuery = seriesQuery.limit(args.limit);
     }

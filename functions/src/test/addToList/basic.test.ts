@@ -1,3 +1,4 @@
+import { testCallableAuth } from '../helpers/callableAuth';
 import { OverflowBehavior } from '@upperroom/shared/types/List';
 import { sermonStatusType, uploadStatus } from '@upperroom/shared/types/SermonTypes';
 import { SubsplashListRow, SubsplashPatchPayload } from '../../types/Subsplash';
@@ -58,7 +59,7 @@ describe('addToList - Basic Functionality (Real Firestore Emulator)', () => {
     subsplashMock.markMediaItemMissing(missingMediaItemId);
 
     const request: TestRequest = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         destinationListIds: [firstListId, secondListId],
         mediaItem: { id: missingMediaItemId, type: 'media-item' },
@@ -91,7 +92,7 @@ describe('addToList - Basic Functionality (Real Firestore Emulator)', () => {
     await createSermonDocument(buildSermon('sermon-1', 'media-1'));
     const mediaItem = { id: 'media-1', type: 'media-item' as const };
     const request: TestRequest = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         destinationListIds: [listId],
         mediaItem,
@@ -161,7 +162,7 @@ describe('addToList - Basic Functionality (Real Firestore Emulator)', () => {
 
     const mediaItem = { id: 'new-item', type: 'media-item' as const };
     const request: TestRequest = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         destinationListIds: [listId],
         mediaItem,
@@ -301,7 +302,7 @@ describe('addToList - Basic Functionality (Real Firestore Emulator)', () => {
     await createSermonDocument(buildSermon('sermon-new', 'new-item'));
 
     const request: TestRequest = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         destinationListIds: [rootListId],
         mediaItem: { id: 'new-item', type: 'media-item' as const },
@@ -403,7 +404,7 @@ describe('addToList - Basic Functionality (Real Firestore Emulator)', () => {
     await createSermonDocument(buildSermon('sermon-phantom', 'new-phantom-item'));
 
     const request: TestRequest = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         destinationListIds: [rootListId],
         mediaItem: { id: 'new-phantom-item', type: 'media-item' as const },
@@ -507,7 +508,7 @@ describe('addToList - Basic Functionality (Real Firestore Emulator)', () => {
     await createSermonDocument(buildSermon('sermon-new-overflow', 'new-overflow-item'));
 
     const request: TestRequest = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         destinationListIds: [rootListId],
         mediaItem: { id: 'new-overflow-item', type: 'media-item' },
@@ -571,7 +572,7 @@ describe('addToList - Basic Functionality (Real Firestore Emulator)', () => {
 
     await createSermonDocument(buildSermon('sermon-too-large', 'media-too-large'));
     const request: TestRequest = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         destinationListIds: [listId],
         mediaItem: { id: 'media-too-large', type: 'media-item' as const },
@@ -689,7 +690,7 @@ describe('addToList - Basic Functionality (Real Firestore Emulator)', () => {
     await createSermonDocument(buildSermon('sermon-new-overflow-standalone', 'new-overflow-item-standalone'));
 
     const request: TestRequest = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         destinationListIds: [rootListId],
         mediaItem: { id: 'new-overflow-item-standalone', type: 'media-item' },
@@ -775,7 +776,7 @@ describe('addToList - Basic Functionality (Real Firestore Emulator)', () => {
 
     const mediaItem = { id: 'new-item-a', type: 'media-item' as const };
     const request: TestRequest = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         destinationListIds: [listA],
         mediaItem,
@@ -865,7 +866,7 @@ describe('addToList - Basic Functionality (Real Firestore Emulator)', () => {
 
     const mediaItem = { id: 'new-item', type: 'media-item' as const };
     const request: TestRequest = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         destinationListIds: [listA],
         mediaItem,
@@ -924,7 +925,7 @@ describe('addToList - Basic Functionality (Real Firestore Emulator)', () => {
     
     const mediaItem = { id: 'new-item', type: 'media-item' as const };
     const request: TestRequest = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         destinationListIds: [listId],
         mediaItem,
@@ -1013,7 +1014,7 @@ describe('addToList - Basic Functionality (Real Firestore Emulator)', () => {
 
     const mediaItem = { id: 'new-item', type: 'media-item' as const };
     const request: TestRequest = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         destinationListIds: [listA],
         mediaItem,
@@ -1054,7 +1055,7 @@ describe('addToList - Basic Functionality (Real Firestore Emulator)', () => {
     // Add first item
     const item1 = { id: 'item-1', type: 'media-item' as const };
     const request1: TestRequest = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: { destinationListIds: [listId], mediaItem: item1, maxListSize: 10 }
     };
     await addToListHandler(request1);
@@ -1067,7 +1068,7 @@ describe('addToList - Basic Functionality (Real Firestore Emulator)', () => {
     // Add second item - should go to top
     const item2 = { id: 'item-2', type: 'media-item' as const };
     const request2: TestRequest = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: { destinationListIds: [listId], mediaItem: item2, maxListSize: 10 }
     };
     await addToListHandler(request2);
@@ -1082,7 +1083,7 @@ describe('addToList - Basic Functionality (Real Firestore Emulator)', () => {
     // Add third item - should go to top
     const item3 = { id: 'item-3', type: 'media-item' as const };
     const request3: TestRequest = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: { destinationListIds: [listId], mediaItem: item3, maxListSize: 10 }
     };
     await addToListHandler(request3);
@@ -1098,7 +1099,7 @@ describe('addToList - Basic Functionality (Real Firestore Emulator)', () => {
     for (let i = 4; i <= 10; i++) {
       const item = { id: `item-${i}`, type: 'media-item' as const };
       const request: TestRequest = {
-        auth: { token: { role: 'admin' } },
+        auth: testCallableAuth('admin'),
         data: { destinationListIds: [listId], mediaItem: item, maxListSize: 10 }
       };
       await addToListHandler(request);
@@ -1117,7 +1118,7 @@ describe('addToList - Basic Functionality (Real Firestore Emulator)', () => {
     // Add one more item to trigger overflow
     const overflowItem = { id: 'overflow-item', type: 'media-item' as const };
     const overflowRequest: TestRequest = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: { destinationListIds: [listId], mediaItem: overflowItem, maxListSize: 10 }
     };
     await addToListHandler(overflowRequest);
@@ -1147,7 +1148,7 @@ describe('addToList - Basic Functionality (Real Firestore Emulator)', () => {
     // Add another item to the original list
     const anotherItem = { id: 'another-item', type: 'media-item' as const };
     const anotherRequest: TestRequest = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: { destinationListIds: [listId], mediaItem: anotherItem, maxListSize: 10 }
     };
     await addToListHandler(anotherRequest);
@@ -1179,7 +1180,7 @@ describe('addToList - Basic Functionality (Real Firestore Emulator)', () => {
       
       const mediaItem = { id: 'new-item-1', type: 'media-item' as const };
       const request: TestRequest = {
-        auth: { token: { role: 'admin' } },
+        auth: testCallableAuth('admin'),
         data: {
           destinationListIds: [listId],
           mediaItem,
@@ -1243,7 +1244,7 @@ describe('addToList - Basic Functionality (Real Firestore Emulator)', () => {
       // Try to add the same item again
       const mediaItem = { id: 'existing-item', type: 'media-item' as const };
       const request: TestRequest = {
-        auth: { token: { role: 'admin' } },
+        auth: testCallableAuth('admin'),
         data: {
           destinationListIds: [listId],
           mediaItem,
@@ -1286,7 +1287,7 @@ describe('addToList - Basic Functionality (Real Firestore Emulator)', () => {
       
       const mediaItem = { id: 'shared-item', type: 'media-item' as const };
       const request: TestRequest = {
-        auth: { token: { role: 'admin' } },
+        auth: testCallableAuth('admin'),
         data: {
           destinationListIds: [listId1, listId2],
           mediaItem
@@ -1320,7 +1321,7 @@ describe('addToList - Basic Functionality (Real Firestore Emulator)', () => {
       
       const mediaItem = { id: 'item-1', type: 'media-item' as const };
       const request: TestRequest = {
-        auth: { token: { role: 'admin' } },
+        auth: testCallableAuth('admin'),
         data: {
           destinationListIds: [listId],
           mediaItem
@@ -1364,7 +1365,7 @@ describe('addToList - Basic Functionality (Real Firestore Emulator)', () => {
       
       const mediaItem = { id: 'overflow-trigger-item', type: 'media-item' as const };
       const request: TestRequest = {
-        auth: { token: { role: 'admin' } },
+        auth: testCallableAuth('admin'),
         data: {
           destinationListIds: [listId],
           mediaItem,
@@ -1452,7 +1453,7 @@ describe('addToList - Basic Functionality (Real Firestore Emulator)', () => {
       // Try to add item that already exists in overflow list
       const mediaItem = { id: 'existing-in-overflow', type: 'media-item' as const };
       const request: TestRequest = {
-        auth: { token: { role: 'admin' } },
+        auth: testCallableAuth('admin'),
         data: {
           destinationListIds: [listId],
           mediaItem,
@@ -1495,7 +1496,7 @@ describe('addToList - Basic Functionality (Real Firestore Emulator)', () => {
       
       const mediaItem = { id: 'parallel-item', type: 'media-item' as const };
       const request: TestRequest = {
-        auth: { token: { role: 'admin' } },
+        auth: testCallableAuth('admin'),
         data: {
           destinationListIds: listIds,
           mediaItem,
@@ -1542,7 +1543,7 @@ describe('addToList - Basic Functionality (Real Firestore Emulator)', () => {
       // Add an item normally
       const mediaItem = { id: 'normal-item', type: 'media-item' as const };
       const request: TestRequest = {
-        auth: { token: { role: 'admin' } },
+        auth: testCallableAuth('admin'),
         data: {
           destinationListIds: [listId],
           mediaItem
@@ -1583,7 +1584,7 @@ describe('addToList - Basic Functionality (Real Firestore Emulator)', () => {
       
       for (const item of items) {
         const request: TestRequest = {
-          auth: { token: { role: 'admin' } },
+          auth: testCallableAuth('admin'),
           data: {
             destinationListIds: [listId],
             mediaItem: item
@@ -1657,7 +1658,7 @@ describe('addToList - Basic Functionality (Real Firestore Emulator)', () => {
       
       const mediaItem = { id: 'new-item', type: 'media-item' as const };
       const request: TestRequest = {
-        auth: { token: { role: 'admin' } },
+        auth: testCallableAuth('admin'),
         data: {
           destinationListIds: [listId],
           mediaItem,
@@ -1812,7 +1813,7 @@ describe('addToList - Basic Functionality (Real Firestore Emulator)', () => {
       
       const mediaItem = { id: 'new-item', type: 'media-item' as const };
       const request: TestRequest = {
-        auth: { token: { role: 'admin' } },
+        auth: testCallableAuth('admin'),
         data: {
           destinationListIds: [listId],
           mediaItem,
@@ -1899,7 +1900,7 @@ describe('addToList - Basic Functionality (Real Firestore Emulator)', () => {
       await createSermonDocument(buildSermon('sermon-new', 'new-item'));
 
       const result = await addToListHandler({
-        auth: { token: { role: 'admin' } },
+        auth: testCallableAuth('admin'),
         data: {
           destinationListIds: [listId],
           mediaItem: { id: 'new-item', type: 'media-item' as const },
@@ -1950,7 +1951,7 @@ describe('addToList - Basic Functionality (Real Firestore Emulator)', () => {
       await createSermonDocument(buildSermon('sermon-hidden-new', 'hidden-new-item'));
 
       const result = await addToListHandler({
-        auth: { token: { role: 'admin' } },
+        auth: testCallableAuth('admin'),
         data: {
           destinationListIds: [listId],
           mediaItem: { id: 'hidden-new-item', type: 'media-item' as const },

@@ -1,3 +1,4 @@
+import { testCallableAuth } from '../helpers/callableAuth';
 /**
  * Integration tests for network failure robustness
  * Uses real Firestore emulator (not mocks)
@@ -61,7 +62,7 @@ describe('addToList - Network Failure Robustness (Real Firestore Emulator)', () 
 
     const mediaItem = { id: 'media-1', type: 'media-item' as const };
     const request: TestRequest = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         destinationListIds: [listId],
         mediaItem,
@@ -106,7 +107,7 @@ describe('addToList - Network Failure Robustness (Real Firestore Emulator)', () 
 
     const mediaItem = { id: 'new-item', type: 'media-item' as const };
     const request: TestRequest = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         destinationListIds: [listId],
         mediaItem,
@@ -151,7 +152,7 @@ describe('addToList - Network Failure Robustness (Real Firestore Emulator)', () 
 
     const mediaItem = { id: 'new-item', type: 'media-item' as const };
     const request: TestRequest = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         destinationListIds: [listId],
         mediaItem,
@@ -217,7 +218,7 @@ describe('addToList - Network Failure Robustness (Real Firestore Emulator)', () 
 
     const mediaItem = { id: 'new-item', type: 'media-item' as const };
     const request: TestRequest = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         destinationListIds: [listId],
         mediaItem,
@@ -264,7 +265,7 @@ describe('addToList - Network Failure Robustness (Real Firestore Emulator)', () 
     networkFailureInjector.registerFailure(`patchList:${listId}`, () => true);
     const mediaItem = { id: 'new-item', type: 'media-item' as const };
     const request: TestRequest = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         destinationListIds: [listId],
         mediaItem,
@@ -311,7 +312,7 @@ describe('addToList - Network Failure Robustness (Real Firestore Emulator)', () 
     });
 
     const request: TestRequest = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         destinationListIds: [listId],
         mediaItem: { id: 'new-item', type: 'media-item' },
@@ -362,7 +363,7 @@ describe('addToList - Network Failure Robustness (Real Firestore Emulator)', () 
     });
 
     const request: TestRequest = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         destinationListIds: [listId],
         mediaItem: { id: 'new-item', type: 'media-item' },
@@ -428,7 +429,7 @@ describe('addToList - Network Failure Robustness (Real Firestore Emulator)', () 
 
     const mediaItem = { id: 'new-item', type: 'media-item' as const };
     const request: TestRequest = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         destinationListIds: [listA],
         mediaItem,
@@ -519,7 +520,7 @@ describe('addToList - Network Failure Robustness (Real Firestore Emulator)', () 
     networkFailureInjector.registerFailure(`patchListAfterMutation:${overflowListId}`, () => true);
 
     const request: TestRequest = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         destinationListIds: [rootListId],
         mediaItem: { id: 'brand-new-overflow-item', type: 'media-item' },
@@ -561,7 +562,7 @@ describe('addToList - Network Failure Robustness (Real Firestore Emulator)', () 
 
     const mediaItem = { id: 'media-1', type: 'media-item' as const };
     const request: TestRequest = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         destinationListIds: [listId],
         mediaItem,
@@ -629,7 +630,7 @@ describe('addToList - Network Failure Robustness (Real Firestore Emulator)', () 
     
     const mediaItem = { id: 'multi-list-item', type: 'media-item' as const };
     const request: TestRequest = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         destinationListIds: [listId1, listId2, listId3, listId4],
         mediaItem,
@@ -758,7 +759,7 @@ describe('addToList - Network Failure Robustness (Real Firestore Emulator)', () 
     
     const mediaItem = { id: 'error-test-item', type: 'media-item' as const };
     const request: TestRequest = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         destinationListIds: [listId1, listId2, listId3],
         mediaItem,
@@ -888,7 +889,7 @@ describe('addToList - Network Failure Robustness (Real Firestore Emulator)', () 
     subsplashMock.failNextPatchesWithUnknownRow(listId, 'stale-row');
 
     const result = await addToListHandler({
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         destinationListIds: [listId],
         mediaItem: { id: 'new-item', type: 'media-item' },
@@ -974,7 +975,7 @@ describe('addToList - Network Failure Robustness (Real Firestore Emulator)', () 
     subsplashMock.failNextPatchesWithUnknownRow(listId, 'stale-row', 2);
 
     const result = await addToListHandler({
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         destinationListIds: [listId],
         mediaItem: { id: 'new-item', type: 'media-item' },

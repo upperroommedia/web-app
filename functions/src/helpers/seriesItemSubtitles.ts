@@ -1,3 +1,4 @@
+import {isDurablePublishingOperation} from '../temporal/publishing/durableOperationContext';
 import { logger } from 'firebase-functions/v2';
 import { patchMediaItemSeries } from './seriesHelpers';
 import { runWithConcurrency } from '../utils/runWithConcurrency';
@@ -57,7 +58,7 @@ export async function syncSeriesItemSubtitles(
   options?: { maxConcurrency?: number }
 ): Promise<SyncSeriesItemSubtitlesResult> {
   const updates = planSeriesItemSubtitleUpdates(seriesTitle, items);
-  const maxConcurrency = Math.max(1, Math.min(options?.maxConcurrency ?? 4, 5));
+  const maxConcurrency = isDurablePublishingOperation()?1:Math.max(1, Math.min(options?.maxConcurrency ?? 4, 5));
   const unpositionedItemCount = items.filter(
     (item) => !Number.isInteger(item.position) || (item.position ?? 0) < 1
   ).length;

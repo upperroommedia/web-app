@@ -1,3 +1,4 @@
+import { testCallableAuth } from '../helpers/callableAuth';
 /**
  * Tests for reorderSeriesItems Firebase function
  * TDD approach: Tests written first
@@ -55,7 +56,7 @@ describe('reorderSeriesItems - Basic Functionality', () => {
 
     // Reorder: move item3 to position 1
     const request: TestRequest<ReorderSeriesItemsInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         firestoreSeriesId: firestoreId,
         expectedRemoteMembershipHash: createExpectedRemoteMembershipHash(subsplashSeries.id),
@@ -107,7 +108,7 @@ describe('reorderSeriesItems - Basic Functionality', () => {
 
     // Keep same order but verify it works
     const request: TestRequest<ReorderSeriesItemsInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         firestoreSeriesId: firestoreId,
         expectedRemoteMembershipHash: createExpectedRemoteMembershipHash(subsplashSeries.id),
@@ -138,7 +139,7 @@ describe('reorderSeriesItems - Basic Functionality', () => {
     });
 
     const request: TestRequest<ReorderSeriesItemsInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         firestoreSeriesId: firestoreId,
         expectedRemoteMembershipHash: createExpectedRemoteMembershipHash(subsplashSeries.id),
@@ -187,7 +188,7 @@ describe('reorderSeriesItems - Authentication', () => {
     });
 
     const request: TestRequest<ReorderSeriesItemsInputType> = {
-      auth: { token: { role: 'viewer' } },
+      auth: testCallableAuth('viewer'),
       data: {
         firestoreSeriesId: firestoreId,
         expectedRemoteMembershipHash: createExpectedRemoteMembershipHash(subsplashSeries.id),
@@ -206,7 +207,7 @@ describe('reorderSeriesItems - Authentication', () => {
     });
 
     const request: TestRequest<ReorderSeriesItemsInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         firestoreSeriesId: firestoreId,
         expectedRemoteMembershipHash: createExpectedRemoteMembershipHash(subsplashSeries.id),
@@ -228,7 +229,7 @@ describe('reorderSeriesItems - Validation', () => {
 
   it('should reject requests without firestoreSeriesId', async () => {
     const request: TestRequest<ReorderSeriesItemsInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         firestoreSeriesId: '',
         expectedRemoteMembershipHash: 'empty',
@@ -241,7 +242,7 @@ describe('reorderSeriesItems - Validation', () => {
 
   it('should reject requests for non-existent series', async () => {
     const request: TestRequest<ReorderSeriesItemsInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         firestoreSeriesId: 'non-existent-id',
         expectedRemoteMembershipHash: 'empty',
@@ -277,7 +278,7 @@ describe('reorderSeriesItems - Error Handling', () => {
     networkFailureInjector.registerFailure(`patchSeries:${subsplashSeries.id}`, () => true);
 
     const request: TestRequest<ReorderSeriesItemsInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         firestoreSeriesId: firestoreId,
         expectedRemoteMembershipHash: createExpectedRemoteMembershipHash(subsplashSeries.id),
@@ -311,7 +312,7 @@ describe('reorderSeriesItems - Locking and Idempotency', () => {
     const patchSpy = jest.spyOn(seriesHelpers, 'patchSeriesItemPositions');
 
     const request: TestRequest<ReorderSeriesItemsInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         firestoreSeriesId: firestoreId,
         expectedRemoteMembershipHash: createExpectedRemoteMembershipHash(subsplashSeries.id),
@@ -358,7 +359,7 @@ describe('reorderSeriesItems - Locking and Idempotency', () => {
     });
 
     const request: TestRequest<ReorderSeriesItemsInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         firestoreSeriesId: firestoreId,
         expectedRemoteMembershipHash: createExpectedRemoteMembershipHash(subsplashSeries.id),
@@ -409,7 +410,7 @@ describe('reorderSeriesItems - Remote source of truth', () => {
     });
 
     const request: TestRequest<ReorderSeriesItemsInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         firestoreSeriesId: firestoreId,
         expectedRemoteMembershipHash: `${createExpectedRemoteMembershipHash(subsplashSeries.id)}-stale`,
@@ -442,7 +443,7 @@ describe('reorderSeriesItems - Remote source of truth', () => {
     });
 
     const request: TestRequest<ReorderSeriesItemsInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         firestoreSeriesId: firestoreId,
         expectedRemoteMembershipHash: createExpectedRemoteMembershipHash(subsplashSeries.id),
@@ -479,7 +480,7 @@ describe('reorderSeriesItems - Remote source of truth', () => {
     });
 
     const request: TestRequest<ReorderSeriesItemsInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         firestoreSeriesId: firestoreId,
         expectedRemoteMembershipHash: createExpectedRemoteMembershipHash(subsplashSeries.id),

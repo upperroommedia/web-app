@@ -1,3 +1,6 @@
+import type { LegacyAdmissionLease } from '../temporal/legacyAdmissionLease';
+import { isDomainTemporalEnabled } from '../temporal/ownership';
+import { createRequestWithEmails } from '../notifications/createRequestWithEmails';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { logger } from 'firebase-functions/v2';
 import { CallableRequest, onCall } from 'firebase-functions/v2/https';
@@ -90,166 +93,226 @@ const listExistingRoleRequests = async (
   return snapshot.docs.map((doc) => ({ id: doc.id, data: doc.data() as PersistedRoleRequestDocument }));
 };
 
-const createRoleRequest = onCall(
-  { secrets: adminRequestSecretsWithRuntimeAlerts },
-  async (request: CallableRequest<CreateRoleRequestInputType>): Promise<CreateRoleRequestOutputType> => {
-    const requesterUid = request.auth?.uid;
-    if (!requesterUid) {
-      return { status: 'error', error: 'Unauthorized.' };
-    }
+export const createRoleRequestHandler = async (
+  request: CallableRequest<CreateRoleRequestInputType>,
+  lease?: LegacyAdmissionLease
+): Promise<CreateRoleRequestOutputType> => {
+  const requesterUid = request.auth?.uid;
+  if (!requesterUid) {
+    return { status: 'error', error: 'Unauthorized.' };
+  }
 
-    const requesterEmail = readRequesterEmail(request);
-    if (!requesterEmail) {
-      return { status: 'error', error: 'Requester email is required.' };
-    }
+  const requesterEmail = readRequesterEmail(request);
+  if (!requesterEmail) {
+    return { status: 'error', error: 'Requester email is required.' };
+  }
 
-    const validation = validateCreateRoleRequestInput(request.data);
-    if (!validation.ok) {
-      return { status: 'error', error: validation.error };
-    }
+  const validation = validateCreateRoleRequestInput(request.data);
+  if (!validation.ok) {
+    return { status: 'error', error: validation.error };
+  }
 
-    const requesterDisplayName = readRequesterDisplayName(request);
-    const adminUrl = buildRoleRequestAdminUrl(getAdminBaseUrl());
-    const createdAtMs = Date.now();
+  const requesterDisplayName = readRequesterDisplayName(request);
+  const adminUrl = buildRoleRequestAdminUrl(getAdminBaseUrl());
+  const createdAtMs = Date.now();
 
-    const existingRequests = await listExistingRoleRequests(requesterUid);
-    const existing = existingRequests.find(
-      ({ data }) => data.status === ROLE_REQUEST_STATUS_PENDING && data.requestedRole === validation.value.requestedRole
-    );
+  const existingRequests = await listExistingRoleRequests(requesterUid);
+  const existing = existingRequests.find(
+    ({ data }) => data.status === ROLE_REQUEST_STATUS_PENDING && data.requestedRole === validation.value.requestedRole
+  );
 
-    if (existing) {
-      return {
-        status: 'success',
-        data: {
-          roleRequestId: existing.id,
-          requestStatus: 'existing',
-          notification: {
-            ...existing.data.notification,
-            status: 'skipped_existing',
-          },
+  if (existing) {
+    return {
+      status: 'success',
+      data: {
+        roleRequestId: existing.id,
+        requestStatus: 'existing',
+        notification: {
+          ...existing.data.notification,
+          status: 'skipped_existing',
         },
-      };
-    }
-
-    const persistedRequest: PersistedRoleRequestDocument = {
-      requesterUid,
-      requesterEmail,
-      ...(requesterDisplayName ? { requesterDisplayName } : {}),
-      requestedRole: validation.value.requestedRole,
-      reason: validation.value.reason,
-      status: ROLE_REQUEST_STATUS_PENDING,
-      createdAtMs,
-      updatedAtMs: createdAtMs,
-      adminUrl,
-      notification: {
-        status: 'not_attempted',
       },
     };
+  }
 
-    const roleRequestRef = await firestore.collection(ROLE_REQUESTS_COLLECTION).add(persistedRequest);
+  if (!isDomainTemporalEnabled('accounts')) {
+    await (
+      await import('../temporal/releaseControl')
+    ).assertLegacyAdmissionAllowed(firebaseAdmin.firestore(), 'accounts', { continuation: Boolean(lease) });
+  }
 
-    const roleRequestPayload: RoleRequestNotificationPayload = {
-      requesterUid,
-      requesterEmail,
-      ...(requesterDisplayName ? { requesterDisplayName } : {}),
-      requestedRole: validation.value.requestedRole,
-      reason: validation.value.reason,
-      requestedAtMs: createdAtMs,
-      adminUrl,
+  const persistedRequest: PersistedRoleRequestDocument = {
+    requesterUid,
+    requesterEmail,
+    ...(requesterDisplayName ? { requesterDisplayName } : {}),
+    requestedRole: validation.value.requestedRole,
+    reason: validation.value.reason,
+    status: ROLE_REQUEST_STATUS_PENDING,
+    createdAtMs,
+    updatedAtMs: createdAtMs,
+    adminUrl,
+    notification: {
+      status: 'not_attempted',
+    },
+  };
+
+  if (!isDomainTemporalEnabled('accounts')) await lease?.markEffectsStarted();
+  const roleRequestRef = isDomainTemporalEnabled('accounts')
+    ? firestore.collection(ROLE_REQUESTS_COLLECTION).doc()
+    : await firestore.collection(ROLE_REQUESTS_COLLECTION).add(persistedRequest);
+
+  const roleRequestPayload: RoleRequestNotificationPayload = {
+    requesterUid,
+    requesterEmail,
+    ...(requesterDisplayName ? { requesterDisplayName } : {}),
+    requestedRole: validation.value.requestedRole,
+    reason: validation.value.reason,
+    requestedAtMs: createdAtMs,
+    adminUrl,
+  };
+
+  const adminRequestRecipients = getAdminRequestRecipients();
+
+  if (isDomainTemporalEnabled('accounts')) {
+    const committed = await createRequestWithEmails({
+      target: roleRequestRef,
+      document: persistedRequest,
+      pendingKey: `role:${requesterUid}:${validation.value.requestedRole}`,
+      emails: [
+        {
+          field: 'notification',
+          input: {
+            to: adminRequestRecipients,
+            source: 'role-request',
+            alertType: 'role-request-created',
+            metadata: {
+              roleRequestId: roleRequestRef.id,
+              requesterUid,
+              requesterEmail,
+              requestedRole: validation.value.requestedRole,
+              reason: validation.value.reason,
+              requestedAtMs: createdAtMs,
+              adminUrl,
+            },
+            message: {
+              subject: `[URM] Role request: ${validation.value.requestedRole}`,
+              text: buildRoleRequestMessageText(roleRequestPayload),
+              html: buildRoleRequestMessageHtml(roleRequestPayload),
+            },
+          },
+        },
+      ],
+    });
+    return {
+      status: 'success',
+      data: {
+        roleRequestId: committed.id,
+        requestStatus: committed.created ? 'created' : 'existing',
+        notification: committed.document.notification,
+      },
+    };
+  }
+
+  try {
+    const mailId = await queueEmail({
+      to: adminRequestRecipients,
+      source: 'role-request',
+      alertType: 'role-request-created',
+      metadata: {
+        roleRequestId: roleRequestRef.id,
+        requesterUid,
+        requesterEmail,
+        requestedRole: validation.value.requestedRole,
+        reason: validation.value.reason,
+        requestedAtMs: createdAtMs,
+        adminUrl,
+      },
+      message: {
+        subject: `[URM] Role request: ${validation.value.requestedRole}`,
+        text: buildRoleRequestMessageText(roleRequestPayload),
+        html: buildRoleRequestMessageHtml(roleRequestPayload),
+      },
+    });
+
+    const notificationState: RoleRequestNotificationState = {
+      status: 'queued',
+      attemptedAtMs: Date.now(),
+      queueMailId: mailId,
     };
 
-    const adminRequestRecipients = getAdminRequestRecipients();
+    await roleRequestRef.update({
+      updatedAtMs: Date.now(),
+      notification: notificationState,
+    });
+
+    return {
+      status: 'success',
+      data: {
+        roleRequestId: roleRequestRef.id,
+        requestStatus: 'created',
+        notification: notificationState,
+      },
+    };
+  } catch (error) {
+    const queueErrorMessage = error instanceof Error ? error.message : 'Unknown queue error';
+    const notificationState: RoleRequestNotificationState = {
+      status: 'queue_failed',
+      attemptedAtMs: Date.now(),
+      queueErrorMessage,
+      warningCode: ROLE_REQUEST_EMAIL_ENQUEUE_FAILED,
+    };
+
+    await roleRequestRef.update({
+      updatedAtMs: Date.now(),
+      notification: notificationState,
+    });
 
     try {
-      const mailId = await queueEmail({
-        to: adminRequestRecipients,
-        source: 'role-request',
-        alertType: 'role-request-created',
-        metadata: {
+      await emitOperationalAlert({
+        alertCode: ROLE_REQUEST_EMAIL_ENQUEUE_FAILED,
+        summary: 'Failed to enqueue role-request notification email.',
+        error,
+        context: {
+          functionName: 'createRoleRequest',
           roleRequestId: roleRequestRef.id,
           requesterUid,
           requesterEmail,
           requestedRole: validation.value.requestedRole,
-          reason: validation.value.reason,
           requestedAtMs: createdAtMs,
-          adminUrl,
-        },
-        message: {
-          subject: `[URM] Role request: ${validation.value.requestedRole}`,
-          text: buildRoleRequestMessageText(roleRequestPayload),
-          html: buildRoleRequestMessageHtml(roleRequestPayload),
         },
       });
-
-      const notificationState: RoleRequestNotificationState = {
-        status: 'queued',
-        attemptedAtMs: Date.now(),
-        queueMailId: mailId,
-      };
-
-      await roleRequestRef.update({
-        updatedAtMs: Date.now(),
-        notification: notificationState,
-      });
-
-      return {
-        status: 'success',
-        data: {
-          roleRequestId: roleRequestRef.id,
-          requestStatus: 'created',
-          notification: notificationState,
-        },
-      };
-    } catch (error) {
-      const queueErrorMessage = error instanceof Error ? error.message : 'Unknown queue error';
-      const notificationState: RoleRequestNotificationState = {
-        status: 'queue_failed',
-        attemptedAtMs: Date.now(),
+    } catch (alertError) {
+      logger.error('failed to emit role-request queue failure alert', {
+        roleRequestId: roleRequestRef.id,
         queueErrorMessage,
-        warningCode: ROLE_REQUEST_EMAIL_ENQUEUE_FAILED,
-      };
-
-      await roleRequestRef.update({
-        updatedAtMs: Date.now(),
-        notification: notificationState,
+        alertError: alertError instanceof Error ? alertError.message : String(alertError),
       });
-
-      try {
-        await emitOperationalAlert({
-          alertCode: ROLE_REQUEST_EMAIL_ENQUEUE_FAILED,
-          summary: 'Failed to enqueue role-request notification email.',
-          error,
-          context: {
-            functionName: 'createRoleRequest',
-            roleRequestId: roleRequestRef.id,
-            requesterUid,
-            requesterEmail,
-            requestedRole: validation.value.requestedRole,
-            requestedAtMs: createdAtMs,
-          },
-        });
-      } catch (alertError) {
-        logger.error('failed to emit role-request queue failure alert', {
-          roleRequestId: roleRequestRef.id,
-          queueErrorMessage,
-          alertError: alertError instanceof Error ? alertError.message : String(alertError),
-        });
-      }
-
-      return {
-        status: 'success',
-        data: {
-          roleRequestId: roleRequestRef.id,
-          requestStatus: 'created',
-          notification: notificationState,
-          warning: {
-            code: ROLE_REQUEST_EMAIL_ENQUEUE_FAILED,
-            message: 'Role request persisted, but notification enqueue failed.',
-          },
-        },
-      };
     }
-  }
-);
 
+    return {
+      status: 'success',
+      data: {
+        roleRequestId: roleRequestRef.id,
+        requestStatus: 'created',
+        notification: notificationState,
+        warning: {
+          code: ROLE_REQUEST_EMAIL_ENQUEUE_FAILED,
+          message: 'Role request persisted, but notification enqueue failed.',
+        },
+      },
+    };
+  }
+};
+export const createRoleRequestSource = async (
+  request: CallableRequest<CreateRoleRequestInputType>
+): Promise<CreateRoleRequestOutputType> => {
+  if (isDomainTemporalEnabled('accounts') || !request.auth?.uid) return createRoleRequestHandler(request);
+  return (await import('../temporal/accounts/sourceAdmission')).withLegacyAccountSource(
+    firebaseAdmin.firestore(),
+    request.auth.uid,
+    'role.request-create',
+    (lease) => createRoleRequestHandler(request, lease)
+  );
+};
+const createRoleRequest = onCall({ secrets: adminRequestSecretsWithRuntimeAlerts }, createRoleRequestSource);
 export default createRoleRequest;

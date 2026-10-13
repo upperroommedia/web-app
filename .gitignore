@@ -78,3 +78,7 @@ firebase.dev.json
 
 # Local pnpm download cache
 /.pnpm-store/
+
+# Generated Temporal worker output and local browser artifacts
+/apps/temporal-worker/lib/
+/.playwright-cli/

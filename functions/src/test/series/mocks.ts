@@ -1,3 +1,4 @@
+import type { AuthData } from '../helpers/callableAuth';
 /**
  * Mock implementations for Series tests
  * Mocks the Subsplash API (axios) but uses real Firestore emulator
@@ -527,10 +528,6 @@ jest.mock('axios', () => {
 // --- Test Request Types ---
 
 export type TestRequest<T> = {
-  auth?: {
-    token?: {
-      role?: string;
-    };
-  };
+  auth?: AuthData;
   data: T;
 };

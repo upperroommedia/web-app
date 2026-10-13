@@ -1,3 +1,4 @@
+import { testCallableAuth, type AuthData } from '../helpers/callableAuth';
 import type { GetListPublishedDriftInputType, GetListPublishedDriftOutputType } from '../../../../packages/contracts/getListPublishedDrift';
 import type {
   ResolveListPublishedDriftInputType,
@@ -27,12 +28,7 @@ jest.mock('../../helpers/publishedListDrift', () => ({
   resolvePublishedListDrift: jest.fn(),
 }));
 
-type CallableAuthType = {
-  uid?: string;
-  token?: {
-    role?: string;
-  };
-};
+type CallableAuthType = AuthData;
 
 type TestRequestType<T> = {
   auth?: CallableAuthType;
@@ -61,7 +57,7 @@ describe('published list drift callables', () => {
     it('rejects callers without publish permissions', async () => {
       await expect(
         getListPublishedDriftHandler({
-          auth: { uid: 'user-1', token: { role: 'viewer' } },
+          auth: testCallableAuth('viewer', 'user-1'),
           data: { listId: 'root-list' },
         })
       ).rejects.toMatchObject({ code: 'unauthenticated' });
@@ -91,7 +87,7 @@ describe('published list drift callables', () => {
       });
 
       const result = await getListPublishedDriftHandler({
-        auth: { uid: 'publisher-1', token: { role: 'publisher' } },
+        auth: testCallableAuth('publisher', 'publisher-1'),
         data: { listId: 'root-list' },
       });
 
@@ -141,7 +137,7 @@ describe('published list drift callables', () => {
       });
 
       const result = await resolveListPublishedDriftHandler({
-        auth: { uid: 'admin-1', token: { role: 'admin' } },
+        auth: testCallableAuth('admin', 'admin-1'),
         data: { listId: 'root-list', strategy: 'IGNORE' },
       });
 

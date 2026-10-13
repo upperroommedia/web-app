@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import {getPublishingMutationOperation,prepareProviderMutationPlanCommit,beginProviderMutationPlan,isDurablePublishingOperation} from './temporal/publishing/durableOperationContext';
+import { commitDurableProjection } from './temporal/publishing/durableOperationContext';
 import { FieldValue } from 'firebase-admin/firestore';
 import { logger } from 'firebase-functions/v2';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
@@ -42,162 +44,186 @@ const toSubsplashSeriesImageRefs = (
     })
     .filter((image): image is { id: string; type: string } => image !== undefined);
 
+export const updateSeriesMetadataDomain = async (
+  request: Pick<CallableRequest<UpdateSeriesMetadataInputType>, 'data' | 'auth'>
+): Promise<UpdateSeriesMetadataOutputType> => {
+  logger.log('updateSeriesMetadata');
+
+  if (!canUserRolePublish(request.auth?.token.role)) {
+    throw new HttpsError(
+      'unauthenticated',
+      'The function must be called while authenticated with publish permissions.'
+    );
+  }
+
+  const firestoreId = request.data.firestoreId?.trim();
+  const title = request.data.title?.trim();
+  const summary = typeof request.data.summary === 'string'
+    ? request.data.summary.trim() || null
+    : request.data.summary ?? null;
+
+  if (!firestoreId) {
+    throw new HttpsError('invalid-argument', 'firestoreId is required.');
+  }
+
+  if (!title) {
+    throw new HttpsError('invalid-argument', 'title is required.');
+  }
+
+  const normalizedOperationKey =
+    request.data.operationKey?.trim() || `update-series-metadata:${firestoreId}:${randomUUID()}`;
+
+  try {
+    return await withIdempotency(normalizedOperationKey, async () => {
+      const seriesRef = firestoreDB
+        .collection('series')
+        .doc(firestoreId)
+        .withConverter(firestoreAdminSeriesConverter);
+      const existingSeriesDoc = await seriesRef.get();
+
+      if (!existingSeriesDoc.exists) {
+        throw new HttpsError('not-found', `Series with firestoreId ${firestoreId} not found.`);
+      }
+
+      const existingSeries = existingSeriesDoc.data()!;
+      const subsplashId = existingSeries.subsplashId?.trim();
+      if (!subsplashId) {
+        throw new HttpsError(
+          'failed-precondition',
+          `Series ${firestoreId} is not linked to Subsplash and cannot be updated remotely.`
+        );
+      }
+
+      return withSubsplashLocks(
+        [`series:${subsplashId}`],
+        async () => {
+          const latestSeriesDoc = await seriesRef.get();
+          if (!latestSeriesDoc.exists) {
+            throw new HttpsError('not-found', `Series with firestoreId ${firestoreId} not found.`);
+          }
+
+          const latestSeries = latestSeriesDoc.data()!;
+          const latestSubsplashId = latestSeries.subsplashId?.trim();
+          if (!latestSubsplashId) {
+            throw new HttpsError(
+              'failed-precondition',
+              `Series ${firestoreId} is not linked to Subsplash and cannot be updated remotely.`
+            );
+          }
+
+          const token = await authenticateSubsplash();
+          const inputImages = request.data.images?.filter((image) => Boolean(image?.id && image?.type)) || [];
+          const imagesToPersist = inputImages.length > 0 ? inputImages : latestSeries.images || [];
+          const repairedImagesToPersist =
+            imagesToPersist.length > 0
+              ? await repairMismatchedSubsplashImageRefs(imagesToPersist, token, normalizedOperationKey)
+              : imagesToPersist;
+          const subtitle = getSeriesSubtitleFromPublishedCount(latestSeries.publishedItemCount || 0);
+          const remoteItems = await getAllSeriesItemsAcrossStatuses(latestSubsplashId, token);
+          if(isDurablePublishingOperation()&&!getPublishingMutationOperation()){
+            await beginProviderMutationPlan({operation:`series-update:${normalizedOperationKey}`,resources:[{provider:'subsplash',account:'app:9XTSHD',resourceType:'series',resourceId:latestSubsplashId},...remoteItems.map(item=>({provider:'subsplash' as const,account:'app:9XTSHD',resourceType:'media',resourceId:item.id}))]});
+          }
+
+          const syncedSubsplashSeries = await patchSeriesMetadata(
+            latestSubsplashId,
+            {
+              title,
+              subtitle,
+              summary,
+              images: toSubsplashSeriesImageRefs(repairedImagesToPersist),
+            },
+            token,
+            {canonicalPatch:{images:repairedImagesToPersist}}
+          );
+          await withSubsplashLocks(
+            remoteItems.map((item) => `media-item:${item.id}`),
+            () => syncSeriesItemSubtitles(
+              latestSubsplashId,
+              syncedSubsplashSeries.title,
+              remoteItems,
+              token
+            ),
+            { operationKey: normalizedOperationKey }
+          );
+
+          const firestoreUpdate: Record<string, unknown> = {
+            name: syncedSubsplashSeries.title,
+            subtitle: syncedSubsplashSeries.subtitle || subtitle,
+            images: repairedImagesToPersist,
+            status: syncedSubsplashSeries.status,
+            slug: syncedSubsplashSeries.slug,
+            shortCode: syncedSubsplashSeries.short_code,
+            position: syncedSubsplashSeries.position,
+            updatedAt: FieldValue.serverTimestamp(),
+          };
+
+          if (syncedSubsplashSeries.summary) {
+            firestoreUpdate.summary = syncedSubsplashSeries.summary;
+          } else {
+            firestoreUpdate.summary = FieldValue.delete();
+          }
+
+          await commitDurableProjection(async tx=>{
+            const operation=getPublishingMutationOperation();const settlement=operation?await prepareProviderMutationPlanCommit(tx,{operation}):undefined;
+            if(settlement?.alreadyCommitted)return;
+            tx.set(seriesRef,firestoreUpdate,{merge:true});
+            for(const image of repairedImagesToPersist.filter(image=>image.subsplashId&&image.subsplashId!==image.id))tx.set(firestoreDB.collection('images').doc(image.id),{subsplashId:image.subsplashId},{merge:true});
+            settlement?.commit();
+          },async()=>{await seriesRef.set(firestoreUpdate,{merge:true});});
+
+          const repairedImageWrites = repairedImagesToPersist.filter(
+            (image) => image.subsplashId && image.subsplashId !== image.id
+          );
+          await Promise.all(
+            repairedImageWrites.map((image) =>
+              commitDurableProjection(async tx=>{tx.set(firestoreDB.collection('images').doc(image.id),{subsplashId:image.subsplashId},{merge:true});},async()=>{await firestoreDB.collection('images').doc(image.id).set({subsplashId:image.subsplashId},{merge:true});})
+            )
+          );
+
+          return {
+            status: 'success',
+            firestoreId,
+            subsplashId: syncedSubsplashSeries.id,
+            title: syncedSubsplashSeries.title,
+            subtitle: syncedSubsplashSeries.subtitle || subtitle,
+            summary: syncedSubsplashSeries.summary,
+            images: repairedImagesToPersist,
+            remoteStatus: syncedSubsplashSeries.status,
+            slug: syncedSubsplashSeries.slug,
+            shortCode: syncedSubsplashSeries.short_code,
+            position: syncedSubsplashSeries.position,
+          };
+        },
+        {
+          operationKey: normalizedOperationKey,
+        }
+      );
+    });
+  } catch (error) {
+    throw handleError(error);
+  }
+};
+
 const updateSeriesMetadata = onCall(
   { secrets: subsplashSecretsWithRuntimeAlerts },
-  async (
-    request: CallableRequest<UpdateSeriesMetadataInputType>
-  ): Promise<UpdateSeriesMetadataOutputType> => {
-    logger.log('updateSeriesMetadata');
+  async (request: Parameters<typeof updateSeriesMetadataDomain>[0]) =>{
 
-    if (!canUserRolePublish(request.auth?.token.role)) {
-      throw new HttpsError(
-        'unauthenticated',
-        'The function must be called while authenticated with publish permissions.'
-      );
-    }
-
-    const firestoreId = request.data.firestoreId?.trim();
-    const title = request.data.title?.trim();
-    const summary = typeof request.data.summary === 'string'
-      ? request.data.summary.trim() || null
-      : request.data.summary ?? null;
-
-    if (!firestoreId) {
-      throw new HttpsError('invalid-argument', 'firestoreId is required.');
-    }
-
-    if (!title) {
-      throw new HttpsError('invalid-argument', 'title is required.');
-    }
-
-    const normalizedOperationKey =
-      request.data.operationKey?.trim() || `update-series-metadata:${firestoreId}:${randomUUID()}`;
-
-    try {
-      return await withIdempotency(normalizedOperationKey, async () => {
-        const seriesRef = firestoreDB
-          .collection('series')
-          .doc(firestoreId)
-          .withConverter(firestoreAdminSeriesConverter);
-        const existingSeriesDoc = await seriesRef.get();
-
-        if (!existingSeriesDoc.exists) {
-          throw new HttpsError('not-found', `Series with firestoreId ${firestoreId} not found.`);
-        }
-
-        const existingSeries = existingSeriesDoc.data()!;
-        const subsplashId = existingSeries.subsplashId?.trim();
-        if (!subsplashId) {
-          throw new HttpsError(
-            'failed-precondition',
-            `Series ${firestoreId} is not linked to Subsplash and cannot be updated remotely.`
-          );
-        }
-
-        return withSubsplashLocks(
-          [`series:${subsplashId}`],
-          async () => {
-            const latestSeriesDoc = await seriesRef.get();
-            if (!latestSeriesDoc.exists) {
-              throw new HttpsError('not-found', `Series with firestoreId ${firestoreId} not found.`);
-            }
-
-            const latestSeries = latestSeriesDoc.data()!;
-            const latestSubsplashId = latestSeries.subsplashId?.trim();
-            if (!latestSubsplashId) {
-              throw new HttpsError(
-                'failed-precondition',
-                `Series ${firestoreId} is not linked to Subsplash and cannot be updated remotely.`
-              );
-            }
-
-            const token = await authenticateSubsplash();
-            const inputImages = request.data.images?.filter((image) => Boolean(image?.id && image?.type)) || [];
-            const imagesToPersist = inputImages.length > 0 ? inputImages : latestSeries.images || [];
-            const repairedImagesToPersist =
-              imagesToPersist.length > 0
-                ? await repairMismatchedSubsplashImageRefs(imagesToPersist, token)
-                : imagesToPersist;
-            const subtitle = getSeriesSubtitleFromPublishedCount(latestSeries.publishedItemCount || 0);
-
-            const syncedSubsplashSeries = await patchSeriesMetadata(
-              latestSubsplashId,
-              {
-                title,
-                subtitle,
-                summary,
-                images: toSubsplashSeriesImageRefs(repairedImagesToPersist),
-              },
-              token
-            );
-            const remoteItems = await getAllSeriesItemsAcrossStatuses(latestSubsplashId, token);
-            await withSubsplashLocks(
-              remoteItems.map((item) => `media-item:${item.id}`),
-              () => syncSeriesItemSubtitles(
-                latestSubsplashId,
-                syncedSubsplashSeries.title,
-                remoteItems,
-                token
-              ),
-              { operationKey: normalizedOperationKey }
-            );
-
-            const firestoreUpdate: Record<string, unknown> = {
-              name: syncedSubsplashSeries.title,
-              subtitle: syncedSubsplashSeries.subtitle || subtitle,
-              images: repairedImagesToPersist,
-              status: syncedSubsplashSeries.status,
-              slug: syncedSubsplashSeries.slug,
-              shortCode: syncedSubsplashSeries.short_code,
-              position: syncedSubsplashSeries.position,
-              updatedAt: FieldValue.serverTimestamp(),
-            };
-
-            if (syncedSubsplashSeries.summary) {
-              firestoreUpdate.summary = syncedSubsplashSeries.summary;
-            } else {
-              firestoreUpdate.summary = FieldValue.delete();
-            }
-
-            await seriesRef.set(firestoreUpdate, { merge: true });
-
-            const repairedImageWrites = repairedImagesToPersist.filter(
-              (image) => image.subsplashId && image.subsplashId !== image.id
-            );
-            await Promise.all(
-              repairedImageWrites.map((image) =>
-                firestoreDB.collection('images').doc(image.id).set(
-                  {
-                    subsplashId: image.subsplashId,
-                  },
-                  { merge: true }
-                )
-              )
-            );
-
-            return {
-              status: 'success',
-              firestoreId,
-              subsplashId: syncedSubsplashSeries.id,
-              title: syncedSubsplashSeries.title,
-              subtitle: syncedSubsplashSeries.subtitle || subtitle,
-              summary: syncedSubsplashSeries.summary,
-              images: repairedImagesToPersist,
-              remoteStatus: syncedSubsplashSeries.status,
-              slug: syncedSubsplashSeries.slug,
-              shortCode: syncedSubsplashSeries.short_code,
-              position: syncedSubsplashSeries.position,
-            };
-          },
-          {
-            operationKey: normalizedOperationKey,
-          }
-        );
-      });
-    } catch (error) {
-      throw handleError(error);
-    }
+if (!canUserRolePublish(request.auth?.token.role)) {
+    throw new HttpsError(
+      'unauthenticated',
+      'The function must be called while authenticated with publish permissions.'
+    );
   }
+if (!request.auth?.uid) {
+ const { HttpsError } = await import('firebase-functions/v2/https');
+ throw new HttpsError('unauthenticated', 'Authentication is required.');
+}
+const { withLegacyAdmissionLease } = await import('./temporal/legacyAdmissionLease');
+return withLegacyAdmissionLease(firebaseAdmin.firestore(), {domain:'publishing',actorUid:request.auth.uid,operation:"updateSeriesMetadata",projectId:firebaseAdmin.app().options.projectId || ''}, async lease => {
+ await lease.markEffectsStarted();
+return updateSeriesMetadataDomain(request);
+});
+}
 );
 
 export default updateSeriesMetadata;

@@ -5,7 +5,9 @@
 import { randomUUID } from 'node:crypto';
 import { logger } from 'firebase-functions/v2';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
-import type { WriteBatch, WriteResult } from 'firebase-admin/firestore';
+import {isDurablePublishingOperation} from './temporal/publishing/durableOperationContext';
+import { commitDurableProjection } from './temporal/publishing/durableOperationContext';
+import type { DocumentReference } from 'firebase-admin/firestore';
 import { authenticateSubsplash } from './subsplashUtils';
 import {
   deleteSubsplashSeries,
@@ -60,45 +62,31 @@ const cleanupLocalSeriesData = async (
   const seriesItemsSnapshot = await seriesRef.collection('seriesItems').get();
   const sermonsSnapshot = await firestoreDB.collection('sermons').where('seriesId', '==', firestoreId).get();
 
-  const commitPromises: Array<Promise<WriteResult[]>> = [];
-  let batch = firestoreDB.batch();
-  let operationCount = 0;
-
-  const commitBatchIfNeeded = () => {
-    if (operationCount === 0) {
-      return;
-    }
-    commitPromises.push(batch.commit());
-    batch = firestoreDB.batch();
-    operationCount = 0;
-  };
-
-  const enqueueOperation = (operation: (currentBatch: WriteBatch) => void) => {
-    if (operationCount >= FIRESTORE_BATCH_OP_LIMIT) {
-      commitBatchIfNeeded();
-    }
-    operation(batch);
-    operationCount += 1;
-  };
-
-  seriesItemsSnapshot.docs.forEach((seriesItemDoc) => {
-    enqueueOperation((currentBatch) => {
-      currentBatch.delete(seriesItemDoc.ref);
+  const writes: Array<{kind:'series-item'|'sermon'|'series';ref:DocumentReference}> = [
+    ...seriesItemsSnapshot.docs.map(doc=>({kind:'series-item' as const,ref:doc.ref})),
+    ...sermonsSnapshot.docs.map(doc=>({kind:'sermon' as const,ref:doc.ref})),
+    {kind:'series',ref:seriesRef},
+  ];
+  // Drain bounded commits sequentially; a failed generation fence stops subsequent writes.
+  for(let offset=0;offset<writes.length;offset+=FIRESTORE_BATCH_OP_LIMIT) {
+    const chunk=writes.slice(offset,offset+FIRESTORE_BATCH_OP_LIMIT);
+    await commitDurableProjection(async tx=>{
+      const current=await Promise.all(chunk.filter(write=>write.kind==='sermon').map(write=>tx.get(write.ref)));
+      for(const write of chunk) {
+        if(write.kind==='sermon') {
+          const sermon=current.find(doc=>doc.ref.path===write.ref.path);
+          if(sermon?.data()?.seriesId===firestoreId) tx.update(write.ref,{seriesId:null,seriesPublishedToSubsplash:false});
+        } else tx.delete(write.ref);
+      }
+    },async()=>{
+      const batch=firestoreDB.batch();
+      for(const write of chunk) {
+        if(write.kind==='sermon') batch.update(write.ref,{seriesId:null,seriesPublishedToSubsplash:false});
+        else batch.delete(write.ref);
+      }
+      await batch.commit();
     });
-  });
-
-  sermonsSnapshot.docs.forEach((sermonDoc) => {
-    enqueueOperation((currentBatch) => {
-      currentBatch.update(sermonDoc.ref, { seriesId: null });
-    });
-  });
-
-  enqueueOperation((currentBatch) => {
-    currentBatch.delete(seriesRef);
-  });
-
-  commitBatchIfNeeded();
-  await Promise.all(commitPromises);
+  }
 
   return {
     localSeriesItemsDeleted: seriesItemsSnapshot.size,
@@ -106,129 +94,147 @@ const cleanupLocalSeriesData = async (
   };
 };
 
+export const deleteSeriesDomain = async (
+  request: Pick<CallableRequest<DeleteSeriesInputType>, 'data' | 'auth'>
+): Promise<DeleteSeriesOutputType> => {
+  logger.log('deleteSeries');
+
+  // Authentication check
+  if (!canUserRolePublish(request.auth?.token.role)) {
+    throw new HttpsError('unauthenticated', 'The function must be called while authenticated with publish permissions.');
+  }
+
+  const { firestoreId, operationKey } = request.data;
+
+  // Validation
+  if (!firestoreId || !firestoreId.trim()) {
+    throw new HttpsError('invalid-argument', 'Firestore ID is required.');
+  }
+
+  const normalizedFirestoreId = firestoreId.trim();
+  const normalizedOperationKey = operationKey?.trim() || `delete-series:${normalizedFirestoreId}:${randomUUID()}`;
+
+  try {
+    return await withIdempotency(normalizedOperationKey, async () => {
+      const seriesRef = firestoreDB
+        .collection('series')
+        .doc(normalizedFirestoreId)
+        .withConverter(firestoreAdminSeriesConverter);
+      const seriesDoc = await seriesRef.get();
+
+      if (!seriesDoc.exists) {
+        logger.warn(
+          `deleteSeries noop: Firestore series ${normalizedFirestoreId} not found; treating as already deleted.`
+        );
+        return buildAlreadyDeletedResponse();
+      }
+
+      const seriesData = seriesDoc.data()!;
+      const subsplashId = seriesData.subsplashId;
+      const lockKeys = subsplashId ? [`series:${subsplashId}`] : [];
+
+      return withSubsplashLocks(
+        lockKeys,
+        async () => {
+          const latestSeriesDoc = await seriesRef.get();
+          if (!latestSeriesDoc.exists) {
+            logger.warn(
+              `deleteSeries noop inside lock: Firestore series ${normalizedFirestoreId} not found; treating as already deleted.`
+            );
+            return buildAlreadyDeletedResponse();
+          }
+
+          const latestSeriesData = latestSeriesDoc.data()!;
+          const latestSubsplashId = latestSeriesData.subsplashId;
+          let remoteUnlinkAttempted = 0;
+          let remoteUnlinkSucceeded = 0;
+          let remoteUnlinkSkippedNotFound = 0;
+          let remoteRemainingLinkedCount = 0;
+
+          // If published to Subsplash, unlink all series members first, verify, then delete the series.
+          if (latestSubsplashId) {
+            const token = await authenticateSubsplash();
+            logger.log(`deleteSeries remote phase started: Firestore ID=${normalizedFirestoreId}, Subsplash ID=${latestSubsplashId}`);
+
+            const linkedRemoteItems = await getAllSeriesItemsAcrossStatuses(latestSubsplashId, token);
+            remoteUnlinkAttempted = linkedRemoteItems.length;
+            logger.log(`deleteSeries found ${remoteUnlinkAttempted} linked remote items to unlink`);
+
+            const unlinkConcurrency = isDurablePublishingOperation()?1:Math.min(REMOTE_UNLINK_MAX_CONCURRENCY, REMOTE_UNLINK_DEFAULT_CONCURRENCY);
+            await runWithConcurrency(linkedRemoteItems, unlinkConcurrency, async (item) => {
+                const unlinkResult = await unlinkMediaItemFromSeries(item.id, token, {
+                  audio: item._embedded?.audio,
+                  images: item._embedded?.images,
+                });
+
+                if (unlinkResult.status === 'not-found') {
+                  remoteUnlinkSkippedNotFound += 1;
+                  return;
+                }
+
+                remoteUnlinkSucceeded += 1;
+            });
+
+            const remainingRemoteItems = await getAllSeriesItemsAcrossStatuses(latestSubsplashId, token);
+            remoteRemainingLinkedCount = remainingRemoteItems.length;
+            if (remoteRemainingLinkedCount > 0) {
+              logger.error(
+                `deleteSeries aborting due to remaining linked items. Firestore ID=${normalizedFirestoreId}, Subsplash ID=${latestSubsplashId}, remaining=${remoteRemainingLinkedCount}`
+              );
+              throw new HttpsError(
+                'failed-precondition',
+                `Cannot delete series ${latestSubsplashId}: ${remoteRemainingLinkedCount} media item(s) are still linked.`
+              );
+            }
+
+            await deleteSubsplashSeries(latestSubsplashId, token);
+            logger.log(
+              `deleteSeries remote phase complete: attempted=${remoteUnlinkAttempted}, unlinked=${remoteUnlinkSucceeded}, skippedNotFound=${remoteUnlinkSkippedNotFound}`
+            );
+          }
+
+          const cleanupResult = await cleanupLocalSeriesData(normalizedFirestoreId);
+          logger.log(
+            `deleteSeries local cleanup complete: Firestore ID=${normalizedFirestoreId}, localSeriesItemsDeleted=${cleanupResult.localSeriesItemsDeleted}, localSermonsUnlinked=${cleanupResult.localSermonsUnlinked}`
+          );
+
+          return {
+            status: 'success',
+            remoteUnlinkAttempted,
+            remoteUnlinkSucceeded,
+            remoteUnlinkSkippedNotFound,
+            remoteRemainingLinkedCount,
+            localSeriesItemsDeleted: cleanupResult.localSeriesItemsDeleted,
+            localSermonsUnlinked: cleanupResult.localSermonsUnlinked,
+          };
+        },
+        {
+          operationKey: normalizedOperationKey,
+        }
+      );
+    });
+  } catch (err) {
+    throw handleError(err);
+  }
+};
+
 const deleteSeries = onCall(
   { secrets: subsplashSecretsWithRuntimeAlerts },
-  async (request: CallableRequest<DeleteSeriesInputType>): Promise<DeleteSeriesOutputType> => {
-    logger.log('deleteSeries');
+  async (request: Parameters<typeof deleteSeriesDomain>[0]) =>{
 
-    // Authentication check
-    if (!canUserRolePublish(request.auth?.token.role)) {
-      throw new HttpsError('unauthenticated', 'The function must be called while authenticated with publish permissions.');
-    }
-
-    const { firestoreId, operationKey } = request.data;
-
-    // Validation
-    if (!firestoreId || !firestoreId.trim()) {
-      throw new HttpsError('invalid-argument', 'Firestore ID is required.');
-    }
-
-    const normalizedFirestoreId = firestoreId.trim();
-    const normalizedOperationKey = operationKey?.trim() || `delete-series:${normalizedFirestoreId}:${randomUUID()}`;
-
-    try {
-      return await withIdempotency(normalizedOperationKey, async () => {
-        const seriesRef = firestoreDB
-          .collection('series')
-          .doc(normalizedFirestoreId)
-          .withConverter(firestoreAdminSeriesConverter);
-        const seriesDoc = await seriesRef.get();
-
-        if (!seriesDoc.exists) {
-          logger.warn(
-            `deleteSeries noop: Firestore series ${normalizedFirestoreId} not found; treating as already deleted.`
-          );
-          return buildAlreadyDeletedResponse();
-        }
-
-        const seriesData = seriesDoc.data()!;
-        const subsplashId = seriesData.subsplashId;
-        const lockKeys = subsplashId ? [`series:${subsplashId}`] : [];
-
-        return withSubsplashLocks(
-          lockKeys,
-          async () => {
-            const latestSeriesDoc = await seriesRef.get();
-            if (!latestSeriesDoc.exists) {
-              logger.warn(
-                `deleteSeries noop inside lock: Firestore series ${normalizedFirestoreId} not found; treating as already deleted.`
-              );
-              return buildAlreadyDeletedResponse();
-            }
-
-            const latestSeriesData = latestSeriesDoc.data()!;
-            const latestSubsplashId = latestSeriesData.subsplashId;
-            let remoteUnlinkAttempted = 0;
-            let remoteUnlinkSucceeded = 0;
-            let remoteUnlinkSkippedNotFound = 0;
-            let remoteRemainingLinkedCount = 0;
-
-            // If published to Subsplash, unlink all series members first, verify, then delete the series.
-            if (latestSubsplashId) {
-              const token = await authenticateSubsplash();
-              logger.log(`deleteSeries remote phase started: Firestore ID=${normalizedFirestoreId}, Subsplash ID=${latestSubsplashId}`);
-
-              const linkedRemoteItems = await getAllSeriesItemsAcrossStatuses(latestSubsplashId, token);
-              remoteUnlinkAttempted = linkedRemoteItems.length;
-              logger.log(`deleteSeries found ${remoteUnlinkAttempted} linked remote items to unlink`);
-
-              const unlinkConcurrency = Math.min(REMOTE_UNLINK_MAX_CONCURRENCY, REMOTE_UNLINK_DEFAULT_CONCURRENCY);
-              await runWithConcurrency(linkedRemoteItems, unlinkConcurrency, async (item) => {
-                  const unlinkResult = await unlinkMediaItemFromSeries(item.id, token, {
-                    audio: item._embedded?.audio,
-                    images: item._embedded?.images,
-                  });
-
-                  if (unlinkResult.status === 'not-found') {
-                    remoteUnlinkSkippedNotFound += 1;
-                    return;
-                  }
-
-                  remoteUnlinkSucceeded += 1;
-              });
-
-              const remainingRemoteItems = await getAllSeriesItemsAcrossStatuses(latestSubsplashId, token);
-              remoteRemainingLinkedCount = remainingRemoteItems.length;
-              if (remoteRemainingLinkedCount > 0) {
-                logger.error(
-                  `deleteSeries aborting due to remaining linked items. Firestore ID=${normalizedFirestoreId}, Subsplash ID=${latestSubsplashId}, remaining=${remoteRemainingLinkedCount}`
-                );
-                throw new HttpsError(
-                  'failed-precondition',
-                  `Cannot delete series ${latestSubsplashId}: ${remoteRemainingLinkedCount} media item(s) are still linked.`
-                );
-              }
-
-              await deleteSubsplashSeries(latestSubsplashId, token);
-              logger.log(
-                `deleteSeries remote phase complete: attempted=${remoteUnlinkAttempted}, unlinked=${remoteUnlinkSucceeded}, skippedNotFound=${remoteUnlinkSkippedNotFound}`
-              );
-            }
-
-            const cleanupResult = await cleanupLocalSeriesData(normalizedFirestoreId);
-            logger.log(
-              `deleteSeries local cleanup complete: Firestore ID=${normalizedFirestoreId}, localSeriesItemsDeleted=${cleanupResult.localSeriesItemsDeleted}, localSermonsUnlinked=${cleanupResult.localSermonsUnlinked}`
-            );
-
-            return {
-              status: 'success',
-              remoteUnlinkAttempted,
-              remoteUnlinkSucceeded,
-              remoteUnlinkSkippedNotFound,
-              remoteRemainingLinkedCount,
-              localSeriesItemsDeleted: cleanupResult.localSeriesItemsDeleted,
-              localSermonsUnlinked: cleanupResult.localSermonsUnlinked,
-            };
-          },
-          {
-            operationKey: normalizedOperationKey,
-          }
-        );
-      });
-    } catch (err) {
-      throw handleError(err);
-    }
+if (!canUserRolePublish(request.auth?.token.role)) {
+    throw new HttpsError('unauthenticated', 'The function must be called while authenticated with publish permissions.');
   }
+if (!request.auth?.uid) {
+ const { HttpsError } = await import('firebase-functions/v2/https');
+ throw new HttpsError('unauthenticated', 'Authentication is required.');
+}
+const { withLegacyAdmissionLease } = await import('./temporal/legacyAdmissionLease');
+return withLegacyAdmissionLease(firebaseAdmin.firestore(), {domain:'publishing',actorUid:request.auth.uid,operation:"deleteSeries",projectId:firebaseAdmin.app().options.projectId || ''}, async lease => {
+ await lease.markEffectsStarted();
+return deleteSeriesDomain(request);
+});
+}
 );
 
 export default deleteSeries;

@@ -1,3 +1,4 @@
+import { Timestamp } from 'firebase-admin/firestore';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { sermonStatusType, uploadStatus } from '@upperroom/shared/types/SermonTypes';
 import { ensureSermonCountInvariant } from '../../utils/sermonCountInvariantGuard';
@@ -34,7 +35,7 @@ async function seedSermon(
       title: `sermon-${sermonId}`,
       subtitle: '',
       description: '',
-      date: firebaseAdmin.firestore.Timestamp.now(),
+      date: Timestamp.now(),
       dateMillis: now,
       sourceStartTime: 0,
       durationSeconds: 0,
