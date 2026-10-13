@@ -8,6 +8,14 @@ on:
       - 'apps/process-audio/**'
       - 'packages/contracts/**'
       - 'packages/shared/**'
+      - 'packages/orchestration/**'
+      - 'patches/**'
+      - 'scripts/temporal-deploy-guard.mjs'
+      - 'scripts/temporal-deploy-source.mjs'
+      - 'scripts/temporal-release-lib.mjs'
+      - 'scripts/temporal-backfill-provider-usage.mjs'
+      - '.github/actions/setup-backend-deploy/**'
+      - 'functions/package.json'
       - 'package.json'
       - 'pnpm-lock.yaml'
       - 'pnpm-workspace.yaml'
@@ -20,7 +28,7 @@ on:
   workflow_dispatch:
     inputs:
       force_process_audio_redeploy:
-        description: "Deploy production process-audio regardless of changed files"
+        description: 'Deploy production process-audio regardless of changed files'
         required: false
         default: false
         type: boolean
@@ -166,7 +174,7 @@ jobs:
               deploy_process_audio=true
             fi
 
-            if contains_path '^(\.github/workflows/main-process-audio-deploy\.yml|packages/contracts/|packages/shared/|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig\.json|turbo\.json|\.npmrc|scripts/deploy-process-audio\.sh|apps/process-audio/cloudbuild\.yaml)'; then
+            if contains_path '^(\.github/workflows/main-process-audio-deploy\.yml|packages/contracts/|packages/shared/|packages/orchestration/|patches/|scripts/temporal-(deploy-guard|deploy-source|release-lib|backfill-provider-usage)\.mjs|\.github/actions/setup-backend-deploy/|functions/package\.json|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig\.json|turbo\.json|\.npmrc|scripts/deploy-process-audio\.sh|apps/process-audio/cloudbuild\.yaml)'; then
               deploy_process_audio=true
             fi
           fi
@@ -254,6 +262,21 @@ jobs:
         with:
           project_id: ${{ env.GCP_PROJECT }}
 
+      - name: Set up Node.js for deployment guard
+        if: needs.detect-changes.outputs.anything_to_run == 'true'
+        uses: actions/setup-node@v7.1.0
+        with:
+          node-version-file: package.json
+          package-manager-cache: false
+
+      - name: Set up pnpm for deployment guard
+        if: needs.detect-changes.outputs.anything_to_run == 'true'
+        uses: pnpm/action-setup@v6.1.0
+
+      - name: Install deployment guard dependencies
+        if: needs.detect-changes.outputs.anything_to_run == 'true'
+        run: pnpm install --frozen-lockfile --filter functions --prod --ignore-scripts
+
       - id: deploy
         name: Deploy production process-audio
         if: needs.detect-changes.outputs.anything_to_run == 'true'
@@ -266,7 +289,7 @@ jobs:
             DEPLOY_POT_PROVIDER=false \
             YOUTUBE_BROWSER_FALLBACK_ENABLED_OVERRIDE=false \
             YOUTUBE_FORCE_IPV4_OVERRIDE=false \
-            bash scripts/deploy-process-audio.sh production "$GITHUB_SHA"
+            node scripts/temporal-deploy-guard.mjs --project "$GCP_PROJECT" -- bash scripts/deploy-process-audio.sh production "$GITHUB_SHA"
           else
             echo "Skipping process-audio Cloud Run deploy; no relevant changes detected."
           fi

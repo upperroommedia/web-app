@@ -290,6 +290,27 @@ Cloudflare should point both at the Hetzner VM. Start with `DNS only`.
 
 ## Deploying Hetzner Workers
 
+The staging and production audio workflows run the runtime deployment inside
+`temporal-deploy-guard.mjs` using the checked-out commit and the matching Firebase
+project. An active controlled Temporal release blocks these automatic deployments;
+they cannot supply a release descriptor to join it. The existing host deployment
+lock still protects both Hetzner environments. Failed or interrupted deployments
+retain the Firestore operation lock for operator inspection.
+
+Before entering the guard, each workflow authenticates through its existing GCP
+OIDC identity, selects the pinned Node and pnpm versions, and installs the Functions
+production dependencies with the frozen workspace lockfile and lifecycle scripts
+disabled. Firebase Admin uses that ADC identity to read release control and acquire
+the operation lock; the identity must have the existing Firestore deployment-control
+permissions. Authentication or permission failures block deployment.
+
+The prepared Docker context includes the contracts, shared, and orchestration
+packages plus workspace patches required by the audio Dockerfile. Dependency
+installation and compilation remain inside the Docker build; local `dist` and
+`node_modules` directories are excluded. Changes to orchestration or patches trigger
+both audio deployment profiles. Run `node --test scripts/process-audio-deployment.test.mjs scripts/test-process-audio-hetzner-isolation.mjs`
+to verify context preparation and automatic-release exclusion without cloud access.
+
 Set:
 
 ```bash

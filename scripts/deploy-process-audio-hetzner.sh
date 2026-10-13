@@ -84,10 +84,12 @@ if [[ -z "$SSH_TARGET" ]]; then
 fi
 
 ensure_browser_auth_stack() {
-  ssh "$SSH_TARGET" "bash -s -- '${REMOTE_DIR}'" <<'EOF'
+  ssh "$SSH_TARGET" "bash -s -- '${REMOTE_DIR}' '${TARGET_ENV}' '${1:-check}'" <<'EOF'
 set -euo pipefail
 
 remote_dir="$1"
+target_env="$2"
+startup_mode="$3"
 profile_dir="${remote_dir}/state/shared-browser-profile/.config/google-chrome"
 required_units=(
   process-audio-browser-xvfb.service
@@ -97,13 +99,22 @@ required_units=(
   process-audio-browser-chrome.service
   process-audio-browser-refresh.service
   process-audio-browser-pot.service
+  process-audio-browser-desktop-bridge.service
 )
 
-systemctl start process-audio-browser-auth.target
-systemctl is-active --quiet process-audio-browser-auth.target
+if [[ "$target_env" == all && "$startup_mode" == start ]]; then
+  systemctl start process-audio-browser-auth.target
+fi
+systemctl is-active --quiet process-audio-browser-auth.target || {
+  echo "Shared browser auth target is inactive; repair it explicitly with the host/browser setup scripts before an isolated deploy" >&2
+  exit 1
+}
 
 for unit in "${required_units[@]}"; do
-  systemctl is-active --quiet "$unit"
+  systemctl is-active --quiet "$unit" || {
+    echo "Shared browser infrastructure is unavailable; repair it explicitly with the host/browser setup scripts before an isolated deploy" >&2
+    exit 1
+  }
 done
 
 if [[ ! -f "${profile_dir}/Default/Cookies" ]]; then
@@ -297,8 +308,6 @@ EOF
   chmod 600 "$WORK_DIR/env/$env_file_name"
 }
 
-"$ROOT_DIR/scripts/setup-process-audio-hetzner-desktop-bridge.sh"
-
 case "$TARGET_ENV" in
   staging)
     write_env_file staging
@@ -372,20 +381,19 @@ snapshot_entry() {
     mkdir -p "${snapshot_tree}/$(dirname "$relative_path")"
     cp -a "${remote_dir}/${relative_path}" "${snapshot_tree}/${relative_path}"
     if [[ "$relative_path" == env/*.env ]]; then
-      chmod 600 "${remote_dir}/${relative_path}" "${snapshot_tree}/${relative_path}"
-      chown "$(id -u):$(id -g)" "${remote_dir}/${relative_path}" "${snapshot_tree}/${relative_path}"
+      chmod 600 "${snapshot_tree}/${relative_path}"
+      chown "$(id -u):$(id -g)" "${snapshot_tree}/${relative_path}"
     fi
   fi
 }
 
-for relative_path in \
-  compose.yaml \
-  .env \
-  Caddyfile \
-  README.md \
-  media-runtime-versions.env \
-  env/process-audio-staging.env \
-  env/process-audio-production.env; do
+# Only snapshot files this transaction is authorized to replace. Reading a
+# production env must never chmod/chown it during an isolated staging rollout.
+snapshot_paths=(README.md "env/process-audio-${target_env}.env")
+if [[ "$target_env" == all ]]; then
+  snapshot_paths=(compose.yaml .env Caddyfile README.md media-runtime-versions.env env/process-audio-staging.env env/process-audio-production.env)
+fi
+for relative_path in "${snapshot_paths[@]}"; do
   snapshot_entry "$relative_path"
 done
 
@@ -445,7 +453,7 @@ snapshot_runtime_service() {
 for env_name in "${snapshot_envs[@]}"; do
   snapshot_runtime_service "ytdlp-pot-provider-${env_name}"
 done
-snapshot_runtime_service caddy
+if [[ "$target_env" == all ]]; then snapshot_runtime_service caddy; fi
 : >"${rollback_root}/config-snapshot-complete"
 echo "Rollout transaction ${deployment_id} acquired lock and preserved previous config/images"
 REMOTE_BEGIN_EOF
@@ -514,39 +522,55 @@ atomic_install_file() {
   mv -f "$temporary_path" "$destination_path"
 }
 
-[[ -f "${rollback_root}/runtime-services/caddy/was-present" ]] || {
-  echo "Cannot activate release without Caddy rollback metadata" >&2
-  exit 1
-}
-: >"${rollback_root}/runtime-services/caddy/mutation-attempted"
+target_env="$(cat "${rollback_root}/target-env")"
+case "$target_env" in staging|production|all) ;; *) echo "Invalid deployment target" >&2; exit 1 ;; esac
+activation_paths=(README.md "env/process-audio-${target_env}.env")
+active_envs=("$target_env")
+if [[ "$target_env" == all ]]; then
+  [[ -f "${rollback_root}/runtime-services/caddy/was-present" ]] || { echo "Missing Caddy rollback metadata" >&2; exit 1; }
+  activation_paths=(compose.yaml .env Caddyfile README.md media-runtime-versions.env env/process-audio-staging.env env/process-audio-production.env)
+  active_envs=(staging production)
+else
+  for shared_path in compose.yaml .env Caddyfile media-runtime-versions.env; do
+    cmp -s "${incoming_dir}/${shared_path}" "${remote_dir}/${shared_path}" || {
+      echo "Shared configuration differs: ${shared_path}; isolated ${target_env} deployment refused. Review and deploy all environments together with the 'all' target for shared infrastructure changes." >&2
+      exit 1
+    }
+  done
+fi
+for env_file in "${incoming_dir}"/env/*.env; do
+  [[ -e "$env_file" ]] || continue
+  if [[ "$target_env" != all && "$(basename "$env_file")" != "process-audio-${target_env}.env" ]]; then
+    echo "Incoming environment file exceeds deployment scope" >&2; exit 1
+  fi
+done
+for relative_path in "${activation_paths[@]}"; do
+  [[ -f "${incoming_dir}/${relative_path}" ]] || { echo "Missing scoped incoming configuration: ${relative_path}" >&2; exit 1; }
+done
+# Record rollback authority before the first mutation, including a partially
+# completed activation. Shared paths never appear in an isolated transaction.
+printf '%s\n' "${activation_paths[@]}" >"${rollback_root}/config-mutation-paths"
 : >"${rollback_root}/config-activation-started"
 if [[ -e "${remote_dir}/context" ]]; then
   mv "${remote_dir}/context" "${rollback_root}/config-before/context"
 fi
 mv "${incoming_dir}/context" "${remote_dir}/context"
-for relative_path in compose.yaml .env Caddyfile README.md media-runtime-versions.env; do
+for relative_path in "${activation_paths[@]}"; do
   atomic_install_file "${incoming_dir}/${relative_path}" "${remote_dir}/${relative_path}"
+  if [[ "$relative_path" == env/*.env ]]; then
+    chmod 600 "${remote_dir}/${relative_path}"
+    chown "$(id -u):$(id -g)" "${remote_dir}/${relative_path}"
+  fi
 done
-for env_file in "${incoming_dir}"/env/*.env; do
-  [[ -e "$env_file" ]] || continue
-  atomic_install_file "$env_file" "${remote_dir}/env/$(basename "$env_file")"
-  chmod 600 "${remote_dir}/env/$(basename "$env_file")"
-  chown "$(id -u):$(id -g)" "${remote_dir}/env/$(basename "$env_file")"
+for env_name in "${active_envs[@]}"; do
+  mkdir -p "${remote_dir}/state/${env_name}/tmp" "${remote_dir}/state/${env_name}/logs"
+  chown -R 1000:1000 "${remote_dir}/state/${env_name}"
 done
-
-mkdir -p \
-  "${remote_dir}/state/staging/tmp" \
-  "${remote_dir}/state/staging/logs" \
-  "${remote_dir}/state/production/tmp" \
-  "${remote_dir}/state/production/logs" \
-  "${remote_dir}/state/shared-browser-profile" \
-  "${remote_dir}/state/browser-refresh-control"
-chmod 755 "$remote_dir" "${remote_dir}/state"
-chown -R 1000:1000 \
-  "${remote_dir}/state/staging" \
-  "${remote_dir}/state/production" \
-  "${remote_dir}/state/shared-browser-profile" \
-  "${remote_dir}/state/browser-refresh-control"
+if [[ "$target_env" == all ]]; then
+  chmod 755 "$remote_dir" "${remote_dir}/state"
+  mkdir -p "${remote_dir}/state/shared-browser-profile" "${remote_dir}/state/browser-refresh-control"
+  chown -R 1000:1000 "${remote_dir}/state/shared-browser-profile" "${remote_dir}/state/browser-refresh-control"
+fi
 printf '%s\n' "$(( $(date +%s) + 3600 ))" >"${lock_dir}/lease-expires-at"
 : >"${rollback_root}/config-activated"
 echo "Atomically activated staged release configuration for ${deployment_id}"
@@ -650,7 +674,7 @@ provider_service="ytdlp-pot-provider-${deploy_env}"
 worker_service="process-audio-${deploy_env}"
 worker_image_ref="upperroom/process-audio-${deploy_env}:current"
 mark_runtime_mutation_attempted "$provider_service"
-docker compose up -d "$provider_service"
+docker compose up -d --no-deps "$provider_service"
 wait_for_provider_health "$provider_service"
 [[ -f "${rollback_root}/${deploy_env}/previous-image-id" ]] || {
   echo "Missing pre-activation rollback image metadata for ${worker_service}" >&2
@@ -699,8 +723,10 @@ if [[ "$deployed_image_id" != "$candidate_image_id" ]]; then
   exit 1
 fi
 wait_for_worker_health "$worker_service"
-mark_runtime_mutation_attempted caddy
-docker compose up -d --no-deps caddy
+if [[ "$(cat "${rollback_root}/target-env")" == all ]]; then
+  mark_runtime_mutation_attempted caddy
+  docker compose up -d --no-deps caddy
+fi
 REMOTE_DEPLOY_EOF
 }
 
@@ -818,15 +844,31 @@ fi
 restore_config_snapshot() {
   local snapshot_tree="${rollback_root}/config-before"
   local relative_path source_path destination_path temporary_path
+  if [[ ! -f "${rollback_root}/config-activation-started" ]]; then
+    echo "Configuration activation never started; active config remains unchanged" >&2
+    return 0
+  fi
   [[ -f "${rollback_root}/config-snapshot-complete" ]] || {
-    if [[ ! -f "${rollback_root}/config-activation-started" ]]; then
-      echo "Configuration activation never started; active config remains unchanged" >&2
-      return 0
-    fi
     echo "Cannot restore activated configuration: snapshot is incomplete" >&2
     return 1
   }
 
+
+  restore_paths=(compose.yaml .env Caddyfile README.md media-runtime-versions.env env/process-audio-staging.env env/process-audio-production.env)
+  if [[ -f "${rollback_root}/config-mutation-paths" ]]; then
+    restore_paths=()
+    while IFS= read -r relative_path; do
+      case "$relative_path" in
+        README.md|env/process-audio-staging.env|env/process-audio-production.env) ;;
+        compose.yaml|.env|Caddyfile|media-runtime-versions.env) [[ "$target_env" == all ]] || { echo "Rollback ledger exceeds isolated deployment scope" >&2; return 1; } ;;
+        *) echo "Invalid rollback mutation path" >&2; return 1 ;;
+      esac
+      if [[ "$target_env" != all && "$relative_path" == env/*.env && "$relative_path" != "env/process-audio-${target_env}.env" ]]; then
+        echo "Rollback ledger exceeds environment scope" >&2; return 1
+      fi
+      restore_paths+=("$relative_path")
+    done <"${rollback_root}/config-mutation-paths"
+  fi
   if [[ -f "${rollback_root}/config-activation-started" && ! -f "${rollback_root}/config-restored" ]]; then
     if [[ -e "${remote_dir}/context" ]]; then
       mv "${remote_dir}/context" "${rollback_root}/failed-context-$(date +%s)"
@@ -836,14 +878,7 @@ restore_config_snapshot() {
     fi
   fi
 
-  for relative_path in \
-    compose.yaml \
-    .env \
-    Caddyfile \
-    README.md \
-    media-runtime-versions.env \
-    env/process-audio-staging.env \
-    env/process-audio-production.env; do
+  for relative_path in "${restore_paths[@]}"; do
     source_path="${snapshot_tree}/${relative_path}"
     destination_path="${remote_dir}/${relative_path}"
     if [[ -e "$source_path" ]]; then
@@ -1036,7 +1071,11 @@ for env_name in "${rollback_envs[@]}"; do
   echo "Rollback restored healthy ${service_name} on image ${previous_image_id}" >&2
 done
 
-if ! restore_runtime_service caddy false; then
+if [[ "$target_env" == all || ! -f "${rollback_root}/config-mutation-paths" ]]; then
+  # Older transactions did replace shared configuration even for staging.
+  if ! restore_runtime_service caddy false; then rollback_failed=true; fi
+elif [[ -f "${rollback_root}/runtime-services/caddy/mutation-attempted" ]]; then
+  echo "Rollback refuses unexpected shared Caddy mutation in an isolated transaction; inspect deployment metadata" >&2
   rollback_failed=true
 fi
 
@@ -1113,6 +1152,12 @@ set +e
 (
   set -e
   begin_remote_transaction
+  if [[ "$TARGET_ENV" == all ]]; then
+    "$ROOT_DIR/scripts/setup-process-audio-hetzner-desktop-bridge.sh"
+    ensure_browser_auth_stack start
+  else
+    ensure_browser_auth_stack
+  fi
   upload_remote_release
   activate_remote_release
   case "$TARGET_ENV" in

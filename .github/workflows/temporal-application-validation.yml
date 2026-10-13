@@ -14,6 +14,8 @@ on:
       - '*json'
       - 'pnpm-*.yaml'
       - '.github/workflows/temporal-application-validation.yml'
+      - '.github/workflows/*process-audio*deploy.yml'
+      - 'ops/process-audio-hetzner/**'
   push:
     branches: [staging, main]
   workflow_dispatch:
@@ -59,6 +61,10 @@ jobs:
         run: pnpm run test:temporal:media
       - name: Validate browser recovery and state projections
         run: pnpm --dir apps/web run test:frontend:unit
+      - name: Set up read-only upload manifest validation
+        uses: google-github-actions/setup-gcloud@v3.0.1
+      - name: Validate audio deployment context, release exclusion and environment isolation
+        run: node --test scripts/process-audio-deployment.test.mjs scripts/test-process-audio-hetzner-isolation.mjs
       - name: Validate release, bootstrap and migration contracts
         run: pnpm run test:temporal:contracts
       - name: Validate locally captured monitoring and OAuth transport
