@@ -1027,6 +1027,9 @@ importers:
       axios:
         specifier: ^1.19.0
         version: 1.20.0(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)
+      fast-average-color-node:
+        specifier: 3.3.0
+        version: 3.3.0(@types/node@22.20.5)
       firebase-admin:
         specifier: ^14.5.0
         version: 14.5.0(@firebase/app-compat@0.5.19)(@firebase/app@0.16.3)(supports-color@10.2.2)
@@ -1057,9 +1060,15 @@ importers:
       node-fetch:
         specifier: 3.3.0
         version: 3.3.0
+      node-vibrant:
+        specifier: 4.0.4
+        version: 4.0.4
       p-limit:
         specifier: ^6.2.0
         version: 6.2.0
+      sharp:
+        specifier: 0.35.5
+        version: 0.35.5(@types/node@22.20.5)
       uuid:
         specifier: 'catalog:'
         version: 11.1.1
@@ -1100,15 +1109,27 @@ importers:
       firebase-functions:
         specifier: ^7.1.1
         version: 7.4.0(firebase-admin@14.5.0(@firebase/app-compat@0.5.19)(@firebase/app@0.16.3)(supports-color@10.2.2))(supports-color@10.2.2)
+      form-data:
+        specifier: 4.0.6
+        version: 4.0.6
       image-size:
         specifier: 'catalog:'
         version: 2.0.4
+      lodash:
+        specifier: 4.18.1
+        version: 4.18.1
       mkdirp:
         specifier: ^2.1.6
         version: 2.1.6
       node-vibrant:
         specifier: ^4.0.3
         version: 4.0.4
+      p-limit:
+        specifier: 6.2.0
+        version: 6.2.0
+      sharp:
+        specifier: 0.35.5
+        version: 0.35.5(@types/node@22.20.5)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -1170,6 +1191,9 @@ importers:
       node-fetch:
         specifier: 3.3.0
         version: 3.3.0
+      uuid:
+        specifier: 11.1.1
+        version: 11.1.1
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -1219,6 +1243,9 @@ importers:
       google-auth-library:
         specifier: ^11.2.0
         version: 11.2.0(supports-color@10.2.2)
+      lodash:
+        specifier: 4.18.1
+        version: 4.18.1
       p-limit:
         specifier: ^6.2.0
         version: 6.2.0

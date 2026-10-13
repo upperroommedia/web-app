@@ -8,6 +8,14 @@ on:
       - 'apps/process-audio/**'
       - 'packages/contracts/**'
       - 'packages/shared/**'
+      - 'packages/orchestration/**'
+      - 'patches/**'
+      - 'scripts/temporal-deploy-guard.mjs'
+      - 'scripts/temporal-deploy-source.mjs'
+      - 'scripts/temporal-release-lib.mjs'
+      - 'scripts/temporal-backfill-provider-usage.mjs'
+      - '.github/actions/setup-backend-deploy/**'
+      - 'functions/package.json'
       - 'package.json'
       - 'pnpm-lock.yaml'
       - 'pnpm-workspace.yaml'
@@ -68,6 +76,18 @@ jobs:
         with:
           project_id: ${{ env.GCP_PROJECT }}
 
+      - name: Set up Node.js for deployment guard
+        uses: actions/setup-node@v7.1.0
+        with:
+          node-version-file: package.json
+          package-manager-cache: false
+
+      - name: Set up pnpm for deployment guard
+        uses: pnpm/action-setup@v6.1.0
+
+      - name: Install deployment guard dependencies
+        run: pnpm install --frozen-lockfile --filter functions --prod --ignore-scripts
+
       - name: Set up SSH access for Hetzner
         env:
           SSH_TARGET: ${{ secrets.HETZNER_PROCESS_AUDIO_SSH_TARGET }}
@@ -86,7 +106,7 @@ jobs:
           PROCESS_AUDIO_HETZNER_SSH_TARGET: ${{ secrets.HETZNER_PROCESS_AUDIO_SSH_TARGET }}
           PROCESS_AUDIO_HETZNER_PUBLIC_SMOKE_YOUTUBE_URL: ${{ vars.PROCESS_AUDIO_HETZNER_PUBLIC_SMOKE_YOUTUBE_URL }}
           PROCESS_AUDIO_HETZNER_AUTH_SMOKE_YOUTUBE_URL: ${{ vars.PROCESS_AUDIO_HETZNER_AUTH_SMOKE_YOUTUBE_URL }}
-        run: ./scripts/deploy-process-audio-hetzner.sh production
+        run: node scripts/temporal-deploy-guard.mjs --project "$GCP_PROJECT" -- bash scripts/deploy-process-audio-hetzner.sh production
 
       - name: Verify production health
         run: bash scripts/wait-for-process-audio-health.sh https://yt-worker.upperroommedia.org/healthz

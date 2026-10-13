@@ -10,6 +10,15 @@ Search uses separate `urm-search` worker concurrency. Each document takes the ex
 
 Full indexing pages 25 source documents at a time, uses deterministic per-page/document admission IDs, waits for all admitted jobs to succeed, and carries a cursor/count through ContinueAsNew after 100 pages. A source failure blocks successful backfill completion. Collection-group cursors use document paths. Backfills coexist with live traffic through the same document locks and authoritative reads.
 
+The metadata helper loads lazily inside the image byte-processing activity. Image
+acknowledgements and core admission retain their receipt logic without loading Sharp
+or either colour library at startup. Each split Functions package declares its full
+runtime import closure, including lazy operations. CI checks the existing startup
+loading boundaries and exports each package with frozen production dependencies to
+an isolated temporary directory; real entrypoint discovery and image metadata probes
+run with network access blocked and no inherited credentials. Removing a required
+image dependency must fail the probe. Monorepo hoisting cannot satisfy this check.
+
 ## Cutover
 
 Keep `TASK_ORCHESTRATOR_SEARCH=legacy` until the dispatcher, matching worker config/secrets and namespace are ready. Drain Cloud Tasks full-index pages and in-flight legacy leases before changing the deployed kit to `temporal`. The kit's trigger then creates durable jobs/outbox instead of calling Algolia. Never enable both execution owners intentionally. Runtime search configurations are server-owned and keyed by existing FIREBASE_KIT_INSTANCE_ID; the worker receives API keys privately. No key or record body belongs in jobs or history.

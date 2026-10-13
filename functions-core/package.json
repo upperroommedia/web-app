@@ -14,8 +14,11 @@
     "@google-cloud/functions-framework": "^3.2.0",
     "@google-cloud/storage": "8.4.0",
     "@sentry/node": "^11.7.0",
+    "@temporalio/activity": "1.24.0",
+    "@temporalio/common": "1.24.0",
     "algoliasearch": "^5.27.0",
     "axios": "^1.19.0",
+    "fast-average-color-node": "3.3.0",
     "firebase-admin": "^14.5.0",
     "firebase-functions": "^7.1.1",
     "form-data": "^4.0.0",
@@ -26,10 +29,10 @@
     "lodash": "^4.17.23",
     "mkdirp": "^2.1.6",
     "node-fetch": "3.3.0",
+    "node-vibrant": "4.0.4",
     "p-limit": "^6.2.0",
-    "uuid": "catalog:",
-    "@temporalio/activity": "1.24.0",
-    "@temporalio/common": "1.24.0"
+    "sharp": "0.35.5",
+    "uuid": "catalog:"
   },
   "devDependencies": {
     "@types/node": "catalog:",

@@ -13,6 +13,9 @@ OUTPUT_DIR="$1"
 rm -rf "$OUTPUT_DIR"
 mkdir -p "$OUTPUT_DIR/apps" "$OUTPUT_DIR/packages"
 
+# pnpm applies workspace patches even when lifecycle scripts are disabled.
+rsync -a --delete "$ROOT_DIR/patches/" "$OUTPUT_DIR/patches/"
+
 cp "$ROOT_DIR/package.json" "$OUTPUT_DIR/package.json"
 cp "$ROOT_DIR/pnpm-lock.yaml" "$OUTPUT_DIR/pnpm-lock.yaml"
 cp "$ROOT_DIR/pnpm-workspace.yaml" "$OUTPUT_DIR/pnpm-workspace.yaml"
@@ -22,7 +25,10 @@ rsync -a --delete --exclude=node_modules --exclude=dist --exclude=.turbo --exclu
 rsync -a --delete --exclude=node_modules --exclude=dist --exclude=.turbo --exclude=.next --exclude=coverage "$ROOT_DIR/packages/contracts/" "$OUTPUT_DIR/packages/contracts/"
 rsync -a --delete --exclude=node_modules --exclude=dist --exclude=.turbo --exclude=.next --exclude=coverage "$ROOT_DIR/packages/shared/" "$OUTPUT_DIR/packages/shared/"
 
+rsync -a --delete --exclude=node_modules --exclude=dist --exclude=.turbo --exclude=coverage "$ROOT_DIR/packages/orchestration/" "$OUTPUT_DIR/packages/orchestration/"
+
 cat > "$OUTPUT_DIR/.dockerignore" <<'EOF'
+/gha-creds-*.json
 **/.git
 **/.github
 **/.next
