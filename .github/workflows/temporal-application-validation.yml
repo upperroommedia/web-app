@@ -58,8 +58,14 @@ jobs:
         run: |
           node --test scripts/materialize-catalog-for-firebase.test.mjs
           node scripts/functions-npm-locks.mjs check
+          node --test scripts/kit-npm-lock-contract.test.mjs
+          node scripts/kit-npm-locks.mjs check
           pnpm run check:function-startup-loads
           node --test scripts/tests/functions-isolated-startup.test.mjs
+      - name: Validate every kit on genuine Linux native production startup
+        env:
+          KIT_STARTUP_REQUIRE_LINUX_X64: 'true'
+        run: node --test scripts/tests/kits-isolated-startup.test.mjs
       - name: Validate application regressions, admission, rules and SDK compatibility
         run: pnpm --dir functions test
       - name: Validate workflows, replay, cancellation and native media

@@ -3,6 +3,7 @@
 // deletes legacy work, changes owners, or replaces the original control documents.
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
@@ -17,8 +18,23 @@ import {
 import { assertCheckoutSource } from './temporal-deploy-source.mjs';
 export const STATE_PATH = '_control/temporalReleaseState';
 export const OPERATION_PATH = '_control/temporalReleaseOperation';
+const { Timestamp } = createRequire(new URL('../functions/package.json', import.meta.url))('firebase-admin/firestore');
+const plainTimestamp = (value) =>
+  value &&
+  Object.getPrototypeOf(value) === Object.prototype &&
+  Object.keys(value).length === 2 &&
+  Object.hasOwn(value, 'seconds') &&
+  Object.hasOwn(value, 'nanoseconds');
+const timestampShape = (value) =>
+  (value instanceof Timestamp &&
+    Object.keys(value).length === 2 &&
+    Object.hasOwn(value, '_seconds') &&
+    Object.hasOwn(value, '_nanoseconds')) ||
+  plainTimestamp(value);
 export const canonical = (value) =>
-  Array.isArray(value)
+  timestampShape(value)
+    ? JSON.stringify(nativeRecoveryTimestamp(value))
+    : Array.isArray(value)
     ? JSON.stringify(value.map((v) => JSON.parse(canonical(v))))
     : value && typeof value === 'object'
     ? JSON.stringify(
@@ -45,6 +61,7 @@ export function validateRecoveryDescriptors(oldRelease, newRelease, actualCommit
   )
     throw new Error('Recovery supports staging initial cutover only');
   if (
+    oldRelease.compatibilityCommit !== oldRelease.uiCommit ||
     oldRelease.releaseId === newRelease.releaseId ||
     oldRelease.compatibilityCommit === newRelease.compatibilityCommit ||
     newRelease.compatibilityCommit !== newRelease.uiCommit ||
@@ -93,7 +110,6 @@ export function validateRecoveryCheckpoint(control, state, oldRelease, revision)
     Object.hasOwn(state, 'compatibilityVerifiedAt') ||
     Object.hasOwn(state, 'legacySettlingDeadline') ||
     Object.hasOwn(state, 'compatibilityEvidenceAt') ||
-    state.recoveryPredecessorReleaseId ||
     !state.appHostingFreezeRequestId ||
     !Number.isSafeInteger(state.maximumLegacyExecutionSeconds) ||
     state.maximumLegacyExecutionSeconds < 540 ||
@@ -101,9 +117,256 @@ export function validateRecoveryCheckpoint(control, state, oldRelease, revision)
     state.savedRolloutPolicy.codebaseBranch !== 'staging' ||
     !state.savedUiTraffic
   )
-    throw new Error(
-      'Recovery cannot rewrite a cutoff, completed compatibility gate, prior recovery, or missing freeze metadata'
-    );
+    throw new Error('Recovery cannot rewrite a cutoff, completed compatibility gate, or missing freeze metadata');
+  const previous = state.recoveryPredecessorReleaseId;
+  if (
+    previous !== undefined &&
+    (!/^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(previous) ||
+      previous === state.releaseId ||
+      state.recoveryArchivePath !== `_control/temporalCompatibilityRecovery-${previous}`)
+  )
+    throw new Error('Recovery ancestry pointer is malformed');
+  if (
+    previous === undefined &&
+    [
+      'recoveryArchivePath',
+      'recoveryArchiveSha256',
+      'recoveryOriginReleaseId',
+      'recoveryOriginalOperatorUid',
+      'recoveryOriginalIdentitySha256',
+    ].some((key) => Object.hasOwn(state, key))
+  )
+    throw new Error('Recovery ancestry metadata has no predecessor');
+}
+const FREEZE_FIELDS = [
+  'appHostingFreezeRequestId',
+  'maximumLegacyExecutionSeconds',
+  'savedRolloutPolicy',
+  'savedUiTraffic',
+  'domains',
+];
+const sha256 = (value) => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
+export function nativeRecoveryTimestamp(value) {
+  if (
+    !timestampShape(value) ||
+    !Number.isSafeInteger(value.seconds) ||
+    value.seconds < -62135596800 ||
+    value.seconds > 253402300799 ||
+    !Number.isSafeInteger(value.nanoseconds) ||
+    value.nanoseconds < 0 ||
+    value.nanoseconds >= 1_000_000_000
+  )
+    throw new Error('Native original recovery document timestamps are required');
+  return { seconds: value.seconds, nanoseconds: value.nanoseconds };
+}
+const stampEqual = (a, b) => same(nativeRecoveryTimestamp(a), nativeRecoveryTimestamp(b));
+/** Read each immutable archive independently. Final CAS uses its exact updateTime, avoiding rereading
+ * unbounded runtime payloads in a transaction while still rejecting ANY intervening archive mutation. */
+export async function validateRecoveryAncestry(input, loadArchive) {
+  const {
+    control,
+    state,
+    oldRelease,
+    controlCreateTime,
+    stateCreateTime,
+    originalOperatorUid,
+    originalIdentitySha256,
+  } = input;
+  validateReleaseConfig(oldRelease);
+  if (
+    oldRelease.environment !== 'staging' ||
+    oldRelease.mode !== 'initial-cutover' ||
+    oldRelease.compatibilityCommit !== oldRelease.uiCommit
+  )
+    throw new Error('Recovery ancestry supports staging initial cutover with exact source pins only');
+  validateRecoveryCheckpoint(control, state, oldRelease, control.revision);
+  nativeRecoveryTimestamp(controlCreateTime);
+  nativeRecoveryTimestamp(stateCreateTime);
+  if (!originalOperatorUid || !sha256(originalIdentitySha256))
+    throw new Error('Original browser identity artifact is required for ancestry');
+  const visited = new Set([oldRelease.releaseId]),
+    commits = new Set([oldRelease.compatibilityCommit]),
+    archives = [];
+  let descriptor = oldRelease,
+    currentControl = control,
+    currentState = state,
+    expectedHash = state.recoveryArchiveSha256;
+  let originDescriptor = oldRelease;
+  while (currentState.recoveryPredecessorReleaseId !== undefined) {
+    const predecessor = currentState.recoveryPredecessorReleaseId,
+      path = `_control/temporalCompatibilityRecovery-${predecessor}`;
+    if (currentState.recoveryArchivePath !== path || visited.has(predecessor))
+      throw new Error('Missing, cyclic or foreign recovery ancestry');
+    visited.add(predecessor);
+    const snapshot = await loadArchive(path);
+    if (!snapshot?.exists) throw new Error('Required protected recovery archive is missing');
+    if (!stampEqual(snapshot.createTime, snapshot.updateTime))
+      throw new Error('Protected recovery archive was modified after its immutable creation');
+    const archive = snapshot.data(),
+      hash = digest(archive),
+      prior = archive?.oldDescriptor,
+      next = archive?.newDescriptor;
+    if (expectedHash !== undefined && (!sha256(expectedHash) || expectedHash !== hash))
+      throw new Error('Protected recovery archive hash changed');
+    if (
+      !archive ||
+      archive.schemaVersion !== 1 ||
+      archive.predecessorReleaseId !== predecessor ||
+      archive.successorReleaseId !== descriptor.releaseId ||
+      !same(next, descriptor) ||
+      archive.oldDescriptorSha256 !== digest(prior) ||
+      archive.newDescriptorSha256 !== digest(next)
+    )
+      throw new Error('Recovery archive descriptor or UUID continuity changed');
+    validateRecoveryDescriptors(prior, next, next.compatibilityCommit);
+    if (commits.has(prior.compatibilityCommit)) throw new Error('Recovery source ancestry contains a cycle');
+    commits.add(prior.compatibilityCommit);
+    const oc = archive.originalControl,
+      os = archive.originalState;
+    validateRecoveryCheckpoint(oc, os, prior, oc?.revision);
+    if (
+      currentControl.revision !== oc.revision + 1 ||
+      currentState.controlRevision !== currentControl.revision ||
+      (archive.successorControlRevision !== undefined && archive.successorControlRevision !== currentControl.revision)
+    )
+      throw new Error('Recovery archive revisions do not form the exact successor chain');
+    if (
+      !stampEqual(archive.originalControlCreateTime, controlCreateTime) ||
+      !stampEqual(archive.originalStateCreateTime, stateCreateTime) ||
+      FREEZE_FIELDS.some((key) => !same(os[key], state[key])) ||
+      !same(oc.domains, control.domains)
+    )
+      throw new Error('Original recovery freeze or native createTime continuity changed');
+    const identityArtifacts = Array.isArray(archive.artifacts)
+      ? archive.artifacts.filter((artifact) => artifact.label === 'original-operator-identity')
+      : undefined;
+    if (
+      archive.originalFreezePreserved !== true ||
+      archive.admissionsOpened !== false ||
+      archive.ownersChanged !== false ||
+      archive.reviewedBrowserActorUid !== originalOperatorUid ||
+      identityArtifacts?.length !== 1 ||
+      identityArtifacts[0].sha256 !== originalIdentitySha256 ||
+      archive.candidateCi?.headSha !== next.compatibilityCommit ||
+      archive.candidateCi.status !== 'completed' ||
+      archive.candidateCi.conclusion !== 'success' ||
+      archive.settledGuard?.releaseId !== prior.releaseId ||
+      archive.settledGuard.commit !== prior.compatibilityCommit ||
+      archive.settledGuard.action !== 'controlled-backend-deploy' ||
+      !sha256(archive.reviewSha256)
+    )
+      throw new Error('Recovery archive lacks exact reviewed original identity and successful candidate evidence');
+    if (
+      (archive.ancestry !== undefined || archive.successorControlRevision !== undefined) &&
+      (expectedHash === undefined ||
+        !archive.ancestry ||
+        !Number.isSafeInteger(archive.successorControlRevision) ||
+        currentState.recoveryOriginReleaseId !== archive.ancestry.originReleaseId ||
+        currentState.recoveryOriginalOperatorUid !== originalOperatorUid ||
+        currentState.recoveryOriginalIdentitySha256 !== originalIdentitySha256)
+    )
+      throw new Error('Pinned recovery head requires exact persisted ancestry identity');
+    const parent = os.recoveryPredecessorReleaseId;
+    if (parent !== undefined) {
+      if (
+        archive.predecessorArchive?.path !== os.recoveryArchivePath ||
+        !sha256(archive.predecessorArchive?.digest) ||
+        (os.recoveryArchiveSha256 !== undefined && archive.predecessorArchive.digest !== os.recoveryArchiveSha256) ||
+        expectedHash === undefined
+      )
+        throw new Error('Repeated recovery requires protected predecessor hash pins');
+    } else {
+      // Compatibility with the genuine first recovery emitted before archive hash pins existed.
+      // An unpinned multi-hop history or a claimed parent can never use this bootstrap.
+      if (archive.predecessorArchive !== undefined && archive.predecessorArchive !== null)
+        throw new Error('Genesis recovery cannot claim an earlier archive');
+      if (
+        expectedHash === undefined &&
+        (archives.length !== 0 || archive.successorControlRevision !== undefined || archive.ancestry !== undefined)
+      )
+        throw new Error('Only the original first-recovery archive may lack a head hash');
+    }
+    if (
+      archive.ancestry &&
+      (archive.ancestry.originalOperatorUid !== originalOperatorUid ||
+        archive.ancestry.originalIdentitySha256 !== originalIdentitySha256 ||
+        !stampEqual(archive.ancestry.originalControlCreateTime, controlCreateTime) ||
+        !stampEqual(archive.ancestry.originalStateCreateTime, stateCreateTime))
+    )
+      throw new Error('Archived recovery ancestry identity changed');
+    archives.push({
+      path,
+      digest: hash,
+      ancestry: archive.ancestry,
+      createTime: nativeRecoveryTimestamp(snapshot.createTime),
+      updateTime: nativeRecoveryTimestamp(snapshot.updateTime),
+    });
+    originDescriptor = prior;
+    descriptor = prior;
+    currentControl = oc;
+    currentState = os;
+    expectedHash = archive.predecessorArchive?.digest ?? os.recoveryArchiveSha256;
+  }
+  if (
+    (state.recoveryOriginReleaseId !== undefined && state.recoveryOriginReleaseId !== originDescriptor.releaseId) ||
+    (state.recoveryOriginalOperatorUid !== undefined && state.recoveryOriginalOperatorUid !== originalOperatorUid) ||
+    (state.recoveryOriginalIdentitySha256 !== undefined &&
+      state.recoveryOriginalIdentitySha256 !== originalIdentitySha256)
+  )
+    throw new Error('Live original recovery identity changed');
+  for (let index = 0; index < archives.length; index++) {
+    const claimed = archives[index].ancestry;
+    if (!claimed) {
+      if (index !== archives.length - 1) throw new Error('Only the original bootstrap archive may omit ancestry');
+      continue;
+    }
+    const tail = archives.slice(index + 1);
+    const expected = {
+      originReleaseId: originDescriptor.releaseId,
+      originCompatibilityCommit: originDescriptor.compatibilityCommit,
+      originalOperatorUid,
+      originalIdentitySha256,
+      originalControlCreateTime: nativeRecoveryTimestamp(controlCreateTime),
+      originalStateCreateTime: nativeRecoveryTimestamp(stateCreateTime),
+      archiveCount: tail.length,
+      chainDigest: digest(tail.map(({ path, digest }) => ({ path, digest }))),
+    };
+    if (!same(claimed, expected))
+      throw new Error('Archived ancestry summary does not match the immutable predecessor chain');
+  }
+  const summary = {
+    originReleaseId: originDescriptor.releaseId,
+    originCompatibilityCommit: originDescriptor.compatibilityCommit,
+    originalOperatorUid,
+    originalIdentitySha256,
+    originalControlCreateTime: nativeRecoveryTimestamp(controlCreateTime),
+    originalStateCreateTime: nativeRecoveryTimestamp(stateCreateTime),
+    archiveCount: archives.length,
+    chainDigest: digest(archives.map(({ path, digest }) => ({ path, digest }))),
+  };
+  if (
+    input.newRelease &&
+    (visited.has(input.newRelease.releaseId) || commits.has(input.newRelease.compatibilityCommit))
+  )
+    throw new Error('A recovery cannot reuse any ancestor release UUID or source commit');
+  return { summary, archives, originDescriptor, releaseIds: [...visited], commits: [...commits] };
+}
+export async function assertRecoveryAncestryUnchanged(tx, db, ancestry) {
+  if (!ancestry || !Array.isArray(ancestry.archives)) throw new Error('Validated recovery ancestry is required');
+  for (let offset = 0; offset < ancestry.archives.length; offset += 100) {
+    const batch = ancestry.archives.slice(offset, offset + 100),
+      snapshots = await tx.getAll(...batch.map((entry) => db.doc(entry.path)), { fieldMask: ['schemaVersion'] });
+    for (let index = 0; index < batch.length; index++) {
+      const snapshot = snapshots[index],
+        entry = batch[index];
+      if (
+        !snapshot.exists ||
+        !stampEqual(snapshot.createTime, entry.createTime) ||
+        !stampEqual(snapshot.updateTime, entry.updateTime)
+      )
+        throw new Error('Protected recovery archive changed after ancestry verification');
+    }
+  }
 }
 export function assertSafeRecoveryLeases(rows) {
   for (const row of rows)
@@ -243,10 +506,30 @@ export function summarizeBuildInventory(location, rows) {
     statusCounts: rows.reduce((counts, b) => ({ ...counts, [b.status]: (counts[b.status] ?? 0) + 1 }), {}),
   };
 }
+export function buildRecoveryArchive({ archive, oldRelease, newRelease, verified }) {
+  const record = {
+    ...archive,
+    predecessorReleaseId: oldRelease.releaseId,
+    successorReleaseId: newRelease.releaseId,
+    originalControl: verified.control,
+    originalState: verified.state,
+    originalControlCreateTime: verified.controlCreateTime,
+    originalStateCreateTime: verified.stateCreateTime,
+    predecessorArchive: verified.ancestry.archives[0]
+      ? { path: verified.ancestry.archives[0].path, digest: verified.ancestry.archives[0].digest }
+      : null,
+    successorControlRevision: verified.control.revision + 1,
+    ancestry: verified.ancestry.summary,
+  };
+  if (Buffer.byteLength(canonical(record), 'utf8') > 750000)
+    throw new Error('Recovery archive exceeds reviewed document byte budget');
+  return record;
+}
 export async function migrateRecoveryCheckpoint(
   db,
   { oldRelease, newRelease, review, operationId, verified, archive }
 ) {
+  validateRecoveryDescriptors(oldRelease, newRelease, newRelease.compatibilityCommit);
   const archivePath = `_control/temporalCompatibilityRecovery-${oldRelease.releaseId}`;
   return db.runTransaction(async (tx) => {
     const [cs, ss, ls, archived, leases] = await Promise.all([
@@ -270,16 +553,17 @@ export async function migrateRecoveryCheckpoint(
       archived.exists
     )
       throw new Error('Recovery CAS, operation ownership or archive identity changed');
+    if (!stampEqual(cs.createTime, verified.controlCreateTime) || !stampEqual(ss.createTime, verified.stateCreateTime))
+      throw new Error('Native original checkpoint createTimes changed');
+    if (
+      verified.ancestry?.releaseIds?.includes(newRelease.releaseId) ||
+      verified.ancestry?.commits?.includes(newRelease.compatibilityCommit)
+    )
+      throw new Error('Recovery cannot reuse an ancestor release or source');
+    await assertRecoveryAncestryUnchanged(tx, db, verified.ancestry);
     assertSafeRecoveryLeases(leases.docs.map((d) => d.data()));
-    tx.create(db.doc(archivePath), {
-      ...archive,
-      predecessorReleaseId: oldRelease.releaseId,
-      successorReleaseId: newRelease.releaseId,
-      originalControl: control,
-      originalState: state,
-      originalControlCreateTime: cs.createTime,
-      originalStateCreateTime: ss.createTime,
-    });
+    const archiveRecord = buildRecoveryArchive({ archive, oldRelease, newRelease, verified });
+    tx.create(db.doc(archivePath), archiveRecord);
     tx.update(db.doc(CONTROL_PATH), {
       releaseId: newRelease.releaseId,
       revision: control.revision + 1,
@@ -293,6 +577,10 @@ export async function migrateRecoveryCheckpoint(
       updatedAt: Date.now(),
       recoveryPredecessorReleaseId: oldRelease.releaseId,
       recoveryArchivePath: archivePath,
+      recoveryArchiveSha256: digest(archiveRecord),
+      recoveryOriginReleaseId: verified.ancestry.summary.originReleaseId,
+      recoveryOriginalOperatorUid: verified.ancestry.summary.originalOperatorUid,
+      recoveryOriginalIdentitySha256: verified.ancestry.summary.originalIdentitySha256,
     });
     tx.delete(db.doc(OPERATION_PATH));
     return { archivePath, controlRevision: control.revision + 1, phase: 'ui-frozen', admission: 'paused' };
@@ -339,13 +627,17 @@ async function main() {
       ['review', review],
     ])
       await writeFile(`${archiveDir}/${name}.json`, JSON.stringify(data, null, 2), { mode: 0o600, flag: 'wx' });
-    let originalIdentity;
+    let originalIdentity, originalIdentitySha256;
     for (const artifact of review.artifacts) {
       const bytes = await readFile(artifact.path);
       if (createHash('sha256').update(bytes).digest('hex') !== artifact.sha256)
         throw new Error('Reviewed runtime/settlement artifact changed');
       await writeFile(`${archiveDir}/${artifact.label}.artifact`, bytes, { mode: 0o600, flag: 'wx' });
-      if (artifact.label === 'original-operator-identity') originalIdentity = JSON.parse(bytes.toString('utf8'));
+      if (artifact.label === 'original-operator-identity') {
+        if (originalIdentity) throw new Error('Exactly one original identity artifact is required');
+        originalIdentity = JSON.parse(bytes.toString('utf8'));
+        originalIdentitySha256 = artifact.sha256;
+      }
     }
     if (
       originalIdentity?.projectId !== oldRelease.projectId ||
@@ -360,6 +652,20 @@ async function main() {
     clients = { db, database };
     const operationId = randomUUID(),
       apply = args.includes('--apply');
+    const [ancestryControl, ancestryState] = await db.getAll(db.doc(CONTROL_PATH), db.doc(STATE_PATH));
+    const ancestry = await validateRecoveryAncestry(
+      {
+        control: ancestryControl.data(),
+        state: ancestryState.data(),
+        oldRelease,
+        controlCreateTime: ancestryControl.createTime,
+        stateCreateTime: ancestryState.createTime,
+        originalOperatorUid: review.originalOperatorUid,
+        originalIdentitySha256,
+        newRelease,
+      },
+      (path) => db.doc(path).get()
+    );
     let verified;
     await db.runTransaction(async (tx) => {
       const [cs, ss, lock] = await Promise.all([
@@ -368,6 +674,14 @@ async function main() {
         tx.get(db.doc(OPERATION_PATH)),
       ]);
       validateRecoveryCheckpoint(cs.data(), ss.data(), oldRelease, review.oldControlRevision);
+      if (
+        !same(cs.data(), ancestryControl.data()) ||
+        !same(ss.data(), ancestryState.data()) ||
+        !stampEqual(cs.createTime, ancestryControl.createTime) ||
+        !stampEqual(ss.createTime, ancestryState.createTime)
+      )
+        throw new Error('Recovery checkpoint changed during ancestry verification');
+      await assertRecoveryAncestryUnchanged(tx, db, ancestry);
       if (Date.parse(originalIdentity.verifiedAt) >= cs.createTime.toMillis())
         throw new Error('Original operator identity must predate the original freeze');
       if (lock.exists)
@@ -378,16 +692,8 @@ async function main() {
         state: ss.data(),
         controlCreateTime: cs.createTime,
         stateCreateTime: ss.createTime,
+        ancestry,
       };
-      if (apply)
-        tx.create(db.doc(OPERATION_PATH), {
-          operationId,
-          action: 'recover-initial-compatibility',
-          releaseId: oldRelease.releaseId,
-          newReleaseId: newRelease.releaseId,
-          commit,
-          createdAt: Date.now(),
-        });
     });
     const observationStart = new Date().toISOString();
     const gh = (path) =>
@@ -517,7 +823,6 @@ async function main() {
         throw new Error('Observed failed runtime identity changed; review actual settlement again');
       runtime.push(projection);
     }
-    const { createRequire } = await import('node:module');
     const require = createRequire(resolve(root, 'functions/package.json'));
     const app = require('firebase-admin/app')
       .getApps()
@@ -630,21 +935,10 @@ async function main() {
       admissionsOpened: false,
       ownersChanged: false,
     };
-    if (Buffer.byteLength(JSON.stringify(archive)) > 750000)
-      throw new Error('Recovery archive exceeds reviewed Firestore document size budget');
+    buildRecoveryArchive({ archive, oldRelease, newRelease, verified });
     await writeFile(
       `${archiveDir}/observations.json`,
-      JSON.stringify(
-        {
-          ...archive,
-          originalControl: verified.control,
-          originalState: verified.state,
-          originalControlCreateTime: verified.controlCreateTime,
-          originalStateCreateTime: verified.stateCreateTime,
-        },
-        null,
-        2
-      ),
+      JSON.stringify(buildRecoveryArchive({ archive, oldRelease, newRelease, verified }), null, 2),
       { mode: 0o600, flag: 'wx' }
     );
     if (!apply) {
@@ -659,6 +953,31 @@ async function main() {
       );
       return;
     }
+    // All deterministic validation, including the complete document budget, precedes lock acquisition.
+    validateRecoveryReview(review, oldRelease, newRelease);
+    await db.runTransaction(async (tx) => {
+      const [cs, ss, lock] = await tx.getAll(db.doc(CONTROL_PATH), db.doc(STATE_PATH), db.doc(OPERATION_PATH));
+      if (lock.exists) throw new Error('Recovery never steals an existing operation lock');
+      validateRecoveryCheckpoint(cs.data(), ss.data(), oldRelease, review.oldControlRevision);
+      if (
+        !same(cs.data(), verified.control) ||
+        !same(ss.data(), verified.state) ||
+        !stampEqual(cs.createTime, verified.controlCreateTime) ||
+        !stampEqual(ss.createTime, verified.stateCreateTime)
+      )
+        throw new Error('Recovery checkpoint changed before lock acquisition');
+      await assertRecoveryAncestryUnchanged(tx, db, ancestry);
+      assertCheckoutSource(root, commit, { project: newRelease.projectId, control: cs.data() });
+      buildRecoveryArchive({ archive, oldRelease, newRelease, verified });
+      tx.create(db.doc(OPERATION_PATH), {
+        operationId,
+        action: 'recover-initial-compatibility',
+        releaseId: oldRelease.releaseId,
+        newReleaseId: newRelease.releaseId,
+        commit,
+        createdAt: Date.now(),
+      });
+    });
     const result = await migrateRecoveryCheckpoint(db, {
       oldRelease,
       newRelease,
