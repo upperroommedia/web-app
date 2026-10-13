@@ -280,17 +280,14 @@ export function createImageActivities(deps: ImageDependencies): ImageActivities 
           const localPath = join(directory, 'source');
           await file.download({ destination: localPath });
           Context.current().cancellationSignal.throwIfAborted();
-          const dimensions = await computeMetadataForImage(localPath, true);
-          if (
-            dimensions.width > 16384 ||
-            dimensions.height > 16384 ||
-            dimensions.width * dimensions.height > 40_000_000
-          )
-            throw ApplicationFailure.nonRetryable(
-              'Image dimensions exceed the processing limit',
-              'ImageDimensionsInvalid'
-            );
-          const metadata = await computeMetadataForImage(localPath);
+          let metadata: Awaited<ReturnType<typeof computeMetadataForImage>>;
+          try {
+            metadata = await computeMetadataForImage(localPath);
+          } catch (error) {
+            if (error instanceof Error && error.name === 'ImageInputInvalid')
+              throw ApplicationFailure.nonRetryable(error.message, 'ImageDimensionsInvalid');
+            throw error;
+          }
           assertImageMutationTransportAllowed();
           const stream = createReadStream(localPath);
           try {

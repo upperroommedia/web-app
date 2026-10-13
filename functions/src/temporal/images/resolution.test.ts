@@ -498,3 +498,39 @@ test('signed image PUT disables redirects so a provider redirect cannot replay t
   );
   expect(records.get('temporalImageReceipts/cleanup-job')?.state).toBe('uploaded');
 });
+
+test('invalid decoded source fails nonretryably before any signed provider PUT', async () => {
+  const { MockActivityEnvironment } = await import('@temporalio/testing');
+  const { writeFile } = await import('node:fs/promises');
+  const { createImageActivities } = await import('./activities');
+  const { deps, records } = harness();
+  const receipt = {
+    state: 'allocated',
+    remoteId: 'own-allocation',
+    uploadUrl: 'https://signed.invalid/own-allocation',
+  };
+  records.set('temporalImageReceipts/cleanup-job', receipt);
+  jest
+    .mocked(computeMetadataForImage)
+    .mockRejectedValueOnce(
+      Object.assign(new Error('Image cannot be decoded within the processing limits'), { name: 'ImageInputInvalid' })
+    );
+  const download = jest.fn(async ({ destination }: { destination: string }) =>
+    writeFile(destination, Buffer.from('invalid-owned-source'))
+  );
+  const activities = createImageActivities({
+    ...deps,
+    loadJob: async () => ({ steps: [] }),
+    recordStep: async () => undefined,
+    project: async () => undefined,
+    storage: { bucket: () => ({ file: () => ({ download }) }) },
+  } as unknown as ImageDependencies);
+  await expect(new MockActivityEnvironment().run(activities.uploadImageBytes, ref)).rejects.toMatchObject({
+    type: 'ImageDimensionsInvalid',
+    nonRetryable: true,
+  });
+  expect(download).toHaveBeenCalledTimes(1);
+  expect(computeMetadataForImage).toHaveBeenCalledTimes(1);
+  expect(axios).not.toHaveBeenCalled();
+  expect(records.get('temporalImageReceipts/cleanup-job')).toEqual(receipt);
+});
