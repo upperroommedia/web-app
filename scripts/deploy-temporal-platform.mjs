@@ -12,6 +12,8 @@ import {
   validateSingleHostCapacity,
   validateSingleHostMedia,
   renderOperatorJob as operatorJob,
+  waitPlatformJob,
+  platformOperatorCommands,
   assertFirebaseRuntimeSecretResources,
   validateBackupEvidence,
   validateInitialSchemaBootstrap,
@@ -261,15 +263,18 @@ try {
     lockUid = lock.metadata.uid;
   }
   const manifests = renderPlatform(c);
+  const commands = platformOperatorCommands(c, Number(flags['--percentage']));
   const write = async (name, data) => {
     const path = join(directory, name);
     await writeFile(path, JSON.stringify(data));
     return path;
   };
   const applyObject = (object) => kubectl(['apply', '-f', '-'], object);
-  const job = (object) => {
+  const job = async (object) => {
     const created = JSON.parse(kubectl(['create', '-f', '-', '-o', 'json'], object));
-    kubectl(['wait', '--for=condition=complete', `job/${created.metadata.name}`, '-n', c.namespace, '--timeout=900s']);
+    await waitPlatformJob(() => json(['get', `job/${created.metadata.name}`, '-n', c.namespace]), {
+      timeoutMs: ((created.spec.activeDeadlineSeconds ?? 300) + 30) * 1000,
+    });
     return created.metadata.name;
   };
   async function verifyDatabaseApi() {
@@ -287,7 +292,7 @@ try {
       p.status.conditions?.some((s) => s.type === 'Ready' && s.status === 'True')
     );
     if (!pod) throw new Error('No ready database pod for private API identity proof');
-    job(
+    await job(
       databaseApiCanary(
         c,
         c.namespace,
@@ -417,7 +422,7 @@ try {
       }
       validateInitialSchemaBootstrap(source, json(['get', 'backups', '-n', c.namespace]).items, tableCounts);
 
-      job(schemaJob(c, 'bootstrap'));
+      await job(schemaJob(c, 'bootstrap'));
     } else {
       for (const name of ['temporal-internode-tls', 'temporal-frontend-tls', 'temporal-ui-tls'])
         secret(name, ['tls.crt', 'tls.key', 'ca.crt']);
@@ -451,7 +456,7 @@ try {
         )
           throw new Error('Server upgrades must be sequential, never skip a minor or downgrade');
       }
-      job(schemaJob(c, 'upgrade'));
+      await job(schemaJob(c, 'upgrade'));
       const chart = await download(versions.chartUrl, versions.chartSha256, 'temporal.tgz');
       execFileSync(
         'helm',
@@ -473,14 +478,7 @@ try {
         { stdio: ['ignore', 'pipe', 'pipe'], timeout: 960_000 }
       );
       // A separate mTLS operator job validates application readiness and creates the namespace.
-      job(
-        operatorJob(
-          c,
-          'namespace',
-          ['operator', 'namespace', 'describe', '--namespace', c.temporalNamespace],
-          ['operator', 'namespace', 'create', '--namespace', c.temporalNamespace, '--retention', c.retention]
-        )
-      );
+      await job(operatorJob(c, 'namespace', commands.namespaceDescribe, commands.namespaceCreate));
     }
   } else if (action === 'worker') {
     await requirePlatformReadiness();
@@ -538,7 +536,7 @@ try {
     if (!c.workerRoles.includes('email') || !flags['--output'])
       throw new Error('Email canary requires configured email worker and private proof output');
     secret('temporal-worker-email-runtime', []);
-    const name = job(
+    const name = await job(
       emailCanary(c, await readFile(new URL('../ops/temporal/email-canary.cjs', import.meta.url), 'utf8'))
     );
     const proof = JSON.parse(
@@ -566,33 +564,12 @@ try {
       requireManagedSecret('TEMPORAL_OPERATOR_API_KEY');
       if (c.workerHosting === 'gce-k3s') secret('temporal-operator-api-key', ['api-key']);
     } else secret('temporal-operator-tls', ['tls.crt', 'tls.key', 'ca.crt']);
-    const version = ['--deployment-name', c.workerDeploymentName, '--build-id', c.workerBuildId];
     if (action === 'worker-status') {
       if (!flags['--output']) throw new Error('worker-status requires --output for its non-secret readiness proof');
-      const deploymentJob = job(
-        operatorJob(c, 'describe-deployment', [
-          'worker',
-          'deployment',
-          'describe',
-          '--deployment-name',
-          c.workerDeploymentName,
-          '--output',
-          'json',
-        ])
-      );
+      const deploymentJob = await job(operatorJob(c, 'describe-deployment', commands.deploymentDescribe));
       const response = JSON.parse(kubectl(['logs', `job/${deploymentJob}`, '-n', c.namespace]));
       assertWorkerRouting(response, c);
-      const versionJob = job(
-        operatorJob(c, 'describe-version', [
-          'worker',
-          'deployment',
-          'describe-version',
-          ...version,
-          '--report-task-queue-stats',
-          '--output',
-          'json',
-        ])
-      );
+      const versionJob = await job(operatorJob(c, 'describe-version', commands.versionDescribe));
       const report = JSON.parse(kubectl(['logs', `job/${versionJob}`, '-n', c.namespace]));
       assertWorkerQueues(report, c);
       await writeFile(
@@ -612,9 +589,7 @@ try {
         { mode: 0o600 }
       );
     } else if (action === 'retire') {
-      const inspectJob = job(
-        operatorJob(c, 'describe-version', ['worker', 'deployment', 'describe-version', ...version, '--output', 'json'])
-      );
+      const inspectJob = await job(operatorJob(c, 'describe-version', commands.drainDescribe));
       assertDrained(JSON.parse(kubectl(['logs', `job/${inspectJob}`, '-n', c.namespace])), c);
       // The lock serializes all routing and retirement commands from this tooling.
       kubectl([
@@ -633,16 +608,7 @@ try {
       const percentage = Number(flags['--percentage']);
       if (action === 'ramp' && (!Number.isFinite(percentage) || percentage <= 0 || percentage > 100))
         throw new Error('ramp requires --percentage in(0,100]');
-      job(
-        operatorJob(c, action, [
-          'worker',
-          'deployment',
-          action === 'promote' ? 'set-current-version' : 'set-ramping-version',
-          ...version,
-          ...(action === 'ramp' ? ['--percentage', String(percentage)] : []),
-          '--yes',
-        ])
-      );
+      await job(operatorJob(c, action, commands[action]));
     }
   }
   console.log(

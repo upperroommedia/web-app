@@ -1,5 +1,6 @@
 import { TestWorkflowEnvironment } from '@temporalio/testing';
 import { Worker } from '@temporalio/worker';
+import { historyToJSON } from '@temporalio/common/lib/proto-utils';
 import { WorkerRestartProbe, workerRestartProbeRelease, workerRestartProbeStatus } from './index';
 test('a waiting deployment probe survives worker replacement in the same original run without activities', async () => {
   const environment = await TestWorkflowEnvironment.createLocal(),
@@ -39,6 +40,10 @@ test('a waiting deployment probe survives worker replacement in the same origina
       expect(history.events?.some((event) => Boolean(event.activityTaskScheduledEventAttributes))).toBe(false);
       expect(history.events?.filter((event) => Boolean(event.workflowExecutionStartedEventAttributes))).toHaveLength(1);
       await Worker.runReplayHistory({ workflowsPath: require.resolve('./index') }, history);
+      // Cloud/CLI downloads contain protobuf JSON, unlike fetchHistory's decoded
+      // objects. Exercise the SDK converter as well as native history replay.
+      const downloadedHistory = JSON.parse(historyToJSON(history));
+      await Worker.runReplayHistory({ workflowsPath: require.resolve('./index') }, downloadedHistory);
     });
   } finally {
     if (worker?.getStatus().runState === 'RUNNING') worker.shutdown();

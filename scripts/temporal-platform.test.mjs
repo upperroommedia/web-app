@@ -12,6 +12,8 @@ import {
   validateSingleHostCapacity,
   validateSingleHostMedia,
   renderOperatorJob,
+  waitPlatformJob,
+  platformOperatorCommands,
   firebaseResourceEnvironment,
   assertFirebaseRuntimeSecretResources,
   renderPlatform,
@@ -1300,4 +1302,82 @@ test('Runtime resource contradictions are rejected before deployment instead of 
     assert.throws(() =>
       assertFirebaseRuntimeSecretResources(c, { data: { [name]: Buffer.from(value).toString('base64') } })
     );
+});
+
+test('CLI 1.9.1 parses rendered Cloud and self-hosted operation-local connection options without making a connection', (t) => {
+  let installed;
+  try {
+    installed = execFileSync('temporal', ['--version'], { encoding: 'utf8' });
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      t.skip('Temporal CLI unavailable');
+      return;
+    }
+    throw error;
+  }
+  assert.match(installed, /temporal version 1\.9\.1/);
+  for (const c of [vmConfig(), config]) {
+    const commands = platformOperatorCommands(c, 10);
+    for (const [name, args] of Object.entries(commands)) {
+      const job = renderOperatorJob(c, name, args);
+      const command =
+        job.spec.template.spec.containers[0].command[2].replace(/^export TEMPORAL_API_KEY=.*?; /, '') + ' --help';
+      assert.ok(command.indexOf("'--disable-config-file'") > command.indexOf(`'${args[2]}'`));
+      const output = execFileSync('/bin/sh', ['-c', command], { encoding: 'utf8', timeout: 5000 });
+      assert.match(output, /Usage:/, name);
+    }
+    // Queue coverage is provided by the actual versionDescribe report, not a legacy reachability command.
+    assert.ok(commands.versionDescribe.includes('--report-task-queue-stats'));
+    assert.ok(commands.deploymentDescribe.includes('--name'));
+    assert.equal(commands.deploymentDescribe.includes('--deployment-name'), false);
+  }
+});
+
+test('Platform Job polling stops on terminal failure and never waits out the success timeout', async () => {
+  for (const status of [
+    { failed: 1 },
+    { conditions: [{ type: 'Failed', status: 'True' }] },
+    { conditions: [{ type: 'FailureTarget', status: 'True' }] },
+  ]) {
+    let polls = 0;
+    await assert.rejects(
+      waitPlatformJob(
+        () => {
+          polls++;
+          return { status };
+        },
+        {
+          sleep: () => {
+            throw new Error('must not sleep');
+          },
+        }
+      ),
+      /Platform Job failed/
+    );
+    assert.equal(polls, 1);
+  }
+  let elapsed = 0,
+    polls = 0;
+  await waitPlatformJob(
+    () => ({ status: ++polls === 2 ? { conditions: [{ type: 'Complete', status: 'True' }] } : {} }),
+    {
+      now: () => elapsed,
+      sleep: async (ms) => {
+        elapsed += ms;
+      },
+    }
+  );
+  assert.equal(polls, 2);
+  elapsed = 0;
+  await assert.rejects(
+    waitPlatformJob(() => ({ status: {} }), {
+      timeoutMs: 2000,
+      now: () => elapsed,
+      sleep: async (ms) => {
+        elapsed += ms;
+      },
+    }),
+    /bounded deadline/
+  );
+  assert.equal(elapsed, 2000);
 });

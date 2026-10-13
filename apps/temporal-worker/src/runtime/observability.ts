@@ -16,59 +16,59 @@ export function initializeWorkerObservability(
       },
     },
   });
-  if (process.env.TEMPORAL_SENTRY_DSN) {
-    Sentry.init({
-      dsn: process.env.TEMPORAL_SENTRY_DSN,
-      environment: projectId,
-      release: buildId,
-      initialScope: {
-        tags: {
-          service: 'temporal-worker',
-          ...(queues.length
-            ? {
-                role: [
-                  ...new Set(
-                    queues.filter((queue) =>
-                      [
-                        'urm-orchestration',
-                        'urm-controls',
-                        'urm-media',
-                        'urm-email',
-                        'urm-images',
-                        'urm-search',
-                      ].includes(queue)
-                    )
-                  ),
-                ]
-                  .sort()
-                  .map((queue) => queue.slice(4))
-                  .join(','),
-              }
-            : {}),
-        },
+  // Own the process client before loading shared adapters, even when reporting is disabled.
+  Sentry.init({
+    dsn: process.env.TEMPORAL_SENTRY_DSN,
+    enabled: Boolean(process.env.TEMPORAL_SENTRY_DSN),
+    environment: projectId,
+    release: buildId,
+    initialScope: {
+      tags: {
+        service: 'temporal-worker',
+        ...(queues.length
+          ? {
+              role: [
+                ...new Set(
+                  queues.filter((queue) =>
+                    [
+                      'urm-orchestration',
+                      'urm-controls',
+                      'urm-media',
+                      'urm-email',
+                      'urm-images',
+                      'urm-search',
+                    ].includes(queue)
+                  )
+                ),
+              ]
+                .sort()
+                .map((queue) => queue.slice(4))
+                .join(','),
+            }
+          : {}),
       },
-      dataCollection: {
-        userInfo: false,
-        cookies: false,
-        httpHeaders: { request: false, response: false },
-        httpBodies: [],
-        urlQueryParams: false,
-        genAI: { inputs: false, outputs: false },
-        databaseQueryData: false,
-        queues: false,
-        graphQL: { document: false, variables: false },
-        stackFrameVariables: false,
-      },
-      beforeSendLog: () => null,
-      maxBreadcrumbs: 20,
-      beforeSend(event) {
-        delete event.request;
-        delete event.breadcrumbs;
-        delete event.extra;
-        return event;
-      },
-    });
-  }
+    },
+    dataCollection: {
+      userInfo: false,
+      cookies: false,
+      httpHeaders: { request: false, response: false },
+      httpBodies: [],
+      urlQueryParams: false,
+      genAI: { inputs: false, outputs: false },
+      databaseQueryData: false,
+      queues: false,
+      graphQL: { document: false, variables: false },
+      stackFrameVariables: false,
+    },
+    beforeSendLog: () => null,
+    maxBreadcrumbs: 20,
+    beforeSend(event) {
+      delete event.request;
+      delete event.breadcrumbs;
+      delete event.extra;
+      return event;
+    },
+  });
 }
 export function reportWorkerFailure(code: string): void {
   if (process.env.TEMPORAL_SENTRY_DSN) Sentry.captureException(new Error(code));

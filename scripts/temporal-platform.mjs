@@ -1712,11 +1712,58 @@ export function databaseNetworkPolicy(c, namespace = c.namespace, clusterName = 
   return policy;
 }
 
+export function platformOperatorCommands(c, percentage) {
+  const version = ['--deployment-name', c.workerDeploymentName, '--build-id', c.workerBuildId];
+  return {
+    namespaceDescribe: ['operator', 'namespace', 'describe'],
+    namespaceCreate: ['operator', 'namespace', 'create', '--retention', c.retention],
+    deploymentDescribe: ['worker', 'deployment', 'describe', '--name', c.workerDeploymentName, '--output', 'json'],
+    versionDescribe: [
+      'worker',
+      'deployment',
+      'describe-version',
+      ...version,
+      '--report-task-queue-stats',
+      '--output',
+      'json',
+    ],
+    drainDescribe: ['worker', 'deployment', 'describe-version', ...version, '--output', 'json'],
+    promote: ['worker', 'deployment', 'set-current-version', ...version, '--yes'],
+    ramp: ['worker', 'deployment', 'set-ramping-version', ...version, '--percentage', String(percentage), '--yes'],
+  };
+}
+
+export async function waitPlatformJob(
+  inspect,
+  {
+    timeoutMs = 330000,
+    pollMs = 1000,
+    now = Date.now,
+    sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  } = {}
+) {
+  const deadline = now() + timeoutMs;
+  while (true) {
+    const status = (await inspect()).status ?? {};
+    if (
+      status.failed > 0 ||
+      status.conditions?.some(
+        (condition) => ['Failed', 'FailureTarget'].includes(condition.type) && condition.status === 'True'
+      )
+    )
+      throw new Error('Platform Job failed; inspect its scoped Pod logs before retrying');
+    if (status.conditions?.some((condition) => condition.type === 'Complete' && condition.status === 'True')) return;
+    if (now() >= deadline) throw new Error('Platform Job did not complete before its bounded deadline');
+    await sleep(Math.min(pollMs, deadline - now()));
+  }
+}
+
 export function renderOperatorJob(config, name, command, fallback) {
   const escaped = (arg) => `'${arg.replaceAll("'", "'\\''")}'`;
   const cli = (args) =>
     [
       'temporal',
+      ...args,
       '--disable-config-file',
       ...(config.connectionMode === 'temporal-cloud'
         ? ['--address', config.cloudAddress, '--namespace', config.temporalNamespace, '--tls']
@@ -1735,7 +1782,6 @@ export function renderOperatorJob(config, name, command, fallback) {
             '--tls-server-name',
             config.privateApiHost,
           ]),
-      ...args,
     ]
       .map(escaped)
       .join(' ');

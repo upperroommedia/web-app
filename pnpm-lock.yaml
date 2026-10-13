@@ -267,6 +267,9 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 22.20.5
+      protobufjs:
+        specifier: 8.8.1
+        version: 8.8.1
       turbo:
         specifier: ^2.5.8
         version: 2.11.7

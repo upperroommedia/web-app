@@ -25,6 +25,9 @@ RUN pnpm --dir function-kits/firestore-send-email build
 RUN pnpm --dir apps/temporal-worker build
 # Keep build/test CLIs out of the serving image; preserve workspace runtime links.
 RUN pnpm install --prod --offline --frozen-lockfile --filter @upperroom/temporal-worker... --filter ./functions... --ignore-scripts
+# Check the final production layout, after pruning, rather than trusting the
+# development tree's protobuf identity for Temporal CLI/Cloud JSON replay.
+RUN node scripts/check-temporal-history-runtime.mjs
 RUN node apps/process-audio/scripts/patch-google-oauth-transport.cjs
 
 FROM node:${NODE_VERSION}-bookworm-slim AS runtime

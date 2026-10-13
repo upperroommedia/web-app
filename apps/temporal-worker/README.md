@@ -15,6 +15,19 @@ The image bakes this revision into a root-owned read-only marker and OCI label;
 production startup rejects a different `TEMPORAL_BUILD_ID`. Deploy by immutable
 image digest linked to the reviewed Git commit and signed build provenance.
 
+The root production dependency pins `protobufjs` to the Temporal SDK's compatible
+major so the hoisted install gives `@temporalio/common` and `@temporalio/proto`
+one shared schema constructor. Firebase retains its own compatible protobuf 7
+dependency. Removing the root pin can break JSON history conversion even when
+ordinary workflow execution succeeds. The Docker build runs
+`scripts/check-temporal-history-runtime.mjs` after production dependency pruning
+to catch this before publishing an image. The restart-probe test also replays
+exported protobuf JSON, not just decoded SDK history objects.
+
+Export replay files with the Temporal CLI or the SDK's `historyToJSON(history)`.
+`JSON.stringify(history)` and protobufjs `history.toJSON()` use a different
+representation for timestamps and are not Temporal protobuf JSON replay files.
+
 Required configuration:
 
 | Variable                                                                                                       | Meaning                                                                          |

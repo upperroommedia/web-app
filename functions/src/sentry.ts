@@ -52,6 +52,12 @@ export const initFunctionsSentry = (): void => {
     return;
   }
 
+  // Reused function helpers must preserve the hosting worker’s client and privacy policy.
+  if (Sentry.getClient()) {
+    initialized = true;
+    return;
+  }
+
   const dsn = process.env.FUNCTIONS_SENTRY_DSN?.trim() || process.env.SENTRY_DSN?.trim() || undefined;
 
   Sentry.init({
@@ -59,7 +65,10 @@ export const initFunctionsSentry = (): void => {
     enabled: Boolean(dsn),
     environment: getFunctionsEnvironment(),
     release: getFunctionsRelease(),
-    tracesSampleRate: parseSampleRate(process.env.SENTRY_TRACES_SAMPLE_RATE, process.env.NODE_ENV === 'development' ? 1 : 0.1),
+    tracesSampleRate: parseSampleRate(
+      process.env.SENTRY_TRACES_SAMPLE_RATE,
+      process.env.NODE_ENV === 'development' ? 1 : 0.1
+    ),
     includeLocalVariables: false,
     dataCollection: {
       userInfo: false,
@@ -114,15 +123,14 @@ const captureWithContext = (error: unknown, context?: FunctionsSentryContext): s
     }
     const reportableError = isAxiosError(error)
       ? Object.assign(new Error(error.message), { name: error.name, stack: error.stack })
-      : error instanceof Error ? error : new Error(JSON.stringify(error));
+      : error instanceof Error
+      ? error
+      : new Error(JSON.stringify(error));
     return Sentry.captureException(reportableError);
   });
 };
 
-export const captureFunctionsException = (
-  error: unknown,
-  context?: FunctionsSentryContext
-): string | undefined => {
+export const captureFunctionsException = (error: unknown, context?: FunctionsSentryContext): string | undefined => {
   if (!initialized) {
     initFunctionsSentry();
   }
@@ -148,10 +156,7 @@ export const captureFunctionsExceptionAndFlush = async (
   return eventId;
 };
 
-export const startFunctionsSpan = async <T>(
-  options: FunctionsSpanOptions,
-  callback: () => Promise<T>
-): Promise<T> => {
+export const startFunctionsSpan = async <T>(options: FunctionsSpanOptions, callback: () => Promise<T>): Promise<T> => {
   if (!initialized) {
     initFunctionsSentry();
   }
