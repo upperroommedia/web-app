@@ -2415,8 +2415,8 @@
     "semantic_hash": ""
   },
   "functions/src/sentryBuildInfo.ts": {
-    "mtime": 1791922675.537682,
-    "ast_hash": "6d89dfc9d2aaad712b82e565bf59cb31",
+    "mtime": 1791925632.4779122,
+    "ast_hash": "1708475eff857aec650178f0033f0f4b",
     "semantic_hash": ""
   },
   "functions/src/setUserRole.ts": {
@@ -6915,8 +6915,8 @@
     "semantic_hash": ""
   },
   "scripts/temporal-release.mjs": {
-    "mtime": 1791914370.448183,
-    "ast_hash": "b7857ad38c5f782689ca30e4144b876a",
+    "mtime": 1791927037.7377408,
+    "ast_hash": "63943ea2e6298e7954f4df0d7e8c9452",
     "semantic_hash": ""
   },
   "scripts/temporal-release.test.mjs": {
@@ -7085,8 +7085,8 @@
     "semantic_hash": ""
   },
   "docs/temporal/OPERATIONS.md": {
-    "mtime": 1791925193.0853844,
-    "ast_hash": "c1e43d802d967e206000b97417721ea8",
+    "mtime": 1791927060.2773376,
+    "ast_hash": "ce6ea8892915ee8b2024ea109d6bfd89",
     "semantic_hash": ""
   },
   "docs/temporal/OPERATOR_REVIEW.md": {
@@ -7180,8 +7180,8 @@
     "semantic_hash": ""
   },
   "scripts/tests/temporal-legacy-upload-drain.firestore.test.mjs": {
-    "mtime": 1791914370.4659014,
-    "ast_hash": "7c339c500d4317288a68358641ee48c6",
+    "mtime": 1791927038.857944,
+    "ast_hash": "2559cece1c6df7e3c8114a861266b819",
     "semantic_hash": ""
   },
   "ops/temporal/DEPLOY_GUARD.md": {
@@ -7302,6 +7302,16 @@
   "scripts/tests/kits-isolated-startup.test.mjs": {
     "mtime": 1791925339.5032108,
     "ast_hash": "a05d9613d00b17b7d2f241106bf63f02",
+    "semantic_hash": ""
+  },
+  "scripts/temporal-compatibility-cutoff.mjs": {
+    "mtime": 1791927038.7528086,
+    "ast_hash": "7f892bd4a52700909fda04dbe517d9a6",
+    "semantic_hash": ""
+  },
+  "scripts/temporal-compatibility-cutoff.test.mjs": {
+    "mtime": 1791927061.0351336,
+    "ast_hash": "55faeedfe0a4d9da0ade59ea330ed9af",
     "semantic_hash": ""
   }
 }

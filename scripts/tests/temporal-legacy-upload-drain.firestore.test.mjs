@@ -8,6 +8,12 @@ import {
   compatibilityLegacyAdmissionCutoffUpdate,
 } from '../temporal-release-lib.mjs';
 
+import {
+  compatibilityCutoffUpdates,
+  assertCompatibilitySettlingCheckpoint,
+  assertCompatibilityGraceElapsed,
+} from '../temporal-compatibility-cutoff.mjs';
+
 const testConfig = JSON.parse(await readFile(new URL('../../firebase.test.json', import.meta.url), 'utf8'));
 const emulator = process.env.FIRESTORE_EMULATOR_HOST && new URL(`http://${process.env.FIRESTORE_EMULATOR_HOST}`);
 if (
@@ -40,12 +46,10 @@ after(async () => {
 });
 test('pending bytes and PROCESSING YouTube downloads block drain even without queues or leases', async () => {
   await db.doc('sermons/no-bytes').set({ status: { audioStatus: 'PENDING' }, uploaderId: 'owner' });
-  await db
-    .doc('sermons/youtube-download')
-    .set({
-      status: { audioStatus: 'PROCESSING', message: 'Downloading YouTube Audio' },
-      youtubeUrl: 'https://youtu.be/example',
-    });
+  await db.doc('sermons/youtube-download').set({
+    status: { audioStatus: 'PROCESSING', message: 'Downloading YouTube Audio' },
+    youtubeUrl: 'https://youtu.be/example',
+  });
   await db.doc('sermons/complete').set({ status: { audioStatus: 'PROCESSED' } });
   assert.equal(await countPendingLegacyUploadAdmissions(db, control, ['media']), 2);
 });
@@ -73,6 +77,32 @@ test('compatibility readiness establishes a server timestamp cutoff once rather 
   );
   await controlRef.update({ updatedAt: 9999999999999, revision: 2 });
   assert.ok((await controlRef.get()).get('legacyAdmissionCutoff').isEqual(cutoff));
+});
+test('actual transaction stamps both cutoff documents and readiness identically, with full server-derived grace', async () => {
+  const stateRef = db.doc('_control/temporalCompatibilityCutoffTest');
+  const config = { mode: 'initial-cutover', legacyExecutionGraceSeconds: 3600 };
+  try {
+    await stateRef.set({ mode: 'initial-cutover', phase: 'ui-frozen', maximumLegacyExecutionSeconds: 3570 });
+    await db.runTransaction(async (tx) => {
+      const current = await tx.get(controlRef);
+      const updates = compatibilityCutoffUpdates(current.data(), 'initial-cutover', 3600, () =>
+        FieldValue.serverTimestamp()
+      );
+      tx.update(controlRef, updates.controlUpdate);
+      tx.update(stateRef, { ...updates.stateUpdate, phase: 'compatibility-ready' });
+    });
+    const [cs, ss] = await db.getAll(controlRef, stateRef);
+    assert.ok(cs.get('legacyAdmissionCutoff').isEqual(ss.get('legacySettlingCutoff')));
+    assert.ok(cs.get('legacyAdmissionCutoff').isEqual(ss.get('compatibilityVerifiedAt')));
+    assert.equal(Object.hasOwn(ss.data(), 'legacySettlingDeadline'), false);
+    const deadline = assertCompatibilitySettlingCheckpoint(cs.data(), ss.data(), config);
+    assert.ok(deadline >= cs.get('legacyAdmissionCutoff').toMillis() + 3600000);
+    assert.throws(() => assertCompatibilityGraceElapsed(cs.data(), ss.data(), config, cs.readTime), /full maximum/);
+    assert.equal(cs.get('domains.media.owner'), 'legacy');
+    assert.equal(cs.get('admission'), 'paused');
+  } finally {
+    await stateRef.delete();
+  }
 });
 test('a client-shaped durable marker cannot hide a legacy pending admission', async () => {
   await db

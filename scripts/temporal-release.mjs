@@ -25,8 +25,14 @@ import {
   validateProviderUsageMarker,
   countPendingLegacyUploadAdmissions,
   assertPendingLegacyUploadsDrainedInTransaction,
-  compatibilityLegacyAdmissionCutoffUpdate,
 } from './temporal-release-lib.mjs';
+
+import {
+  compatibilityCutoffUpdates,
+  hasCompatibilitySettlingCheckpoint,
+  assertCompatibilitySettlingCheckpoint,
+  assertCompatibilityGraceElapsed,
+} from './temporal-compatibility-cutoff.mjs';
 
 const [action, ...args] = process.argv.slice(2);
 const configPath = args[args.indexOf('--release') + 1];
@@ -253,17 +259,32 @@ async function snapshot() {
     throw new Error(
       'Release descriptor differs from immutable checkpoint; resume with the original reviewed descriptor'
     );
-  return { control: validateControl(control.data()), state: checkpoint };
+  const validatedControl = validateControl(control.data());
+  if (hasCompatibilitySettlingCheckpoint(validatedControl, checkpoint, config))
+    assertCompatibilitySettlingCheckpoint(validatedControl, checkpoint, config);
+  return { control: validatedControl, state: checkpoint, serverReadTime: control.readTime };
 }
 async function transition(revision, phase, update = {}, controlUpdate) {
   await firestore.runTransaction(async (tx) => {
-    const [current, currentState] = await Promise.all([tx.get(controlRef), tx.get(stateRef)]);
+    const [current, currentState, operation] = await Promise.all([
+      tx.get(controlRef),
+      tx.get(stateRef),
+      tx.get(lockRef),
+    ]);
     if (
       current.data()?.releaseId !== config.releaseId ||
       currentState.data()?.releaseId !== config.releaseId ||
-      current.data()?.revision !== revision
+      current.data()?.revision !== revision ||
+      operation.data()?.operationId !== operationId ||
+      operation.data()?.releaseId !== config.releaseId ||
+      operation.data()?.action !== action
     )
       throw new Error('Release revision changed; re-read before proceeding');
+    if (hasCompatibilitySettlingCheckpoint(current.data(), currentState.data(), config)) {
+      assertCompatibilitySettlingCheckpoint(current.data(), currentState.data(), config);
+      if (!['compatibility-ready', 'pause', 'resume', 'rollback-ui', 'restore-reviewed-ui'].includes(action))
+        assertCompatibilityGraceElapsed(current.data(), currentState.data(), config, current.readTime);
+    }
     if (phase === 'ownership-changed') {
       await assertPendingLegacyUploadsDrainedInTransaction(tx, firestore, current.data(), config.domains);
       const usage = await tx.get(firestore.doc('_control/temporalProviderUsage'));
@@ -276,11 +297,25 @@ async function transition(revision, phase, update = {}, controlUpdate) {
       );
       if (leases.size) throw new Error('A legacy lease remains active or uncertain; audited reconciliation required');
     }
-    if (phase === 'compatibility-ready')
-      controlUpdate = {
-        ...controlUpdate,
-        ...compatibilityLegacyAdmissionCutoffUpdate(current.data(), config.mode, serverTimestamp),
-      };
+    if (phase === 'compatibility-ready') {
+      if (currentState.data().phase !== 'ui-frozen')
+        throw new Error('Compatibility cutoff already committed or phase changed');
+      if (
+        config.mode === 'initial-cutover' &&
+        (!Number.isSafeInteger(currentState.data().maximumLegacyExecutionSeconds) ||
+          update.legacySettlingGraceSeconds < currentState.data().maximumLegacyExecutionSeconds ||
+          update.legacySettlingGraceSeconds < config.legacyExecutionGraceSeconds)
+      )
+        throw new Error('Reviewed compatibility grace changed');
+      const cutoff = compatibilityCutoffUpdates(
+        current.data(),
+        config.mode,
+        update.legacySettlingGraceSeconds,
+        serverTimestamp
+      );
+      controlUpdate = { ...controlUpdate, ...cutoff.controlUpdate };
+      update = { ...update, ...cutoff.stateUpdate };
+    }
     tx.update(controlRef, { ...controlUpdate, revision: revision + 1, updatedAt: Date.now() });
     tx.update(stateRef, { ...update, phase, updatedAt: Date.now(), controlRevision: revision + 1 });
   });
@@ -498,8 +533,13 @@ try {
     const { control } = await snapshot();
     if (!sameRelease || existingState.data()?.phase !== 'ui-frozen') await transition(control.revision, 'ui-frozen');
   } else {
-    const { control, state } = await snapshot();
+    const { control, state, serverReadTime } = await snapshot();
     if (!['pause', 'restore-auto'].includes(action)) requirePaused(control);
+    if (
+      hasCompatibilitySettlingCheckpoint(control, state, config) &&
+      !['pause', 'resume', 'rollback-ui', 'restore-reviewed-ui', 'compatibility-ready'].includes(action)
+    )
+      assertCompatibilityGraceElapsed(control, state, config, serverReadTime);
     if (action === 'compatibility-ready') {
       requirePhase(state, ['ui-frozen']);
       const report = await evidence(config.compatibilityEvidence, control.revision, {
@@ -516,16 +556,12 @@ try {
         ...functions.map((f) => Number(f.serviceConfig?.timeoutSeconds ?? 0))
       );
       await transition(control.revision, 'compatibility-ready', {
-        compatibilityVerifiedAt: Date.now(),
-        legacySettlingDeadline: Date.now() + (config.mode === 'initial-cutover' ? maxTimeout * 1000 : 0),
+        ...(config.mode === 'initial-cutover' ? { legacySettlingGraceSeconds: maxTimeout } : {}),
         compatibilityEvidenceAt: report.verifiedAt,
       });
     } else if (action === 'drain') {
       requirePhase(state, ['compatibility-ready', 'legacy-drained']);
-      if (Date.now() < state.legacySettlingDeadline)
-        throw new Error(
-          'Wait for maximum legacy execution duration after compatibility deployment before proving drain'
-        );
+      assertCompatibilityGraceElapsed(control, state, config, serverReadTime);
       const counts = { ...(await queuesEmpty()), ...(await legacyCounts()) };
       await transition(control.revision, 'legacy-drained', { legacyDrainedAt: Date.now(), legacyDrainCounts: counts });
     } else if (action === 'provider-usage-ready') {
