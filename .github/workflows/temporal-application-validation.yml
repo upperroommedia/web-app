@@ -51,6 +51,13 @@ jobs:
         run: |
           pnpm run build:temporal
           pnpm run build-functions-codebases
+      - name: Validate isolated Functions production startup and loading boundaries
+        env:
+          FIREBASE_PROJECT_ID: demo-temporal-ci
+          FIREBASE_CONFIG: '{"projectId":"demo-temporal-ci","storageBucket":"demo-temporal-ci.appspot.com","databaseURL":"https://demo-temporal-ci-default-rtdb.firebaseio.com"}'
+        run: |
+          pnpm run check:function-startup-loads
+          node --test scripts/tests/functions-isolated-startup.test.mjs
       - name: Validate application regressions, admission, rules and SDK compatibility
         run: pnpm --dir functions test
       - name: Validate workflows, replay, cancellation and native media
@@ -66,7 +73,9 @@ jobs:
       - name: Validate audio deployment context, release exclusion and environment isolation
         run: node --test scripts/process-audio-deployment.test.mjs scripts/test-process-audio-hetzner-isolation.mjs
       - name: Validate release, bootstrap and migration contracts
-        run: pnpm run test:temporal:contracts
+        run: |
+          pnpm run test:temporal:contracts
+          node --test scripts/temporal-recover-initial-compatibility.test.mjs
       - name: Validate locally captured monitoring and OAuth transport
         run: pnpm --dir apps/process-audio run test:sdk-upgrades
       - name: Validate email and search kits

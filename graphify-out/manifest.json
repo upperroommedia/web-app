@@ -1660,8 +1660,8 @@
     "semantic_hash": "d3ff41fc8c9813cb745272d91f15dffe"
   },
   "functions-core/package.json": {
-    "mtime": 1791914369.6459224,
-    "ast_hash": "57ce4d3617ff9636ad8b3bd85cdbf5ba",
+    "mtime": 1791915151.8545537,
+    "ast_hash": "d3ff8de16f9bca229184f6577e585802",
     "semantic_hash": ""
   },
   "functions-core/src/index.ts": {
@@ -1680,8 +1680,8 @@
     "semantic_hash": "d3ff41fc8c9813cb745272d91f15dffe"
   },
   "functions-image/package.json": {
-    "mtime": 1791914369.646469,
-    "ast_hash": "5d2e903bb7c8dfa79bd93b31456f4cdd",
+    "mtime": 1791915198.3495142,
+    "ast_hash": "017ec90265381822850fd38fa459bc6b",
     "semantic_hash": ""
   },
   "functions-image/src/index.ts": {
@@ -1700,8 +1700,8 @@
     "semantic_hash": "d3ff41fc8c9813cb745272d91f15dffe"
   },
   "functions-integrations/package.json": {
-    "mtime": 1791914369.6471772,
-    "ast_hash": "74b441ca6a9970e33c732a061e645708",
+    "mtime": 1791915199.3225386,
+    "ast_hash": "67085f7150921f28b0f5a7a056c5f3b5",
     "semantic_hash": ""
   },
   "functions-integrations/src/index.ts": {
@@ -1720,8 +1720,8 @@
     "semantic_hash": "d3ff41fc8c9813cb745272d91f15dffe"
   },
   "functions-media/package.json": {
-    "mtime": 1791914369.6477337,
-    "ast_hash": "78ce7a5a8fb15fd6719abc8126d346cb",
+    "mtime": 1791915194.4197197,
+    "ast_hash": "b0e128087b0952334c8cd08b63be9248",
     "semantic_hash": ""
   },
   "functions-media/src/addIntroOutroTaskGenerator.ts": {
@@ -5970,8 +5970,8 @@
     "semantic_hash": ""
   },
   "functions/src/temporal/images/activities.ts": {
-    "mtime": 1791914369.7129889,
-    "ast_hash": "749309c0c18436cae06b751f8e8e60c9",
+    "mtime": 1791915365.3153296,
+    "ast_hash": "edc74bb6ae53d36ec14cf9909a966014",
     "semantic_hash": ""
   },
   "functions/src/temporal/images/admission.test.ts": {
@@ -6990,8 +6990,8 @@
     "semantic_hash": ""
   },
   ".github/workflows/temporal-application-validation.yml": {
-    "mtime": 1791914760.0371537,
-    "ast_hash": "97a07dc18d07f0fd2fa2efe4c0a190e7",
+    "mtime": 1791916033.2034287,
+    "ast_hash": "07c6b8e97848039009321034325d9452",
     "semantic_hash": ""
   },
   ".github/workflows/temporal-platform-deploy.yml": {
@@ -7075,8 +7075,8 @@
     "semantic_hash": ""
   },
   "docs/temporal/IMAGE_SEARCH.md": {
-    "mtime": 1791914369.608964,
-    "ast_hash": "ed5ae37b2457db34603ea66d48fccdff",
+    "mtime": 1791915593.0161083,
+    "ast_hash": "87fe8f01f2b3a56c94db477b4ab82b7c",
     "semantic_hash": ""
   },
   "docs/temporal/MEDIA.md": {
@@ -7085,8 +7085,8 @@
     "semantic_hash": ""
   },
   "docs/temporal/OPERATIONS.md": {
-    "mtime": 1791914369.6100779,
-    "ast_hash": "48c73ec2c298c0680e831d09ea0a95bb",
+    "mtime": 1791916084.2287529,
+    "ast_hash": "be3e689ee80a6d9ef629a275345f11c8",
     "semantic_hash": ""
   },
   "docs/temporal/OPERATOR_REVIEW.md": {
@@ -7247,6 +7247,21 @@
   "scripts/test-process-audio-hetzner-isolation.mjs": {
     "mtime": 1791914796.369292,
     "ast_hash": "8c059bd76b05b1e3fe6d73ac502da788",
+    "semantic_hash": ""
+  },
+  "scripts/temporal-recover-initial-compatibility.mjs": {
+    "mtime": 1791916084.5843234,
+    "ast_hash": "955f7b88acb051f69665bfb7e21ba4b9",
+    "semantic_hash": ""
+  },
+  "scripts/temporal-recover-initial-compatibility.test.mjs": {
+    "mtime": 1791916116.978762,
+    "ast_hash": "996ffe9cc7270727511db21bad1c3da7",
+    "semantic_hash": ""
+  },
+  "scripts/tests/functions-isolated-startup.test.mjs": {
+    "mtime": 1791915593.0156877,
+    "ast_hash": "3585440d55fa82a6ff5870c20c1a4f4e",
     "semantic_hash": ""
   }
 }

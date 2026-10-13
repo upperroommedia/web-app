@@ -17,7 +17,7 @@ import type {
   DurableSafeError,
 } from '@upperroom/contracts/temporal';
 import { authenticateSubsplash, createAxiosConfig } from '../../subsplashUtils';
-import computeMetadataForImage from '../../computeMetadataForImage';
+import type computeMetadataForImage from '../../computeMetadataForImage';
 import { ensureFirebaseDownloadUrl } from '../../storageDownloadUrl';
 import { createDurableJobStore } from '../../../../packages/orchestration/src/job-store';
 import type { ImageActivities, ImageIntent } from './types';
@@ -282,6 +282,7 @@ export function createImageActivities(deps: ImageDependencies): ImageActivities 
           Context.current().cancellationSignal.throwIfAborted();
           let metadata: Awaited<ReturnType<typeof computeMetadataForImage>>;
           try {
+            const { default: computeMetadataForImage } = await import('../../computeMetadataForImage');
             metadata = await computeMetadataForImage(localPath);
           } catch (error) {
             if (error instanceof Error && error.name === 'ImageInputInvalid')
