@@ -4,6 +4,35 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 export const RELEASE_DOMAINS = ['media', 'publishing', 'images', 'emails', 'accounts', 'bundles', 'search'];
 export const CONTROL_PATH = '_control/temporalRelease';
+export function compatibilityLegacyAdmissionCutoffUpdate(control, mode, serverTimestamp) {
+  return mode === 'initial-cutover' && !control.legacyAdmissionCutoff
+    ? { legacyAdmissionCutoff: serverTimestamp() }
+    : {};
+}
+
+function needsLegacyUploadDrain(control, domains) {
+  if (!domains.includes('media')) return false;
+  const owner = control?.domains?.media?.owner;
+  if (!['legacy', 'temporal'].includes(owner)) throw new Error('Explicit media ownership is required for upload drain');
+  return owner === 'legacy';
+}
+const pendingLegacyUploads = (firestore) =>
+  firestore.collection('sermons').where('status.audioStatus', 'in', ['PENDING', 'PROCESSING']);
+/** A browser-owned canonical admission is work even before a file/queue/lease exists.
+ * Never exempt an unverified client marker; under legacy ownership all pending rows block. */
+export async function countPendingLegacyUploadAdmissions(firestore, control, domains) {
+  if (!needsLegacyUploadDrain(control, domains)) return 0;
+  const snapshot = await pendingLegacyUploads(firestore).count().get();
+  return snapshot.data().count;
+}
+export async function assertPendingLegacyUploadsDrainedInTransaction(tx, firestore, control, domains) {
+  if (!needsLegacyUploadDrain(control, domains)) return;
+  const pending = await tx.get(pendingLegacyUploads(firestore).limit(1));
+  if (!pending.empty)
+    throw new Error(
+      'Previously admitted legacy uploads remain pending or processing; complete or explicitly reconcile them before taking ownership'
+    );
+}
 
 export function validateReleaseConfig(config) {
   const expected = { staging: ['urm-app-staging', 'web-staging'], production: ['urm-app', 'web-prod'] }[
@@ -175,6 +204,7 @@ export function firebaseAdmin(projectId, databaseURL) {
   return {
     credential: app.options.credential,
     firestore: require('firebase-admin/firestore').getFirestore(app),
+    serverTimestamp: () => require('firebase-admin/firestore').FieldValue.serverTimestamp(),
     database: databaseURL ? require('firebase-admin/database').getDatabase(app) : undefined,
   };
 }

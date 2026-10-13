@@ -2,6 +2,7 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { resolve, relative, sep } from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { assertCheckoutCommit, assertCheckoutSource } from './temporal-deploy-source.mjs';
 import {
   firebaseAdmin,
   flagsForControl,
@@ -27,7 +28,9 @@ const commit = args.includes('--commit')
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
     }).trim();
-if (!/^[a-f0-9]{40}$/.test(commit ?? '')) throw new Error('Function deployment commit must be an immutable full SHA');
+const actualCheckout = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
+assertCheckoutCommit(actualCheckout, commit);
+assertCheckoutSource(root, commit, { project, control });
 flags.TEMPORAL_RELEASE_COMMIT = commit;
 const manifest = JSON.parse(await readFile(resolve(root, 'firebase.json'), 'utf8'));
 const sources = firebaseEnvironmentSources(manifest, project);

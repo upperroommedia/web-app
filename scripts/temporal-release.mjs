@@ -23,6 +23,9 @@ import {
   validatePromotionApproval,
   validatePreopenSmoke,
   validateProviderUsageMarker,
+  countPendingLegacyUploadAdmissions,
+  assertPendingLegacyUploadsDrainedInTransaction,
+  compatibilityLegacyAdmissionCutoffUpdate,
 } from './temporal-release-lib.mjs';
 
 const [action, ...args] = process.argv.slice(2);
@@ -60,7 +63,7 @@ if (action === 'plan') {
 }
 if (!args.includes('--apply'))
   throw new Error('Remote release operations require explicit --apply; use plan for offline review');
-const { firestore, database } = firebaseAdmin(config.projectId, config.databaseUrl);
+const { firestore, database, serverTimestamp } = firebaseAdmin(config.projectId, config.databaseUrl);
 const controlRef = firestore.doc(CONTROL_PATH);
 const stateRef = firestore.doc('_control/temporalReleaseState');
 const lockRef = firestore.doc('_control/temporalReleaseOperation');
@@ -262,6 +265,7 @@ async function transition(revision, phase, update = {}, controlUpdate) {
     )
       throw new Error('Release revision changed; re-read before proceeding');
     if (phase === 'ownership-changed') {
+      await assertPendingLegacyUploadsDrainedInTransaction(tx, firestore, current.data(), config.domains);
       const usage = await tx.get(firestore.doc('_control/temporalProviderUsage'));
       validateProviderUsageMarker(config, usage.data(), currentState.data().providerUsageEpoch);
       const leases = await tx.get(
@@ -272,6 +276,11 @@ async function transition(revision, phase, update = {}, controlUpdate) {
       );
       if (leases.size) throw new Error('A legacy lease remains active or uncertain; audited reconciliation required');
     }
+    if (phase === 'compatibility-ready')
+      controlUpdate = {
+        ...controlUpdate,
+        ...compatibilityLegacyAdmissionCutoffUpdate(current.data(), config.mode, serverTimestamp),
+      };
     tx.update(controlRef, { ...controlUpdate, revision: revision + 1, updatedAt: Date.now() });
     tx.update(stateRef, { ...update, phase, updatedAt: Date.now(), controlRevision: revision + 1 });
   });
@@ -378,6 +387,11 @@ async function legacyCounts() {
     .select('domain', 'state')
     .get();
   counts.unresolvedLegacyAdmissionLeases = leases.size;
+  counts.pendingLegacyUploadAdmissions = await countPendingLegacyUploadAdmissions(
+    firestore,
+    (await controlRef.get()).data(),
+    config.domains
+  );
   assertDrainedCounts(counts);
   return counts;
 }

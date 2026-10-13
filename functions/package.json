@@ -7,15 +7,15 @@
     "serve": "firebase emulators:start --only functions --config ../firebase.test.json",
     "shell": "firebase functions:shell --config ../firebase.test.json",
     "start": "pnpm run shell",
-    "test": "firebase emulators:exec --only auth,firestore,database,storage --config ../firebase.test.json 'NODE_OPTIONS=--experimental-vm-modules pnpm exec jest --watchman=false --maxWorkers=1 --forceExit'",
-    "test:verbose": "VERBOSE=1 firebase emulators:exec --only auth,firestore,database,storage --config ../firebase.test.json 'NODE_OPTIONS=--experimental-vm-modules pnpm exec jest --watchman=false --maxWorkers=1 --forceExit'",
+    "test": "firebase emulators:exec --only auth,firestore,database,storage --config ../firebase.test.json 'NODE_OPTIONS=--experimental-vm-modules pnpm exec jest --watchman=false --maxWorkers=1 --forceExit && node ../scripts/tests/temporal-legacy-upload-drain.firestore.test.mjs'",
+    "test:verbose": "VERBOSE=1 firebase emulators:exec --only auth,firestore,database,storage --config ../firebase.test.json 'NODE_OPTIONS=--experimental-vm-modules pnpm exec jest --watchman=false --maxWorkers=1 --forceExit && node ../scripts/tests/temporal-legacy-upload-drain.firestore.test.mjs'",
     "test:series-locking:long": "firebase emulators:exec --only auth,firestore,database --config ../firebase.test.json 'pnpm exec jest --forceExit --runInBand --testTimeout=240000 src/test/series/reorderSeriesItems.test.ts src/test/series/bulkAddToSeries.crossCallableLocking.test.ts'",
     "deploy": "node -e \"console.error('Deploy split Firebase codebases from the repository root or CI workflows, not from the legacy functions package.'); process.exit(1)\"",
     "logs": "firebase functions:log --config ../firebase.json",
     "build:ci": "pnpm run build",
     "lint:ci": "pnpm run lint",
     "test:ci": "pnpm run test",
-    "test:temporal": "firebase emulators:exec --only auth,firestore,database,storage --config ../firebase.test.json \"NODE_OPTIONS=--experimental-vm-modules pnpm exec jest --watchman=false --maxWorkers=1 --forceExit src/temporal src/test/temporal src/test/firebaseFunctionsTestCompat.test.ts src/test/DocumentListeners/membershipReplay.test.ts src/test/sentry.test.ts\""
+    "test:temporal": "firebase emulators:exec --only auth,firestore,database,storage --config ../firebase.test.json \"NODE_OPTIONS=--experimental-vm-modules pnpm exec jest --watchman=false --maxWorkers=1 --forceExit src/temporal src/test/temporal src/test/firebaseFunctionsTestCompat.test.ts src/test/DocumentListeners/membershipReplay.test.ts src/test/sentry.test.ts && node ../scripts/tests/temporal-legacy-upload-drain.firestore.test.mjs\""
   },
   "engines": {
     "node": "22"

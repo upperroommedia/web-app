@@ -10,6 +10,7 @@ export interface TemporalReleaseControl {
   domains: Record<string, { owner: 'temporal' | 'legacy'; admission: 'open' | 'paused' }>;
   updatedAt: number;
   releaseId: string;
+  legacyAdmissionCutoff?: { seconds: number; nanoseconds: number };
 }
 /** Read before any writes so an operator pause conflicts with in-flight admissions. */
 export async function assertAdmissionReleaseInTransaction(

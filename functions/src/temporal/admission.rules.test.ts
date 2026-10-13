@@ -203,6 +203,47 @@ describe('durable projection and immutable source rules', () => {
     await assertFails(owner.firestore().doc('lists/example/listItems/legacy').set(sermon));
     await assertFails(owner.firestore().doc('_control/temporalRelease').get());
   });
+  it('lets an admitted legacy owner finish bytes during pause but denies first upload after ownership changes', async () => {
+    const owner = environment.authenticatedContext('owner', { role: 'uploader' });
+    await environment.withSecurityRulesDisabled(async (context) => {
+      await context
+        .firestore()
+        .doc('_control/temporalRelease')
+        .set({
+          schemaVersion: 1,
+          revision: 1,
+          admission: 'paused',
+          domains: { media: { owner: 'legacy', admission: 'paused' } },
+        });
+      for (const id of ['paused-source', 'unfinished-source'])
+        await context
+          .firestore()
+          .doc(`sermons/${id}`)
+          .set({ uploaderId: 'owner', status: { audioStatus: 'PENDING' } });
+    });
+    await assertSucceeds(
+      Promise.resolve(
+        owner
+          .storage()
+          .ref('sermons/paused-source')
+          .put(new Uint8Array([1, 2, 3]))
+      )
+    );
+    await environment.withSecurityRulesDisabled(async (context) => {
+      await context
+        .firestore()
+        .doc('_control/temporalRelease')
+        .update({ 'domains.media.owner': 'temporal', revision: 2 });
+    });
+    await assertFails(
+      Promise.resolve(
+        owner
+          .storage()
+          .ref('sermons/unfinished-source')
+          .put(new Uint8Array([1, 2, 3]))
+      )
+    );
+  });
   it('rejects wrong length and unreserved source paths', async () => {
     const owner = environment.authenticatedContext('owner', { role: 'uploader' }),
       metadata = { customMetadata: { durableJobId: 'job-1' } };

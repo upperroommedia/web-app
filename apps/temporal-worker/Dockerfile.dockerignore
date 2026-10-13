@@ -34,3 +34,6 @@ docs
 .github
 ops
 graphify-out
+
+# Google Actions OIDC credentials are local auth artifacts, never source or image content.
+/gha-creds-*.json

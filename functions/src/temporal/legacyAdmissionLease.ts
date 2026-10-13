@@ -20,6 +20,8 @@ export interface LegacyAdmissionLeaseRecord {
   completedAt?: number;
   outcome?: 'succeeded' | 'rejected_no_effect' | 'unknown';
   errorCode?: string;
+  legacySourceSermonId?: string;
+  legacySourceOwnerUid?: string;
 }
 export interface LegacyAdmissionLease {
   leaseId: string;
@@ -33,6 +35,14 @@ export interface LegacyAdmissionLeaseOptions {
   operation: string;
   /** Only server continuations of already-admitted work may use this option. */
   continuation?: boolean;
+  /** Only the server create trigger can continue a canonical source admitted before pause. */
+  legacySourceUpload?: {
+    sermonId: string;
+    uploaderId: string;
+    sourceStartTime: number;
+    trimDurationSeconds: number;
+    youtubeUrl?: string;
+  };
   projectId: string;
   heartbeatIntervalMs?: number;
   diagnosticTimeoutMs?: number;
@@ -57,8 +67,57 @@ export async function withLegacyAdmissionLease<T>(
     document = firestore.collection(LEGACY_ADMISSION_LEASES_COLLECTION).doc(leaseId),
     timeout = options.diagnosticTimeoutMs ?? 60000;
   await firestore.runTransaction(async (tx) => {
-    await assertLegacyAdmissionInTransaction(tx, firestore, options.domain, { continuation: options.continuation });
+    const source = options.legacySourceUpload;
+    if (
+      source &&
+      (options.domain !== 'media' ||
+        options.actorUid !== 'system:firebase-event' ||
+        options.operation !== 'sermonaudiocreatetrigger' ||
+        !source.sermonId ||
+        source.sermonId.includes('/') ||
+        !source.uploaderId ||
+        !Number.isFinite(source.sourceStartTime) ||
+        source.sourceStartTime < 0 ||
+        !Number.isFinite(source.trimDurationSeconds) ||
+        source.trimDurationSeconds <= 0)
+    )
+      throw new HttpsError('permission-denied', 'Only the verified initial source trigger may continue this upload.');
+    await assertLegacyAdmissionInTransaction(tx, firestore, options.domain, {
+      continuation: options.continuation || Boolean(source),
+    });
     const control = await tx.get(firestore.doc(TEMPORAL_RELEASE_CONTROL_PATH));
+    if (source) {
+      const sermon = await tx.get(firestore.doc(`sermons/${source.sermonId}`));
+      if (
+        !sermon.exists ||
+        sermon.get('uploaderId') !== source.uploaderId ||
+        sermon.get('status.audioStatus') !== 'PENDING' ||
+        sermon.get('activeDurableJobs.upload') ||
+        sermon.get('activeDurableJobs.audio') ||
+        sermon.get('sourceStartTime') !== source.sourceStartTime ||
+        sermon.get('trimDurationSeconds') !== source.trimDurationSeconds ||
+        (sermon.get('youtubeUrl')?.trim() || undefined) !== source.youtubeUrl
+      )
+        throw new HttpsError(
+          'aborted',
+          'The previously admitted source is no longer pending with this owner and selection.'
+        );
+      const cutoff = control.get('legacyAdmissionCutoff') as { seconds?: number; nanoseconds?: number } | undefined;
+      if (cutoff && (control.get('admission') === 'paused' || control.get('domains.media.admission') === 'paused')) {
+        const created = sermon.createTime;
+        if (
+          !created ||
+          !Number.isSafeInteger(cutoff.seconds) ||
+          !Number.isSafeInteger(cutoff.nanoseconds) ||
+          created.seconds > cutoff.seconds! ||
+          (created.seconds === cutoff.seconds && created.nanoseconds > cutoff.nanoseconds!)
+        )
+          throw new HttpsError(
+            'aborted',
+            'This source was not admitted before the verified compatibility pause boundary.'
+          );
+      }
+    }
     const now = Date.now();
     const record: LegacyAdmissionLeaseRecord = {
       schemaVersion: 1,
@@ -73,6 +132,7 @@ export async function withLegacyAdmissionLease<T>(
       diagnosticExpiresAt: now + timeout,
       releaseRevision: Number(control.get('revision') ?? 0),
       effectsStarted: false,
+      ...(source ? { legacySourceSermonId: source.sermonId, legacySourceOwnerUid: source.uploaderId } : {}),
     };
     tx.create(document, record);
   });

@@ -85,25 +85,50 @@ export const enqueueInitialSermonAudio = async (
   return { action: 'enqueued', queueAction: result.action };
 };
 
-const createProductionDependencies = (bucket: Bucket, eventId: string): InitialAudioEnqueueDependencies => ({
+const createProductionDependencies = (
+  bucket: Bucket,
+  eventId: string,
+  sermon: Sermon
+): InitialAudioEnqueueDependencies => ({
   fileExists: async (path) => (await bucket.file(path).exists())[0],
   getDownloadUrl: async (path) => ensureFirebaseDownloadUrl(bucket.file(path)),
   enqueue: async (payload) => {
-    const enqueue = () => queueOrReplaceProcessAudioRequest({
-      database: firebaseAdmin.database(),
-      payload,
-      targetUri: process.env.TASK_ORCHESTRATOR_MEDIA === 'temporal' ? '' : getProcessAudioTargetUri('youtubeUrl' in payload ? 'youtube' : 'storage'),
-      ownerId: `sermon-create:${eventId}`,
-      onlyIfMissing: true,
-    });
+    const enqueue = () =>
+      queueOrReplaceProcessAudioRequest({
+        database: firebaseAdmin.database(),
+        payload,
+        targetUri:
+          process.env.TASK_ORCHESTRATOR_MEDIA === 'temporal'
+            ? ''
+            : getProcessAudioTargetUri('youtubeUrl' in payload ? 'youtube' : 'storage'),
+        ownerId: `sermon-create:${eventId}`,
+        onlyIfMissing: true,
+      });
     if (process.env.TASK_ORCHESTRATOR_MEDIA === 'temporal') return enqueue();
     const projectId = firebaseAdmin.app().options.projectId;
     if (!projectId) throw new Error('Firebase project is required.');
-    return withLegacyAdmissionLease(firebaseAdmin.firestore(), { projectId, domain: 'media',
-      actorUid: 'system:firebase-event', operation: 'sermonaudiocreatetrigger' }, async lease => {
-      await lease.markEffectsStarted();
-      return enqueue();
-    });
+    const uploaderId = sermon.uploaderId;
+    if (!uploaderId) throw new Error('Legacy source requires its admitted canonical uploader.');
+    return withLegacyAdmissionLease(
+      firebaseAdmin.firestore(),
+      {
+        projectId,
+        domain: 'media',
+        actorUid: 'system:firebase-event',
+        operation: 'sermonaudiocreatetrigger',
+        legacySourceUpload: {
+          sermonId: payload.id,
+          uploaderId,
+          sourceStartTime: payload.startTime,
+          trimDurationSeconds: payload.duration,
+          ...('youtubeUrl' in payload ? { youtubeUrl: payload.youtubeUrl } : {}),
+        },
+      },
+      async (lease) => {
+        await lease.markEffectsStarted();
+        return enqueue();
+      }
+    );
   },
 });
 
@@ -123,10 +148,16 @@ const sermonAudioCreateTrigger = onDocumentCreated({ document: 'sermons/{sermonI
     throw new Error('Created sermon event has no document.');
   }
 
+  const created = snapshot.data() as Sermon;
+  // Durable source confirmations own their enqueue and need no legacy continuation lookup.
+  const durableSource = (created as Sermon & { activeDurableJobs?: { upload?: unknown } }).activeDurableJobs?.upload;
+  const current = durableSource ? snapshot : await snapshot.ref.get();
+  if (!current.exists) return;
+  const sermon = current.data() as Sermon;
   const result = await enqueueInitialSermonAudio(
     event.params.sermonId,
-    snapshot.data() as Sermon,
-    createProductionDependencies(firebaseAdmin.storage().bucket(), event.id)
+    sermon,
+    createProductionDependencies(firebaseAdmin.storage().bucket(), event.id, sermon)
   );
 
   logger.info('Reconciled initial sermon audio queue request', {
