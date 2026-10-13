@@ -51,11 +51,13 @@ jobs:
         run: |
           pnpm run build:temporal
           pnpm run build-functions-codebases
-      - name: Validate isolated Functions production startup and loading boundaries
+      - name: Validate locked npm Functions startup, lifecycle and loading boundaries
         env:
           FIREBASE_PROJECT_ID: demo-temporal-ci
           FIREBASE_CONFIG: '{"projectId":"demo-temporal-ci","storageBucket":"demo-temporal-ci.appspot.com","databaseURL":"https://demo-temporal-ci-default-rtdb.firebaseio.com"}'
         run: |
+          node --test scripts/materialize-catalog-for-firebase.test.mjs
+          node scripts/functions-npm-locks.mjs check
           pnpm run check:function-startup-loads
           node --test scripts/tests/functions-isolated-startup.test.mjs
       - name: Validate application regressions, admission, rules and SDK compatibility

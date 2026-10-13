@@ -2415,7 +2415,7 @@
     "semantic_hash": ""
   },
   "functions/src/sentryBuildInfo.ts": {
-    "mtime": 1791914369.7005475,
+    "mtime": 1791919054.296408,
     "ast_hash": "c79b85ab2f140e33593c1014ec98c6af",
     "semantic_hash": "c79b85ab2f140e33593c1014ec98c6af"
   },
@@ -3560,8 +3560,8 @@
     "semantic_hash": "8cb0fb32e61f9845416d4af6955b6e8e"
   },
   "scripts/materialize-catalog-for-firebase.mjs": {
-    "mtime": 1791914370.4379005,
-    "ast_hash": "83fea2b7389f173b28913b1b5b35a4a8",
+    "mtime": 1791918839.0208945,
+    "ast_hash": "e4f31692c828bc5b61a8973ef0501049",
     "semantic_hash": ""
   },
   "scripts/prepare-browser-fallback-home-context.sh": {
@@ -6990,8 +6990,8 @@
     "semantic_hash": ""
   },
   ".github/workflows/temporal-application-validation.yml": {
-    "mtime": 1791916033.2034287,
-    "ast_hash": "07c6b8e97848039009321034325d9452",
+    "mtime": 1791919016.808302,
+    "ast_hash": "9df613f09c85e722baef7645e9517b08",
     "semantic_hash": ""
   },
   ".github/workflows/temporal-platform-deploy.yml": {
@@ -7085,8 +7085,8 @@
     "semantic_hash": ""
   },
   "docs/temporal/OPERATIONS.md": {
-    "mtime": 1791916084.2287529,
-    "ast_hash": "be3e689ee80a6d9ef629a275345f11c8",
+    "mtime": 1791919039.7796946,
+    "ast_hash": "5310bf4f75ec45969fcfc2400eeadcee",
     "semantic_hash": ""
   },
   "docs/temporal/OPERATOR_REVIEW.md": {
@@ -7170,13 +7170,13 @@
     "semantic_hash": ""
   },
   "scripts/temporal-deploy-source.mjs": {
-    "mtime": 1791914370.4419966,
-    "ast_hash": "e7782e5b9fdccdcf0ecb36e2a8ba501c",
+    "mtime": 1791918839.047785,
+    "ast_hash": "17c1399d1bb1aef7ec81ce4fb0376834",
     "semantic_hash": ""
   },
   "scripts/temporal-deploy-source.test.mjs": {
-    "mtime": 1791914370.4421878,
-    "ast_hash": "f94482a3e1bc65e9313d2252a77f6c65",
+    "mtime": 1791918839.074555,
+    "ast_hash": "e2c4aa9edea2fb1cdbaa6457aff73f2d",
     "semantic_hash": ""
   },
   "scripts/tests/temporal-legacy-upload-drain.firestore.test.mjs": {
@@ -7260,8 +7260,18 @@
     "semantic_hash": ""
   },
   "scripts/tests/functions-isolated-startup.test.mjs": {
-    "mtime": 1791915593.0156877,
-    "ast_hash": "3585440d55fa82a6ff5870c20c1a4f4e",
+    "mtime": 1791918278.327843,
+    "ast_hash": "6bc42e936131c01744febba72e80860c",
+    "semantic_hash": ""
+  },
+  "scripts/functions-npm-locks.mjs": {
+    "mtime": 1791918839.0328722,
+    "ast_hash": "aec2a5562740db5058802f156f465dfc",
+    "semantic_hash": ""
+  },
+  "scripts/materialize-catalog-for-firebase.test.mjs": {
+    "mtime": 1791918862.5715358,
+    "ast_hash": "92abe1605bfa97ed03c2df5c103ee7b4",
     "semantic_hash": ""
   }
 }

@@ -1,7 +1,11 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync, existsSync, lstatSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { defaultTargets, materializedPackageContents } from './materialize-catalog-for-firebase.mjs';
+import {
+  defaultTargets,
+  materializedPackageContents,
+  validateNpmDeploymentLock,
+} from './materialize-catalog-for-firebase.mjs';
 import { selectKitDeployConfig, selectLegacyDeployConfig } from './create-kit-deploy-config.mjs';
 import { firebaseEnvironmentSources, flagsForControl, upsertFunctionFlags } from './temporal-release-lib.mjs';
 
@@ -20,6 +24,30 @@ export function assertCheckoutSource(root, commit, { project, control } = {}) {
     throw new Error('Staged deployment source requires review/commit before preparation');
   if (untracked.length) throw new Error('Untracked deployment source requires review/commit before deployment');
   const input = JSON.parse(original('firebase.json'));
+  const splitSources = new Set(
+    (Array.isArray(input.functions) ? input.functions : [input.functions])
+      .filter(Boolean)
+      .map((entry) => entry.source && resolve(root, entry.source))
+  );
+  for (const target of defaultTargets) {
+    const source = target.slice(0, target.lastIndexOf('/'));
+    if (!splitSources.has(resolve(root, source))) continue;
+    const lockFile = `${source}/package-lock.json`,
+      lockPath = resolve(root, lockFile),
+      pinned = original(lockFile);
+    if (
+      !existsSync(lockPath) ||
+      !lstatSync(lockPath).isFile() ||
+      lstatSync(lockPath).isSymbolicLink() ||
+      readFileSync(lockPath, 'utf8') !== pinned
+    )
+      throw new Error(`Deployment source differs from pinned commit: ${lockFile}`);
+    validateNpmDeploymentLock(
+      JSON.parse(materializedPackageContents(original(target), original('pnpm-workspace.yaml'))),
+      JSON.parse(pinned),
+      original('pnpm-workspace.yaml')
+    );
+  }
   const environmentFiles = project
     ? firebaseEnvironmentSources(input, project).map((source) => `${source}/.env.${project}`)
     : [];

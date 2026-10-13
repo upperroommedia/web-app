@@ -39,10 +39,49 @@ async function fixture(action, { firebase = manifest, sourceFiles = {} } = {}) {
     await writeFile(join(root, 'pnpm-workspace.yaml'), workspace);
     await writeFile(join(root, 'functions-core/package.json'), packageSource);
     await writeFile(
+      join(root, 'functions-core/package-lock.json'),
+      JSON.stringify({
+        name: 'functions-core',
+        lockfileVersion: 3,
+        packages: {
+          '': { name: 'functions-core', dependencies: { example: '1.2.3' } },
+          'node_modules/example': {
+            version: '1.2.3',
+            resolved: 'https://registry.npmjs.org/example/-/example-1.2.3.tgz',
+            integrity: 'sha512-' + Buffer.alloc(64).toString('base64'),
+          },
+        },
+      })
+    );
+    await writeFile(
       join(root, 'functions/src/sentryBuildInfo.ts'),
       'export const sentryBuildGitSha = null as const;\n'
     );
     await writeFile(join(root, 'functions/src/handler.ts'), 'export const original = true;\n');
+    for (const entry of Array.isArray(firebase.functions) ? firebase.functions : [firebase.functions]) {
+      const source = entry?.source;
+      if (!['functions-media', 'functions-image', 'functions-integrations'].includes(source)) continue;
+      await mkdir(join(root, source), { recursive: true });
+      await writeFile(
+        join(root, source, 'package.json'),
+        JSON.stringify({ ...JSON.parse(packageSource), name: source })
+      );
+      await writeFile(
+        join(root, source, 'package-lock.json'),
+        JSON.stringify({
+          name: source,
+          lockfileVersion: 3,
+          packages: {
+            '': { name: source, dependencies: { example: '1.2.3' } },
+            'node_modules/example': {
+              version: '1.2.3',
+              resolved: 'https://registry.npmjs.org/example/-/example-1.2.3.tgz',
+              integrity: 'sha512-' + Buffer.alloc(64).toString('base64'),
+            },
+          },
+        })
+      );
+    }
     for (const [file, contents] of Object.entries(sourceFiles)) {
       await mkdir(dirname(join(root, file)), { recursive: true });
       await writeFile(join(root, file), contents);
@@ -223,4 +262,32 @@ test('Actual Firebase source surface permits exact current-project control gener
 test('Google OIDC root artifact is narrowly excluded from source and every applicable Docker context', async () => {
   for (const file of ['.gitignore', '.dockerignore', 'apps/temporal-worker/Dockerfile.dockerignore'])
     assert.match(await readFile(new URL(`../${file}`, import.meta.url), 'utf8'), /^\/gha-creds-\*\.json$/m);
+});
+
+test('Deployment source refuses absent, modified and stale npm locks even before materialization', async () => {
+  for (const change of ['missing', 'modified', 'stale-root'])
+    await fixture(async (root, commit, git) => {
+      const file = join(root, 'functions-core/package-lock.json');
+      if (change === 'missing') await rm(file);
+      else if (change === 'modified') await writeFile(file, (await readFile(file, 'utf8')) + '\n');
+      else {
+        const lock = JSON.parse(await readFile(file, 'utf8'));
+        lock.packages[''].dependencies.example = '9.9.9';
+        await writeFile(file, JSON.stringify(lock));
+        git(['add', '.']);
+        git([
+          '-c',
+          'user.name=Test',
+          '-c',
+          'user.email=test@example.invalid',
+          '-c',
+          'commit.gpgsign=false',
+          'commit',
+          '-m',
+          'stale-lock',
+        ]);
+        commit = git(['rev-parse', 'HEAD']);
+      }
+      assert.throws(() => assertCheckoutSource(root, commit));
+    });
 });
