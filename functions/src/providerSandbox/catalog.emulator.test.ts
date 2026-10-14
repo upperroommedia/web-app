@@ -1,6 +1,5 @@
 /** Dedicated firebase.test.json only. Exercises actual Firestore native CAS and generation-pinned staging Storage. */
 import { randomUUID, createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
 import { getApps, deleteApp } from 'firebase-admin/app';
 jest.mock('@upperroom/shared/firebase/firebaseAdmin', () => {
   const { getApps, initializeApp } = require('firebase-admin/app'),
@@ -62,6 +61,28 @@ const controls = () => ({
     ])
   ),
 });
+// Deterministic 20-second, 8kHz mono PCM16 signal. Integer samples keep its digest portable across hosts.
+function createCatalogWavFixture(): Buffer {
+  const sampleRate = 8000,
+    frameCount = sampleRate * 20,
+    dataLength = frameCount * 2;
+  const bytes = Buffer.alloc(44 + dataLength);
+  bytes.write('RIFF', 0, 'ascii');
+  bytes.writeUInt32LE(36 + dataLength, 4);
+  bytes.write('WAVEfmt ', 8, 'ascii');
+  bytes.writeUInt32LE(16, 16);
+  bytes.writeUInt16LE(1, 20);
+  bytes.writeUInt16LE(1, 22);
+  bytes.writeUInt32LE(sampleRate, 24);
+  bytes.writeUInt32LE(sampleRate * 2, 28);
+  bytes.writeUInt16LE(2, 32);
+  bytes.writeUInt16LE(16, 34);
+  bytes.write('data', 36, 'ascii');
+  bytes.writeUInt32LE(dataLength, 40);
+  for (let frame = 0; frame < frameCount; frame++) bytes.writeInt16LE(((frame % 200) - 100) * 128, 44 + frame * 2);
+  return bytes;
+}
+const fixtureSha256 = 'f2b223ef6cabad1917d0415ede3adfa58c8261fb545b984ee08f4baa3e07b5e3';
 beforeAll(async () => {
   for (const name of ['FIRESTORE_EMULATOR_HOST', 'FIREBASE_STORAGE_EMULATOR_HOST'])
     if (!/^(127\.0\.0\.1|localhost):[1-9][0-9]*$/.test(process.env[name] ?? '') || process.env[name]?.endsWith(':9'))
@@ -71,10 +92,9 @@ beforeAll(async () => {
     const snapshot = await db().doc(path).get();
     prior.set(path, snapshot.exists ? snapshot.data() : undefined);
   }
-  const bytes = readFileSync('/tmp/urm-staging-3ede-e2e-owned/original/urm-temporal-smoke.wav');
-  expect(createHash('sha256').update(bytes).digest('hex')).toBe(
-    'b3e0d94b07ec00f6583451ea18a23776028788798b2a9925524024348dc6acc7'
-  );
+  const bytes = createCatalogWavFixture();
+  expect(bytes.length).toBe(320044);
+  expect(createHash('sha256').update(bytes).digest('hex')).toBe(fixtureSha256);
   await admin
     .storage()
     .bucket()
@@ -85,8 +105,8 @@ beforeAll(async () => {
     bucket: 'urm-app-staging.firebasestorage.app',
     path: fixturePath,
     generation: String(metadata.generation),
-    sha256: 'b3e0d94b07ec00f6583451ea18a23776028788798b2a9925524024348dc6acc7',
-    size: 1764044,
+    sha256: fixtureSha256,
+    size: 320044,
     durationSeconds: 20,
   });
   expect(fixture.durationSeconds).toBe(20);

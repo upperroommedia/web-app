@@ -5,7 +5,11 @@ jest.mock('./durableOperationContext', () => ({
 }));
 jest.mock('@upperroom/shared/firebase/firebaseAdmin', () => ({
   __esModule: true,
-  default: { auth: () => ({ getUser: mockGetUser }), firestore: () => mockDb },
+  default: {
+    app: () => ({ options: { projectId: 'urm-app' } }),
+    auth: () => ({ getUser: mockGetUser }),
+    firestore: () => mockDb,
+  },
 }));
 jest.mock('../../createNewSubsplashList', () => ({
   createNewSubsplashListDomain: (...args: unknown[]) => mockCreateList(...args),
@@ -92,7 +96,7 @@ const mockDb = {
     }),
   collection: jest.fn(() => ({ doc: jest.fn(() => ({ set: mockSet, update: mockUpdate, get: mockGet })) })),
 };
-const ref = { projectId: 'urm-app-staging', jobId: 'job-1' };
+const ref = { projectId: 'urm-app', jobId: 'job-1' };
 beforeEach(() => {
   checkpointRecords.clear();
   jest.clearAllMocks();
@@ -164,7 +168,7 @@ describe('concrete entity execution', () => {
     });
     expect(mockCreateList).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ operationKey: 'durable:urm-app-staging:job-1:list.create:create' }),
+        data: expect.objectContaining({ operationKey: 'durable:urm-app:job-1:list.create:create' }),
       })
     );
     expect(out).toEqual({ listId: 'canonical-id', subsplashId: 'remote-id' });
@@ -343,7 +347,7 @@ describe('reviewed list creation projection', () => {
     entity: intent.entity,
     generation: 1,
     continuation: 'reviewed-create' as const,
-    receiptId: JSON.stringify(['durable:urm-app-staging:job-1:list.create:create', 'list-create']),
+    receiptId: JSON.stringify(['durable:urm-app:job-1:list.create:create', 'list-create']),
     receiptStep: 'list-create',
   };
   it('continues the frozen projection after a confirmed allocation without repeating create', async () => {
@@ -353,7 +357,7 @@ describe('reviewed list creation projection', () => {
       state: 'confirmed',
       projectId: ref.projectId,
       jobId: ref.jobId,
-      operationKey: 'durable:urm-app-staging:job-1:list.create:create',
+      operationKey: 'durable:urm-app:job-1:list.create:create',
       providerAccount: { provider: 'subsplash', account: 'app:9XTSHD' },
       result: { listId: 'remote-id' },
     });
@@ -372,7 +376,7 @@ describe('reviewed list creation projection', () => {
       state: 'confirmed',
       projectId: ref.projectId,
       jobId: ref.jobId,
-      operationKey: 'durable:urm-app-staging:job-1:list.create:create',
+      operationKey: 'durable:urm-app:job-1:list.create:create',
       providerAccount: { provider: 'subsplash', account: 'app:9XTSHD' },
       result: { listId: 'remote-id' },
     });

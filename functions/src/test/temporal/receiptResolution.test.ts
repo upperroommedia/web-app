@@ -1,4 +1,7 @@
-jest.mock('@upperroom/shared/firebase/firebaseAdmin', () => ({ __esModule: true, default: {} }));
+jest.mock('@upperroom/shared/firebase/firebaseAdmin', () => ({
+  __esModule: true,
+  default: { app: () => ({ options: { projectId: 'urm-app' } }) },
+}));
 jest.mock('axios', () => ({ __esModule: true, default: Object.assign(jest.fn(), { get: jest.fn() }) }));
 jest.mock('../../subsplashUtils', () => ({
   authenticateSubsplash: async () => 'test-token',

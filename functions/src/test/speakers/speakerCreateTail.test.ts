@@ -29,7 +29,7 @@ const mockDb: any = {
 };
 jest.mock('@upperroom/shared/firebase/firebaseAdmin', () => ({
   __esModule: true,
-  default: { firestore: () => mockDb },
+  default: { firestore: () => mockDb, app: () => ({ options: { projectId: 'urm-app' } }) },
 }));
 jest.mock('../../temporal/publishing/durableOperationContext', () => ({
   getDurablePublishingJobId: () => 'job',
@@ -57,7 +57,7 @@ jest.mock('../../temporal/publishing/providerReceipts', () => ({
     mockRows.set(path, {
       operationKey: input.operationKey,
       step: input.step,
-      projectId: 'project',
+      projectId: 'urm-app',
       jobId: 'job',
       providerAccount: { provider: 'subsplash', account: 'app:9XTSHD' },
       fingerprint: actual.providerPayloadFingerprint(input.payload),
@@ -112,7 +112,7 @@ function fixture(list = false) {
   } as CreateSpeakerCallableInputType;
   const raw = {
     schemaVersion: 1 as const,
-    projectId: 'project',
+    projectId: 'urm-app',
     jobId: 'job',
     generation: 1,
     workflowId: 'workflow',
@@ -149,7 +149,7 @@ function fixture(list = false) {
     mockRows.set(PROVIDER_RECEIPTS_COLLECTION + '/' + providerReceiptId(key, stage), {
       operationKey: key,
       step: stage,
-      projectId: 'project',
+      projectId: 'urm-app',
       jobId: 'job',
       providerAccount: { provider: 'subsplash', account: 'app:9XTSHD' },
       fingerprint: fp(stage === 'speaker-tag-create' ? checkpoint.tagPayload : checkpoint.listPayload),
@@ -278,8 +278,8 @@ it('canonical race before final commit cannot overwrite the changed row', async 
 it('captures resolved image program before original tag POST, then retries without image repair or repeated POST', async () => {
   const f = fixture(true);
   mockRows.clear();
-  const input = { ...f.input, operationKey: 'durable:project:job:speaker-create' };
-  mockRows.set('durableJobs/job', { projectId: 'project', jobId: 'job', generation: 1, workflowId: 'workflow' });
+  const input = { ...f.input, operationKey: 'durable:urm-app:job:speaker-create' };
+  mockRows.set('durableJobs/job', { projectId: 'urm-app', jobId: 'job', generation: 1, workflowId: 'workflow' });
   mockRows.set('durableJobIntents/job', { generation: 1, kind: 'speaker.mutate', entity: { id: 'speaker' } });
   jest.mocked(repairMismatchedSubsplashImageRefs).mockImplementation(async (images: any) => {
     mockEvents.push('images-resolved');
@@ -328,11 +328,11 @@ it('captures resolved image program before original tag POST, then retries witho
 it('fresh actor revocation before checkpoint commit prevents tag POST', async () => {
   const f = fixture();
   mockRows.clear();
-  mockRows.set('durableJobs/job', { projectId: 'project', jobId: 'job', generation: 1, workflowId: 'workflow' });
+  mockRows.set('durableJobs/job', { projectId: 'urm-app', jobId: 'job', generation: 1, workflowId: 'workflow' });
   mockRows.set('durableJobIntents/job', { generation: 1, kind: 'speaker.mutate', entity: { id: 'speaker' } });
   mockRevoke = true;
   await expect(
-    createSpeakerMutation({ ...f.input, operationKey: 'durable:project:job:speaker-create' }, { speakerId: 'speaker' })
+    createSpeakerMutation({ ...f.input, operationKey: 'durable:urm-app:job:speaker-create' }, { speakerId: 'speaker' })
   ).rejects.toThrow('ACTOR_REVOKED');
   expect(axios).not.toHaveBeenCalled();
 });

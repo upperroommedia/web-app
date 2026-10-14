@@ -2,7 +2,7 @@ import type { Firestore, Transaction } from 'firebase-admin/firestore';
 let mockDb: Firestore;
 jest.mock('@upperroom/shared/firebase/firebaseAdmin', () => ({
   __esModule: true,
-  default: { firestore: () => mockDb, app: () => ({ options: { projectId: 'test-project' } }) },
+  default: { firestore: () => mockDb, app: () => ({ options: { projectId: 'urm-app' } }) },
 }));
 jest.mock('../../subsplashUtils', () => ({
   createAxiosConfig: (url: string, _token: string, method: string, data?: unknown) => ({ url, method, data }),

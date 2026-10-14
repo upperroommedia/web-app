@@ -1,6 +1,6 @@
 jest.mock('@upperroom/shared/firebase/firebaseAdmin', () => ({
   __esModule: true,
-  default: { app: () => ({ options: { projectId: 'test' } }) },
+  default: { app: () => ({ options: { projectId: 'urm-app' } }) },
 }));
 jest.mock('../../notifications/emitOperationalAlert', () => ({ emitOperationalAlert: jest.fn() }));
 import { createServer } from 'node:http';

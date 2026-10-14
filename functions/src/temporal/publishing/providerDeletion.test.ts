@@ -23,7 +23,7 @@ const checkpoint = {
 jest.mock('@upperroom/shared/firebase/firebaseAdmin', () => ({
   __esModule: true,
   default: {
-    app: () => ({ options: { projectId: 'project' } }),
+    app: () => ({ options: { projectId: 'urm-app' } }),
     firestore: () => ({ collection: () => ({ doc: () => checkpoint }) }),
   },
 }));
@@ -51,7 +51,7 @@ jest.mock('../../locks/withSubsplashLocks', () => ({
 import { deletePublishingSoundCloudTrack, deletePublishingSubsplashMedia } from './providerDeletion';
 import type { PrivatePublishingIntent, PublishingJobRef } from './types';
 import type { Transaction } from 'firebase-admin/firestore';
-const ref = { projectId: 'project', jobId: 'deletion-job' } as PublishingJobRef;
+const ref = { projectId: 'urm-app', jobId: 'deletion-job' } as PublishingJobRef;
 const intent = { sermonId: 'sermon', actorUid: 'admin', action: 'delete' } as PrivatePublishingIntent;
 const store = () => ({
   assertCurrent: jest.fn(),
@@ -114,7 +114,7 @@ it('binds positive SoundCloud account/track ownership before same-token deletion
     .mockRejectedValueOnce(missing);
   mockTrackDelete.mockImplementation(async () => {
     expect(mockCheckpoint).toMatchObject({
-      projectId: 'project',
+      projectId: 'urm-app',
       jobId: 'deletion-job',
       remoteId: '123',
       originalAccount: 'soundcloud:users:1',
@@ -155,7 +155,7 @@ it('replays a lost DELETE response using the same bound owner and fixed-ID absen
 });
 it('rejects changed account after checkpoint and does not mistake /me404 plus existing track for track absence', async () => {
   mockCheckpoint = {
-    projectId: 'project',
+    projectId: 'urm-app',
     jobId: 'deletion-job',
     sermonId: 'sermon',
     provider: 'soundcloud',

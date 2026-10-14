@@ -26,7 +26,7 @@ const query: any = {
 };
 jest.mock('@upperroom/shared/firebase/firebaseAdmin', () => ({
   __esModule: true,
-  default: { firestore: () => ({ collection: () => query }) },
+  default: { app: () => ({ options: { projectId: 'urm-app' } }), firestore: () => ({ collection: () => query }) },
 }));
 jest.mock('axios', () => ({
   __esModule: true,
@@ -54,7 +54,7 @@ import { reconcilePublishingDeletionCheckpoints } from './providerDeletion';
 import type { PrivatePublishingIntent, PublishingJobRef } from './types';
 import type { Transaction } from 'firebase-admin/firestore';
 import { uploadStatus } from '@upperroom/shared/types/SermonTypes';
-const ref = { projectId: 'project', jobId: 'job' } as PublishingJobRef,
+const ref = { projectId: 'urm-app', jobId: 'job' } as PublishingJobRef,
   intent = { sermonId: 'sermon' } as PrivatePublishingIntent;
 const update = jest.fn();
 const store = {
@@ -75,7 +75,7 @@ beforeEach(() => {
   mockAuth.mockResolvedValue('token');
   mockRetire.mockResolvedValue(mockRetirementCommit);
   mockJournal = {
-    projectId: 'project',
+    projectId: 'urm-app',
     jobId: 'job',
     sermonId: 'sermon',
     provider: 'subsplash',

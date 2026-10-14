@@ -22,6 +22,10 @@ Emulator-backed tests use the unchanged `firebase.test.json` configuration. Brow
 
 Hosts remain `127.0.0.1`; overrides must be integer ports from 1 through 65535. These values do not select a publishing mode or change production endpoints. An existing Admin Auth emulator endpoint supplied by `firebase emulators:exec` is preserved.
 
+Functions test commands run `typecheck:tests` before starting emulators. This checks the complete Functions and orchestration test roots with strict TypeScript, then Jest uses isolated file transforms to avoid repeating the same project type check in each worker. Tests still run serially with the worker memory limit. GitHub Actions receives Jest annotations and a final summary.
+
+Before a direct, focused Jest invocation, run `pnpm --dir functions run typecheck:tests` to retain the complete type check. Firebase Functions compile to ES2022 for the configured Node 22 runtime.
+
 ## 1. Upgrade staging project billing (required)
 
 App Hosting requires Blaze:

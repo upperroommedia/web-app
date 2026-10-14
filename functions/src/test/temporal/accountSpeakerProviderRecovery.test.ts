@@ -81,7 +81,7 @@ jest.mock('@upperroom/shared/firebase/firebaseAdmin', () => {
   };
   return {
     __esModule: true,
-    default: { firestore: () => db, app: () => ({ options: { projectId: 'urm-app-staging' } }) },
+    default: { firestore: () => db, app: () => ({ options: { projectId: 'urm-app' } }) },
   };
 });
 import axios from 'axios';
@@ -97,7 +97,7 @@ import { resolvePublishingProviderReceipt } from '../../temporal/publishing/rece
 import type { ImageType } from '@upperroom/shared/types/Image';
 
 const mockAxios = axios as unknown as jest.Mock;
-const ref = { projectId: 'urm-app-staging', jobId: 'account-approval-job' };
+const ref = { projectId: 'urm-app', jobId: 'account-approval-job' };
 const operationKey = `durable:${ref.projectId}:${ref.jobId}:speaker-request:request-1`;
 const image: ImageType = {
   id: 'image-local',

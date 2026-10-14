@@ -2,7 +2,7 @@ module.exports = {
   preset: 'ts-jest',
   // Admin14 uses jose ESM; preserve the Node22 test target by transforming only that dependency.
   transform: {
-    '^.+\\.tsx?$': ['ts-jest', { tsconfig: '<rootDir>/tsconfig.json' }],
+    '^.+\\.tsx?$': ['ts-jest', { tsconfig: '<rootDir>/tsconfig.test.json' }],
     '^.+\\.[cm]?js$': [
       'babel-jest',
       { babelrc: false, configFile: false, plugins: ['@babel/plugin-transform-modules-commonjs'] },
@@ -10,6 +10,8 @@ module.exports = {
   },
   transformIgnorePatterns: ['/node_modules/(?!(?:\\.pnpm/[^/]+/node_modules/)?jose(?:/|$))'],
   testEnvironment: 'node',
+  // Annotate failed suites as they finish instead of waiting for the final summary.
+  reporters: process.env.GITHUB_ACTIONS === 'true' ? [['github-actions', { silent: false }], 'summary'] : ['default'],
   setupFiles: ['<rootDir>/../scripts/firebase-test-isolation.cjs'],
   testMatch: ['**/*.test.ts'],
   roots: ['<rootDir>/src', '<rootDir>/../packages/orchestration/src'],

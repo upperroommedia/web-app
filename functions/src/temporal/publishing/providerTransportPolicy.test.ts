@@ -9,18 +9,24 @@ import {
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { assertProviderMutationTransportAllowed } from './providerTransportPolicy';
 describe('actual provider transport isolation', () => {
-  it('blocks both staging vendor transports even when private test simulation is enabled', () => {
+  it('rejects unconfigured staging even when private test simulation is enabled', () => {
     (firebaseAdmin.app as jest.Mock).mockReturnValue({ options: { projectId: 'urm-app-staging' } });
-    const keys = ['TEMPORAL_PROVIDER_MUTATION_SIMULATION', 'FIRESTORE_EMULATOR_HOST', 'NODE_ENV'] as const;
+    const keys = [
+      'TEMPORAL_PROVIDER_MUTATION_SIMULATION',
+      'FIRESTORE_EMULATOR_HOST',
+      'NODE_ENV',
+      'STAGING_PROVIDER_MODE',
+    ] as const;
     const previous = keys.map((key) => process.env[key]);
     Object.assign(process.env, {
       TEMPORAL_PROVIDER_MUTATION_SIMULATION: 'true',
       FIRESTORE_EMULATOR_HOST: '127.0.0.1:8089',
       NODE_ENV: 'test',
     });
+    delete process.env.STAGING_PROVIDER_MODE;
     try {
       for (const provider of ['subsplash', 'soundcloud'] as const)
-        expect(() => assertProviderMutationTransportAllowed(provider)).toThrow('verified isolated provider account');
+        expect(() => assertProviderMutationTransportAllowed(provider)).toThrow('PROVIDER_PROFILE_NOT_CONFIGURED');
     } finally {
       keys.forEach((key, index) => {
         if (previous[index] === undefined) delete process.env[key];

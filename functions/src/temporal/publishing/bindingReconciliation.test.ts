@@ -3,7 +3,7 @@ const mockRelease = jest.fn().mockResolvedValue(() => undefined);
 const mockAxios = jest.fn();
 const mockProof = jest.fn();
 const mockData: any = {
-  projectId: 'test',
+  projectId: 'urm-app',
   jobId: 'job',
   provider: 'subsplash',
   account: 'app:9XTSHD',
@@ -29,7 +29,7 @@ const mockCheckpoint: any = {
   get: (key: string) =>
     ((
       {
-        projectId: 'test',
+        projectId: 'urm-app',
         jobId: 'job',
         receiptId: 'b'.repeat(64),
         remoteId: 'media',
@@ -51,7 +51,7 @@ const mockDb: any = {
 jest.mock('axios', () => ({ __esModule: true, default: (...args: unknown[]) => mockAxios(...args) }));
 jest.mock('@upperroom/shared/firebase/firebaseAdmin', () => ({
   __esModule: true,
-  default: { firestore: () => mockDb },
+  default: { app: () => ({ options: { projectId: 'urm-app' } }), firestore: () => mockDb },
 }));
 jest.mock('../../subsplashUtils', () => ({
   authenticateSubsplash: async () => 'token',
@@ -73,7 +73,7 @@ jest.mock('../../../../packages/orchestration/src/provider-usage', () => ({
 }));
 import { releaseCancelledProviderBindings } from './bindingReconciliation';
 import type { Transaction } from 'firebase-admin/firestore';
-const ref = { projectId: 'test', jobId: 'job' };
+const ref = { projectId: 'urm-app', jobId: 'job' };
 let mockReceiptValue: any;
 const update = jest.fn(),
   set = jest.fn();
@@ -95,7 +95,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockRelease.mockResolvedValue(() => undefined);
   mockReceiptValue = {
-    projectId: 'test',
+    projectId: 'urm-app',
     jobId: 'job',
     step: 'subsplash-media-item',
     state: 'confirmed',
@@ -111,7 +111,7 @@ beforeEach(() => {
 it('releases an audio dependency only after the exact parent receipt has verified deletion proof', async () => {
   expect(await releaseCancelledProviderBindings(ref, store)).toBe('completed');
   expect(mockRelease).toHaveBeenCalledWith(expect.anything(), mockDb, {
-    resource: { projectId: 'test', provider: 'subsplash', account: 'app:9XTSHD', remoteId: 'audio' },
+    resource: { projectId: 'urm-app', provider: 'subsplash', account: 'app:9XTSHD', remoteId: 'audio' },
     jobId: 'job',
     bindingId: 'a'.repeat(64),
   });
@@ -119,12 +119,12 @@ it('releases an audio dependency only after the exact parent receipt has verifie
   expect(mockAxios).not.toHaveBeenCalled();
 });
 it('retains dependency edges when the parent allocation is unresolved', async () => {
-  mockReceipt.mockResolvedValue({ projectId: 'test', jobId: 'job', state: 'executing' });
+  mockReceipt.mockResolvedValue({ projectId: 'urm-app', jobId: 'job', state: 'executing' });
   await releaseCancelledProviderBindings(ref, store);
   expect(mockRelease).not.toHaveBeenCalled();
 });
 it('releases a never-dispatched prepared parent only in the scoped cancelled job', async () => {
-  mockReceiptValue = { projectId: 'test', jobId: 'job', state: 'prepared' };
+  mockReceiptValue = { projectId: 'urm-app', jobId: 'job', state: 'prepared' };
   mockReceipt.mockResolvedValue(mockReceiptValue);
   await releaseCancelledProviderBindings(ref, store);
   expect(mockRelease).toHaveBeenCalledTimes(1);

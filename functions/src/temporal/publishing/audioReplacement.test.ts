@@ -3,7 +3,12 @@ jest.mock('../../soundcloudClient', () => ({
 }));
 jest.mock('@upperroom/shared/firebase/firebaseAdmin', () => ({
   __esModule: true,
-  default: { firestore: jest.fn(), auth: jest.fn(), storage: jest.fn() },
+  default: {
+    app: () => ({ options: { projectId: 'urm-app' } }),
+    firestore: jest.fn(),
+    auth: jest.fn(),
+    storage: jest.fn(),
+  },
 }));
 jest.mock('firebase-admin/storage', () => ({
   getDownloadURL: jest.fn().mockResolvedValue('https://trusted.invalid/audio'),
@@ -41,7 +46,7 @@ import {
   type AudioReplacementStore,
 } from './audioReplacement';
 import type { PrivatePublishingIntent } from './types';
-const ref = { jobId: 'parent', projectId: 'test' };
+const ref = { jobId: 'parent', projectId: 'urm-app' };
 const intent: PrivatePublishingIntent = {
   sermonId: 'sermon',
   generation: 1,

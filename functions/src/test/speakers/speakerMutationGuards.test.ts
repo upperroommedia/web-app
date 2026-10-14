@@ -50,7 +50,7 @@ const mockDb = {
 };
 jest.mock('@upperroom/shared/firebase/firebaseAdmin', () => ({
   __esModule: true,
-  default: { firestore: () => mockDb },
+  default: { firestore: () => mockDb, app: () => ({ options: { projectId: 'urm-app' } }) },
 }));
 jest.mock('../../temporal/publishing/durableOperationContext', () => ({
   markPublishingCritical: jest.fn(),

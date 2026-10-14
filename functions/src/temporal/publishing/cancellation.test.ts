@@ -21,7 +21,11 @@ const mockQuery = {
 const mockDb = { collection: () => ({ ...mockQuery, doc: (id: string) => ({ id, get: mockCheckpointGet }) }) };
 jest.mock('@upperroom/shared/firebase/firebaseAdmin', () => ({
   __esModule: true,
-  default: { firestore: () => mockDb, auth: () => ({ getUser: mockActor }) },
+  default: {
+    app: () => ({ options: { projectId: 'urm-app' } }),
+    firestore: () => mockDb,
+    auth: () => ({ getUser: mockActor }),
+  },
 }));
 jest.mock('../../subsplashUtils', () => ({
   authenticateSubsplash: (...args: unknown[]) => mockAuth(...args),
@@ -51,12 +55,12 @@ import type { DurableJobRef } from '@upperroom/contracts/temporal';
 import type { PrivatePublishingIntent } from './types';
 import type { ProviderReceipt } from './providerReceipts';
 import type { Transaction } from 'firebase-admin/firestore';
-const ref = { projectId: 'test', jobId: 'job' } as DurableJobRef;
+const ref = { projectId: 'urm-app', jobId: 'job' } as DurableJobRef;
 const intent = { sermonId: 'sermon' } as PrivatePublishingIntent;
 const receipt = (step: string, state: ProviderReceipt['state'] = 'confirmed', id = step) => ({
   receiptId: 'a'.repeat(64),
   receipt: {
-    projectId: 'test',
+    projectId: 'urm-app',
     jobId: 'job',
     step,
     state,
@@ -165,7 +169,7 @@ it('uses service cleanup authority to delete a confirmed orphan audio after the 
 it('does not reuse a terminal-fetch proof after adoption changes a receipt ID, fingerprint or revision', async () => {
   const entry = receipt('subsplash-transcode');
   const checkpoint = {
-    projectId: 'test',
+    projectId: 'urm-app',
     jobId: 'job',
     receiptId: entry.receiptId,
     remoteId: 'subsplash-transcode',
@@ -235,7 +239,7 @@ it('blocks unresolved acknowledged orphans before cleanup and proceeds only afte
   const acknowledgement = {
     schemaVersion: 1,
     receiptId: 'a'.repeat(64),
-    projectId: 'test',
+    projectId: 'urm-app',
     jobId: 'job',
     step: 'subsplash-media-item',
     attemptOwner: 'attempt',

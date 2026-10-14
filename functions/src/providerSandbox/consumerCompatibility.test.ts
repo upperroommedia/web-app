@@ -24,6 +24,51 @@ mockAudio.write('data', 36);
 mockAudio.writeUInt32LE(16000, 40);
 type StoredAsset = { bytes: Buffer; metadata: Record<string, any> };
 const mockAssets = new Map<string, StoredAsset>();
+const mockDocuments = new Map<string, Record<string, any>>();
+const mockTransactionReads: string[] = [];
+const mockSnapshot = (path: string, documents = mockDocuments) => ({
+  exists: documents.has(path),
+  data: () => {
+    const value = documents.get(path);
+    return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
+  },
+  get: (field: string) => field.split('.').reduce<any>((current, key) => current?.[key], documents.get(path)),
+});
+const mockReference = (path: string): any => ({
+  path,
+  id: path.split('/').pop(),
+  collection: (name: string) => mockCollection(path + '/' + name),
+  get: async () => mockSnapshot(path),
+});
+const mockCollection = (path: string): any => ({ path, doc: (id: string) => mockReference(path + '/' + id) });
+const mockFirestore = {
+  doc: mockReference,
+  collection: mockCollection,
+  runTransaction: async <T>(work: (tx: any) => Promise<T>): Promise<T> => {
+    const staged = new Map([...mockDocuments].map(([path, value]) => [path, JSON.parse(JSON.stringify(value))]));
+    let writesStarted = false;
+    const result = await work({
+      get: async (ref: { path: string }) => {
+        if (writesStarted) throw new Error('Firestore transaction read after write');
+        mockTransactionReads.push(ref.path);
+        return mockSnapshot(ref.path, staged);
+      },
+      create: (ref: { path: string }, value: Record<string, any>) => {
+        writesStarted = true;
+        if (staged.has(ref.path)) throw new Error('Firestore create precondition failed');
+        staged.set(ref.path, JSON.parse(JSON.stringify(value)));
+      },
+      update: (ref: { path: string }, value: Record<string, any>) => {
+        writesStarted = true;
+        if (!staged.has(ref.path)) throw new Error('Firestore update precondition failed');
+        staged.set(ref.path, { ...staged.get(ref.path), ...JSON.parse(JSON.stringify(value)) });
+      },
+    });
+    mockDocuments.clear();
+    for (const [path, value] of staged) mockDocuments.set(path, value);
+    return result;
+  },
+};
 let mockGeneration = 100;
 const mockReadStream = jest.fn((bytes: Buffer, _options?: unknown) =>
   Readable.from([Buffer.from(bytes.subarray(0, 44)), Buffer.from(bytes.subarray(44))])
@@ -38,7 +83,7 @@ const mockBucket = {
     const stored = () => {
       const asset = mockAssets.get(path);
       if (!asset || (options?.generation && options.generation !== asset.metadata.generation))
-        throw new Error('Storage object/generation not found: ' + path);
+        throw Object.assign(new Error('Storage object/generation not found: ' + path), { code: 404 });
       return asset;
     };
     return {
@@ -57,7 +102,7 @@ const mockBucket = {
           },
           final(callback) {
             if (writeOptions.preconditionOpts?.ifGenerationMatch !== 0 || mockAssets.has(path)) {
-              callback(new Error('Storage create precondition failed'));
+              callback(Object.assign(new Error('Storage create precondition failed'), { code: 412 }));
               return;
             }
             const bytes = Buffer.concat(chunks);
@@ -76,36 +121,7 @@ jest.mock('@upperroom/shared/firebase/firebaseAdmin', () => ({
   __esModule: true,
   default: {
     app: () => ({ options: { projectId: 'urm-app-staging' } }),
-    firestore: () => ({
-      doc: (path: string) => {
-        if (path !== '_providerSandbox/urm-app-staging-publishing-v1')
-          throw new Error('Unexpected Firestore transport: ' + path);
-        const marker = {
-          state: 'ready',
-          profile: {
-            schemaVersion: 1,
-            projectId: 'urm-app-staging',
-            mode: 'sandbox',
-            profileId: 'urm-app-staging-publishing-v1',
-            version: 1,
-            namespace: 'urm-app-staging-publishing-v1',
-          },
-          catalogImportId: 'consumer-fixture',
-          sourceDigest: 'a'.repeat(64),
-          resourceCount: 1,
-          fixture: {
-            bucket: mockBucket.name,
-            path: 'audio/consumer.wav',
-            generation: '100',
-            size: mockAudio.length,
-            sha256: createHash('sha256').update(mockAudio).digest('hex'),
-            durationSeconds: 1,
-            contentType: 'audio/wav',
-          },
-        };
-        return { path, get: async () => ({ data: () => marker, get: (field: keyof typeof marker) => marker[field] }) };
-      },
-    }),
+    firestore: () => mockFirestore,
     storage: () => ({
       bucket: (name: string) => {
         expect(name).toBe(mockBucket.name);
@@ -236,12 +252,69 @@ import { isSubsplashMediaPlayable } from '../temporal/publishing/providerReadine
 import { prepareMultipartUpload, updateTrack } from '../soundcloudClient';
 import { probeStageAsset } from './assets';
 import { getProviderExecutionProfile } from './profile';
+import { assertSandboxAssetPreparation } from './store';
+import { durableEntityKey } from '@upperroom/orchestration/job-store';
 import type { Bucket } from '@google-cloud/storage';
 
 beforeEach(() => {
   process.env.STAGING_PROVIDER_MODE = 'sandbox';
   mockResources.clear();
   mockOperations.length = 0;
+  mockDocuments.clear();
+  mockTransactionReads.length = 0;
+  const profile = {
+    schemaVersion: 1,
+    projectId: 'urm-app-staging',
+    mode: 'sandbox',
+    profileId: 'urm-app-staging-publishing-v1',
+    version: 1,
+    namespace: 'urm-app-staging-publishing-v1',
+  };
+  const providerExecution = { mode: 'sandbox', profileId: profile.profileId, version: 1, scenario: 'success' };
+  const jobId = 'consumer-protocol-job',
+    generation = 3,
+    kind = 'sermon.publish' as const,
+    entity = { type: 'sermon' as const, id: 'sermon-fixture' };
+  mockDocuments.set('_providerSandbox/' + profile.profileId, {
+    state: 'ready',
+    profile,
+    catalogImportId: 'consumer-fixture',
+    sourceDigest: 'a'.repeat(64),
+    resourceCount: 1,
+    fixture: {
+      bucket: mockBucket.name,
+      path: 'audio/consumer.wav',
+      generation: '100',
+      size: mockAudio.length,
+      sha256: createHash('sha256').update(mockAudio).digest('hex'),
+      durationSeconds: 1,
+      contentType: 'audio/wav',
+    },
+  });
+  mockDocuments.set('durableJobIntents/' + jobId, {
+    schemaVersion: 1,
+    projectId: profile.projectId,
+    jobId,
+    generation,
+    kind,
+    entity,
+    payload: { providerExecution },
+  });
+  mockDocuments.set('durableJobs/' + jobId, {
+    schemaVersion: 1,
+    projectId: profile.projectId,
+    jobId,
+    generation,
+    kind,
+    entity,
+    state: 'running',
+    providerExecution,
+  });
+  mockDocuments.set('durableJobEntities/' + durableEntityKey(profile.projectId, entity, kind), {
+    generation,
+    activeJobId: jobId,
+  });
+
   mockClock = 1000;
   jest.clearAllMocks();
   mockAssets.clear();
@@ -282,6 +355,26 @@ afterEach(() => {
   ])
     expect(transport).not.toHaveBeenCalled();
   expect(FormData).not.toHaveBeenCalled();
+  expect(mockTransactionReads).toEqual(
+    expect.arrayContaining([
+      '_providerSandbox/urm-app-staging-publishing-v1',
+      'durableJobIntents/consumer-protocol-job',
+      'durableJobs/consumer-protocol-job',
+      'durableJobEntities/' +
+        durableEntityKey('urm-app-staging', { type: 'sermon', id: 'sermon-fixture' }, 'sermon.publish'),
+    ])
+  );
+  const preparations = [...mockDocuments]
+    .filter(([path]) => path.startsWith('_providerSandbox/urm-app-staging-publishing-v1/preparedAssets/'))
+    .map(([, value]) => value);
+  expect(preparations).toHaveLength(1);
+  expect(preparations[0]).toMatchObject({
+    projectId: 'urm-app-staging',
+    jobId: 'consumer-protocol-job',
+    generation: 3,
+    state: 'retained',
+    target: { generation: '101', sha256: sourceHash() },
+  });
 });
 afterAll(() => {
   if (mockInitialMode === undefined) delete process.env.STAGING_PROVIDER_MODE;
@@ -334,6 +427,26 @@ it('real Subsplash upload/auth/config/facade emits compatible relationships and 
     date: new Date('2026-10-14T00:00:00Z'),
   };
   const original = JSON.stringify(input);
+  const profile = getProviderExecutionProfile();
+  if (profile.mode !== 'sandbox') throw new Error('Expected staging sandbox');
+  const entityPath =
+    'durableJobEntities/' +
+    durableEntityKey(profile.projectId, { type: 'sermon', id: 'sermon-fixture' }, 'sermon.publish');
+  const currentEntity = mockDocuments.get(entityPath)!;
+  mockDocuments.set(entityPath, { ...currentEntity, generation: currentEntity.generation + 1 });
+  await expect(
+    assertSandboxAssetPreparation(profile, { jobId: 'consumer-protocol-job', sourceStepIds: ['subsplash-upload'] })
+  ).rejects.toThrow('superseded');
+  expect(mockWrites).not.toHaveBeenCalled();
+  mockDocuments.set(entityPath, currentEntity);
+  const markerPath = '_providerSandbox/' + profile.profileId,
+    currentMarker = mockDocuments.get(markerPath)!;
+  mockDocuments.set(markerPath, { ...currentMarker, state: 'importing' });
+  await expect(
+    assertSandboxAssetPreparation(profile, { jobId: 'consumer-protocol-job', sourceStepIds: ['subsplash-upload'] })
+  ).rejects.toMatchObject({ code: 'PROVIDER_SANDBOX_CATALOG_NOT_READY' });
+  expect(mockWrites).not.toHaveBeenCalled();
+  mockDocuments.set(markerPath, currentMarker);
   const token = await authenticateSubsplash();
   expect(token).toBe('provider-sandbox:urm-app-staging-publishing-v1:subsplash');
   expect(createAxiosConfig('https://core.subsplash.com/files/v1/audios', token, 'GET').headers).toEqual(
