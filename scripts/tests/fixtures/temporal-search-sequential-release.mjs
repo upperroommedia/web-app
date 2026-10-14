@@ -433,6 +433,8 @@ async function fetchTransport(raw, options = {}) {
         metageneration: '1',
       };
   } else throw new Error('UNEXPECTED_NETWORK_' + raw);
+  if (process.argv[2]?.startsWith('ui-canonical') && parsed.hostname === 'firebaseapphosting.googleapis.com' && result)
+    result = JSON.parse(JSON.stringify(result).replaceAll(`projects/${projectId}/`, 'projects/123456789/'));
   return { ok: status === 200, status, json: async () => clone(result) };
 }
 function bootstrapTransport(args) {
@@ -995,6 +997,14 @@ if (process.argv[2] === 'ui-identity-migration') {
   await run('restore-auto');
   checkDomains(true);
   assert.equal(traffic.rolloutPolicy.disabled, false);
+  if (process.argv[2] === 'ui-canonical-recovery') {
+    await run('pause');
+    assert.equal(records.get('_control/temporalReleaseState').pausedFrom, 'complete');
+    await run('resume');
+    assert.equal(records.get('_control/temporalReleaseState').phase, 'ui-ready');
+    assert.equal(records.get('_control/temporalRelease').admission, 'paused');
+  }
+
   assert.deepEqual(records.get('_control/temporalProviderUsage'), marker);
   assert.deepEqual(versions.get('_control/temporalProviderUsage'), { createTime: markerTime, updateTime: markerTime });
   assert(

@@ -135,13 +135,34 @@ async function createOrObserve(api, name, requestId, queryKey, body) {
   return lookup(api, name);
 }
 
-function verifyBuild(build, identity) {
-  if (
-    build.name !== identity.buildName ||
-    (build.source?.codebase?.hash ?? build.source?.codebase?.commit) !== identity.uiCommit
-  )
+export function sameAppHostingResource(actual, expected, projectNumber) {
+  if (actual === expected && typeof actual === 'string') return true;
+  if (!/^\d+$/.test(String(projectNumber ?? ''))) return false;
+  const parse = (name) =>
+    typeof name === 'string' &&
+    name.match(/^projects\/([^/]+)(\/locations\/[^/]+\/backends\/[^/]+\/(?:builds|rollouts)\/[^/]+)$/);
+  const a = parse(actual),
+    e = parse(expected);
+  return !!(a && e && a[2] === e[2] && a[1] === String(projectNumber) && !/^\d+$/.test(e[1]));
+}
+
+export function verifyAppHostingBuild(build, identity, projectNumber) {
+  if (!sameAppHostingResource(build.name, identity.buildName, projectNumber))
     throw new Error('App Hosting build identity or immutable commit changed');
   if (FAILED_BUILDS.has(build.state)) throw new Error(`Reviewed App Hosting build is ${build.state}`);
+  const codebase = build.source?.codebase;
+  if (
+    (codebase?.commit && codebase.commit !== identity.uiCommit) ||
+    (codebase?.hash && codebase.hash !== identity.uiCommit)
+  )
+    throw new Error('App Hosting build identity or immutable commit changed');
+  // Hash is output-only and optional. Either exact full SHA proves the immutable source.
+  // Initial responses may omit both fields; observe them without claiming source readiness.
+  if (!(codebase?.hash || codebase?.commit)) {
+    if (build.reconciling || ['BUILDING', 'PENDING', 'STATE_UNSPECIFIED'].includes(build.state)) return false;
+    throw new Error('App Hosting build lacks an immutable commit');
+  }
+  return true;
 }
 
 /**
@@ -150,7 +171,7 @@ function verifyBuild(build, identity) {
  * before returning. Persist that identity unchanged on every later invocation.
  * Official REST create exposes IDs that the Firebase rollout CLI does not expose.
  */
-export async function reconcileAppHostingRollout({ config, checkpoint, api, saveIdentity }) {
+export async function reconcileAppHostingRollout({ config, checkpoint, api, saveIdentity, projectNumber }) {
   const identity = rolloutIdentity(config);
   if (
     checkpoint &&
@@ -168,7 +189,9 @@ export async function reconcileAppHostingRollout({ config, checkpoint, api, save
     );
     if (
       (page.rollouts ?? []).some(
-        (rollout) => rollout.name !== identity.rolloutName && !TERMINAL_ROLLOUTS.has(rollout.state)
+        (rollout) =>
+          !sameAppHostingResource(rollout.name, identity.rolloutName, projectNumber) &&
+          !TERMINAL_ROLLOUTS.has(rollout.state)
       )
     )
       throw new Error('Unexpected concurrent App Hosting rollout; admissions remain paused');
@@ -183,7 +206,7 @@ export async function reconcileAppHostingRollout({ config, checkpoint, api, save
       labels: { 'temporal-release': identity.releaseId.toLowerCase() },
     });
   if (!build) return { status: 'pending', identity };
-  verifyBuild(build, identity);
+  if (!verifyAppHostingBuild(build, identity, projectNumber)) return { status: 'pending', identity };
 
   let rollout = await lookup(api, identity.rolloutName);
   if (!rollout)
@@ -192,7 +215,10 @@ export async function reconcileAppHostingRollout({ config, checkpoint, api, save
       labels: { 'temporal-release': identity.releaseId.toLowerCase() },
     });
   if (!rollout) return { status: 'pending', identity };
-  if (rollout.name !== identity.rolloutName || rollout.build !== identity.buildName)
+  if (
+    !sameAppHostingResource(rollout.name, identity.rolloutName, projectNumber) ||
+    !sameAppHostingResource(rollout.build, identity.buildName, projectNumber)
+  )
     throw new Error('App Hosting rollout identity changed');
   if (TERMINAL_ROLLOUTS.has(rollout.state) && rollout.state !== 'SUCCEEDED')
     throw new Error(`Reviewed App Hosting rollout is ${rollout.state}`);
@@ -205,12 +231,12 @@ export async function reconcileAppHostingRollout({ config, checkpoint, api, save
     rollout.reconciling ||
     current.reconciling ||
     splits.length !== 1 ||
-    splits[0].build !== identity.buildName ||
+    !sameAppHostingResource(splits[0].build, identity.buildName, projectNumber) ||
     splits[0].percent !== 100
   )
     return { status: 'pending', identity };
   build = await api(identity.buildName);
-  verifyBuild(build, identity);
+  if (!verifyAppHostingBuild(build, identity, projectNumber)) return { status: 'pending', identity };
   if (build.state !== 'READY' || build.reconciling) return { status: 'pending', identity };
   return { status: 'ready', identity, buildName: identity.buildName, rolloutName: identity.rolloutName };
 }
@@ -253,15 +279,16 @@ export async function restoreReviewedUiRecovery({
   savedRolloutPolicy,
   api,
   settleOperation,
+  projectNumber,
 }) {
-  if (!buildName?.startsWith(`${parent}/builds/`) || !/^[a-f0-9]{40}$/.test(uiCommit))
+  const expectedBuildName = `${parent}/builds/${buildName?.split('/').at(-1)}`;
+  if (!sameAppHostingResource(buildName, expectedBuildName, projectNumber) || !/^[a-f0-9]{40}$/.test(uiCommit))
     throw new Error('Reviewed recovery build identity is required');
   const checkBuild = (build) => {
     if (
-      build.name !== buildName ||
+      !verifyAppHostingBuild(build, { buildName: expectedBuildName, uiCommit }, projectNumber) ||
       build.state !== 'READY' ||
-      build.reconciling ||
-      (build.source?.codebase?.hash ?? build.source?.codebase?.commit) !== uiCommit
+      build.reconciling
     )
       throw new Error('Recovery build is not the verified READY immutable commit');
   };
@@ -271,7 +298,7 @@ export async function restoreReviewedUiRecovery({
   if (traffic.reconciling) throw new Error('Recovery traffic is still pending; retry after it settles');
   const matches = (value) =>
     value.current?.splits?.length === 1 &&
-    value.current.splits[0].build === buildName &&
+    sameAppHostingResource(value.current.splits[0].build, expectedBuildName, projectNumber) &&
     value.current.splits[0].percent === 100;
   if (!matches(traffic)) {
     await settleOperation(
