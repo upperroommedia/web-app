@@ -605,8 +605,8 @@
     "semantic_hash": ""
   },
   "apps/web/components/uploaderComponents/UploaderComponent.tsx": {
-    "mtime": 1791961998.2563477,
-    "ast_hash": "161d13320d69dcfff1d44a54806f54c9",
+    "mtime": 1792020127.466643,
+    "ast_hash": "ecf6e3d3e52d8a8bd0646e80d6fe0b54",
     "semantic_hash": ""
   },
   "apps/web/components/uploaderComponents/UploaderDatePicker.tsx": {
@@ -920,13 +920,13 @@
     "semantic_hash": ""
   },
   "apps/web/tests/audio-player.spec.ts": {
-    "mtime": 1792008783.4614863,
-    "ast_hash": "d26156920336453c190113a143334c72",
+    "mtime": 1792019980.5554168,
+    "ast_hash": "86b22f5c3d9fdda6a3d1282fad673b6c",
     "semantic_hash": ""
   },
   "apps/web/tests/audio-trimmer.spec.ts": {
-    "mtime": 1792008783.4617782,
-    "ast_hash": "516a4e7e2caa28ac87943e11731cef0a",
+    "mtime": 1792020197.7227798,
+    "ast_hash": "1c2ca33308a4e4d35de8f69ec68804dd",
     "semantic_hash": ""
   },
   "apps/web/tests/helpers/seedPlayableSermon.ts": {
@@ -945,8 +945,8 @@
     "semantic_hash": ""
   },
   "apps/web/tests/player-clear-on-upload.spec.ts": {
-    "mtime": 1792008783.461897,
-    "ast_hash": "2116f61f76b22267d025a57ce83cec72",
+    "mtime": 1792020127.565707,
+    "ast_hash": "49573e701846105f195a81542b50c317",
     "semantic_hash": ""
   },
   "apps/web/tests/utils/categoryScopedLists.test.ts": {
@@ -4240,8 +4240,8 @@
     "semantic_hash": ""
   },
   "docs/STAGING_SETUP.md": {
-    "mtime": 1792014399.6503963,
-    "ast_hash": "b2f6916fddffb4670fd0085088a00fcd",
+    "mtime": 1792020314.7493124,
+    "ast_hash": "090b5c74727c388b0d1f3440340cc988",
     "semantic_hash": ""
   },
   "docs/YOUTUBE_TRIMMER_IOS.md": {
@@ -6935,8 +6935,8 @@
     "semantic_hash": ""
   },
   ".github/workflows/temporal-application-validation.yml": {
-    "mtime": 1792008827.8366253,
-    "ast_hash": "146c2904b4bf6bbfdd7474243281d8aa",
+    "mtime": 1792019785.285564,
+    "ast_hash": "e1f12264e831bea8a47beb78a4dbd944",
     "semantic_hash": ""
   },
   ".github/workflows/temporal-platform-deploy.yml": {
@@ -7985,13 +7985,13 @@
     "semantic_hash": ""
   },
   "scripts/tests/authenticated-player-browser.mjs": {
-    "mtime": 1792009235.4715083,
-    "ast_hash": "a487b91080153fb90b0981384068f153",
+    "mtime": 1792019834.3832383,
+    "ast_hash": "13c227ad2ff60417221d69813734ea23",
     "semantic_hash": ""
   },
   "scripts/tests/authenticated-player-browser.test.mjs": {
-    "mtime": 1792009236.370218,
-    "ast_hash": "8d37a8671e8615d2ae25422a4f76e245",
+    "mtime": 1792019939.759222,
+    "ast_hash": "e0dd7c8d24cf2056d3ae0969499b9349",
     "semantic_hash": ""
   },
   "functions/tsconfig.test.json": {
@@ -8002,6 +8002,31 @@
   "scripts/tests/functions-test-pipeline.test.mjs": {
     "mtime": 1792012832.2717223,
     "ast_hash": "c6ed89078d8859268113f465b14db953",
+    "semantic_hash": ""
+  },
+  "apps/web/tests/helpers/mediaBackendFixture.ts": {
+    "mtime": 1792020127.504619,
+    "ast_hash": "628877f2d8071c10548116e050e71859",
+    "semantic_hash": ""
+  },
+  "apps/web/tests/helpers/ownedAudioFixture.ts": {
+    "mtime": 1792020386.841006,
+    "ast_hash": "78451f8c42ff8dc24979eb562fa681e6",
+    "semantic_hash": ""
+  },
+  "apps/web/tests/utils/mediaBackendFixture.test.ts": {
+    "mtime": 1792020387.2017481,
+    "ast_hash": "07d30ec7eb3bd7017c51e7fb3b76a3d8",
+    "semantic_hash": ""
+  },
+  "apps/web/utils/uploaderCatalog.test.ts": {
+    "mtime": 1792020127.490566,
+    "ast_hash": "4473cca5fd38d9175f06b7ef1448c090",
+    "semantic_hash": ""
+  },
+  "apps/web/utils/uploaderCatalog.ts": {
+    "mtime": 1792020127.4764364,
+    "ast_hash": "81ec98fa170548321947d02fcdc91fb2",
     "semantic_hash": ""
   }
 }

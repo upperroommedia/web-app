@@ -1,9 +1,10 @@
-import { installMediaProviderStatusFixture } from './helpers/providerStatusFixture';
+import { routePlayableAudio } from './helpers/ownedAudioFixture';
+import { installMediaBackendFixtures } from './helpers/mediaBackendFixture';
 import { expect, test } from '@playwright/test';
 import { seedPlayableSermon } from './helpers/seedPlayableSermon';
 
 test.beforeEach(async ({ page }) => {
-  await installMediaProviderStatusFixture(page);
+  await installMediaBackendFixtures(page);
 });
 
 async function loginAsDevAdmin(page: import('@playwright/test').Page) {
@@ -23,7 +24,9 @@ async function playSermonFromSearch(page: import('@playwright/test').Page, sermo
   await searchBox.fill(sermonTitle);
   await expect(page.getByText(sermonTitle)).toBeVisible({ timeout: 10_000 });
 
-  const playButton = page.locator('button:has([data-testid="PlayArrowIcon"])').first();
+  const card = page.locator('.MuiCard-root').filter({ has: page.getByText(sermonTitle, { exact: true }) });
+  await expect(card).toHaveCount(1);
+  const playButton = card.locator('button:has([data-testid="PlayArrowIcon"])');
   await expect(playButton).toBeVisible();
   await playButton.click();
 }
@@ -34,6 +37,7 @@ test.describe('Audio player (floating bar)', () => {
   test('player visible and main content has bottom padding when playing on admin sermons', async ({ page }) => {
     const seededSermon = await seedPlayableSermon();
     try {
+      await routePlayableAudio(page, seededSermon.id);
       await loginAsDevAdmin(page);
       await page.goto('/admin/sermons');
 
@@ -61,6 +65,7 @@ test.describe('Audio player (floating bar)', () => {
     const seededSermon = await seedPlayableSermon();
     try {
       await page.setViewportSize({ width: 375, height: 667 });
+      await routePlayableAudio(page, seededSermon.id);
       await loginAsDevAdmin(page);
       await page.goto('/admin/sermons');
 
@@ -83,60 +88,6 @@ test.describe('Audio player (floating bar)', () => {
     }
   });
 });
-
-// Local deterministic media: browser exercises real Video.js/native audio without
-// contacting a media provider or requiring a pre-existing Storage object.
-async function routePlayableAudio(page: import('@playwright/test').Page, sermonId: string, failFirstMetadata = false) {
-  let metadataRequests = 0;
-  const samples = 8_000 * 60;
-  const wav = Buffer.alloc(44 + samples, 128);
-  wav.write('RIFF', 0);
-  wav.writeUInt32LE(36 + samples, 4);
-  wav.write('WAVEfmt ', 8);
-  wav.writeUInt32LE(16, 16);
-  wav.writeUInt16LE(1, 20);
-  wav.writeUInt16LE(1, 22);
-  wav.writeUInt32LE(8_000, 24);
-  wav.writeUInt32LE(8_000, 28);
-  wav.writeUInt16LE(1, 32);
-  wav.writeUInt16LE(8, 34);
-  wav.write('data', 36);
-  wav.writeUInt32LE(samples, 40);
-  await page.route('**/o/**', async (route) => {
-    const url = new URL(route.request().url());
-    if (!decodeURIComponent(url.pathname).includes(`intro-outro-sermons/${sermonId}`)) return route.continue();
-    const headers = {
-      'access-control-allow-origin': route.request().headers().origin || '*',
-      'access-control-allow-credentials': 'true',
-      'access-control-allow-headers': route.request().headers()['access-control-request-headers'] || '*',
-      'access-control-allow-methods': 'GET, HEAD, OPTIONS',
-    };
-    if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers });
-    if (url.searchParams.get('alt') === 'media') {
-      return route.fulfill({ status: 200, contentType: 'audio/wav', headers, body: wav });
-    }
-    if (failFirstMetadata && metadataRequests++ === 0) {
-      return route.fulfill({
-        status: 404,
-        headers,
-        json: { error: { code: 404, message: 'Fixture temporarily unavailable' } },
-      });
-    }
-    const bucket = decodeURIComponent(url.pathname.split('/b/')[1].split('/o/')[0]);
-    return route.fulfill({
-      headers,
-      json: {
-        name: `intro-outro-sermons/${sermonId}`,
-        bucket,
-        contentType: 'audio/wav',
-        size: String(wav.length),
-        generation: '1',
-        metageneration: '1',
-        downloadTokens: 'local-browser-fixture',
-      },
-    });
-  });
-}
 
 test('real audio controls support pause, keyboard seek/volume, mute and close with local media', async ({ page }) => {
   const seeded = await seedPlayableSermon();

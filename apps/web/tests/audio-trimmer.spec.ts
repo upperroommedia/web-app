@@ -1,9 +1,9 @@
-import { installMediaProviderStatusFixture } from './helpers/providerStatusFixture';
+import { installMediaBackendFixtures } from './helpers/mediaBackendFixture';
 import { expect, test } from '@playwright/test';
 import type { ConsoleMessage, Page } from '@playwright/test';
 
 test.beforeEach(async ({ page }) => {
-  await installMediaProviderStatusFixture(page);
+  await installMediaBackendFixtures(page);
 });
 
 function createSilentWav(durationSeconds = 0.5, sampleRate = 44100) {
@@ -48,6 +48,51 @@ function collectTrimmerBrowserErrors(page: Page) {
 }
 
 test.describe('Audio trimmer', () => {
+  test('catalog bundle outage falls back to Firestore without blocking local audio controls', async ({ page }) => {
+    const pageErrors: string[] = [];
+    page.on('pageerror', (error) => pageErrors.push(error.message));
+    const rejected = new Set<string>();
+    const endpoints = new Set(
+      ['createsubtitlebundle', 'createlatestlistbundle'].map(
+        (name) => `http://127.0.0.1:5001/demo-temporal-ci/us-central1/${name}`
+      )
+    );
+    if (process.env.URM_MEDIA_BROWSER_STATUS_FIXTURE !== 'true' || process.env.GCLOUD_PROJECT !== 'demo-temporal-ci')
+      throw new Error('Catalog outage regression requires the isolated demo harness');
+    await page.route(
+      (url) => endpoints.has(url.href),
+      async (route) => {
+        if (route.request().method() !== 'GET') return route.fallback();
+        rejected.add(route.request().url());
+        await route.fulfill({
+          status: 503,
+          headers: { 'access-control-allow-origin': 'http://127.0.0.1:3004', vary: 'Origin' },
+          body: 'Deliberate catalog bundle outage',
+        });
+      }
+    );
+    await loginAsDevAdmin(page);
+    await expect(page.getByRole('button', { name: 'Upload', exact: true })).toBeEnabled();
+    expect(rejected.size).toBe(2);
+    const dropzone = page.getByText('Drag & drop audio files here, or click to select files').locator('..');
+    await dropzone
+      .locator('input')
+      .setInputFiles({ name: 'outage-draft.wav', mimeType: 'audio/wav', buffer: createSilentWav(10) });
+    const play = page.getByRole('button', { name: 'Play', exact: true });
+    await expect(play).toBeEnabled();
+    await play.click();
+    const pause = page.getByRole('button', { name: 'Pause', exact: true });
+    await expect(pause).toBeVisible();
+    await pause.click();
+    const start = page.getByRole('textbox', { name: 'Trim Start' });
+    await start.click();
+    await start.press('ControlOrMeta+A');
+    await start.pressSequentially('0000010');
+    await start.blur();
+    await expect(start).toHaveValue('00:00:01.0');
+    expect(pageErrors).toEqual([]);
+  });
+
   test('scrub, trim end, and reset without console errors', async ({ page }) => {
     await loginAsDevAdmin(page);
 
@@ -320,8 +365,16 @@ test.describe('Bounded optional waveform lifetime', () => {
     await expect(page.getByRole('button', { name: 'Play', exact: true })).toBeEnabled();
     expect((await snapshot()).previewReads).toBe(before.previewReads);
     page.on('dialog', (dialog) => dialog.accept());
-    await page.locator('a[href="/admin/activity"]').first().click();
+    await page.evaluate(() => {
+      Object.assign(window, { __mediaSpaNavigation: 'waveform-lifetime' });
+    });
+    const activityLink = page.getByRole('link', { name: 'Activity', exact: true });
+    if (!(await activityLink.isVisible())) await page.getByRole('button', { name: 'open drawer', exact: true }).click();
+    await activityLink.click();
     await expect(page.getByRole('heading', { name: 'Activity', exact: true })).toBeVisible();
+    expect(
+      await page.evaluate(() => (window as unknown as { __mediaSpaNavigation?: string }).__mediaSpaNavigation)
+    ).toBe('waveform-lifetime');
     await expect
       .poll(async () => {
         const current = await snapshot();
@@ -343,7 +396,9 @@ test.describe('Bounded optional waveform lifetime', () => {
     await expect(page.getByRole('button', { name: 'Play', exact: true })).toBeEnabled();
     const start = page.getByRole('textbox', { name: 'Trim Start' });
     await expect(start).toBeEnabled();
-    await start.fill('00:00:01.0');
+    await start.click();
+    await start.press('ControlOrMeta+A');
+    await start.pressSequentially('0000010');
     await start.blur();
     await expect(start).toHaveValue('00:00:01.0');
   });

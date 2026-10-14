@@ -2,7 +2,8 @@
 import assert from 'node:assert/strict';
 import { DEV_ADMIN_EMAIL, DEV_ADMIN_PASSWORD } from '../../apps/web/context/user/devAuth.ts';
 import { spawn } from 'node:child_process';
-import { readFile, readdir } from 'node:fs/promises';
+import { readFile, readdir, mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { createRequire } from 'node:module';
 import net from 'node:net';
 import { resolve } from 'node:path';
@@ -26,6 +27,86 @@ const delay = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export function devAdminSeed() {
   return { uid: 'ci-player-admin', email: DEV_ADMIN_EMAIL, password: DEV_ADMIN_PASSWORD, emailVerified: true };
+}
+
+export function loadMediaFixtureSources(require) {
+  const service = require('ts-node').register({
+    project: resolve(ROOT, 'functions/tsconfig.json'),
+    transpileOnly: true,
+  });
+  try {
+    const source = require(resolve(ROOT, 'apps/web/shared/bundleConfigs.ts'));
+    const configs = ['TOPIC', 'SUBTITLE', 'BIBLE_CHAPTER', 'SUNDAY_HOMILY', 'HOLY_WEEK', 'LATEST_LIST'].map(
+      (name) => source[`${name}_BUNDLE_CONFIG`]
+    );
+    assert.equal(configs.length, 6);
+    assert.equal(new Set(configs.map((config) => config.functionName)).size, 6);
+    const { toDirectoryUser } = require(resolve(ROOT, 'functions/src/userDirectory.ts'));
+    return { configs, toDirectoryUser };
+  } finally {
+    service.enabled(false);
+  }
+}
+
+export async function buildMediaBackendFixture({ db, auth, database, configs, toDirectoryUser }) {
+  assert.equal(db.projectId, PROJECT, 'Demo Firestore required for fixtures');
+  assert.equal(auth.app.options.projectId, PROJECT, 'Demo Auth required for fixtures');
+  assert.equal(database.app.options.projectId, PROJECT, 'Demo RTDB required for fixtures');
+  const uid = 'playwright-e2e';
+  await auth.createUser({
+    uid,
+    email: 'media-uploader@example.test',
+    displayName: 'Media Fixture Uploader',
+    emailVerified: true,
+  });
+  await auth.setCustomUserClaims(uid, { role: 'uploader' });
+  const users = [toDirectoryUser(await auth.getUser(uid))];
+  assert.equal(users[0].uid, uid);
+  const bundles = {};
+  for (const config of configs) {
+    assert(/^[a-z]+bundle$/.test(config.functionName), 'Unexpected fixture endpoint');
+    assert(!bundles[config.functionName], 'Duplicate fixture endpoint');
+    let query = db.collection(config.collectionName);
+    for (const condition of config.whereConditions ?? [])
+      query = query.where(condition.field, condition.operator, condition.value);
+    if (config.orderByField) query = query.orderBy(config.orderByField);
+    const snapshot = await query.get();
+    const timestamp = snapshot.readTime.toMillis();
+    assert(Number.isSafeInteger(timestamp) && timestamp > 0);
+    const body = db.bundle(`media-ci-${config.bundleType}`).add(config.namedQuery, snapshot).build();
+    assert(
+      Buffer.isBuffer(body) && body.length > 0 && body.length <= 1024 * 1024,
+      'Invalid or oversized Firestore bundle'
+    );
+    bundles[config.functionName] = { namedQuery: config.namedQuery, bodyBase64: body.toString('base64'), timestamp };
+    await database
+      .ref(config.metadataDocPath)
+      .set({ lastUpdated: timestamp, count: snapshot.size, storagePath: config.bundlePath });
+  }
+  assert.equal(Object.keys(bundles).length, 6);
+  return { schemaVersion: 1, projectId: PROJECT, bundles, users };
+}
+
+export async function cleanupMediaSeed(db, database, app, deleteApp, originalError) {
+  const errors = originalError ? [originalError] : [];
+  for (const close of [() => db.terminate(), () => database.goOffline(), () => deleteApp(app)]) {
+    try {
+      await close();
+    } catch (error) {
+      errors.push(error);
+    }
+  }
+  if (errors.length === 1) throw errors[0];
+  if (errors.length > 1) throw new AggregateError(errors, 'Demo fixture seed and cleanup failed');
+}
+
+export async function prewarmMediaRoutes(baseURL, request = fetch) {
+  assert.equal(baseURL, 'http://127.0.0.1:3004');
+  for (const path of ['/login', '/', '/admin/sermons']) {
+    const response = await request(`${baseURL}${path}`, { redirect: 'error', signal: AbortSignal.timeout(90_000) });
+    await response.body?.cancel();
+    assert(response.ok, `Owned media route did not compile successfully: ${path} (${response.status})`);
+  }
 }
 
 export function isLoadedDotenv(name) {
@@ -170,6 +251,7 @@ async function main() {
   let child;
   let failure;
   let stopping = false;
+  let fixtureDirectory;
   const abort = () => {
     failure ??= new Error('Authenticated browser check interrupted');
     if (child?.pid && groupAlive(child)) process.kill(-child.pid, 'SIGTERM');
@@ -188,13 +270,30 @@ async function main() {
       const require = createRequire(resolve(ROOT, 'functions/package.json'));
       const { initializeApp, deleteApp } = require('firebase-admin/app');
       const { getAuth } = require('firebase-admin/auth');
-      const app = initializeApp({ projectId: PROJECT }, 'ci-player-seed');
+      const { getFirestore } = require('firebase-admin/firestore');
+      const { getDatabase } = require('firebase-admin/database');
+      const app = initializeApp(
+        { projectId: PROJECT, databaseURL: JSON.parse(env.FIREBASE_CONFIG).databaseURL },
+        'ci-player-seed'
+      );
+      const db = getFirestore(app);
+      const database = getDatabase(app);
+      let seedError;
       try {
         const auth = getAuth(app);
         await auth.createUser(devAdminSeed());
         await auth.setCustomUserClaims('ci-player-admin', { role: 'admin' });
+        const source = loadMediaFixtureSources(require);
+        const fixture = await buildMediaBackendFixture({ db, auth, database, ...source });
+        const json = JSON.stringify(fixture);
+        assert(Buffer.byteLength(json) <= 8 * 1024 * 1024, 'Media fixtures exceed budget');
+        fixtureDirectory = await mkdtemp(resolve(tmpdir(), 'urm-media-browser-'));
+        env.URM_MEDIA_BROWSER_BUNDLE_FIXTURES_FILE = resolve(fixtureDirectory, 'fixtures.json');
+        await writeFile(env.URM_MEDIA_BROWSER_BUNDLE_FIXTURES_FILE, json, { mode: 0o600, flag: 'wx' });
+      } catch (error) {
+        seedError = error;
       } finally {
-        await deleteApp(app);
+        await cleanupMediaSeed(db, database, app, deleteApp, seedError);
       }
       child = start(['--dir', 'apps/web', 'run', 'dev', '--hostname', '127.0.0.1', '--port', '3004'], env);
       const ready = async () => {
@@ -216,8 +315,24 @@ async function main() {
           throw new Error('Next exited before tests');
         }),
       ]);
+      await Promise.race([
+        prewarmMediaRoutes(env.PLAYWRIGHT_BASE_URL),
+        child.result.then(() => {
+          throw new Error('Next exited during route compilation');
+        }),
+      ]);
       const browser = start(
-        ['--dir', 'apps/web', 'exec', 'playwright', 'test', ...SPECS, '--workers=1', '--reporter=line'],
+        [
+          '--dir',
+          'apps/web',
+          'exec',
+          'playwright',
+          'test',
+          ...SPECS,
+          '--workers=1',
+          '--reporter=line',
+          '--trace=retain-on-failure',
+        ],
         env
       );
       try {
@@ -240,6 +355,13 @@ async function main() {
       await assertClosed(process.argv.includes('--inside-emulators') ? [3004] : [...Object.values(ports), 3004]);
     } catch (error) {
       failure = failure ? new AggregateError([failure, error], 'Checks and cleanup failed') : error;
+    }
+    if (fixtureDirectory) {
+      try {
+        await rm(fixtureDirectory, { recursive: true, force: true });
+      } catch (error) {
+        failure = failure ? new AggregateError([failure, error], 'Checks and fixture cleanup failed') : error;
+      }
     }
     process.off('SIGTERM', abort);
     process.off('SIGINT', abort);

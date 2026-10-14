@@ -4,6 +4,10 @@ import { DEV_ADMIN_EMAIL, DEV_ADMIN_PASSWORD } from '../../apps/web/context/user
 import { readFileSync } from 'node:fs';
 import {
   emulatorPorts,
+  loadMediaFixtureSources,
+  buildMediaBackendFixture,
+  cleanupMediaSeed,
+  prewarmMediaRoutes,
   devAdminSeed,
   isLoadedDotenv,
   isolatedEnvironment,
@@ -198,15 +202,18 @@ test('real TypeScript media fixture limits routes and rejects foreign or malform
       else process.env[key] = original[key];
   }
 });
-test('each media spec installs the narrow fixture before any login', () => {
+test('each media spec installs the backend fixtures and status guard before any login', () => {
   for (const spec of SPECS) {
     const source = readFileSync(new URL(`../../apps/web/${spec}`, import.meta.url), 'utf8');
-    assert.match(
-      source,
-      /test\.beforeEach\(async \(\{ page \}\) => \{\s*await installMediaProviderStatusFixture\(page\);/
-    );
+    assert.match(source, /test\.beforeEach\(async \(\{ page \}\) => \{\s*await installMediaBackendFixtures\(page\);/);
+    assert.match(source, /import \{ installMediaBackendFixtures \} from '\.\/helpers\/mediaBackendFixture'/);
     assert(source.indexOf('test.beforeEach') < source.indexOf('async function loginAsDevAdmin'));
   }
+  const adapter = readFileSync(new URL('../../apps/web/tests/helpers/mediaBackendFixture.ts', import.meta.url), 'utf8');
+  assert.match(
+    adapter,
+    /export async function installMediaBackendFixtures\(page: Page\): Promise<void> \{\s*await installMediaProviderStatusFixture\(page\);/
+  );
 });
 
 test('rejects only loadable dotenv files, permits tracked inert templates', () => {
@@ -236,4 +243,188 @@ test('seeds the real emulator dev-login fixture without duplicating its credenti
   assert.equal(source.includes(DEV_ADMIN_EMAIL), false);
   assert.equal(source.includes(DEV_ADMIN_PASSWORD), false);
   assert.match(source, /await auth\.createUser\(devAdminSeed\(\)\)/);
+});
+
+test('actual six bundle configs and directory mapper load without initializing a browser Firebase app', async () => {
+  const { createRequire } = await import('node:module');
+  const require = createRequire(new URL('../../functions/package.json', import.meta.url));
+  const { configs, toDirectoryUser } = loadMediaFixtureSources(require);
+  assert.deepEqual(
+    configs.map((config) => [config.functionName, config.namedQuery]),
+    [
+      ['createtopicbundle', 'latest-topics-query'],
+      ['createsubtitlebundle', 'latest-subtitles-query'],
+      ['createbiblechapterbundle', 'latest-bible-chapters-query'],
+      ['createsundayhomilybundle', 'latest-sunday-homilies-query'],
+      ['createholyweekbundle', 'latest-holy-week-query'],
+      ['createlatestlistbundle', 'latest-list-query'],
+    ]
+  );
+  assert.equal(
+    Object.keys(require.cache).some((path) => path.endsWith('/apps/web/firebase/firebase.ts')),
+    false
+  );
+  const user = toDirectoryUser({
+    uid: 'playwright-e2e',
+    email: 'media-uploader@example.test',
+    metadata: {},
+    providerData: [],
+    customClaims: { role: 'uploader' },
+    emailVerified: true,
+  });
+  assert.equal(user.uid, 'playwright-e2e');
+  assert.equal(user.role, 'uploader');
+  assert.equal(user.refreshToken, '');
+});
+
+test('bundle fixture uses actual config filters and order, owned user and metadata with bounded bytes', async () => {
+  const { createRequire } = await import('node:module');
+  const { configs, toDirectoryUser } = loadMediaFixtureSources(
+    createRequire(new URL('../../functions/package.json', import.meta.url))
+  );
+  const events = [];
+  const app = { options: { projectId: PROJECT } };
+  const record = {
+    uid: 'playwright-e2e',
+    email: 'media-uploader@example.test',
+    metadata: {},
+    providerData: [],
+    customClaims: { role: 'uploader' },
+    emailVerified: true,
+  };
+  const auth = {
+    app,
+    createUser: async (value) => {
+      events.push(['user', value.uid]);
+    },
+    setCustomUserClaims: async (uid, claims) => {
+      events.push(['claims', uid, claims]);
+    },
+    getUser: async (uid) => {
+      assert.equal(uid, record.uid);
+      return record;
+    },
+  };
+  const db = {
+    projectId: PROJECT,
+    collection: (name) => {
+      const operations = [['collection', name]];
+      const query = {
+        where: (...args) => {
+          operations.push(['where', ...args]);
+          return query;
+        },
+        orderBy: (field) => {
+          operations.push(['orderBy', field]);
+          return query;
+        },
+        get: async () => {
+          events.push(operations);
+          return { size: 0, readTime: { toMillis: () => 123456 } };
+        },
+      };
+      return query;
+    },
+    bundle: (id) => ({
+      add: (name, snapshot) => {
+        events.push(['bundle', id, name, snapshot.size]);
+        return { build: () => Buffer.from('SDK-builder-test-result') };
+      },
+    }),
+  };
+  const database = { app, ref: (path) => ({ set: async (value) => events.push(['metadata', path, value]) }) };
+  const fixture = await buildMediaBackendFixture({ db, auth, database, configs, toDirectoryUser });
+  assert.equal(fixture.projectId, PROJECT);
+  assert.equal(fixture.schemaVersion, 1);
+  assert.equal(Object.keys(fixture.bundles).length, 6);
+  assert.equal(fixture.users[0].uid, record.uid);
+  assert.deepEqual(
+    events.filter((e) => e[0]?.[0] === 'collection'),
+    configs.map((c) => [
+      ['collection', c.collectionName],
+      ...(c.whereConditions ?? []).map((w) => ['where', w.field, w.operator, w.value]),
+      ...(c.orderByField ? [['orderBy', c.orderByField]] : []),
+    ])
+  );
+  for (const c of configs) {
+    assert.equal(fixture.bundles[c.functionName].namedQuery, c.namedQuery);
+    assert(events.some((e) => e[0] === 'metadata' && e[1] === c.metadataDocPath && e[2].lastUpdated === 123456));
+  }
+  await assert.rejects(
+    buildMediaBackendFixture({ db: { ...db, projectId: 'urm-app' }, auth, database, configs, toDirectoryUser }),
+    /Demo Firestore/
+  );
+  await assert.rejects(
+    buildMediaBackendFixture({
+      db,
+      auth: { ...auth, app: { options: { projectId: 'urm-app' } } },
+      database,
+      configs,
+      toDirectoryUser,
+    }),
+    /Demo Auth/
+  );
+  await assert.rejects(
+    buildMediaBackendFixture({
+      db,
+      auth,
+      database: { ...database, app: { options: { projectId: 'urm-app' } } },
+      configs,
+      toDirectoryUser,
+    }),
+    /Demo RTDB/
+  );
+  const tooLarge = { ...db, bundle: () => ({ add: () => ({ build: () => Buffer.alloc(1024 * 1024 + 1) }) }) };
+  await assert.rejects(
+    buildMediaBackendFixture({ db: tooLarge, auth, database, configs, toDirectoryUser }),
+    /oversized/
+  );
+});
+
+test('seed teardown tries every owned SDK even on seed and cleanup failures', async () => {
+  const seed = new Error('seed failed'),
+    close = new Error('Firestore close failed'),
+    order = [];
+  await assert.rejects(
+    cleanupMediaSeed(
+      {
+        terminate: async () => {
+          order.push('firestore');
+          throw close;
+        },
+      },
+      { goOffline: () => order.push('database') },
+      { name: 'owned' },
+      async (app) => {
+        assert.equal(app.name, 'owned');
+        order.push('app');
+      },
+      seed
+    ),
+    (error) => error instanceof AggregateError && error.errors[0] === seed && error.errors[1] === close
+  );
+  assert.deepEqual(order, ['firestore', 'database', 'app']);
+});
+
+test('prewarms only fixed demo media pages and fails on compilation errors', async () => {
+  const urls = [];
+  await prewarmMediaRoutes('http://127.0.0.1:3004', async (url, options) => {
+    urls.push(url);
+    assert.equal(options.redirect, 'error');
+    return { ok: true, body: { cancel: async () => {} } };
+  });
+  assert.deepEqual(urls, [
+    'http://127.0.0.1:3004/login',
+    'http://127.0.0.1:3004/',
+    'http://127.0.0.1:3004/admin/sermons',
+  ]);
+  await assert.rejects(prewarmMediaRoutes('https://production.example'), /Expected values/);
+  await assert.rejects(
+    prewarmMediaRoutes('http://127.0.0.1:3004', async () => ({
+      ok: false,
+      status: 500,
+      body: { cancel: async () => {} },
+    })),
+    /did not compile/
+  );
 });

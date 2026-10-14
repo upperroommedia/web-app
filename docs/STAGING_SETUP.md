@@ -22,6 +22,10 @@ Emulator-backed tests use the unchanged `firebase.test.json` configuration. Brow
 
 Hosts remain `127.0.0.1`; overrides must be integer ports from 1 through 65535. These values do not select a publishing mode or change production endpoints. An existing Admin Auth emulator endpoint supplied by `firebase emulators:exec` is preserved.
 
+Authenticated media tests generate real named-query bundle bytes and directory records from their isolated demo Firebase services. Exact test-only routes serve the six catalog endpoints and uploader-directory callable needed by the media screens. Owned WAV routes isolate playback regressions; playback of actual uploaded assets remains a separate end-to-end check. Development pages compile before the timed media checks; production cold navigation remains a separate check. Failed media runs retain their test traces for three days.
+
+Catalog failures offer a retry and pause new upload submissions while preserving local audio and destination choices. Accepted uploads continue through their existing receipts and recovery paths without requiring a catalog refresh.
+
 Functions test commands run `typecheck:tests` before starting emulators. This checks the complete Functions and orchestration test roots with strict TypeScript, then Jest uses isolated file transforms to avoid repeating the same project type check in each worker. Tests still run serially with the worker memory limit. GitHub Actions receives Jest annotations and a final summary.
 
 Before a direct, focused Jest invocation, run `pnpm --dir functions run typecheck:tests` to retain the complete type check. Firebase Functions compile to ES2022 for the configured Node 22 runtime.

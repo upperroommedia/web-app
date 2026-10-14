@@ -7,7 +7,15 @@ import { ChangeEvent, useCallback, useEffect, useMemo, useState, useRef } from '
 import TextField from '@mui/material/TextField';
 import Box from '@mui/material/Box';
 
-import firestore, { collection, getDocs, query, where, doc, getDoc } from '../../firebase/firestore';
+import {
+  loadUploaderCatalog,
+  readCompleteUploaderCatalog,
+  applyLatestUploaderDefault,
+  catalogBlocksNewAdmission,
+} from '../../utils/uploaderCatalog';
+import type { Dispatch, SetStateAction } from 'react';
+import type { QueryDocumentSnapshot } from 'firebase/firestore';
+import firestore, { collection, getDocs, query, where, doc, getDoc, limit, startAfter } from '../../firebase/firestore';
 import { createEmptySermon } from '../../types/Sermon';
 import { Sermon } from '../../types/SermonTypes';
 import Radio from '@mui/material/Radio';
@@ -148,7 +156,14 @@ const Uploader = (props: UploaderProps) => {
     }
     return createEmptySermon(props.user.uid);
   });
-  const [sermonList, setSermonList] = useState<List[]>(props.existingList || []);
+  const destinationEdited = useRef(false);
+  const latestDefaultApplied = useRef(false);
+  const [sermonList, setSermonListState] = useState<List[]>(props.existingList || []);
+  const setSermonList = useCallback<Dispatch<SetStateAction<List[]>>>((next) => {
+    // Explicit clearing is a choice too; neither a late default nor Retry may undo it.
+    destinationEdited.current = true;
+    setSermonListState(next);
+  }, []);
   const [audioSource, setAudioSource, selectAudioFile] = useOwnedAudioSource();
   const [uploadProgress, setUploadProgress] = useState<AudioTransferProgress>({
     error: false,
@@ -166,6 +181,9 @@ const Uploader = (props: UploaderProps) => {
   const [isNavigatingToSermon, setIsNavigatingToSermon] = useState(false);
   const [subtitles, setSubtitles] = useState<List[]>([]);
   const [subtitlesLoading, setSubtitlesLoading] = useState(true);
+  const [latestListLoading, setLatestListLoading] = useState(!props.existingSermon);
+  const [catalogErrors, setCatalogErrors] = useState<{ subtitles?: boolean; latest?: boolean }>({});
+  const [catalogAttempt, setCatalogAttempt] = useState(0);
   const [formErrors, setFormErrors] = useState<FormErrors>(getFormErrorInitialState());
   const [showAdvancedListConfig, setShowAdvancedListConfig] = useState(false);
   const [speakerRequestPopupOpen, setSpeakerRequestPopupOpen] = useState(false);
@@ -277,65 +295,74 @@ const Uploader = (props: UploaderProps) => {
     !sermonsEqual(sermon, props.existingSermon || emptySermon) ||
     !listEqual(sermonList, props.existingList || emptyListWithLatest);
 
-  const addList = useCallback(
-    (list: List) => {
-      setSermonList((previousList) => {
-        if (previousList.find((prevList) => prevList.id === list.id)) {
-          return previousList;
-        }
-        return [...previousList, list];
-      });
-    },
-    [setSermonList]
-  );
-
   useEffect(() => {
-    const fetchData = async () => {
-      // fetch subtitles using bundle system
-      try {
-        setSubtitlesLoading(true);
-        const subtitlesFromBundle = await getSubtitlesFromBundle();
-        setSubtitles(subtitlesFromBundle.filter(isDiscoverableRootList));
-      } catch (error) {
-        console.warn('Error loading subtitles from bundle, falling back to Firestore:', error);
-        // Fallback to manual fetch
-        // Note: We can't use != filter here because Firestore requires inequality fields to be first in orderBy
-        // Instead, we filter client-side after fetching
-        const listQuery = query(
-          collection(firestore, 'lists'),
-          where('type', '==', ListType.CATEGORY_LIST)
-        ).withConverter(listConverter);
-        const listQuerySnapshot = await getDocs(listQuery);
-        setSubtitles(
-          listQuerySnapshot.docs
-            .map((doc) => {
-              const list = doc.data();
-              return list;
-            })
-            .filter(isDiscoverableRootList)
+    let cancelled = false;
+    setSubtitlesLoading(true);
+    setLatestListLoading(!props.existingSermon);
+    setCatalogErrors({});
+    // Observe these independently: default lookup must not wait on a category fallback.
+    void loadUploaderCatalog(
+      async () => (await getSubtitlesFromBundle()).filter(isDiscoverableRootList),
+      async () => {
+        const items = await readCompleteUploaderCatalog<List, QueryDocumentSnapshot<List>>(
+          async (cursor, count) => {
+            const listQuery = query(
+              collection(firestore, 'lists'),
+              where('type', '==', ListType.CATEGORY_LIST),
+              ...(cursor ? [startAfter(cursor)] : []),
+              limit(count)
+            ).withConverter(listConverter);
+            const snapshot = await getDocs(listQuery);
+            return { items: snapshot.docs.map((item) => item.data()), cursor: snapshot.docs.at(-1) };
+          },
+          () => !cancelled
         );
-      } finally {
-        setSubtitlesLoading(false);
-      }
-
-      // fetch latest list
-      if (!props.existingSermon) {
-        const latestListFromBundle = await getLatestListFromBundle();
-        if (latestListFromBundle.length > 0) {
-          const latestList = latestListFromBundle[0];
-          setEmptyListWithLatest([latestList]);
-          addList(latestList);
+        return items.filter(isDiscoverableRootList);
+      },
+      () => !cancelled
+    ).then((result) => {
+      if (cancelled) return;
+      if (result.ok) setSubtitles(result.items);
+      setCatalogErrors((previous) => ({ ...previous, subtitles: !result.ok }));
+      setSubtitlesLoading(false);
+    });
+    if (!props.existingSermon) {
+      void loadUploaderCatalog(
+        getLatestListFromBundle,
+        async () => {
+          const snapshot = await getDocs(
+            query(collection(firestore, 'lists'), where('type', '==', ListType.LATEST), limit(1)).withConverter(
+              listConverter
+            )
+          );
+          return snapshot.docs.map((item) => item.data());
+        },
+        () => !cancelled
+      ).then((result) => {
+        if (cancelled) return;
+        if (result.ok) {
+          const defaults = result.items.slice(0, 1);
+          setEmptyListWithLatest(defaults);
+          const firstResolvedLoad = !latestDefaultApplied.current;
+          latestDefaultApplied.current = true;
+          setSermonListState((previous) =>
+            applyLatestUploaderDefault(previous, defaults, firstResolvedLoad, destinationEdited.current)
+          );
         }
-      }
+        setCatalogErrors((previous) => ({ ...previous, latest: !result.ok }));
+        setLatestListLoading(false);
+      });
+    }
+    return () => {
+      cancelled = true;
     };
-    fetchData();
-  }, [addList, props.existingSermon]);
+  }, [catalogAttempt, props.existingSermon]);
 
   useEffect(() => {
-    if (props.existingList) {
-      setSermonList(props.existingList);
+    if (props.existingSermon && props.existingList) {
+      setSermonListState(props.existingList);
     }
-  }, [props.existingList]);
+  }, [props.existingList, props.existingSermon]);
 
   useEffect(() => {
     clearIntentionalNavigation();
@@ -1042,6 +1069,29 @@ const Uploader = (props: UploaderProps) => {
         <h1 style={{ justifySelf: 'center', gridColumn: '1/-1' }}>
           {props.existingSermon ? 'Edit Sermon' : 'Uploader'}
         </h1>
+        {(catalogErrors.subtitles || catalogErrors.latest) && (
+          <Alert
+            severity="warning"
+            sx={{ gridColumn: '1/-1' }}
+            action={
+              <Button color="inherit" onClick={() => setCatalogAttempt((attempt) => attempt + 1)}>
+                Retry
+              </Button>
+            }
+          >
+            {catalogErrors.subtitles ? 'Categories could not be loaded completely. ' : ''}
+            {catalogErrors.latest ? 'The default destination could not be verified. ' : ''}
+            {!props.existingSermon && !uploadReceipt
+              ? 'Uploading is paused until categories and the default destination are available. Your local audio and choices are kept.'
+              : 'Your existing destinations and local changes are kept.'}
+          </Alert>
+        )}
+        {!props.existingSermon && (subtitlesLoading || latestListLoading) && (
+          <Typography role="status" sx={{ gridColumn: '1/-1' }}>
+            Checking categories and default destination… Local audio controls remain available.
+          </Typography>
+        )}
+
         <Box
           sx={{
             display: 'flex',
@@ -1448,24 +1498,40 @@ const Uploader = (props: UploaderProps) => {
                   {getErrorMessage(formErrors.durationSeconds)}
                 </Typography>
                 <Box display="flex" gap={2}>
-                  <UploadButton
-                    user={props.user}
-                    sermon={sermon}
-                    audioSource={audioSource}
-                    trimStart={sermon.sourceStartTime}
-                    sermonList={sermonList}
-                    date={date}
-                    validateForm={validateForm}
-                    setUploadProgress={setUploadProgress}
-                    setInvalidFormMessage={setInvalidFormMessage}
-                    setIsUploading={setIsUploading}
-                    receipt={uploadReceipt}
-                    onAdmission={(receipt) => {
-                      setUploadReceipt(receipt);
-                      if (receipt.sermonId) setUploadedSermon({ ...sermon, id: receipt.sermonId });
-                    }}
-                    onUploadSuccess={handleUploadSuccess}
-                  />
+                  <Box
+                    component="fieldset"
+                    disabled={catalogBlocksNewAdmission(
+                      Boolean(uploadReceipt),
+                      subtitlesLoading || latestListLoading || Boolean(catalogErrors.subtitles || catalogErrors.latest)
+                    )}
+                    sx={{ border: 0, p: 0, m: 0 }}
+                  >
+                    <UploadButton
+                      user={props.user}
+                      sermon={sermon}
+                      audioSource={audioSource}
+                      trimStart={sermon.sourceStartTime}
+                      sermonList={sermonList}
+                      date={date}
+                      validateForm={() =>
+                        !catalogBlocksNewAdmission(
+                          Boolean(uploadReceipt),
+                          subtitlesLoading ||
+                            latestListLoading ||
+                            Boolean(catalogErrors.subtitles || catalogErrors.latest)
+                        ) && validateForm()
+                      }
+                      setUploadProgress={setUploadProgress}
+                      setInvalidFormMessage={setInvalidFormMessage}
+                      setIsUploading={setIsUploading}
+                      receipt={uploadReceipt}
+                      onAdmission={(receipt) => {
+                        setUploadReceipt(receipt);
+                        if (receipt.sermonId) setUploadedSermon({ ...sermon, id: receipt.sermonId });
+                      }}
+                      onUploadSuccess={handleUploadSuccess}
+                    />
+                  </Box>
                   <Button variant="outlined" color="secondary" onClick={() => clearForm()}>
                     Clear Form
                   </Button>
