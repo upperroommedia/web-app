@@ -45,6 +45,7 @@ jobs:
     timeout-minutes: 90
     env:
       GCP_PROJECT: urm-app
+      PROCESS_AUDIO_ALLOWED_CALLER_EMAILS: ${{ vars.PRODUCTION_PROCESS_AUDIO_ALLOWED_CALLER_EMAILS }}
       PROCESS_AUDIO_HETZNER_STAGING_HOSTNAME: yt-worker-staging.upperroommedia.org
       PROCESS_AUDIO_HETZNER_PRODUCTION_HOSTNAME: yt-worker.upperroommedia.org
       SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}

@@ -95,8 +95,9 @@
         "^build"
       ],
       "outputs": [
-        "*.js",
-        "*.d.ts"
+        "**/*.js",
+        "**/*.d.ts",
+        "!node_modules/**"
       ]
     },
     "@upperroom/process-audio#build": {
@@ -129,8 +130,9 @@
         "^build:ci"
       ],
       "outputs": [
-        "*.js",
-        "*.d.ts"
+        "**/*.js",
+        "**/*.d.ts",
+        "!node_modules/**"
       ]
     },
     "@upperroom/process-audio#build:ci": {

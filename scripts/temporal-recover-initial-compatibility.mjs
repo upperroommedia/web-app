@@ -109,6 +109,8 @@ export function validateRecoveryCheckpoint(control, state, oldRelease, revision)
     Object.hasOwn(control, 'legacyAdmissionCutoff') ||
     Object.hasOwn(state, 'compatibilityVerifiedAt') ||
     Object.hasOwn(state, 'legacySettlingDeadline') ||
+    Object.hasOwn(state, 'legacySettlingCutoff') ||
+    Object.hasOwn(state, 'legacySettlingGraceSeconds') ||
     Object.hasOwn(state, 'compatibilityEvidenceAt') ||
     !state.appHostingFreezeRequestId ||
     !Number.isSafeInteger(state.maximumLegacyExecutionSeconds) ||
@@ -250,12 +252,50 @@ export async function validateRecoveryAncestry(input, loadArchive) {
       archive.candidateCi?.headSha !== next.compatibilityCommit ||
       archive.candidateCi.status !== 'completed' ||
       archive.candidateCi.conclusion !== 'success' ||
-      archive.settledGuard?.releaseId !== prior.releaseId ||
-      archive.settledGuard.commit !== prior.compatibilityCommit ||
-      archive.settledGuard.action !== 'controlled-backend-deploy' ||
+      (recoveryMode(archive) === 'failed-deployment' &&
+        (archive.settledGuard?.releaseId !== prior.releaseId ||
+          archive.settledGuard.commit !== prior.compatibilityCommit ||
+          archive.settledGuard.action !== 'controlled-backend-deploy')) ||
       !sha256(archive.reviewSha256)
     )
       throw new Error('Recovery archive lacks exact reviewed original identity and successful candidate evidence');
+    if (recoveryMode(archive) === PLANNED_SUPERSESSION) {
+      if (
+        !archive.plannedReview ||
+        archive.plannedReview.oldControlRevision !== oc.revision ||
+        archive.plannedReview.originalOperatorUid !== originalOperatorUid ||
+        !same(
+          archive.artifacts,
+          archive.plannedReview.artifacts.map(({ label, sha256 }) => ({ label, sha256 }))
+        ) ||
+        digest(archive.plannedReview) !== archive.reviewSha256 ||
+        !same(archive.plannedSourceSupersession, archive.plannedReview.plannedSourceSupersession)
+      )
+        throw new Error('Planned archive requires its exact typed reviewed proof');
+      validateRecoveryReview(archive.plannedReview, prior, next, Date.parse(archive.observedAt));
+      validatePlannedSourceProof(
+        archive.plannedDeployedSourceProof,
+        archive.plannedReview,
+        prior,
+        Date.parse(archive.observedAt)
+      );
+      if (
+        !Array.isArray(archive.plannedExpectedFunctions) ||
+        !same([...archive.plannedExpectedFunctions].sort(), archive.runtime?.map((r) => r.name).sort()) ||
+        !same(archive.runtime, archive.plannedReview.runtime) ||
+        archive.plannedOperationLockAbsent !== true ||
+        !Array.isArray(archive.plannedSuccessfulBuilds) ||
+        new Set(archive.plannedSuccessfulBuilds.map((b) => b.name)).size !== archive.plannedSuccessfulBuilds.length ||
+        !same(
+          archive.plannedSuccessfulBuilds.map((b) => b.name).sort(),
+          [...new Set(archive.runtime.map((r) => r.build))].sort()
+        ) ||
+        archive.plannedSuccessfulBuilds.some(
+          (b) => b.status !== 'SUCCESS' || !archive.runtime.some((r) => r.build === b.name)
+        )
+      )
+        throw new Error('Planned archive successful runtime/build proof changed');
+    }
     if (
       (archive.ancestry !== undefined || archive.successorControlRevision !== undefined) &&
       (expectedHash === undefined ||
@@ -379,6 +419,169 @@ export function assertSafeRecoveryLeases(rows) {
     )
       throw new Error('Active, uncertain or malformed legacy leases require explicit reconciliation before recovery');
 }
+const PLANNED_SUPERSESSION = 'planned-source-supersession';
+const FAILED_REVIEW_FIELDS = ['settledGuard', 'guardSettlementVerified', 'failedCompatibilityDeploymentVerified'];
+export function recoveryMode(review) {
+  if (review.recoveryMode === undefined && !Object.hasOwn(review, 'recoveryMode')) {
+    if (Object.hasOwn(review, 'plannedSourceSupersession'))
+      throw new Error('Planned proof requires an explicit recovery mode');
+    return 'failed-deployment';
+  }
+  if (review.recoveryMode !== PLANNED_SUPERSESSION) throw new Error('Unknown explicit recovery mode');
+  if (FAILED_REVIEW_FIELDS.some((key) => Object.hasOwn(review, key)))
+    throw new Error('Planned supersession cannot claim a failed deployment or guard');
+  return PLANNED_SUPERSESSION;
+}
+export function validatePlannedSourceSupersession(review, oldRelease) {
+  if (recoveryMode(review) !== PLANNED_SUPERSESSION) throw new Error('Explicit planned source supersession required');
+  const proof = review.plannedSourceSupersession;
+  if (
+    !proof ||
+    proof.schemaVersion !== 1 ||
+    proof.predecessorCommit !== oldRelease.compatibilityCommit ||
+    proof.predecessorControlRevision !== review.oldControlRevision ||
+    proof.operationLockAbsent !== true ||
+    !sha256(proof.sourceAuditSha256) ||
+    !sha256(proof.deployedSourceProofSha256)
+  )
+    throw new Error('Exact planned predecessor source, revision, no-lock observation and artifact pins required');
+  for (const [label, hash] of [
+    ['planned-source-audit', proof.sourceAuditSha256],
+    ['deployed-source-provenance', proof.deployedSourceProofSha256],
+  ]) {
+    const artifacts = review.artifacts?.filter((a) => a.label === label);
+    if (artifacts?.length !== 1 || artifacts[0].sha256 !== hash) throw new Error('Planned source artifact pin changed');
+  }
+  if (
+    !Array.isArray(review.runtime) ||
+    !review.runtime.length ||
+    review.runtime.some(
+      (r) =>
+        r.state !== 'ACTIVE' ||
+        typeof r.revision !== 'string' ||
+        !r.revision ||
+        typeof r.build !== 'string' ||
+        !r.build ||
+        r.releaseCommit !== oldRelease.compatibilityCommit ||
+        !r.source ||
+        typeof r.source.bucket !== 'string' ||
+        !r.source.bucket ||
+        typeof r.source.object !== 'string' ||
+        !r.source.object ||
+        !/^[0-9]+$/.test(r.source.generation || '')
+    ) ||
+    new Set(review.runtime.map((r) => r.name)).size !== review.runtime.length
+  )
+    throw new Error('Planned supersession requires complete successful source-bound runtime observations');
+  return proof;
+}
+export function validatePlannedSourceProof(proof, review, oldRelease, now = Date.now()) {
+  validatePlannedSourceSupersession(review, oldRelease);
+  if (
+    !proof ||
+    proof.schemaVersion !== 1 ||
+    proof.scope !== 'managed-functions-source-identities' ||
+    proof.result !== 'passed' ||
+    proof.projectId !== oldRelease.projectId ||
+    proof.releaseId !== oldRelease.releaseId ||
+    proof.commit !== oldRelease.compatibilityCommit ||
+    proof.controlRevision !== review.oldControlRevision ||
+    !fresh(proof.verifiedAt, now) ||
+    proof.runtimeSha256 !== digest(review.runtime)
+  )
+    throw new Error('Fresh actual deployed predecessor source proof required');
+}
+export function expectedPlannedFunctionNames(root, oldRelease) {
+  const read = (path) =>
+    execFileSync('git', ['show', `${oldRelease.compatibilityCommit}:${path}`], {
+      cwd: root,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  const names = [];
+  for (const codebase of ['core', 'media', 'image', 'integrations']) {
+    const source = read(`functions-${codebase}/src/index.ts`);
+    const before = names.length;
+    names.push(...[...source.matchAll(/^exports\.([A-Za-z_$][\w$]*)\s*=/gm)].map((match) => match[1]));
+    for (const match of source.matchAll(/^export\s*\{([^}]+)\}\s*from\s*['"][^'"]+['"]/gm)) {
+      for (const entry of match[1].split(',')) {
+        const name = entry
+          .trim()
+          .split(/\s+as\s+/)
+          .at(-1);
+        if (!/^[A-Za-z_$][\w$]*$/.test(name)) throw new Error('Unsupported predecessor named export');
+        names.push(name);
+      }
+    }
+    if (names.length === before || /^export\s+(?:const|function|default|\*)/m.test(source))
+      throw new Error('Unsupported predecessor function export surface');
+  }
+  const firebase = JSON.parse(read('firebase.json'));
+  for (const config of firebase.functions.filter((entry) => entry.kit)) {
+    if (!config.instances || !Object.keys(config.instances).length)
+      throw new Error('Missing predecessor kit instances');
+    if (config.kit === 'image-processing-api')
+      names.push(...Object.keys(config.instances).map((id) => `kit-${id}-handler`));
+    else if (config.kit === 'firestore-send-email')
+      names.push(...Object.keys(config.instances).map((id) => `kit-${id}-processQueue`));
+    else if (config.kit === 'firestore-algolia-search') {
+      if (oldRelease.domains.includes('search'))
+        names.push(
+          ...Object.keys(config.instances).flatMap((id) => [
+            `kit-${id}-executeIndexOperation`,
+            `kit-${id}-executeFullIndexOperation`,
+          ])
+        );
+    } else throw new Error('Unreviewed predecessor kit export surface');
+  }
+  if (new Set(names).size !== names.length) throw new Error('Duplicate predecessor function export');
+  return names
+    .map((name) => `projects/${oldRelease.projectId}/locations/${oldRelease.location}/functions/${name}`)
+    .sort();
+}
+export function validatePlannedRuntimeInventory(functions, services, review, oldRelease, expectedNames) {
+  validatePlannedSourceSupersession(review, oldRelease);
+  if (
+    !Array.isArray(expectedNames) ||
+    !expectedNames.length ||
+    new Set(expectedNames).size !== expectedNames.length ||
+    !same([...expectedNames].sort(), review.runtime.map((r) => r.name).sort())
+  )
+    throw new Error('Review must cover exact immutable predecessor export surface');
+  const managed = functions.filter((f) => expectedNames.includes(f.name));
+  if (
+    managed.length !== expectedNames.length ||
+    new Set(managed.map((f) => f.name)).size !== managed.length ||
+    functions.some(
+      (f) => f.serviceConfig?.environmentVariables?.TEMPORAL_RELEASE_COMMIT && !expectedNames.includes(f.name)
+    )
+  )
+    throw new Error('Complete managed Functions source inventory required');
+  for (const expected of review.runtime) {
+    const actual = managed.find((f) => f.name === expected.name),
+      service = services.find((s) => s.name === actual?.serviceConfig?.service);
+    if (
+      !actual ||
+      actual.state !== 'ACTIVE' ||
+      actual.serviceConfig.environmentVariables.TEMPORAL_RELEASE_COMMIT !== oldRelease.compatibilityCommit ||
+      actual.buildConfig?.build !== expected.build ||
+      actual.serviceConfig?.revision !== expected.revision ||
+      !same(actual.buildConfig?.source?.storageSource, expected.source) ||
+      !service ||
+      service.reconciling ||
+      service.terminalCondition?.state !== 'CONDITION_SUCCEEDED' ||
+      service.latestCreatedRevision !== service.latestReadyRevision ||
+      service.latestReadyRevision?.split('/').at(-1) !== expected.revision ||
+      !Array.isArray(service.trafficStatuses) ||
+      service.trafficStatuses.reduce(
+        (total, t) => total + (t.revision === service.latestReadyRevision ? Number(t.percent ?? 0) : 0),
+        0
+      ) !== 100 ||
+      service.trafficStatuses.some((t) => Number(t.percent ?? 0) > 0 && t.revision !== service.latestReadyRevision)
+    )
+      throw new Error('Planned predecessor runtime is not fully ready on its exact successful source');
+  }
+}
 export function validateRecoveryReview(review, oldRelease, newRelease, now = Date.now()) {
   if (
     !Number.isSafeInteger(review.candidateCiRunId) ||
@@ -395,17 +598,20 @@ export function validateRecoveryReview(review, oldRelease, newRelease, now = Dat
     review.reason.length > 2000
   )
     throw new Error('Fresh scoped reviewed recovery evidence is required');
+  const mode = recoveryMode(review);
+  if (mode === PLANNED_SUPERSESSION) validatePlannedSourceSupersession(review, oldRelease);
   const g = review.settledGuard,
     i = review.operatorIdentity;
   if (
-    g?.action !== 'controlled-backend-deploy' ||
-    g.releaseId !== oldRelease.releaseId ||
-    g.commit !== oldRelease.compatibilityCommit ||
-    !/^[a-f0-9-]{36}$/.test(g.operationId || '') ||
-    !Number.isSafeInteger(g.createdAt) ||
-    g.createdAt > now ||
-    review.guardSettlementVerified !== true ||
-    review.failedCompatibilityDeploymentVerified !== true ||
+    (mode === 'failed-deployment' &&
+      (g?.action !== 'controlled-backend-deploy' ||
+        g.releaseId !== oldRelease.releaseId ||
+        g.commit !== oldRelease.compatibilityCommit ||
+        !/^[a-f0-9-]{36}$/.test(g.operationId || '') ||
+        !Number.isSafeInteger(g.createdAt) ||
+        g.createdAt > now ||
+        review.guardSettlementVerified !== true ||
+        review.failedCompatibilityDeploymentVerified !== true)) ||
     !i?.actorUid ||
     !Number.isFinite(Date.parse(i.authTime)) ||
     !fresh(i.verifiedAt, now) ||
@@ -414,7 +620,7 @@ export function validateRecoveryReview(review, oldRelease, newRelease, now = Dat
     throw new Error('Matching settled failed deployment and unchanged reviewed operator are required');
   if (
     !Array.isArray(review.operations) ||
-    !review.operations.length ||
+    (mode === 'failed-deployment' && !review.operations.length) ||
     !Array.isArray(review.builds) ||
     !Array.isArray(review.runtime) ||
     !review.runtime.length ||
@@ -627,12 +833,14 @@ async function main() {
       ['review', review],
     ])
       await writeFile(`${archiveDir}/${name}.json`, JSON.stringify(data, null, 2), { mode: 0o600, flag: 'wx' });
-    let originalIdentity, originalIdentitySha256;
+    let originalIdentity, originalIdentitySha256, plannedDeployedSourceProof;
     for (const artifact of review.artifacts) {
       const bytes = await readFile(artifact.path);
       if (createHash('sha256').update(bytes).digest('hex') !== artifact.sha256)
         throw new Error('Reviewed runtime/settlement artifact changed');
       await writeFile(`${archiveDir}/${artifact.label}.artifact`, bytes, { mode: 0o600, flag: 'wx' });
+      if (artifact.label === 'deployed-source-provenance')
+        plannedDeployedSourceProof = JSON.parse(bytes.toString('utf8'));
       if (artifact.label === 'original-operator-identity') {
         if (originalIdentity) throw new Error('Exactly one original identity artifact is required');
         originalIdentity = JSON.parse(bytes.toString('utf8'));
@@ -648,6 +856,8 @@ async function main() {
       !Number.isFinite(Date.parse(originalIdentity.verifiedAt))
     )
       throw new Error('Reviewed original operator identity artifact required');
+    const mode = recoveryMode(review);
+    if (mode === PLANNED_SUPERSESSION) validatePlannedSourceProof(plannedDeployedSourceProof, review, oldRelease);
     const { firestore: db, database, credential } = firebaseAdmin(oldRelease.projectId, oldRelease.databaseUrl);
     clients = { db, database };
     const operationId = randomUUID(),
@@ -786,7 +996,7 @@ async function main() {
         createTime: actual.metadata?.createTime ?? actual.metadata?.startTime ?? null,
       });
     }
-    assertFailedDeploymentAfterGuard(settled, review.settledGuard.createdAt);
+    if (mode === 'failed-deployment') assertFailedDeploymentAfterGuard(settled, review.settledGuard.createdAt);
     const runOperations = await list(
       `https://run.googleapis.com/v2/projects/${project}/locations/us-central1/operations?pageSize=1000`,
       'operations'
@@ -810,6 +1020,17 @@ async function main() {
       if (actual.status !== b.status) throw new Error('Reviewed build settlement changed');
       builds.push({ name: b.name, id: actual.id, status: actual.status, finishTime: actual.finishTime ?? null });
     }
+    if (mode === PLANNED_SUPERSESSION)
+      validatePlannedRuntimeInventory(
+        functions,
+        services,
+        review,
+        oldRelease,
+        expectedPlannedFunctionNames(root, oldRelease)
+      );
+    const plannedExpectedFunctions =
+      mode === PLANNED_SUPERSESSION ? expectedPlannedFunctionNames(root, oldRelease) : undefined;
+    const plannedSuccessfulBuilds = [];
     const runtime = [];
     for (const expected of review.runtime) {
       const actual = functions.find((f) => f.name === expected.name);
@@ -819,6 +1040,15 @@ async function main() {
         build: actual?.buildConfig?.build ?? null,
         revision: actual?.serviceConfig?.revision ?? null,
       };
+      if (mode === PLANNED_SUPERSESSION) {
+        projection.releaseCommit = actual.serviceConfig.environmentVariables.TEMPORAL_RELEASE_COMMIT;
+        projection.source = actual.buildConfig.source.storageSource;
+        if (!plannedSuccessfulBuilds.some((b) => b.name === projection.build)) {
+          const build = await api(`https://cloudbuild.googleapis.com/v1/${projection.build}`);
+          if (build.status !== 'SUCCESS') throw new Error('Planned predecessor build did not succeed');
+          plannedSuccessfulBuilds.push({ name: projection.build, status: build.status });
+        }
+      }
       if (!same(projection, expected))
         throw new Error('Observed failed runtime identity changed; review actual settlement again');
       runtime.push(projection);
@@ -917,7 +1147,17 @@ async function main() {
       newDescriptorSha256: digest(newRelease),
       reviewSha256: digest(review),
       candidateCi,
-      settledGuard: review.settledGuard,
+      ...(mode === 'failed-deployment'
+        ? { settledGuard: review.settledGuard }
+        : {
+            recoveryMode: PLANNED_SUPERSESSION,
+            plannedSourceSupersession: review.plannedSourceSupersession,
+            plannedReview: review,
+            plannedDeployedSourceProof,
+            plannedOperationLockAbsent: true,
+            plannedSuccessfulBuilds,
+            plannedExpectedFunctions,
+          }),
       reviewedBrowserActorUid: user.uid,
       claimsADCActorIdentity: false,
       reason: review.reason,

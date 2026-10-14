@@ -33,6 +33,7 @@ describe('sermonAudioCreateTrigger', () => {
     await Promise.all([
       firebaseAdmin.database().ref('processAudioRequests/sermon-123').remove(),
       firebaseAdmin.database().ref('processAudioQueueClaims/sermon-123').remove(),
+      firebaseAdmin.firestore().doc('sermons/sermon-123').delete(),
     ]);
   });
 
@@ -109,6 +110,10 @@ describe('sermonAudioCreateTrigger', () => {
       introUrl: 'https://storage.example.test/intro.mp3',
       outroUrl: 'https://storage.example.test/outro.mp3',
     };
+    await firebaseAdmin
+      .firestore()
+      .doc('sermons/sermon-123')
+      .set(buildSermon({ uploaderId: 'owner' }));
     const requestVersion = computeProcessAudioRequestVersion(payload);
     const requestRef = firebaseAdmin.database().ref('processAudioRequests/sermon-123');
     await requestRef.set({

@@ -25,19 +25,20 @@ const getAlwaysAdminEmails = (): Set<string> => {
   return new Set([...DEFAULT_STAGING_ADMIN_EMAILS, ...configured].map((value) => normalizeEmail(value)));
 };
 
-const shouldForceAdminRole = (email: string | null | undefined): boolean => {
+const isAllowlistedStagingEmail = (email: string | null | undefined): boolean => {
   if (!isStagingProject()) return false;
   const normalizedEmail = normalizeEmail(email);
   if (!normalizedEmail) return false;
   return getAlwaysAdminEmails().has(normalizedEmail);
 };
 
-const resolveRoleForUser = (email: string | null | undefined): string =>
-  shouldForceAdminRole(email) ? ADMIN_ROLE : DEFAULT_ROLE;
+// Email/password registration does not prove ownership of an allowlisted address.
+const resolveRoleForUser = (email: string | null | undefined, emailVerified: boolean | undefined): string =>
+  emailVerified === true && isAllowlistedStagingEmail(email) ? ADMIN_ROLE : DEFAULT_ROLE;
 
 const setUserRoleOnCreate = beforeUserCreated((event) => {
   const email = event.data?.email;
-  const role = resolveRoleForUser(email);
+  const role = resolveRoleForUser(email, event.data?.emailVerified);
   logger.info('Setting user role on create', {
     email,
     role,
@@ -54,19 +55,20 @@ const setUserRoleOnCreate = beforeUserCreated((event) => {
 
 const setUserRoleOnSignIn = beforeUserSignedIn((event) => {
   const email = event.data?.email;
-  if (!shouldForceAdminRole(email)) {
+  if (!isAllowlistedStagingEmail(email)) {
     return;
   }
 
-  logger.info('Ensuring staging admin role on sign-in', {
+  const role = resolveRoleForUser(email, event.data?.emailVerified);
+  logger.info('Ensuring verified staging role on sign-in', {
     email,
-    role: ADMIN_ROLE,
+    role,
     projectId: getProjectId(),
   });
 
   return {
     customClaims: {
-      role: ADMIN_ROLE,
+      role,
     },
   };
 });

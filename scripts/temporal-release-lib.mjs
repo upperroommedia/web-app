@@ -34,6 +34,78 @@ export async function assertPendingLegacyUploadsDrainedInTransaction(tx, firesto
     );
 }
 
+/** Same portable classification as the standalone email kit. A historical ERROR
+ * without submission evidence is uncertain, including attempts=0 (lost final write). */
+export function legacyMailRequiresDrain(delivery) {
+  if (delivery?.orchestrator === 'temporal') return false;
+  const submission = delivery?.smtpSubmissionState;
+  if (submission === 'started' || submission === 'unknown') return true;
+  if (submission !== undefined && !['not_submitted', 'accepted'].includes(submission)) return true;
+  if (delivery?.state === 'ERROR' && submission === undefined) return true;
+  return !['SUCCESS', 'ERROR'].includes(delivery?.state);
+}
+function needsLegacySeriesDrain(control, domains) {
+  if (!domains.includes('publishing')) return false;
+  const owner = control?.domains?.publishing?.owner;
+  if (!['legacy', 'temporal'].includes(owner))
+    throw new Error('Explicit publishing ownership is required for series drain');
+  return owner === 'legacy';
+}
+/** Read within the control revision transaction: a concurrent legacy claim cannot be
+ * omitted by an earlier, nontransactional zero-count audit. Private pending series
+ * facts are work, even if their platform event has not acquired a lease yet. */
+export async function assertLegacyDrainInTransaction(tx, firestore, control, domains, mailCollection) {
+  await assertPendingLegacyUploadsDrainedInTransaction(tx, firestore, control, domains);
+  const leases = await tx.get(
+    firestore.collection('legacyAdmissionLeases').where('state', 'in', ['active', 'needs_attention']).limit(1)
+  );
+  if (!leases.empty) throw new Error('A legacy lease remains active or uncertain; audited reconciliation required');
+  if (!/^[A-Za-z0-9_-]+$/.test(mailCollection ?? '')) throw new Error('Explicit legacy mail collection required');
+  let mailCursor;
+  for (;;) {
+    let query = firestore.collection(mailCollection).orderBy('__name__').select('delivery').limit(500);
+    if (mailCursor) query = query.startAfter(mailCursor);
+    const page = await tx.get(query);
+    if (
+      page.docs.some((doc) => {
+        const delivery = doc.get('delivery');
+        return legacyMailRequiresDrain(delivery);
+      })
+    )
+      throw new Error('Legacy mail remains pending, processing or uncertain; explicit reconciliation required');
+    if (page.size < 500) break;
+    mailCursor = page.docs.at(-1);
+  }
+
+  if (!needsLegacySeriesDrain(control, domains)) return;
+  let cursor;
+  for (;;) {
+    let query = firestore.collection('seriesMetadataContinuations').orderBy('__name__').select('state').limit(500);
+    if (cursor) query = query.startAfter(cursor);
+    const page = await tx.get(query);
+    if (page.docs.some((doc) => doc.get('state') !== 'completed'))
+      throw new Error(
+        'Private series metadata continuations remain pending or invalid; explicit reconciliation required'
+      );
+    if (page.size < 500) break;
+    cursor = page.docs.at(-1);
+  }
+}
+export async function countPendingSeriesMetadataContinuations(firestore, control, domains) {
+  if (!needsLegacySeriesDrain(control, domains)) return 0;
+  let cursor,
+    count = 0;
+  for (;;) {
+    let query = firestore.collection('seriesMetadataContinuations').orderBy('__name__').select('state').limit(500);
+    if (cursor) query = query.startAfter(cursor);
+    const page = await query.get();
+    count += page.docs.filter((doc) => doc.get('state') !== 'completed').length;
+    if (page.size < 500) break;
+    cursor = page.docs.at(-1);
+  }
+  return count;
+}
+
 export function validateReleaseConfig(config) {
   const expected = { staging: ['urm-app-staging', 'web-staging'], production: ['urm-app', 'web-prod'] }[
     config.environment

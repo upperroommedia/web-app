@@ -8,7 +8,7 @@ import {
 const mockDb = { doc: jest.fn(), collection: jest.fn(), runTransaction: jest.fn() };
 jest.mock('@upperroom/shared/firebase/firebaseAdmin', () => ({
   __esModule: true,
-  default: { firestore: () => mockDb },
+  default: { firestore: () => mockDb, app: () => ({ options: { projectId: 'urm-app' } }) },
 }));
 jest.mock('firebase-functions/v2/firestore', () => ({
   onDocumentCreated: (_path: string, handler: unknown) => handler,
@@ -21,6 +21,17 @@ jest.mock('../../helpers/listOverflowChain', () => ({
     list.isRootList !== false && list.isMoreSermonsList !== true,
 }));
 jest.mock('../../removeFromList', () => ({ removeFromList: jest.fn() }));
+jest.mock('../../DocumentListeners/providerListenerContinuation', () => ({
+  ...jest.requireActual('../../DocumentListeners/providerListenerContinuation'),
+  runLegacyProviderListener: async (input: {
+    firestore: Firestore;
+    validateCurrent(tx: unknown): Promise<boolean>;
+    effect(key: string, verify: () => Promise<boolean>): Promise<unknown>;
+  }) =>
+    input.firestore.runTransaction(async (tx) => {
+      if (await input.validateCurrent(tx)) await input.effect('test', async () => true);
+    }),
+}));
 import { removeFromList } from '../../removeFromList';
 import sermonListOnDelete from '../../DocumentListeners/SermonLists/sermonListOnDelete';
 import listItemOnCreate from '../../DocumentListeners/Lists/listItemOnCreate';
@@ -60,7 +71,12 @@ function mockFirestore(initial: Record<string, Record<string, unknown>>) {
           .map(([key, value]) => ({ id: key.split('/').at(-1), exists: true, data: () => value }));
         return { docs, size: docs.length };
       }
-      return { exists: state.has(ref.path), data: () => state.get(ref.path) };
+      return {
+        exists: state.has(ref.path),
+        data: () => state.get(ref.path),
+        createTime: { seconds: 0, nanoseconds: 0 },
+        get: (key: string) => state.get(ref.path)?.[key],
+      };
     }),
     update: jest.fn((ref: { path: string }, data: Record<string, unknown>) =>
       state.set(ref.path, { ...state.get(ref.path), ...data })
@@ -188,8 +204,11 @@ describe('canonical delete provider ownership', () => {
     const fixture = mockFirestore(state);
     Object.assign(mockDb, fixture.db);
     await (sermonListOnDelete as unknown as (event: unknown) => Promise<void>)({
+      id: 'membership-event',
+      time: '2026-01-01T00:00:00Z',
       params: { sermonId: 's', sermonListId: 'l' },
       data: {
+        createTime: { seconds: 1, nanoseconds: 0 },
         data: () => ({
           id: 'l',
           subsplashId: 'remote-list',

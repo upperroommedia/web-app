@@ -163,3 +163,44 @@ test('application CI runs both audio deployment suites for workflow and host cha
       workflow.indexOf('node --test scripts/process-audio-deployment.test.mjs')
   );
 });
+
+test('actual deployment allowlist parsers accept exact Google service identities and reject broad or malformed trust', () => {
+  const cases = [
+    { value: ['251680231116-compute@developer.gserviceaccount.com'], valid: true },
+    { value: ['queue@urm-app.iam.gserviceaccount.com', 'native@urm-app-staging.iam.gserviceaccount.com'], valid: true },
+    { value: ['user@gmail.com'], valid: false },
+    { value: ['*@urm-app.iam.gserviceaccount.com'], valid: false },
+    { value: [], valid: false },
+    { value: 'queue@urm-app.iam.gserviceaccount.com', valid: false },
+    { value: [null], valid: false },
+    { value: ['queue@urm-app.iamXgserviceaccountXcom'], valid: false },
+  ];
+  for (const [file, marker] of [
+    ['scripts/deploy-process-audio.sh', 'CHECK_NATIVE_AUTH'],
+    ['scripts/deploy-process-audio-hetzner.sh', 'CHECK_NATIVE_CALLERS'],
+  ]) {
+    const source = readFileSync(join(root, file), 'utf8');
+    const parser = source.split(`<<'${marker}'\n`)[1]?.split(`\n${marker}`)[0];
+    assert.ok(parser, `${file} actual parser is exercised`);
+    for (const item of cases) {
+      let succeeded = true;
+      try {
+        execFileSync('python3', ['-c', parser], {
+          stdio: 'pipe',
+          env: {
+            ...process.env,
+            PROCESS_AUDIO_ALLOWED_CALLER_EMAILS: JSON.stringify(item.value),
+            PROCESS_AUDIO_TASK_SERVICE_ACCOUNT_EMAIL: Array.isArray(item.value) ? String(item.value[0]) : 'not-allowed',
+            PROCESS_AUDIO_OIDC_AUDIENCES: JSON.stringify([
+              'https://owned.example',
+              'https://owned.example/process-audio',
+            ]),
+          },
+        });
+      } catch {
+        succeeded = false;
+      }
+      assert.equal(succeeded, item.valid, `${file}: ${JSON.stringify(item.value)}`);
+    }
+  }
+});

@@ -1,4 +1,20 @@
 import assert from 'node:assert/strict';
+// This suite isolates the queue state machine and HTTP transport. Real Firestore
+// admission, ownership, journal and server-clock fences run in the dedicated
+// emulator integration suite, without a permissive production environment flag.
+import { getApps, initializeApp } from 'firebase-admin/app';
+if (!getApps().length) initializeApp({ projectId: 'urm-app' });
+process.env.PROCESS_AUDIO_TASK_SERVICE_ACCOUNT_EMAIL = 'queue-test@urm-app.iam.gserviceaccount.com';
+const moduleLoader = require('node:module') as { _load: (request: string, ...rest: unknown[]) => unknown };
+const originalModuleLoad = moduleLoader._load;
+moduleLoader._load = function (request, ...rest) {
+  if (request === '@upperroom/orchestration/legacy-media-execution')
+    return {
+      withLegacyMediaExecution: async (_input: unknown, callback: () => Promise<unknown>) => callback(),
+      prepareLegacyMediaAdmission: async () => undefined,
+    };
+  return originalModuleLoad.call(this, request, ...rest);
+};
 import { createYouTubeAuthRecovery, recoverDeferredYouTubeAfterCanary } from '../src/youtubeAuthRecovery';
 import {
   buildCloudTasksCreateTaskRequest,
@@ -18,6 +34,7 @@ import {
 } from '../src/processAudioQueueStore';
 import {
   PROCESS_AUDIO_DEFERRED_DISPOSITIONS,
+  computeProcessAudioRequestVersion,
   getYouTubeFailureDisposition,
 } from '../../../packages/contracts/processAudioQueue';
 import {
@@ -26,6 +43,8 @@ import {
   recoverStaleYouTubeQueueProbe,
   setYouTubeTaskQueueFactoryForTesting,
 } from '../../../functions-media/src/processAudioQueueStore';
+
+moduleLoader._load = originalModuleLoad;
 
 class MockSnapshot {
   constructor(private readonly value: unknown) {}
@@ -2390,6 +2409,65 @@ async function main(): Promise<void> {
   assert.equal(postLiveNoNextRaceState.probeDispatchReservationId, 'post-live-replacement-reservation');
   setCloudTasksApiDepsForTesting(null);
   setProcessAudioTaskQueueFactoryForTesting(null);
+
+  // A trim replacement admitted while the original is running must survive
+  // native completion and retain the explicit OIDC identity on its real REST request.
+  const originalFile = {
+    id: 'native-trim-replacement',
+    storageFilePath: 'sermons/native-trim-replacement',
+    startTime: 0,
+    duration: 20,
+    deleteOriginal: false,
+  };
+  const replacementFile = { ...originalFile, startTime: 2, duration: 15 };
+  const replacementStore = createMockDatabase({
+    'processAudioRequests/native-trim-replacement': {
+      sermonId: originalFile.id,
+      sourceType: 'storage',
+      currentPayload: originalFile,
+      currentRequestVersion: computeProcessAudioRequestVersion(originalFile),
+      queuedTaskId: 'original-task',
+      runningRequestId: 'original-running',
+      runningTaskId: 'original-task',
+      runningRequestVersion: computeProcessAudioRequestVersion(originalFile),
+      nextPayload: replacementFile,
+      nextRequestVersion: computeProcessAudioRequestVersion(replacementFile),
+      updatedAt: new Date().toISOString(),
+    },
+  });
+  const replacementDispatches: Array<Record<string, any>> = [];
+  setProcessAudioTaskQueueFactoryForTesting(() => ({ async delete() {} }));
+  setCloudTasksApiDepsForTesting({
+    authFactory: async () => ({ getAccessToken: async () => 'owned-native-token' }),
+    fetchImpl: async (_url, init) => {
+      replacementDispatches.push(JSON.parse(String(init?.body)));
+      return new Response('{}', { status: 200 });
+    },
+  });
+  await completeProcessAudioSuccess({
+    database: replacementStore as any,
+    payload: originalFile,
+    requestId: 'original-running',
+    taskId: 'original-task',
+  });
+  assert.equal(replacementDispatches.length, 1);
+  const dispatchedReplacement = replacementDispatches[0].task.httpRequest;
+  assert.deepEqual(dispatchedReplacement.oidcToken, {
+    serviceAccountEmail: 'queue-test@urm-app.iam.gserviceaccount.com',
+    audience: dispatchedReplacement.url,
+  });
+  assert.deepEqual(JSON.parse(Buffer.from(dispatchedReplacement.body, 'base64').toString()).data, {
+    ...replacementFile,
+    skipTranscode: false,
+  });
+  assert.equal(
+    (replacementStore.store['processAudioRequests/native-trim-replacement'] as Record<string, unknown>)
+      .currentRequestVersion,
+    computeProcessAudioRequestVersion(replacementFile)
+  );
+  setCloudTasksApiDepsForTesting(null);
+  setProcessAudioTaskQueueFactoryForTesting(null);
+  console.log('Native queue state machine passed, including authenticated queued trim replacement.');
 }
 
 void main().catch((error) => {

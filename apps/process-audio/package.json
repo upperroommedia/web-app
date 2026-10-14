@@ -20,9 +20,10 @@
     "test:queue": "ts-node -r tsconfig-paths/register --project tsconfig.test.json scripts/test-process-audio-queue-store.ts",
     "test:request-context": "ts-node --project tsconfig.json scripts/test-process-audio-request-context.ts",
     "test:provider-relay": "ts-node --project tsconfig.json scripts/test-provider-relay.ts",
-    "test:ci": "pnpm run build && pnpm run test:youtube-admin && pnpm run test:readiness && pnpm run test:queue && pnpm run test:request-context && pnpm run test:provider-relay && pnpm run verify:youtube:policy && pnpm run verify:youtube:loop && pnpm run test:sdk-upgrades",
+    "test:ci": "pnpm run build && pnpm run test:youtube-admin && pnpm run test:readiness && pnpm run test:queue && pnpm run test:legacy-ingress && pnpm run test:request-context && pnpm run test:provider-relay && pnpm run verify:youtube:policy && pnpm run verify:youtube:loop && pnpm run test:sdk-upgrades",
     "test:youtube-admin": "ts-node --project tsconfig.json scripts/test-youtube-admin-desktop.ts && node scripts/test-youtube-auth-alerts.js",
-    "test:sdk-upgrades": "node scripts/test-sentry-v11.cjs && node --test scripts/test-google-oauth-transport.cjs"
+    "test:sdk-upgrades": "node scripts/test-sentry-v11.cjs && node --test scripts/test-google-oauth-transport.cjs",
+    "test:legacy-ingress": "ts-node -r tsconfig-paths/register --project tsconfig.test.json scripts/test-legacy-media-ingress.ts && ts-node -r tsconfig-paths/register --project tsconfig.test.json scripts/test-original-source-generation.ts"
   },
   "engines": {
     "node": "22"

@@ -22,6 +22,7 @@ const mockUpdateTrack = jest.fn();
 const mockDeleteTrack = jest.fn();
 const mockSermonDocUpdate = jest.fn();
 const mockStorageFileExists = jest.fn();
+const mockStorageFileGetMetadata = jest.fn();
 
 jest.mock('../../locks/withIdempotency', () => ({
   withIdempotency: jest.fn(async (_operationKey: string, run: () => Promise<unknown>) => run()),
@@ -75,8 +76,10 @@ jest.mock('@upperroom/shared/firebase/firebaseAdmin', () => ({
     app: () => jest.requireActual('firebase-admin/app').getApp(),
     storage: () => ({
       bucket: () => ({
+        name: 'urm-app.appspot.com',
         file: () => ({
           exists: (...args: unknown[]) => mockStorageFileExists(...args),
+          getMetadata: (...args: unknown[]) => mockStorageFileGetMetadata(...args),
           download: () => Promise.resolve([Buffer.alloc(0)]),
           delete: jest.fn(),
           setMetadata: jest.fn(),
@@ -90,13 +93,18 @@ jest.mock('@upperroom/shared/firebase/firebaseAdmin', () => ({
         // update observed by this notification contract test.
         doc: actual.doc.bind(actual),
         runTransaction: actual.runTransaction.bind(actual),
-        collection: (collectionName: string) => collectionName === 'sermons' ? {
-          doc: (id: string) => ({
-            get: () => actual.collection('sermons').doc(id).get(),
-            update: (...args: unknown[]) => mockSermonDocUpdate(...args),
-          }),
-          withConverter: () => ({ doc: () => ({ update: (...args: unknown[]) => mockSermonDocUpdate(...args) }) }),
-        } : actual.collection(collectionName),
+        collection: (collectionName: string) =>
+          collectionName === 'sermons'
+            ? {
+                doc: (id: string) => ({
+                  get: () => actual.collection('sermons').doc(id).get(),
+                  update: (...args: unknown[]) => mockSermonDocUpdate(...args),
+                }),
+                withConverter: () => ({
+                  doc: () => ({ update: (...args: unknown[]) => mockSermonDocUpdate(...args) }),
+                }),
+              }
+            : actual.collection(collectionName),
       };
     },
     database: () => ({
@@ -113,7 +121,7 @@ jest.mock('firebase-functions/v2/https', () => {
   return {
     ...actual,
     onCall: jest.fn((optsOrHandler: unknown, maybeHandler?: unknown) =>
-      (typeof optsOrHandler === 'function' ? optsOrHandler : maybeHandler)
+      typeof optsOrHandler === 'function' ? optsOrHandler : maybeHandler
     ),
   };
 });
@@ -240,10 +248,20 @@ describe('runtime alert taxonomy contract', () => {
       return new HttpsError('internal', `normalized:${message}`);
     });
     mockWithSubsplashLocks.mockImplementation(async (_keys, run) => run());
-    mockPrepareMultipartUpload.mockResolvedValue({ post: (token: string) => mockUploadTrack(token), dispose: jest.fn() });
-    mockRunWithSoundCloudAccessToken.mockImplementation(async (operation: (token: string) => unknown) => operation('fake-soundcloud-token'));
+    mockPrepareMultipartUpload.mockResolvedValue({
+      post: (token: string) => mockUploadTrack(token),
+      dispose: jest.fn(),
+    });
+    mockRunWithSoundCloudAccessToken.mockImplementation(async (operation: (token: string) => unknown) =>
+      operation('fake-soundcloud-token')
+    );
     mockQueueAudioRequest.mockResolvedValue({ state: 'queued', sourceType: 'storage', requestVersion: 'test-request' });
-    await jest.requireActual('firebase-admin/firestore').getFirestore().collection('sermons').doc('sermon-audio-123').set({ uploaderId: adminAuth.uid });
+    await jest
+      .requireActual('firebase-admin/firestore')
+      .getFirestore()
+      .collection('sermons')
+      .doc('sermon-audio-123')
+      .set({ uploaderId: adminAuth.uid });
     process.env.SUBSPLASH_EMAIL = 'test@example.com';
     process.env.SUBSPLASH_PASSWORD = 'test-password';
 
@@ -260,6 +278,14 @@ describe('runtime alert taxonomy contract', () => {
     mockDeleteTrack.mockResolvedValue(undefined);
     mockSermonDocUpdate.mockResolvedValue(undefined);
     mockStorageFileExists.mockResolvedValue([true]);
+    mockStorageFileGetMetadata.mockResolvedValue([
+      {
+        bucket: 'urm-app.appspot.com',
+        name: 'sermons/sermon-audio-123',
+        generation: '1',
+        timeCreated: '2020-01-01T00:00:00.000Z',
+      },
+    ]);
   });
 
   it('declares deterministic alert codes and context requirements for each targeted catch path', () => {
@@ -501,7 +527,20 @@ describe('runtime alert taxonomy contract', () => {
         auth: adminAuth,
         data: buildAddIntroOutroPayload(),
       })
-    ).rejects.toMatchObject({ code: 'internal' });
+    ).rejects.toMatchObject({ code: 'internal', message: 'normalized:task enqueue failed' });
+    expect(mockStorageFileGetMetadata).toHaveBeenCalledTimes(1);
+    expect(mockQueueAudioRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        legacyConfiguredSourceBucket: 'urm-app.appspot.com',
+        legacyOriginalStorageSource: {
+          kind: 'storage',
+          bucket: 'urm-app.appspot.com',
+          path: 'sermons/sermon-audio-123',
+          generation: '1',
+          timeCreated: '2020-01-01T00:00:00.000Z',
+        },
+      })
+    );
     expect(mockQueueAudioRequest).toHaveBeenCalledTimes(1);
 
     expect(mockEmitOperationalAlert).toHaveBeenCalledWith(
@@ -516,6 +555,33 @@ describe('runtime alert taxonomy contract', () => {
         }),
       })
     );
+  });
+
+  it('does not emit a runtime alert or enqueue audio for an expected admission pause', async () => {
+    const db = jest.requireActual('firebase-admin/firestore').getFirestore();
+    const controlRef = db.doc('_control/temporalRelease');
+    const previous = await controlRef.get();
+    try {
+      await controlRef.set({
+        schemaVersion: 1,
+        revision: 1,
+        releaseId: 'runtime-alert-paused',
+        admission: 'paused',
+        domains: { media: { owner: 'legacy', admission: 'paused' } },
+        updatedAt: Date.now(),
+      });
+      await expect(
+        addIntroOutroTaskGeneratorHandler({ auth: adminAuth, data: buildAddIntroOutroPayload() })
+      ).rejects.toMatchObject({ code: 'unavailable' });
+      expect(mockStorageFileGetMetadata).not.toHaveBeenCalled();
+      expect(mockSermonDocUpdate).not.toHaveBeenCalled();
+      expect(mockQueueAudioRequest).not.toHaveBeenCalled();
+      expect(mockEmitOperationalAlert).not.toHaveBeenCalled();
+      expect(mockHandleError).not.toHaveBeenCalled();
+    } finally {
+      if (previous.exists) await controlRef.set(previous.data());
+      else await controlRef.delete();
+    }
   });
 
   it('preserves normalized error behavior via handleError in publish catch paths', async () => {

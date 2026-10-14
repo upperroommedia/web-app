@@ -466,7 +466,9 @@ export const removeFromList = async (
   itemIds: string[],
   itemTypes: string[],
   sermonIds?: string[],
-  operationKey?: string
+  operationKey?: string,
+  /** Trusted server listener guard, rechecked after waiting for the exact provider resource locks. */
+  beforeLockedRemoval?: () => Promise<boolean>
 ) => {
   const normalizedOperationKey = getOperationKey(operationKey);
   listDebugLog('removeFromList.start', {
@@ -739,9 +741,17 @@ export const removeFromList = async (
 
   try {
     const executeLockedRemoval = async (): Promise<RemoveFromListOutputType> => {
-      return withSubsplashLocks(lockKeys, runRemoval, {
-        ...(normalizedOperationKey ? { operationKey: normalizedOperationKey } : {}),
-      });
+      return withSubsplashLocks(
+        lockKeys,
+        async () => {
+          // No provider reads/mutations or local mirror writes occur before this final listener check.
+          if (beforeLockedRemoval && !(await beforeLockedRemoval())) return [];
+          return runRemoval();
+        },
+        {
+          ...(normalizedOperationKey ? { operationKey: normalizedOperationKey } : {}),
+        }
+      );
     };
 
     const output = normalizedOperationKey

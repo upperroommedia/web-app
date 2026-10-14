@@ -776,3 +776,219 @@ test('full repeated-recovery transaction pins the new archive and rejects ancest
     assert.equal(stored.get(CONTROL_PATH).admission, 'paused');
   }
 });
+
+function plannedFixture(prior = oldRelease, next = newRelease, revision = 2) {
+  const runtime = [
+    {
+      name: 'projects/urm-app-staging/locations/us-central1/functions/deleteseries',
+      state: 'ACTIVE',
+      build: 'projects/urm-app-staging/locations/us-central1/builds/abc-def',
+      revision: 'deleteseries-00001-abc',
+      releaseCommit: prior.compatibilityCommit,
+      source: { bucket: 'reviewed-sources', object: 'deleteseries/source.zip', generation: '1234' },
+    },
+  ];
+  const value = {
+    ...clone(review),
+    oldReleaseId: prior.releaseId,
+    newReleaseId: next.releaseId,
+    oldControlRevision: revision,
+    recoveryMode: 'planned-source-supersession',
+    operations: [],
+    runtime,
+    plannedSourceSupersession: {
+      schemaVersion: 1,
+      predecessorCommit: prior.compatibilityCommit,
+      predecessorControlRevision: revision,
+      operationLockAbsent: true,
+      sourceAuditSha256: '1'.repeat(64),
+      deployedSourceProofSha256: '2'.repeat(64),
+    },
+  };
+  for (const key of ['settledGuard', 'guardSettlementVerified', 'failedCompatibilityDeploymentVerified'])
+    delete value[key];
+  value.artifacts.push(
+    { label: 'planned-source-audit', path: '/secure/audit.json', sha256: '1'.repeat(64) },
+    { label: 'deployed-source-provenance', path: '/secure/source.json', sha256: '2'.repeat(64) }
+  );
+  const proof = {
+    schemaVersion: 1,
+    scope: 'managed-functions-source-identities',
+    result: 'passed',
+    projectId: prior.projectId,
+    releaseId: prior.releaseId,
+    commit: prior.compatibilityCommit,
+    controlRevision: revision,
+    verifiedAt: value.verifiedAt,
+    runtimeSha256: digest(runtime),
+  };
+  const serviceName = 'projects/urm-app-staging/locations/us-central1/services/deleteseries';
+  const revisionName = `${serviceName}/revisions/${runtime[0].revision}`;
+  const functions = [
+    {
+      name: runtime[0].name,
+      state: 'ACTIVE',
+      buildConfig: { build: runtime[0].build, source: { storageSource: clone(runtime[0].source) } },
+      serviceConfig: {
+        service: serviceName,
+        revision: runtime[0].revision,
+        environmentVariables: { TEMPORAL_RELEASE_COMMIT: prior.compatibilityCommit },
+      },
+    },
+  ];
+  const services = [
+    {
+      name: serviceName,
+      reconciling: false,
+      terminalCondition: { state: 'CONDITION_SUCCEEDED' },
+      latestCreatedRevision: revisionName,
+      latestReadyRevision: revisionName,
+      trafficStatuses: [{ revision: revisionName, percent: 100 }],
+    },
+  ];
+  return { review: value, proof, functions, services, names: [runtime[0].name] };
+}
+
+test('planned supersession is explicit and forbids every failed-only or ambiguous reason field', async () => {
+  const { recoveryMode, validatePlannedSourceProof } = await import('./temporal-recover-initial-compatibility.mjs');
+  const f = plannedFixture();
+  validateRecoveryReview(f.review, oldRelease, newRelease, now);
+  validatePlannedSourceProof(f.proof, f.review, oldRelease, now);
+  assert.equal(recoveryMode(review), 'failed-deployment');
+  for (const mutate of [
+    (r) => delete r.recoveryMode,
+    (r) => (r.recoveryMode = null),
+    (r) => (r.recoveryMode = 'failed-deployment'),
+    (r) => (r.settledGuard = null),
+    (r) => (r.guardSettlementVerified = false),
+    (r) => (r.failedCompatibilityDeploymentVerified = false),
+    (r) => (r.plannedSourceSupersession.operationLockAbsent = false),
+    (r) => (r.plannedSourceSupersession.predecessorCommit = newRelease.compatibilityCommit),
+    (r) => r.plannedSourceSupersession.predecessorControlRevision++,
+    (r) => r.artifacts.push(clone(r.artifacts[1])),
+    (r) => (r.runtime[0].state = 'FAILED'),
+    (r) => (r.runtime[0].source.generation = 'latest'),
+    (r) => r.runtime.push(clone(r.runtime[0])),
+  ]) {
+    const value = clone(f.review);
+    mutate(value);
+    assert.throws(() => validateRecoveryReview(value, oldRelease, newRelease, now));
+  }
+  for (const change of [
+    { commit: newRelease.compatibilityCommit },
+    { controlRevision: 3 },
+    { runtimeSha256: '0'.repeat(64) },
+    { verifiedAt: new Date(now - 600001).toISOString() },
+    { scope: 'all-sources-deployed' },
+  ])
+    assert.throws(() => validatePlannedSourceProof({ ...f.proof, ...change }, f.review, oldRelease, now));
+});
+
+test('planned source inventory binds every immutable predecessor export, source generation, build and ready traffic', async () => {
+  const { validatePlannedRuntimeInventory } = await import('./temporal-recover-initial-compatibility.mjs');
+  const f = plannedFixture();
+  const check = (x) => validatePlannedRuntimeInventory(x.functions, x.services, x.review, oldRelease, x.names);
+  check(f);
+  for (const mutate of [
+    (x) => (x.functions = []),
+    (x) => x.functions.push(clone(x.functions[0])),
+    (x) => x.names.push('projects/urm-app-staging/locations/us-central1/functions/omitted-export'),
+    (x) => x.names.push(x.names[0]),
+    (x) => (x.functions[0].serviceConfig.environmentVariables.TEMPORAL_RELEASE_COMMIT = newRelease.compatibilityCommit),
+    (x) => delete x.functions[0].serviceConfig.environmentVariables.TEMPORAL_RELEASE_COMMIT,
+    (x) => (x.functions[0].buildConfig.source.storageSource.generation = '1235'),
+    (x) => (x.functions[0].buildConfig.build = 'changed'),
+    (x) => (x.functions[0].state = 'FAILED'),
+    (x) => (x.services[0].reconciling = true),
+    (x) => (x.services[0].terminalCondition.state = 'CONDITION_FAILED'),
+    (x) => (x.services[0].latestCreatedRevision = 'new-failed'),
+    (x) => (x.services[0].trafficStatuses[0].percent = 99),
+    (x) => x.services[0].trafficStatuses.push({ revision: 'other', percent: 1 }),
+    (x) =>
+      x.functions.push({
+        ...clone(x.functions[0]),
+        name: 'projects/urm-app-staging/locations/us-central1/functions/unreviewed',
+      }),
+  ]) {
+    const value = clone(f);
+    mutate(value);
+    assert.throws(() => check(value));
+  }
+});
+
+test('planned third-hop archive preserves the full two failed predecessors and rejects reason downgrade/tampering', async () => {
+  const f = await repeatedFixture(),
+    ancestry = await validateRecoveryAncestry(f.input, f.load);
+  const fourth = {
+    ...f.third,
+    releaseId: '46873ec5-1752-4e66-8cb2-761920aa3de5',
+    compatibilityCommit: 'f'.repeat(40),
+    uiCommit: 'f'.repeat(40),
+    compatibilityEvidence: '/secure/fourth-compat.json',
+    backendEvidence: '/secure/fourth-backend.json',
+    smokeEvidence: '/secure/fourth-smoke.json',
+  };
+  const planned = plannedFixture(f.third, fourth, 4);
+  const record = buildRecoveryArchive({
+    archive: {
+      ...archiveFixture(f.input, f.third, fourth),
+      recoveryMode: 'planned-source-supersession',
+      plannedSourceSupersession: planned.review.plannedSourceSupersession,
+      plannedReview: planned.review,
+      plannedDeployedSourceProof: planned.proof,
+      plannedOperationLockAbsent: true,
+      plannedSuccessfulBuilds: [{ name: planned.review.runtime[0].build, status: 'SUCCESS' }],
+      plannedExpectedFunctions: planned.names,
+      runtime: planned.review.runtime,
+      reviewSha256: digest(planned.review),
+      observedAt: new Date(now).toISOString(),
+      artifacts: planned.review.artifacts.map(({ label, sha256 }) => ({ label, sha256 })),
+    },
+    oldRelease: f.third,
+    newRelease: fourth,
+    verified: {
+      control: f.input.control,
+      state: f.input.state,
+      controlCreateTime: originalStamp,
+      stateCreateTime: originalStamp,
+      ancestry,
+    },
+  });
+  delete record.settledGuard;
+  const next = successorCheckpoint(f.input, fourth, 5);
+  Object.assign(next.state, {
+    recoveryArchiveSha256: digest(record),
+    recoveryOriginReleaseId: oldRelease.releaseId,
+    recoveryOriginalOperatorUid: 'original-admin',
+    recoveryOriginalIdentitySha256: identityHash,
+  });
+  const path = next.state.recoveryArchivePath;
+  f.rows.set(path, { archive: record, createTime: originalStamp, updateTime: originalStamp });
+  const input = { ...f.input, ...next, oldRelease: fourth };
+  const actual = await validateRecoveryAncestry(input, f.load);
+  assert.equal(actual.summary.archiveCount, 3);
+  assert.deepEqual(actual.releaseIds, [
+    fourth.releaseId,
+    f.third.releaseId,
+    newRelease.releaseId,
+    oldRelease.releaseId,
+  ]);
+  assert.equal(record.predecessorArchive.digest, digest(f.record));
+  assert.deepEqual(record.originalControlCreateTime, originalStamp);
+  for (const mutate of [
+    (r) => delete r.recoveryMode,
+    (r) => delete r.plannedReview,
+    (r) => (r.settledGuard = null),
+    (r) => (r.plannedOperationLockAbsent = false),
+    (r) => (r.plannedSuccessfulBuilds[0].status = 'FAILURE'),
+    (r) => r.plannedSuccessfulBuilds.push(clone(r.plannedSuccessfulBuilds[0])),
+    (r) => (r.plannedDeployedSourceProof.runtimeSha256 = '0'.repeat(64)),
+    (r) => (r.plannedReview.oldControlRevision = 3),
+  ]) {
+    const bad = clone(record);
+    mutate(bad);
+    f.rows.get(path).archive = bad;
+    input.state.recoveryArchiveSha256 = digest(bad);
+    await assert.rejects(validateRecoveryAncestry(input, f.load));
+  }
+});

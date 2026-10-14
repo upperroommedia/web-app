@@ -5,6 +5,8 @@ import { BundleConfig } from '@upperroom/shared/shared/bundleConfigs';
 import { generateAndStoreBundle } from './bundleCreationUtils';
 import { randomUUID } from 'crypto';
 import { isDomainTemporalEnabled } from '../temporal/ownership';
+import { withLegacyAdmissionLease } from '../temporal/legacyAdmissionLease';
+import { getFirebaseProjectId } from '@upperroom/shared/shared/firebaseProjectConfig';
 
 const database = firebaseAdmin.database();
 const BUNDLE_REGEN_DEBOUNCE_MS = 2_500;
@@ -108,80 +110,91 @@ export function createBundleDocumentListener<T>(config: BundleConfig<T>) {
       return;
     }
 
-    await (
-      await import('../temporal/releaseControl')
-    ).assertLegacyAdmissionAllowed(firebaseAdmin.firestore(), 'bundles', { continuation: true });
-    logger.info(`Regenerating ${config.displayName} bundle.`, dataDiff);
+    // Only already leased invocations may finish during pause. A newly
+    // delivered event retries instead of creating an invisible continuation.
+    await withLegacyAdmissionLease(
+      firebaseAdmin.firestore(),
+      {
+        domain: 'bundles',
+        actorUid: 'system:firebase-event',
+        operation: `bundle.listener:${config.bundleType}`,
+        projectId: getFirebaseProjectId(),
+      },
+      async (lease) => {
+        await lease.markEffectsStarted();
+        logger.info(`Regenerating ${config.displayName} bundle.`, dataDiff);
 
-    let ownedProcessorToken: string | null = null;
-    try {
-      const claim = await claimBundleRegeneration(config.metadataDocPath);
-      ownedProcessorToken = claim.isOwner ? claim.processorToken : null;
+        let ownedProcessorToken: string | null = null;
+        try {
+          const claim = await claimBundleRegeneration(config.metadataDocPath);
+          ownedProcessorToken = claim.isOwner ? claim.processorToken : null;
 
-      if (!claim.isOwner) {
-        logger.info(
-          `${config.displayName} bundle regeneration already in progress; coalescing this request into the active cycle.`
-        );
-        return;
-      }
-
-      let cycles = 0;
-      while (cycles < MAX_REGEN_CYCLES_PER_OWNER) {
-        cycles += 1;
-
-        await delay(BUNDLE_REGEN_DEBOUNCE_MS);
-
-        const currentState = (
-          await getRegenerationStateRef(config.metadataDocPath).once('value')
-        ).val() as BundleRegenerationState | null;
-
-        if (!currentState || currentState.processorToken !== claim.processorToken) {
-          logger.warn(`${config.displayName} bundle regeneration ownership was lost before generation started.`);
-          return;
-        }
-
-        const processedRequestAt = currentState.latestRequestAt ?? Date.now();
-        logger.info(`${config.displayName} bundle regeneration cycle starting.`, {
-          cycle: cycles,
-          processedRequestAt,
-        });
-
-        const count = await generateAndStoreBundle(config);
-
-        await database.ref(config.metadataDocPath).update({
-          lastUpdated: Date.now(),
-          [`${config.bundleType}-count`]: count,
-        });
-
-        const shouldContinue = await shouldRunAnotherBundleCycle(
-          config.metadataDocPath,
-          claim.processorToken,
-          processedRequestAt
-        );
-
-        if (!shouldContinue) {
-          logger.info(`${config.displayName} bundle regenerated successfully`, { cycles });
-          return;
-        }
-
-        logger.info(
-          `${config.displayName} bundle received another queued mutation during regeneration; running another cycle.`,
-          {
-            cycle: cycles,
+          if (!claim.isOwner) {
+            logger.info(
+              `${config.displayName} bundle regeneration already in progress; coalescing this request into the active cycle.`
+            );
+            return;
           }
-        );
-      }
 
-      logger.warn(
-        `${config.displayName} bundle regeneration hit the cycle cap; releasing the lock for a future mutation to retry.`
-      );
-    } catch (error) {
-      logger.error(`Error regenerating ${config.displayName} bundle after operation:`, error);
-      throw handleError(error);
-    } finally {
-      if (ownedProcessorToken) {
-        await releaseBundleRegeneration(config.metadataDocPath, ownedProcessorToken);
+          let cycles = 0;
+          while (cycles < MAX_REGEN_CYCLES_PER_OWNER) {
+            cycles += 1;
+
+            await delay(BUNDLE_REGEN_DEBOUNCE_MS);
+
+            const currentState = (
+              await getRegenerationStateRef(config.metadataDocPath).once('value')
+            ).val() as BundleRegenerationState | null;
+
+            if (!currentState || currentState.processorToken !== claim.processorToken) {
+              logger.warn(`${config.displayName} bundle regeneration ownership was lost before generation started.`);
+              return;
+            }
+
+            const processedRequestAt = currentState.latestRequestAt ?? Date.now();
+            logger.info(`${config.displayName} bundle regeneration cycle starting.`, {
+              cycle: cycles,
+              processedRequestAt,
+            });
+
+            const count = await generateAndStoreBundle(config);
+
+            await database.ref(config.metadataDocPath).update({
+              lastUpdated: Date.now(),
+              [`${config.bundleType}-count`]: count,
+            });
+
+            const shouldContinue = await shouldRunAnotherBundleCycle(
+              config.metadataDocPath,
+              claim.processorToken,
+              processedRequestAt
+            );
+
+            if (!shouldContinue) {
+              logger.info(`${config.displayName} bundle regenerated successfully`, { cycles });
+              return;
+            }
+
+            logger.info(
+              `${config.displayName} bundle received another queued mutation during regeneration; running another cycle.`,
+              {
+                cycle: cycles,
+              }
+            );
+          }
+
+          logger.warn(
+            `${config.displayName} bundle regeneration hit the cycle cap; releasing the lock for a future mutation to retry.`
+          );
+        } catch (error) {
+          logger.error(`Error regenerating ${config.displayName} bundle after operation:`, error);
+          throw handleError(error);
+        } finally {
+          if (ownedProcessorToken) {
+            await releaseBundleRegeneration(config.metadataDocPath, ownedProcessorToken);
+          }
+        }
       }
-    }
+    );
   });
 }

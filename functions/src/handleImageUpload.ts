@@ -23,7 +23,7 @@ import { getFirebaseImagesBucket } from '@upperroom/shared/shared/firebaseProjec
 import { subsplashSecretsWithRuntimeAlerts } from './subsplashSecrets';
 import { ensureFirebaseDownloadUrl } from './storageDownloadUrl';
 import handleError from './handleError';
-import { assertLegacyAdmissionAllowed } from './temporal/releaseControl';
+import { withLegacyAdmissionLease } from './temporal/legacyAdmissionLease';
 import { enqueueSystemImage } from './temporal/images/admission';
 import { assertProviderMutationTransportAllowed } from './temporal/publishing/providerTransportPolicy';
 import { createHash } from 'node:crypto';
@@ -56,7 +56,7 @@ const uploadImageToSubsplash = async (
   };
   const config = createAxiosConfig('https://core.subsplash.com/files/v1/images', bearerToken, 'POST', requestData);
   // contains s3 presigned url
-  const subsplashResponse = (await axios({ ...config, maxRedirects: 0 })).data;
+  const subsplashResponse = (await axios({ ...config, maxRedirects: 0, timeout: 30_000 })).data;
   if (!subsplashResponse.id) {
     throw new Error('No id was returned from subsplash');
   }
@@ -66,7 +66,6 @@ const uploadImageToSubsplash = async (
   if (!uploadURL) {
     throw new Error('No upload link was returned from subsplash');
   }
-  logger.log('Subsplash Upload Response:', subsplashResponse);
   const file = fs.readFileSync(originalFile);
   //upload data to s3 signedUrl
   const uploadConfig: AxiosRequestConfig = {
@@ -99,7 +98,6 @@ const handleImageUpload = onObjectFinalized(
     const object = storageEvent.data;
     const filePath = object.name ? object.name : '';
     const metadata = object.metadata;
-    logger.log(object);
     logger.log('Object Finalized', filePath);
     if (!filePath.startsWith('speaker-images/') || filePath.endsWith('speaker-images/')) {
       logger.log(filePath);
@@ -129,7 +127,6 @@ const handleImageUpload = onObjectFinalized(
       throw new HttpsError('invalid-argument', 'Image name is not valid');
     }
     logger.log('ImageName', imageName);
-    logger.log('Data', object);
 
     if (process.env.TASK_ORCHESTRATOR_IMAGES === 'temporal') {
       const projectId = firebaseAdmin.app().options.projectId ?? process.env.GCLOUD_PROJECT ?? '';
@@ -153,68 +150,83 @@ const handleImageUpload = onObjectFinalized(
       return;
     }
 
-    await assertLegacyAdmissionAllowed(firebaseAdmin.firestore(), 'images');
-    let originalFile = '';
-    let temporaryDirectory = '';
-    try {
-      temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), 'urm-image-'));
-      originalFile = path.join(temporaryDirectory, 'source');
-      const bucket = firebaseAdmin.storage().bucket(object.bucket);
+    const contentType = object.contentType;
+    return withLegacyAdmissionLease(
+      firebaseAdmin.firestore(),
+      {
+        domain: 'images',
+        actorUid: 'system:firebase-event',
+        operation: 'uploadimage',
+        projectId: firebaseAdmin.app().options.projectId ?? process.env.GCLOUD_PROJECT ?? '',
+      },
+      async (lease) => {
+        let originalFile = '';
+        let temporaryDirectory = '';
+        try {
+          temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), 'urm-image-'));
+          originalFile = path.join(temporaryDirectory, 'source');
+          const bucket = firebaseAdmin.storage().bucket(object.bucket);
 
-      // Create the temp directory where the storage file will be downloaded.
+          // Create the temp directory where the storage file will be downloaded.
 
-      // Download file from bucket.
-      const remoteFile = bucket.file(filePath, { generation: object.generation });
-      logger.log(`Downloading image file: '${filePath}'`);
-      await remoteFile.download({ destination: originalFile });
-      logger.log(`Downloaded image file: '${filePath}' to '${originalFile}'`);
+          // Download file from bucket.
+          const remoteFile = bucket.file(filePath, { generation: object.generation });
+          logger.log(`Downloading image file: '${filePath}'`);
+          await remoteFile.download({ destination: originalFile });
+          logger.log(`Downloaded image file: '${filePath}' to '${originalFile}'`);
 
-      const downloadUrl = await ensureFirebaseDownloadUrl(remoteFile);
-      logger.log('uploading to subsplash');
-      const imageType = metadata.type as ImageSizeType;
-      const [subsplashImageId, computedImageMetadata] = await Promise.all([
-        uploadImageToSubsplash(imageName, originalFile, imageType, object.contentType),
-        computeMetadataForImage(originalFile),
-      ]);
+          // Download tokens and provider allocation are mutations. Register their start
+          // before either can occur so a pause cannot silently drain this invocation.
+          await lease.markEffectsStarted();
+          const downloadUrl = await ensureFirebaseDownloadUrl(remoteFile);
+          logger.log('uploading to subsplash');
+          const imageType = metadata.type as ImageSizeType;
+          const [subsplashImageId, computedImageMetadata] = await Promise.all([
+            uploadImageToSubsplash(imageName, originalFile, imageType, contentType),
+            computeMetadataForImage(originalFile),
+          ]);
 
-      // uploading to firestore
-      const image: ImageType = {
-        ...computedImageMetadata,
-        id: subsplashImageId,
-        subsplashId: subsplashImageId,
-        size: 'original',
-        type: imageType,
-        downloadLink: downloadUrl,
-        name: imageName,
-        dateAddedMillis: new Date().getTime(),
-      };
-      logger.log('adding image with metadata to firestore', image);
-      await firebaseAdmin
-        .firestore()
-        .collection('images')
-        .withConverter(firestoreAdminImagesConverter)
-        .doc(subsplashImageId)
-        .set(image);
-    } catch (e) {
-      handleError(e, {
-        alertCode: 'HANDLE_IMAGE_UPLOAD_RUNTIME_FAILURE',
-        summary: 'handleImageUpload failed while processing a finalized storage object.',
-        context: { functionName: 'handleImageUpload', filePath },
-      });
-      throw new Error('Image ingestion failed; retry required');
-    } finally {
-      if (temporaryDirectory) await rm(temporaryDirectory, { recursive: true, force: true });
-      // Delete the original file
-      // if (remoteFile) {
-      //   try {
-      //     logger.log(`Deleting original file from storage bucket: '${remoteFile}'`);
-      //     await remoteFile.delete();
-      //     logger.log(`Deleted original file from storage bucket: '${remoteFile}'`);
-      //   } catch (err) {
-      //     logger.warn("Error when deleting temporary files", err);
-      //   }
-      // }
-    }
+          // uploading to firestore
+          const image: ImageType = {
+            ...computedImageMetadata,
+            id: subsplashImageId,
+            subsplashId: subsplashImageId,
+            size: 'original',
+            type: imageType,
+            downloadLink: downloadUrl,
+            name: imageName,
+            dateAddedMillis: new Date().getTime(),
+          };
+          logger.log('adding image metadata to firestore', { imageId: subsplashImageId });
+          await firebaseAdmin
+            .firestore()
+            .collection('images')
+            .withConverter(firestoreAdminImagesConverter)
+            .doc(subsplashImageId)
+            .set(image);
+        } catch (e) {
+          if (e instanceof HttpsError) throw e;
+          handleError(e, {
+            alertCode: 'HANDLE_IMAGE_UPLOAD_RUNTIME_FAILURE',
+            summary: 'handleImageUpload failed while processing a finalized storage object.',
+            context: { functionName: 'handleImageUpload', filePath },
+          });
+          throw new Error('Image ingestion failed; retry required');
+        } finally {
+          if (temporaryDirectory) await rm(temporaryDirectory, { recursive: true, force: true });
+          // Delete the original file
+          // if (remoteFile) {
+          //   try {
+          //     logger.log(`Deleting original file from storage bucket: '${remoteFile}'`);
+          //     await remoteFile.delete();
+          //     logger.log(`Deleted original file from storage bucket: '${remoteFile}'`);
+          //   } catch (err) {
+          //     logger.warn("Error when deleting temporary files", err);
+          //   }
+          // }
+        }
+      }
+    );
   }
 );
 

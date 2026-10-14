@@ -1,11 +1,21 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
-    function legacyMediaWritesAllowed() {
+    function legacyWritesAllowed(domain) {
       return !firestore.exists(/databases/(default)/documents/_control/temporalRelease)
         || (firestore.get(/databases/(default)/documents/_control/temporalRelease).data.admission == 'open'
-          && firestore.get(/databases/(default)/documents/_control/temporalRelease).data.domains.media.owner == 'legacy'
-          && firestore.get(/databases/(default)/documents/_control/temporalRelease).data.domains.media.admission == 'open');
+          && domain in firestore.get(/databases/(default)/documents/_control/temporalRelease).data.domains
+          && firestore.get(/databases/(default)/documents/_control/temporalRelease).data.domains[domain].owner == 'legacy'
+          && firestore.get(/databases/(default)/documents/_control/temporalRelease).data.domains[domain].admission == 'open');
+    }
+    function canUpload() {
+      return request.auth != null && request.auth.token.role in ['uploader', 'publisher', 'admin'];
+    }
+    function admissionOpen(domain) {
+      return !firestore.exists(/databases/(default)/documents/_control/temporalRelease)
+        || (firestore.get(/databases/(default)/documents/_control/temporalRelease).data.admission == 'open'
+          && domain in firestore.get(/databases/(default)/documents/_control/temporalRelease).data.domains
+          && firestore.get(/databases/(default)/documents/_control/temporalRelease).data.domains[domain].admission == 'open');
     }
     match /durable-upload-sources/{uid}/{jobId}/source {
       allow create: if resource == null && request.auth != null && request.auth.uid == uid
@@ -14,13 +24,17 @@ service firebase.storage {
         && firestore.exists(/databases/(default)/documents/durableJobs/$(jobId))
         && firestore.get(/databases/(default)/documents/durableJobs/$(jobId)).data.requestedBy == uid
         && firestore.get(/databases/(default)/documents/durableJobs/$(jobId)).data.state == 'awaiting_source'
+        && firestore.get(/databases/(default)/documents/durableJobs/$(jobId)).data.kind == 'upload.source.start'
+        && firestore.get(/databases/(default)/documents/durableJobs/$(jobId)).data.result.sourceUpload.storagePath == 'durable-upload-sources/' + uid + '/' + jobId + '/source'
         && firestore.get(/databases/(default)/documents/durableJobs/$(jobId)).data.result.sourceUpload.expectedFile.size == request.resource.size;
       allow read: if request.auth != null && (request.auth.uid == uid || request.auth.token.role == 'admin');
       allow update, delete: if false;
     }
     match /durable-image-sources/{uid}/{requestId}/source {
       allow create: if resource == null && request.auth != null && request.auth.uid == uid
-        && request.auth.token.role in ['uploader', 'publisher', 'admin']
+        && canUpload() && admissionOpen('images')
+        && firestore.exists(/databases/(default)/documents/_control/temporalRelease)
+        && firestore.get(/databases/(default)/documents/_control/temporalRelease).data.domains.images.owner == 'temporal'
         && request.resource.metadata.ownerUID == uid
         && request.resource.metadata.durableRequestId == requestId
         && request.resource.size > 0 && request.resource.size <= 26214400
@@ -36,11 +50,19 @@ service firebase.storage {
         && (!firestore.exists(/databases/(default)/documents/_control/temporalRelease)
           || firestore.get(/databases/(default)/documents/_control/temporalRelease).data.domains.media.owner == 'legacy');
     }
+    // Legacy browser mutations have explicit destinations. Server SDK writes bypass rules.
+    match /speaker-images/{filePath=**} {
+      allow write: if canUpload() && legacyWritesAllowed('images');
+    }
     match /{topLevel}/{remaining=**} {
-    allow write: if !(topLevel in ['durable-upload-sources', 'durable-image-sources', 'workflow-audio'])
-                    && (!(topLevel in ['sermons', 'processed-sermons', 'intro-outro-sermons']) || legacyMediaWritesAllowed()) && request.auth != null &&
-                    (request.auth.token.role == 'uploader' || request.auth.token.role == 'admin' || request.auth.token.role == 'publisher');
-    allow read: if !(topLevel in ['durable-upload-sources', 'durable-image-sources']);
+      allow read: if !(topLevel in ['durable-upload-sources', 'durable-image-sources', 'speaker-request-images']);
+    }
+    match /speaker-request-images/{fileName} {
+      allow create: if resource == null && request.auth != null && admissionOpen('accounts')
+        && request.resource.size > 0 && request.resource.size <= 26214400
+        && request.resource.contentType.matches('image/(jpeg|png|webp|gif|tiff)');
+      allow read: if request.auth != null;
+      allow update, delete: if false;
     }
   }
 }

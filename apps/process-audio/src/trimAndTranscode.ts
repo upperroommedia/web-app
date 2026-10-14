@@ -33,7 +33,12 @@ function buildQueuedStageLabel(args: { action: string; active: number; waiting: 
 }
 
 // Parse ffmpeg stderr for progress and duration
-function parseFFmpegProgress(stderrLine: string): { time?: string; duration?: string; speed?: string; bitrate?: string } {
+function parseFFmpegProgress(stderrLine: string): {
+  time?: string;
+  duration?: string;
+  speed?: string;
+  bitrate?: string;
+} {
   const result: { time?: string; duration?: string; speed?: string; bitrate?: string } = {};
 
   // Parse time: time=00:01:23.45
@@ -75,7 +80,8 @@ const trimAndTranscode = async (
   customMetadata: CustomMetadata,
   startTime?: number,
   duration?: number,
-  ctx?: LogContext
+  ctx?: LogContext,
+  sourceBucket: Bucket = bucket
 ): Promise<File> => {
   const log = createLoggerWithContext(ctx);
   const outputFile = bucket.file(outputFilePath);
@@ -201,7 +207,11 @@ const trimAndTranscode = async (
 
   const acquireSemaphoreSlot = async (
     action: string,
-    semaphore: { name: string; acquire: () => Promise<() => void>; snapshot: () => { active: number; waiting: number; limit: number } },
+    semaphore: {
+      name: string;
+      acquire: () => Promise<() => void>;
+      snapshot: () => { active: number; waiting: number; limit: number };
+    },
     onQueued?: (snapshot: { active: number; waiting: number; limit: number }) => Promise<void>
   ): Promise<() => void> => {
     const before = semaphore.snapshot();
@@ -259,12 +269,17 @@ const trimAndTranscode = async (
         'youtube_download',
         ytDlpDownloadSemaphore,
         async (snapshot) => {
-          await setProcessAudioProgress(realtimeDBRef, 0, 'queued', buildQueuedStageLabel({
-            action: 'youtube_download',
-            active: snapshot.active,
-            waiting: snapshot.waiting,
-            limit: snapshot.limit,
-          })).catch((err) => {
+          await setProcessAudioProgress(
+            realtimeDBRef,
+            0,
+            'queued',
+            buildQueuedStageLabel({
+              action: 'youtube_download',
+              active: snapshot.active,
+              waiting: snapshot.waiting,
+              limit: snapshot.limit,
+            })
+          ).catch((err) => {
             log.error('Failed to set queued download progress state', {
               error: err instanceof Error ? err.message : String(err),
               active: snapshot.active,
@@ -302,7 +317,7 @@ const trimAndTranscode = async (
         });
       });
       log.debug('Downloading raw audio source', { source: audioSource.source, destination: rawSourceFile });
-      await bucket.file(audioSource.source).download({ destination: rawSourceFile });
+      await sourceBucket.file(audioSource.source).download({ destination: rawSourceFile });
       inputSource = rawSourceFile;
     }
 

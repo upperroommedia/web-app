@@ -18,19 +18,32 @@ const options = {
   operation: 'sermonaudiocreatetrigger',
   legacySourceUpload: source,
 };
+async function freeze() {
+  const batch = db.batch(),
+    cutoff = FieldValue.serverTimestamp();
+  batch.update(db.doc('_control/temporalRelease'), { legacyAdmissionCutoff: cutoff });
+  batch.set(db.doc('_control/temporalReleaseState'), {
+    releaseId: 'legacy-source-test',
+    mode: 'initial-cutover',
+    legacySettlingCutoff: cutoff,
+    compatibilityVerifiedAt: cutoff,
+    legacySettlingGraceSeconds: 3600,
+    maximumLegacyExecutionSeconds: 3570,
+  });
+  await batch.commit();
+}
 beforeEach(async () => {
   await db.recursiveDelete(db.collection('legacyAdmissionLeases'));
   await db.doc('_control/temporalProviderUsage').delete();
-  await db
-    .doc('_control/temporalRelease')
-    .set({
-      schemaVersion: 1,
-      revision: 1,
-      releaseId: 'legacy-source-test',
-      admission: 'paused',
-      domains: { media: { owner: 'legacy', admission: 'paused' } },
-      updatedAt: Date.now(),
-    });
+  await db.doc('_control/temporalReleaseState').delete();
+  await db.doc('_control/temporalRelease').set({
+    schemaVersion: 1,
+    revision: 1,
+    releaseId: 'legacy-source-test',
+    admission: 'paused',
+    domains: { media: { owner: 'legacy', admission: 'paused' } },
+    updatedAt: Date.now(),
+  });
   await db
     .doc(`sermons/${source.sermonId}`)
     .set({ ...source, uploaderId: source.uploaderId, subtitle: '', status: { audioStatus: 'PENDING' } });
@@ -38,11 +51,12 @@ beforeEach(async () => {
 afterAll(async () => {
   await db.doc(`sermons/${source.sermonId}`).delete();
   await db.doc('_control/temporalRelease').delete();
+  await db.doc('_control/temporalReleaseState').delete();
 });
 describe('previously admitted legacy source continuation', () => {
   it('registers and finishes verified work during pause without opening generic admissions', async () => {
     // Source created during the compatibility window after initial freeze remains admitted.
-    await db.doc('_control/temporalRelease').update({ legacyAdmissionCutoff: FieldValue.serverTimestamp() });
+    await freeze();
     const result = await withLegacyAdmissionLease(db, options, async (lease) => {
       await lease.markEffectsStarted();
       await db.doc(`sermons/${source.sermonId}`).update({ 'status.audioStatus': 'PROCESSING' });
@@ -61,7 +75,7 @@ describe('previously admitted legacy source continuation', () => {
     ).rejects.toMatchObject({ code: 'unavailable' });
   });
   it('rejects sources created after the verified compatibility cutoff even if updatedAt advances', async () => {
-    await db.doc('_control/temporalRelease').update({ legacyAdmissionCutoff: FieldValue.serverTimestamp() });
+    await freeze();
     await db.doc(`sermons/${source.sermonId}`).delete();
     await db.doc(`sermons/${source.sermonId}`).create({ ...source, status: { audioStatus: 'PENDING' } });
     await db.doc('_control/temporalRelease').update({ updatedAt: Date.now() + 86400000, revision: 2 });
