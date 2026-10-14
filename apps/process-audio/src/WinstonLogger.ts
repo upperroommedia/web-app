@@ -3,9 +3,11 @@ import Transport from 'winston-transport';
 import { LoggingWinston } from '@google-cloud/logging-winston';
 import { LogContext } from './context';
 import { Sentry, sentryLogsEnabled } from './instrument';
+import { createLogDeliveryFailureReporter } from './logDeliveryFailure';
 
 const isDevelopment = process.env.NODE_ENV === 'development';
 const cloudLoggingEnabled = process.env.ENABLE_CLOUD_LOGGING === 'true' || Boolean(process.env.K_SERVICE);
+const reportLogDeliveryFailure = createLogDeliveryFailureReporter();
 const defaultSentryLogLevels = ['warn', 'error'];
 const sentryLogLevels = Array.from(
   new Set(
@@ -24,6 +26,11 @@ if (!isDevelopment && cloudLoggingEnabled) {
   try {
     // Configure LoggingWinston with proper labels for GCP structured logging
     const loggingWinston = new LoggingWinston({
+      // SDK diagnostic entries can bypass Winston's writable callback. Handle
+      // that delivery path as well as the logger's transport error event.
+      defaultCallback: (error) => {
+        if (error) reportLogDeliveryFailure();
+      },
       // Use service name and version for better log organization
       serviceContext: {
         service: 'process-audio-cloud-run',
@@ -72,6 +79,11 @@ const baseLogger = winston.createLogger({
   format: winston.format.combine(gcpFormat, winston.format.json()),
   transports,
 });
+
+// Winston re-emits asynchronous transport failures as logger errors. Keep
+// logging outages outside the application's task/retry lifecycle. Never report
+// these failures through the same logger or serialize provider error payloads.
+baseLogger.on('error', reportLogDeliveryFailure);
 
 // Helper to merge context with metadata following GCP structured logging best practices
 // GCP best practices: Use top-level fields for filterable metadata, not nested objects

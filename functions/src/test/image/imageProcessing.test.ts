@@ -5,14 +5,15 @@ import sharp from 'sharp';
 import { Bucket } from '@google-cloud/storage';
 import { StorageObjectData } from 'firebase-functions/v2/storage';
 import { modifyImage } from '../../resize-image';
-import computeMetadataForImage from '../../computeMetadataForImage';
+import computeMetadataForImage, { vibrantHexFromRgba } from '../../computeMetadataForImage';
 import { getAverageColor } from 'fast-average-color-node';
-import { Vibrant } from 'node-vibrant/node';
+import { MMCQ } from '@vibrant/quantizer-mmcq';
+import { DefaultGenerator } from '@vibrant/generator-default';
 import { imageSize } from 'image-size';
 
 jest.mock('fast-average-color-node', () => ({ getAverageColor: jest.fn() }));
-const mockGetPalette = jest.fn();
-jest.mock('node-vibrant/node', () => ({ Vibrant: { from: jest.fn(() => ({ getPalette: mockGetPalette })) } }));
+jest.mock('@vibrant/quantizer-mmcq', () => ({ MMCQ: jest.fn(() => []) }));
+jest.mock('@vibrant/generator-default', () => ({ DefaultGenerator: jest.fn() }));
 jest.mock('firebase-functions', () => ({ logger: { log: jest.fn(), error: jest.fn(), warn: jest.fn() } }));
 
 let fixtureDirectory: string;
@@ -29,7 +30,9 @@ beforeEach(async () => {
     isDark: true,
     isLight: false,
   });
-  mockGetPalette.mockResolvedValue({ Vibrant: { hex: '#abcdef' } });
+  jest
+    .mocked(DefaultGenerator)
+    .mockResolvedValue({ Vibrant: { hex: '#abcdef' } } as Awaited<ReturnType<typeof DefaultGenerator>>);
   fixtureDirectory = await mkdtemp(path.join(os.tmpdir(), 'image-processing-test-'));
   originalFile = path.join(fixtureDirectory, 'original.png');
   await sharp({ create: { width: 80, height: 40, channels: 3, background: '#123456' } })
@@ -61,14 +64,14 @@ test.each([true, false])(
     expect(imageSize(input)).toMatchObject({ type: 'svg', width: 1, height: 1 });
     await expect(computeMetadataForImage(input, dimensionsOnly)).rejects.toMatchObject({ name: 'ImageInputInvalid' });
     expect(getAverageColor).not.toHaveBeenCalled();
-    expect(Vibrant.from).not.toHaveBeenCalled();
+    expect(MMCQ).not.toHaveBeenCalled();
   }
 );
 test('dimensions-only callers reject an image header whose pixel data cannot decode', async () => {
   const truncated = (await readFile(originalFile)).subarray(0, 40);
   expect(imageSize(truncated)).toMatchObject({ width: 80, height: 40 });
   await expect(computeMetadataForImage(truncated, true)).rejects.toMatchObject({ name: 'ImageInputInvalid' });
-  expect(Vibrant.from).not.toHaveBeenCalled();
+  expect(MMCQ).not.toHaveBeenCalled();
 });
 test.each(['png', 'jpeg', 'webp', 'gif', 'tiff'] as const)(
   'decodes real %s and passes only bounded encoded PNG to color libraries',
@@ -81,7 +84,10 @@ test.each(['png', 'jpeg', 'webp', 'gif', 'tiff'] as const)(
     const sample = jest.mocked(getAverageColor).mock.calls[0][0];
     expect(Buffer.isBuffer(sample)).toBe(true);
     expect(await sharp(sample).metadata()).toMatchObject({ format: 'png', width: 128, height: 64 });
-    expect(jest.mocked(Vibrant.from).mock.calls[0][0]).toBe(sample);
+    const pixels = jest.mocked(MMCQ).mock.calls[0][0];
+    expect(pixels).toBeInstanceOf(Uint8Array);
+    expect(pixels).toHaveLength(26 * 13 * 4);
+    expect(jest.mocked(MMCQ).mock.calls[0][1]).toEqual({ colorCount: 64 });
   }
 );
 test('valid SVG is rasterized before secondary parsing without changing reported dimensions', async () => {
@@ -140,11 +146,11 @@ test.each([
 ])('rejects oversized dimensions %sx%s before color libraries', async (width, height) => {
   const input = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"></svg>`);
   await expect(computeMetadataForImage(input)).rejects.toMatchObject({ name: 'ImageInputInvalid' });
-  expect(Vibrant.from).not.toHaveBeenCalled();
+  expect(MMCQ).not.toHaveBeenCalled();
 });
 test('retains stable fallback colors when genuine extraction libraries fail after valid decoding', async () => {
   jest.mocked(getAverageColor).mockRejectedValue(new Error('color extraction failed'));
-  mockGetPalette.mockRejectedValue(new Error('palette extraction failed'));
+  jest.mocked(DefaultGenerator).mockRejectedValue(new Error('palette extraction failed'));
   expect(await computeMetadataForImage(originalFile)).toEqual({
     width: 80,
     height: 40,
@@ -212,4 +218,26 @@ test('cleans temporary output when a storage upload fails', async () => {
   expect(result.success).toBe(false);
   expect(uploadedPath).not.toBe('');
   await expect(access(path.dirname(uploadedPath))).rejects.toThrow();
+});
+
+test('filters near-white and low alpha before passing bounded RGBA to MMCQ', async () => {
+  const pixels = (r: number, g: number, b: number, a: number) => ({
+    width: 1,
+    height: 1,
+    channels: 4,
+    data: Buffer.from([r, g, b, a]),
+  });
+  expect(await vibrantHexFromRgba(pixels(251, 251, 251, 255))).toBeUndefined();
+  expect(await vibrantHexFromRgba(pixels(220, 36, 36, 124))).toBeUndefined();
+  expect(MMCQ).not.toHaveBeenCalled();
+  await vibrantHexFromRgba(pixels(250, 251, 251, 255));
+  expect(MMCQ).toHaveBeenCalledTimes(1);
+  expect(jest.mocked(MMCQ).mock.calls[0][0]).toEqual(Buffer.from([250, 251, 251, 255]));
+});
+
+test('preserves the fallback when the real quantizer boundary throws', async () => {
+  jest.mocked(MMCQ).mockImplementationOnce(() => {
+    throw new Error('quantizer failed');
+  });
+  expect(await computeMetadataForImage(originalFile)).toMatchObject({ vibrantColorHex: '#2b7256' });
 });

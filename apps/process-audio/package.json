@@ -31,10 +31,13 @@
   "author": "Google LLC",
   "license": "Apache-2.0",
   "dependencies": {
-    "@google-cloud/logging-winston": "^6.0.1",
+    "@google-cloud/logging-winston": "^7.3.0",
     "@google-cloud/storage": "catalog:",
     "@sentry/node": "^11.7.0",
+    "@temporalio/activity": "1.24.0",
+    "@temporalio/common": "1.24.0",
     "@upperroom/contracts": "workspace:*",
+    "@upperroom/orchestration": "workspace:*",
     "@upperroom/shared": "workspace:*",
     "axios": "catalog:",
     "express": "^4.18.2",
@@ -42,10 +45,7 @@
     "firebase-admin": "catalog:",
     "google-auth-library": "^11.2.0",
     "uuid": "catalog:",
-    "winston": "^3.18.3",
-    "@upperroom/orchestration": "workspace:*",
-    "@temporalio/activity": "1.24.0",
-    "@temporalio/common": "1.24.0"
+    "winston": "^3.18.3"
   },
   "devDependencies": {
     "@types/express": "^5.0.3",

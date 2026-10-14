@@ -54,7 +54,7 @@ function flatWorkspaceSection(workspace, section) {
   const lines = workspace.split(/\r?\n/),
     start = lines.findIndex((line) => line.trim() === `${section}:`);
   if (start < 0) return {};
-  const result = {};
+  const result = Object.create(null);
   const unquote = (text) =>
     (text.startsWith("'") && text.endsWith("'")) || (text.startsWith('"') && text.endsWith('"'))
       ? text.slice(1, -1)
@@ -72,16 +72,96 @@ function flatWorkspaceSection(workspace, section) {
   }
   return result;
 }
-export function npmWorkspaceOverrides(workspace) {
-  const overrides = flatWorkspaceSection(workspace, 'overrides');
-  for (const [name, version] of Object.entries(overrides)) {
+const packageNamePattern = /^(?:@[A-Za-z0-9][A-Za-z0-9._-]*\/)?[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const exactVersionPattern = /^[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?$/;
+function reviewedWorkspaceOverrides(workspace) {
+  const flat = Object.create(null),
+    scoped = [];
+  for (const [selector, version] of Object.entries(flatWorkspaceSection(workspace, 'overrides'))) {
+    const names = selector.split('>');
     if (
-      !/^(?:@[A-Za-z0-9._-]+\/)?[A-Za-z0-9._-]+$/.test(name) ||
-      !/^[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?$/.test(version)
+      !exactVersionPattern.test(version) ||
+      names.length > 2 ||
+      names.some((name) => !packageNamePattern.test(name)) ||
+      (names.length === 2 && names[0] === names[1])
     )
-      throw new Error(`Unsupported pnpm override ${name}; review an explicit npm equivalent`);
+      throw new Error(`Unsupported pnpm override ${selector}; review an explicit npm equivalent`);
+    if (names.length === 1) flat[selector] = version;
+    else scoped.push({ parent: names[0], child: names[1], version });
   }
-  return overrides;
+  for (const { parent, child, version } of scoped) {
+    if (flat[child] && flat[child] !== version)
+      throw new Error(`Conflicting flat/scoped override for ${parent}>${child}`);
+  }
+  return { flat, scoped };
+}
+/** Literal ancestor/child overrides only; no ranges, aliases, wildcards or deeper selector grammar. */
+export function npmWorkspaceOverrides(workspace) {
+  const { flat, scoped } = reviewedWorkspaceOverrides(workspace);
+  const translated = { ...flat };
+  for (const { parent, child, version } of scoped) {
+    const current = Object.hasOwn(translated, parent) ? translated[parent] : undefined;
+    if (!current || typeof current === 'string')
+      translated[parent] = { ...(current ? { '.': current } : {}), [child]: version };
+    else current[child] = version;
+  }
+  return translated;
+}
+function packageAtPath(key) {
+  return key.slice(key.lastIndexOf('node_modules/') + 'node_modules/'.length);
+}
+/** Resolve a lock edge by Node's ancestor search, including hoisted and scoped packages. */
+function resolveLockDependency(packages, from, name) {
+  let directory = from;
+  while (true) {
+    // Node searches namespace directories too (@scope/node_modules), but skips
+    // generating duplicate node_modules/node_modules lookup locations.
+    if (path.posix.basename(directory) !== 'node_modules') {
+      const candidate = `${directory ? `${directory}/` : ''}node_modules/${name}`;
+      if (Object.hasOwn(packages, candidate)) return candidate;
+    }
+    if (!directory) return undefined;
+    const parent = path.posix.dirname(directory);
+    directory = parent === '.' ? '' : parent;
+  }
+}
+
+function validateScopedOverrides(lock, scoped) {
+  if (scoped.length) {
+    const root = lock.packages[''];
+    for (const name of Object.keys({ ...root.dependencies, ...root.optionalDependencies })) {
+      if (!resolveLockDependency(lock.packages, '', name) && !Object.hasOwn(root.optionalDependencies || {}, name))
+        throw new Error(`Missing required root dependency ${name} in scoped override closure`);
+    }
+  }
+  for (const { parent, child, version } of scoped) {
+    for (const [parentPath, pkg] of Object.entries(lock.packages)) {
+      if (!parentPath || packageAtPath(parentPath) !== parent) continue;
+      // A present parent with a removed/renamed target means this policy is stale.
+      if (!Object.hasOwn({ ...pkg.dependencies, ...pkg.optionalDependencies }, child))
+        throw new Error(`Scoped override target is not a declared dependency: ${parent}>${child}`);
+      const pending = [parentPath],
+        seen = new Set();
+      while (pending.length) {
+        const from = pending.pop();
+        if (seen.has(from)) continue;
+        seen.add(from);
+        const current = lock.packages[from];
+        for (const name of Object.keys({ ...current.dependencies, ...current.optionalDependencies })) {
+          const resolved = resolveLockDependency(lock.packages, from, name);
+          if (!resolved) {
+            if (name === child) throw new Error(`Missing scoped override dependency ${parent}>${child}`);
+            if (!Object.hasOwn(current.optionalDependencies || {}, name))
+              throw new Error(`Missing required dependency ${name} in scoped override closure at ${from}`);
+            continue; // Only explicitly optional cross-platform packages may be absent.
+          }
+          if (name === child && lock.packages[resolved].version !== version)
+            throw new Error(`Npm lock violates reviewed scoped override ${parent}>${child} at ${resolved}`);
+          pending.push(resolved);
+        }
+      }
+    }
+  }
 }
 export function validateNpmDeploymentLock(manifest, lock, workspace) {
   if (
@@ -114,12 +194,13 @@ export function validateNpmDeploymentLock(manifest, lock, workspace) {
     )
       throw new Error(`Unpinned or external npm deployment package ${key}`);
   }
-  const overrides = npmWorkspaceOverrides(workspace);
-  for (const [name, version] of Object.entries(overrides))
+  const { flat, scoped } = reviewedWorkspaceOverrides(workspace);
+  for (const [name, version] of Object.entries(flat))
     for (const [key, pkg] of Object.entries(lock.packages)) {
       if (key.endsWith(`node_modules/${name}`) && pkg.version !== version)
         throw new Error(`Npm lock violates reviewed override ${name}`);
     }
+  validateScopedOverrides(lock, scoped);
   // pnpm patches cannot silently disappear when exporting to npm. Test-only
   // patches absent from this entire standalone graph are intentionally irrelevant.
   for (const selector of Object.keys(flatWorkspaceSection(workspace, 'patchedDependencies'))) {
@@ -152,7 +233,7 @@ export function materializedPackageContents(original, workspace) {
   if (packageJson.overrides && JSON.stringify(packageJson.overrides) !== JSON.stringify(overrides))
     throw new Error('Split-specific npm overrides differ from reviewed workspace policy');
   for (const section of depSections)
-    for (const [name, version] of Object.entries(overrides)) {
+    for (const [name, version] of Object.entries(reviewedWorkspaceOverrides(workspace).flat)) {
       if (Object.hasOwn(packageJson[section] || {}, name)) packageJson[section][name] = version;
     }
   if (Object.keys(overrides).length) packageJson.overrides = overrides;

@@ -26,12 +26,13 @@ test('all tracked split npm locks match materialized roots and every reviewed ex
   }
 });
 
-test('direct overrides remain exact and unsupported nested/conditional/removal/alias selectors fail explicitly', () => {
+test('direct overrides remain exact and unsupported deeper/conditional/removal/alias selectors fail explicitly', () => {
   const pkg = JSON.parse(materializedPackageContents(JSON.stringify(manifest), tiny));
   assert.equal(pkg.dependencies.cookie, '0.7.0');
   assert.equal(pkg.overrides.cookie, '0.7.0');
   for (const entry of [
-    '  "parent>cookie": 0.7.0',
+    '  "parent>bridge>cookie": 0.7.0',
+    '  "parent*>cookie": 0.7.0',
     '  "parent@1.0.0>cookie": 0.7.0',
     '  cookie:\n    child: 0.7.0',
     '  cookie: -',
@@ -161,4 +162,124 @@ test('path aliases cannot bypass required split lock checks or partially materia
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+const scopedPolicy = 'catalog:\n  parent: 1.0.0\noverrides:\n  "parent>child": 11.1.1\n';
+function scopedLock(packages) {
+  const pkg = JSON.parse(
+    materializedPackageContents(
+      JSON.stringify({ name: 'scoped-fixture', dependencies: { parent: '1.0.0' }, engines: { node: '22' } }),
+      scopedPolicy
+    )
+  );
+  const lock = {
+    name: pkg.name,
+    lockfileVersion: 3,
+    packages: {
+      '': { ...pkg },
+      ...Object.fromEntries(
+        Object.entries(packages).map(([key, value]) => [
+          key,
+          {
+            version: '1.0.0',
+            integrity: 'sha512-eA==',
+            resolved: 'https://registry.npmjs.org/fixture/-/fixture-1.0.0.tgz',
+            ...value,
+          },
+        ])
+      ),
+    },
+  };
+  return { pkg, lock };
+}
+test('literal scoped overrides translate to npm nested policy without rewriting direct parent declarations', () => {
+  assert.deepEqual(npmWorkspaceOverrides(scopedPolicy), { parent: { child: '11.1.1' } });
+  const both = 'catalog:\n  parent: ^1.0.0\noverrides:\n  parent: 1.2.3\n  parent>child: 11.1.1\n';
+  const pkg = JSON.parse(
+    materializedPackageContents(JSON.stringify({ name: 'fixture', dependencies: { parent: 'catalog:' } }), both)
+  );
+  assert.equal(pkg.dependencies.parent, '1.2.3');
+  assert.deepEqual(pkg.overrides, { parent: { '.': '1.2.3', child: '11.1.1' } });
+  assert.deepEqual(
+    npmWorkspaceOverrides('catalog:\n  cookie: 1.0.0\noverrides:\n  "@scope/parent>@other/child": 1.2.3\n'),
+    { '@scope/parent': { '@other/child': '1.2.3' } }
+  );
+  assert.throws(() => npmWorkspaceOverrides(scopedPolicy + '  child: 9.0.1\n'), /Conflicting/);
+});
+test('scoped closure checks actual hoisted dependency resolution and leaves unrelated child versions alone', () => {
+  const { pkg, lock } = scopedLock({
+    'node_modules/parent': { dependencies: { child: '^8.3.2' } },
+    'node_modules/child': { version: '11.1.1' },
+    'node_modules/unrelated': { dependencies: { child: '^9.0.0' } },
+    'node_modules/unrelated/node_modules/child': { version: '9.0.1' },
+  });
+  assert.equal(validateNpmDeploymentLock(pkg, lock, scopedPolicy), lock);
+  lock.packages['node_modules/child'].version = '8.3.2';
+  assert.throws(() => validateNpmDeploymentLock(pkg, lock, scopedPolicy), /reviewed scoped override/);
+});
+test('nested scoped children cannot hide behind a correct hoisted version or a dependency cycle', () => {
+  const { pkg, lock } = scopedLock({
+    'node_modules/parent': { dependencies: { child: '^8.3.2', bridge: '1.0.0' } },
+    'node_modules/child': { version: '11.1.1' },
+    'node_modules/bridge': { dependencies: { child: '9.0.1', parent: '1.0.0' } },
+    'node_modules/bridge/node_modules/child': { version: '9.0.1' },
+  });
+  assert.throws(() => validateNpmDeploymentLock(pkg, lock, scopedPolicy), /reviewed scoped override/);
+  lock.packages['node_modules/bridge/node_modules/child'].version = '11.1.1';
+  assert.equal(validateNpmDeploymentLock(pkg, lock, scopedPolicy), lock);
+});
+test('scoped policy rejects missing targets and stale present parents but allows absent parents', () => {
+  const { pkg, lock } = scopedLock({ 'node_modules/parent': { dependencies: { child: '^8.3.2' } } });
+  assert.throws(() => validateNpmDeploymentLock(pkg, lock, scopedPolicy), /Missing scoped/);
+  delete lock.packages['node_modules/parent'].dependencies;
+  assert.throws(() => validateNpmDeploymentLock(pkg, lock, scopedPolicy), /not a declared dependency/);
+  delete lock.packages['node_modules/parent'];
+  assert.throws(() => validateNpmDeploymentLock(pkg, lock, scopedPolicy), /Missing required root dependency parent/);
+  pkg.dependencies = {};
+  lock.packages[''].dependencies = {};
+  assert.equal(validateNpmDeploymentLock(pkg, lock, scopedPolicy), lock);
+});
+test('flat all-occurrence validation still rejects an unrelated incorrect nested override', () => {
+  const policy = scopedPolicy + '  cookie: 0.7.0\n';
+  const { pkg, lock } = scopedLock({
+    'node_modules/parent': { dependencies: { child: '^8.3.2' } },
+    'node_modules/child': { version: '11.1.1' },
+    'node_modules/unrelated/node_modules/cookie': { version: '0.6.0' },
+  });
+  assert.throws(() => validateNpmDeploymentLock(pkg, lock, policy), /reviewed override cookie/);
+});
+test('literal selectors reject path-like segments and cannot mutate inherited object properties', () => {
+  for (const selector of ['..>child', '@scope/..>child', '.hidden>child', '__proto__>child', 'parent>__proto__'])
+    assert.throws(
+      () => npmWorkspaceOverrides(`catalog:\n  child: 1.0.0\noverrides:\n  "${selector}": 1.2.3\n`),
+      /Unsupported/
+    );
+  assert.deepEqual(npmWorkspaceOverrides('catalog:\n  child: 1.0.0\noverrides:\n  "constructor>child": 1.2.3\n'), {
+    constructor: { child: '1.2.3' },
+  });
+  assert.equal(Object.child, undefined);
+});
+test('missing required intermediate edges cannot hide a stale descendant from scoped validation', () => {
+  const { pkg, lock } = scopedLock({
+    'node_modules/parent': { dependencies: { child: '^8.3.2', bridge: '1.0.0' } },
+    'node_modules/child': { version: '11.1.1' },
+    'node_modules/bridge/node_modules/child': { version: '9.0.1' },
+  });
+  assert.throws(() => validateNpmDeploymentLock(pkg, lock, scopedPolicy), /Missing required dependency bridge/);
+  delete lock.packages['node_modules/parent'].dependencies.bridge;
+  lock.packages['node_modules/parent'].optionalDependencies = { bridge: '1.0.0' };
+  assert.equal(validateNpmDeploymentLock(pkg, lock, scopedPolicy), lock);
+});
+test('scoped package namespace intermediate resolution matches Node and cannot hide a stale child', () => {
+  const policy = 'catalog:\n  child: 1.0.0\noverrides:\n  "@scope/parent>child": 11.1.1\n';
+  const { pkg, lock } = scopedLock({
+    'node_modules/@scope/parent': { dependencies: { child: '^8.3.2' } },
+    'node_modules/@scope/node_modules/child': { version: '9.0.1' },
+    'node_modules/child': { version: '11.1.1' },
+  });
+  pkg.dependencies = { '@scope/parent': '1.0.0' };
+  lock.packages[''].dependencies = pkg.dependencies;
+  assert.throws(() => validateNpmDeploymentLock(pkg, lock, policy), /reviewed scoped override/);
+  lock.packages['node_modules/@scope/node_modules/child'].version = '11.1.1';
+  assert.equal(validateNpmDeploymentLock(pkg, lock, policy), lock);
 });
