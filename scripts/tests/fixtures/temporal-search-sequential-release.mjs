@@ -9,6 +9,7 @@ import * as moduleApi from 'node:module';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import * as crypto from 'node:crypto';
+import * as net from 'node:net';
 import * as urlApi from 'node:url';
 import { PROVIDER_USAGE_SCAN_GROUPS } from '../../temporal-backfill-provider-usage.mjs';
 const root = urlApi.fileURLToPath(new URL('../../../', import.meta.url));
@@ -82,6 +83,16 @@ const platform = {
   context: 'fixture-context',
   namespace: 'temporal-staging',
   connectionMode: 'temporal-cloud',
+  workerHosting: 'gce-k3s',
+  firebaseResources: {
+    storageBucket: 'urm-app-staging.firebasestorage.app',
+    imagesBucket: 'urm-app-staging-images',
+    databaseUrl: `https://${projectId}-default-rtdb.firebaseio.com/`,
+  },
+  gce: {
+    instanceName: 'urm-temporal-staging',
+    serviceAccount: `temporal-worker@${projectId}.iam.gserviceaccount.com`,
+  },
   cloudAccountId: 'qwejt',
   cloudProvider: 'gcp',
   cloudRegion: 'us-central1',
@@ -145,7 +156,9 @@ const actions = [],
   commands = [],
   apps = [],
   apiEvents = [];
-let currentModules, readinessProof, beforeTransaction;
+let currentModules, readinessProof, beforeTransaction, currentAction, rtdbFailure;
+const rtdbCanaryCalls = [],
+  rejectedRtdbBoundaries = [];
 const rejectedBoundaries = [];
 let sdkClone = clone;
 const lookup = (value, field) => field.split('.').reduce((a, k) => a?.[k], value);
@@ -435,7 +448,39 @@ function childTransport(command, args) {
   if (script === 'temporal-backfill-provider-usage.mjs') throw new Error('UNEXPECTED_LEGACY_PROVIDER_BACKFILL');
   if (script === 'temporal-bootstrap-search.mjs') return bootstrapTransport(args);
   if (script === 'deploy-temporal-platform.mjs') {
-    assert(['preflight', 'worker-status'].includes(args[1]));
+    assert(['preflight', 'worker-status', 'firebase-rtdb-canary'].includes(args[1]));
+    if (args[1] === 'firebase-rtdb-canary') {
+      const output = args[args.indexOf('--output') + 1];
+      assert.deepEqual([...args].slice(1), [
+        'firebase-rtdb-canary',
+        '--config',
+        config.platformConfig,
+        '--peer',
+        config.platformPeerConfig,
+        '--output',
+        output,
+        '--apply',
+      ]);
+      rtdbCanaryCalls.push({ action: currentAction, failure: rtdbFailure ?? null });
+      if (rtdbFailure === 'cli') throw new Error('RTDB_CANARY_CLI_FAILED');
+      const proof = {
+        ok: true,
+        projectId,
+        databaseURL: platform.firebaseResources.databaseUrl,
+        serviceAccountEmail: platform.gce.serviceAccount,
+        buildId: platform.workerBuildId,
+        readSucceeded: true,
+        noWrites: true,
+        ownedSdkCleanupComplete: true,
+      };
+      if (rtdbFailure === 'auth') {
+        proof.ok = false;
+        proof.readSucceeded = false;
+      }
+      if (rtdbFailure === 'cleanup') proof.ownedSdkCleanupComplete = false;
+      files.set(output, JSON.stringify(proof));
+      return '';
+    }
     if (args[1] === 'worker-status')
       files.set(
         args[args.indexOf('--output') + 1],
@@ -446,6 +491,7 @@ function childTransport(command, args) {
   throw new Error('UNEXPECTED_COMMAND_' + command + '_' + script);
 }
 async function run(action) {
+  currentAction = action;
   const context = createContext({
     process: {
       argv: [
@@ -508,6 +554,7 @@ async function run(action) {
     'node:path': path,
     'node:os': os,
     'node:crypto': crypto,
+    'node:net': net,
     'node:url': urlApi,
     'node:child_process': { execFileSync: childTransport },
     'node:module': {
@@ -622,6 +669,37 @@ async function rejectsMutation(label, action, mutate, insideTransaction = false)
   for (const pair of savedVersions) versions.set(...pair);
   rejectedBoundaries.push(label);
 }
+async function rejectsRtdbCanary(action, failure) {
+  const beforeState = clone(records.get('_control/temporalReleaseState'));
+  const beforeControl = clone(records.get('_control/temporalRelease'));
+  const beforeCalls = rtdbCanaryCalls.length;
+  const completedActions = actions.length;
+  rtdbFailure = failure;
+  try {
+    await assert.rejects(run(action), failure === 'cli' ? /RTDB_CANARY_CLI_FAILED/ : /Firebase RTDB.*proof missing/);
+  } finally {
+    rtdbFailure = undefined;
+  }
+  assert.deepEqual(
+    records.get('_control/temporalReleaseState'),
+    beforeState,
+    `${action}/${failure}: phase and checkpoint unchanged`
+  );
+  assert.deepEqual(
+    records.get('_control/temporalRelease'),
+    beforeControl,
+    `${action}/${failure}: revision, ownership and admission unchanged`
+  );
+  assert.equal(actions.length, completedActions, 'failed capability proof cannot record a completed transition');
+  assert.deepEqual(
+    rtdbCanaryCalls.slice(beforeCalls),
+    [{ action, failure }],
+    'actual controller must launch the canary before rejecting'
+  );
+  assert(!records.has('_control/temporalReleaseOperation'), 'failed capability proof releases the operation lock');
+  assert.equal(apps.length, 0, 'failed capability proof closes owned SDK apps');
+  rejectedRtdbBoundaries.push(`${action}:${failure}`);
+}
 await run('freeze-ui');
 checkDomains();
 assert.equal(
@@ -688,6 +766,7 @@ assert.equal(records.get('_control/temporalReleaseState').pausedFrom, 'provider-
 await run('resume');
 checkDomains();
 assert.equal(records.get('_control/temporalReleaseState').phase, 'provider-usage-ready');
+for (const failure of ['cli', 'auth', 'cleanup']) await rejectsRtdbCanary('workers-ready', failure);
 await run('workers-ready');
 checkDomains();
 await run('take-ownership');
@@ -726,6 +805,7 @@ await rejectsMutation(
   () => (records.get('_control/temporalProviderUsage').status = 'building'),
   true
 );
+for (const failure of ['cli', 'auth', 'cleanup']) await rejectsRtdbCanary('open', failure);
 await run('open');
 checkDomains(true);
 await run('restore-auto');
@@ -740,6 +820,7 @@ for (const name of [
   'temporal-bootstrap-search.mjs',
   'temporal-apphosting-rollout.mjs',
   'temporal-provider-usage-continuity.mjs',
+  'temporal-platform.mjs',
 ])
   assert(currentModules.has(new URL('../../' + name, import.meta.url).href), 'actual source module loaded: ' + name);
 assert.equal(
@@ -748,9 +829,16 @@ assert.equal(
   ).length,
   5
 );
+assert.deepEqual(
+  rtdbCanaryCalls.filter((call) => call.failure === null).map((call) => call.action),
+  ['workers-ready', 'take-ownership', 'open', 'open', 'open'],
+  'workers-ready, ownership, and every open attempt must run the actual readiness helper'
+);
 console.log(
   JSON.stringify({
     rejectedBoundaries,
+    rejectedRtdbBoundaries,
+    rtdbCanaryCalls,
     providerTamperingRejected: true,
     actualValidators: true,
     phase: records.get('_control/temporalReleaseState').phase,

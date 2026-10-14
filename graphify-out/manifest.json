@@ -6760,8 +6760,8 @@
     "semantic_hash": ""
   },
   "scripts/deploy-temporal-platform.mjs": {
-    "mtime": 1791961999.6161063,
-    "ast_hash": "003497b8700049d2e7814f99fbbb577e",
+    "mtime": 1791968258.9132783,
+    "ast_hash": "49b683ecbc599fd141bf88916c28711b",
     "semantic_hash": ""
   },
   "scripts/lib/legacy-image-source.mjs": {
@@ -6830,13 +6830,13 @@
     "semantic_hash": ""
   },
   "scripts/temporal-platform.mjs": {
-    "mtime": 1791966309.957497,
-    "ast_hash": "623d9f0618eed643ff1728e0c36e5e30",
+    "mtime": 1791968258.7136037,
+    "ast_hash": "36d0457eb2ef479276510a92528b44e7",
     "semantic_hash": ""
   },
   "scripts/temporal-platform.test.mjs": {
-    "mtime": 1791966309.9697785,
-    "ast_hash": "a6bca0288e8710050c1ea1ce7ad2eeac",
+    "mtime": 1791968258.8637655,
+    "ast_hash": "c6c14557ecf15945f112eaaea2184cb4",
     "semantic_hash": ""
   },
   "scripts/temporal-reconcile-account-execution.mjs": {
@@ -6860,8 +6860,8 @@
     "semantic_hash": ""
   },
   "scripts/temporal-release.mjs": {
-    "mtime": 1791961999.6399937,
-    "ast_hash": "6de5582967a8b41258dbd32fbf183ef5",
+    "mtime": 1791968258.9786773,
+    "ast_hash": "f92c324cffd153cb3376ad0b8834c535",
     "semantic_hash": ""
   },
   "scripts/temporal-release.test.mjs": {
@@ -6880,13 +6880,13 @@
     "semantic_hash": ""
   },
   "scripts/temporal-single-vm-config.mjs": {
-    "mtime": 1791961999.6417036,
-    "ast_hash": "1272488c3d93a717992421c856c4d35f",
+    "mtime": 1791968131.7170045,
+    "ast_hash": "8d9b9842dbe2437ef19503ea14f5e476",
     "semantic_hash": ""
   },
   "scripts/temporal-single-vm-config.test.mjs": {
-    "mtime": 1791961999.6419423,
-    "ast_hash": "033f3e0b5533884a18a4278c36c88d03",
+    "mtime": 1791968132.1479795,
+    "ast_hash": "e939bed506718beea96339911aab0216",
     "semantic_hash": ""
   },
   "scripts/temporal-vm-secrets.mjs": {
@@ -7070,8 +7070,8 @@
     "semantic_hash": ""
   },
   "ops/temporal/CLOUD.md": {
-    "mtime": 1791961999.397518,
-    "ast_hash": "8e58e29bf3f8361a72a38e1678fce41f",
+    "mtime": 1791967981.2762055,
+    "ast_hash": "315d6ac1949ddf45fbcf8f984156ccb6",
     "semantic_hash": ""
   },
   "ops/temporal/README.md": {
@@ -7585,8 +7585,8 @@
     "semantic_hash": ""
   },
   "scripts/temporal-search-sequential-release.test.mjs": {
-    "mtime": 1791961999.6414714,
-    "ast_hash": "f906edbdf9a5c5bfb0a6a749ff0e3f87",
+    "mtime": 1791968414.9304497,
+    "ast_hash": "513a0279e6e12d55e3e75bf1fa2341b8",
     "semantic_hash": ""
   },
   "scripts/temporal-staging-search-env.mjs": {
@@ -7605,8 +7605,8 @@
     "semantic_hash": ""
   },
   "scripts/tests/fixtures/temporal-search-sequential-release.mjs": {
-    "mtime": 1791961999.650747,
-    "ast_hash": "add7961f6152060016c51d86036bbc79",
+    "mtime": 1791968414.911439,
+    "ast_hash": "fd2ed7d7ba7084bcedd59529fe37eaa7",
     "semantic_hash": ""
   },
   "docs/temporal/STAGING_SEARCH_ONBOARDING.md": {
@@ -7682,6 +7682,16 @@
   "packages/shared/firebase/firebaseAdminOwnership.ts": {
     "mtime": 1791965888.145376,
     "ast_hash": "ff81ba6d63cbcaae70c881449dbf20e2",
+    "semantic_hash": ""
+  },
+  "ops/temporal/single-vm/media-storage.py": {
+    "mtime": 1791967414.48094,
+    "ast_hash": "4b8834a1c27b5939add3ac62a9cfb444",
+    "semantic_hash": ""
+  },
+  "ops/temporal/single-vm/test_media_storage.py": {
+    "mtime": 1791967544.4589305,
+    "ast_hash": "98529fb60f1e1330a1e5429a852a9fc8",
     "semantic_hash": ""
   }
 }

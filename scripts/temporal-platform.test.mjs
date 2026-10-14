@@ -9,6 +9,7 @@ import {
   validateCloudEvidence,
   validateGkeCluster,
   validateGceInstance,
+  GCE_FIREBASE_ADC_SCOPES,
   validateSingleHostCapacity,
   validateSingleHostMedia,
   renderOperatorJob,
@@ -20,6 +21,9 @@ import {
   schemaJob,
   certificateManifests,
   emailCanary,
+  firebaseRtdbCanary,
+  assertFirebaseRtdbCanaryProof,
+  verifyFirebaseRtdbReadiness,
   databaseApiCanary,
   assertDrained,
   assertWorkerRouting,
@@ -50,7 +54,12 @@ const config = {
   workerReplicas: 2,
   workerRoles: ['orchestration', 'controls', 'media', 'email', 'images', 'search'],
   workerPort: 8080,
-  search: { appId: '2VZFOFLFHE', configSecret: 'temporal-search-config', replicas: 1, instanceIds: ['users-index', 'speakers-index', 'sermons-index', 'images-index', 'lists-index'] },
+  search: {
+    appId: '2VZFOFLFHE',
+    configSecret: 'temporal-search-config',
+    replicas: 1,
+    instanceIds: ['users-index', 'speakers-index', 'sermons-index', 'images-index', 'lists-index'],
+  },
   emailEgress: {
     schemaVersion: 1,
     provider: 'smtp',
@@ -1007,6 +1016,11 @@ test('Simple Cloud uses one actual VM/node and attached ADC with bounded media, 
   );
 });
 test('Actual simple VM identity cannot borrow the other project, attached account, zone or private address', () => {
+  assert.deepEqual(GCE_FIREBASE_ADC_SCOPES, [
+    'https://www.googleapis.com/auth/cloud-platform',
+    'https://www.googleapis.com/auth/firebase.database',
+    'https://www.googleapis.com/auth/userinfo.email',
+  ]);
   const c = vmConfig(),
     instance = {
       id: c.gce.instanceId,
@@ -1015,10 +1029,43 @@ test('Actual simple VM identity cannot borrow the other project, attached accoun
       selfLink: `https://compute.googleapis.com/compute/v1/projects/${c.firebaseProjectId}/zones/us-central1-a/instances/${c.gce.instanceName}`,
       zone: 'zones/us-central1-a',
       machineType: 'machineTypes/e2-standard-4',
-      serviceAccounts: [{ email: c.gce.serviceAccount, scopes: ['https://www.googleapis.com/auth/cloud-platform'] }],
+      serviceAccounts: [{ email: c.gce.serviceAccount, scopes: [...GCE_FIREBASE_ADC_SCOPES] }],
       networkInterfaces: [{ networkIP: c.gce.privateIp }],
     };
   assert.equal(validateGceInstance(c, instance), instance);
+  const reversed = {
+    ...instance,
+    serviceAccounts: [{ email: c.gce.serviceAccount, scopes: [...GCE_FIREBASE_ADC_SCOPES].reverse() }],
+  };
+  assert.equal(validateGceInstance(c, reversed), reversed, 'scope order does not change the reviewed set');
+  const invalidScopes = [
+    ['https://www.googleapis.com/auth/cloud-platform'],
+    ...GCE_FIREBASE_ADC_SCOPES.map((missing) => GCE_FIREBASE_ADC_SCOPES.filter((scope) => scope !== missing)),
+    ...GCE_FIREBASE_ADC_SCOPES.map((changed) =>
+      GCE_FIREBASE_ADC_SCOPES.map((scope) => (scope === changed ? `${scope}.evil.invalid` : scope))
+    ),
+    ...GCE_FIREBASE_ADC_SCOPES.map((changed) =>
+      GCE_FIREBASE_ADC_SCOPES.map((scope) => (scope === changed ? `https://evil.invalid/${scope}` : scope))
+    ),
+    ...GCE_FIREBASE_ADC_SCOPES.map((changed) =>
+      GCE_FIREBASE_ADC_SCOPES.map((scope) => (scope === changed ? `${scope} ` : scope))
+    ),
+    ...GCE_FIREBASE_ADC_SCOPES.map((duplicate) => [...GCE_FIREBASE_ADC_SCOPES, duplicate]),
+    [GCE_FIREBASE_ADC_SCOPES[0], GCE_FIREBASE_ADC_SCOPES[1], GCE_FIREBASE_ADC_SCOPES[1]],
+    [...GCE_FIREBASE_ADC_SCOPES, 'https://www.googleapis.com/auth/compute'],
+    [GCE_FIREBASE_ADC_SCOPES[0], GCE_FIREBASE_ADC_SCOPES[1], null],
+    [GCE_FIREBASE_ADC_SCOPES[0], GCE_FIREBASE_ADC_SCOPES[1], {}],
+    [],
+    undefined,
+    null,
+    GCE_FIREBASE_ADC_SCOPES.join(','),
+  ];
+  for (const scopes of invalidScopes)
+    assert.throws(
+      () => validateGceInstance(c, { ...instance, serviceAccounts: [{ email: c.gce.serviceAccount, scopes }] }),
+      /exact three reviewed ADC scopes/
+    );
+
   for (const overrides of [
     { id: 'other' },
     { status: 'TERMINATED' },
@@ -1194,7 +1241,7 @@ test('Selected single-VM Cloud preflight passes real-target restart/access proof
       selfLink: `https://compute.googleapis.com/compute/v1/projects/${c.firebaseProjectId}/zones/${c.gce.zone}/instances/${c.gce.instanceName}`,
       zone: `zones/${c.gce.zone}`,
       machineType: `machineTypes/${c.gce.machineType}`,
-      serviceAccounts: [{ email: c.gce.serviceAccount, scopes: ['https://www.googleapis.com/auth/cloud-platform'] }],
+      serviceAccounts: [{ email: c.gce.serviceAccount, scopes: [...GCE_FIREBASE_ADC_SCOPES] }],
       networkInterfaces: [{ networkIP: c.gce.privateIp }],
     };
     await writeFile(
@@ -1476,10 +1523,173 @@ test('Public DNS email IPv4 policy is explicit, role/port scoped and cannot be o
 });
 
 test('staging search has one bounded worker, private config mount and exact reviewed target', () => {
-  for (const search of [undefined, {...config.search,appId:'8OY'}, {...config.search,instanceIds:['sermons-index']}])
-    assert.throws(() => validateConfig({...config,search},peer), /Staging search/);
-  const deployment=renderPlatform(config).worker.items.find(item=>item.kind==='Deployment' && item.metadata.labels['urm.temporal/role']==='search');
-  assert.equal(deployment.spec.replicas,1);
-  assert.deepEqual(deployment.spec.template.spec.containers[0].resources,{requests:{cpu:'100m',memory:'256Mi'},limits:{cpu:'1',memory:'512Mi'}});
-  assert.equal(deployment.spec.template.spec.volumes.find(v=>v.name==='search').secret.defaultMode,0o440);
+  for (const search of [
+    undefined,
+    { ...config.search, appId: '8OY' },
+    { ...config.search, instanceIds: ['sermons-index'] },
+  ])
+    assert.throws(() => validateConfig({ ...config, search }, peer), /Staging search/);
+  const deployment = renderPlatform(config).worker.items.find(
+    (item) => item.kind === 'Deployment' && item.metadata.labels['urm.temporal/role'] === 'search'
+  );
+  assert.equal(deployment.spec.replicas, 1);
+  assert.deepEqual(deployment.spec.template.spec.containers[0].resources, {
+    requests: { cpu: '100m', memory: '256Mi' },
+    limits: { cpu: '1', memory: '512Mi' },
+  });
+  assert.equal(deployment.spec.template.spec.volumes.find((v) => v.name === 'search').secret.defaultMode, 0o440);
+});
+
+function rtdbProof(c) {
+  return {
+    ok: true,
+    projectId: c.firebaseProjectId,
+    databaseURL: c.firebaseResources.databaseUrl,
+    serviceAccountEmail: c.gce.serviceAccount,
+    buildId: c.workerBuildId,
+    readSucceeded: true,
+    noWrites: true,
+    ownedSdkCleanupComplete: true,
+  };
+}
+test('GCE RTDB canary uses the exact worker image/node/identity without provider secret mounts or periodic health work', async () => {
+  for (const environment of ['staging', 'production']) {
+    const c = vmConfig(environment),
+      script = await readFile(new URL('../ops/temporal/firebase-rtdb-canary.cjs', import.meta.url), 'utf8');
+    const job = firebaseRtdbCanary(c, script),
+      pod = job.spec.template.spec,
+      container = pod.containers[0];
+    assert.equal(job.spec.backoffLimit, 0);
+    assert.equal(job.spec.activeDeadlineSeconds, 30);
+    assert.equal(container.image, c.workerImage);
+    assert.equal(pod.nodeSelector['kubernetes.io/hostname'], c.gce.instanceName);
+    assert.equal(pod.automountServiceAccountToken, false);
+    assert.equal(container.envFrom, undefined);
+    assert.equal(pod.volumes, undefined);
+    assert.equal(job.spec.template.metadata.labels['urm.temporal/role'], 'orchestration');
+    const env = Object.fromEntries(container.env.map((x) => [x.name, x.value]));
+    assert.equal(env.FIREBASE_DATABASE_URL, c.firebaseResources.databaseUrl);
+    assert.equal(env.TEMPORAL_EXPECTED_GOOGLE_SERVICE_ACCOUNT, c.gce.serviceAccount);
+    assert.deepEqual(JSON.parse(env.TEMPORAL_EXPECTED_METADATA_SCOPES_JSON), GCE_FIREBASE_ADC_SCOPES);
+    assert.match(container.command[2], /void module\.exports\.runCli\(\);$/);
+    assert.throws(
+      () => execFileSync(process.execPath, container.command.slice(1), { env: {}, stdio: 'pipe' }),
+      (error) => {
+        assert.equal(error.status, 1);
+        assert.equal(error.stdout.toString(), '');
+        assert.deepEqual(JSON.parse(error.stderr.toString()), { ok: false, code: 'CANARY_INVALID_CONFIG' });
+        return true;
+      }
+    );
+  }
+});
+test('RTDB proof binds exact project/database/Compute identity/build and completed read-only SDK teardown', () => {
+  const c = vmConfig();
+  assert.equal(assertFirebaseRtdbCanaryProof(rtdbProof(c), c).ok, true);
+  for (const change of [
+    { ok: false },
+    { projectId: 'urm-app' },
+    { databaseURL: 'https://foreign.firebaseio.com/' },
+    { serviceAccountEmail: 'foreign@urm-app-staging.iam.gserviceaccount.com' },
+    { buildId: 'f'.repeat(40) },
+    { readSucceeded: false },
+    { noWrites: false },
+    { ownedSdkCleanupComplete: false },
+    { readSucceeded: 'true' },
+    { unexpected: true },
+  ]) {
+    assert.throws(() => assertFirebaseRtdbCanaryProof({ ...rtdbProof(c), ...change }, c));
+  }
+  const missing = rtdbProof(c);
+  delete missing.ownedSdkCleanupComplete;
+  assert.throws(() => assertFirebaseRtdbCanaryProof(missing, c));
+});
+test('Actual release canary seam launches CLI before accepting its exact fresh output', async () => {
+  const c = vmConfig(),
+    calls = [],
+    inputs = {
+      configPath: '/private/stage.json',
+      peerPath: '/private/prod-peer.json',
+      output: '/private/fresh-proof.json',
+    };
+  const result = await verifyFirebaseRtdbReadiness(c, inputs, {
+    run: async (args) => calls.push(['run', args]),
+    readProof: async (path) => {
+      calls.push(['read', path]);
+      return rtdbProof(c);
+    },
+  });
+  assert.equal(result.ok, true);
+  assert.deepEqual(calls, [
+    [
+      'run',
+      [
+        'firebase-rtdb-canary',
+        '--config',
+        inputs.configPath,
+        '--peer',
+        inputs.peerPath,
+        '--output',
+        inputs.output,
+        '--apply',
+      ],
+    ],
+    ['read', inputs.output],
+  ]);
+});
+test('Canary launch, read, identity or cleanup failure cannot authorize worker admission', async () => {
+  const c = vmConfig(),
+    input = { configPath: 'stage', peerPath: 'peer', output: 'fresh' };
+  let reads = 0;
+  await assert.rejects(
+    verifyFirebaseRtdbReadiness(c, input, {
+      run: async () => {
+        throw Error('CLI failed');
+      },
+      readProof: async () => {
+        reads++;
+        return rtdbProof(c);
+      },
+    })
+  );
+  assert.equal(reads, 0);
+  await assert.rejects(
+    verifyFirebaseRtdbReadiness(c, input, {
+      run: async () => {},
+      readProof: async () => {
+        throw Error('missing proof');
+      },
+    })
+  );
+  for (const change of [
+    { ownedSdkCleanupComplete: false },
+    { readSucceeded: false },
+    { serviceAccountEmail: 'wrong' },
+  ]) {
+    await assert.rejects(
+      verifyFirebaseRtdbReadiness(c, input, {
+        run: async () => {},
+        readProof: async () => ({ ...rtdbProof(c), ...change }),
+      })
+    );
+  }
+});
+test('Compute-specific scope/readiness gate preserves existing GKE and separate self-hosted credential modes', async () => {
+  for (const c of [cloudConfig(), config]) {
+    let called = false;
+    await verifyFirebaseRtdbReadiness(
+      c,
+      {},
+      {
+        run: async () => {
+          called = true;
+        },
+        readProof: async () => {
+          called = true;
+        },
+      }
+    );
+    assert.equal(called, false);
+    assert.throws(() => firebaseRtdbCanary(c, 'runCli'));
+  }
 });

@@ -51,6 +51,18 @@ test('actual controller completes sequential staging search onboarding without r
     'epoch changed at open transaction',
     'status changed at open transaction',
   ]);
+  assert.deepEqual(proof.rejectedRtdbBoundaries, [
+    'workers-ready:cli',
+    'workers-ready:auth',
+    'workers-ready:cleanup',
+    'open:cli',
+    'open:auth',
+    'open:cleanup',
+  ]);
+  assert.deepEqual(
+    proof.rtdbCanaryCalls.filter(({ failure }) => failure === null).map(({ action }) => action),
+    ['workers-ready', 'take-ownership', 'open', 'open', 'open']
+  );
   assert.equal(proof.legacyBackfillInvoked, false);
   assert.equal(proof.jobCount, 5);
 });

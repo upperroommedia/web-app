@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { verifyFirebaseRtdbReadiness } from './temporal-platform.mjs';
 import {
   reconcileAppHostingRollout,
   restoreReviewedUiRecovery,
@@ -223,6 +224,23 @@ await runWithCleanup(
                 '--apply',
               ],
               { stdio: 'inherit', timeout: 960_000 }
+            );
+            await verifyFirebaseRtdbReadiness(
+              platform,
+              {
+                configPath: config.platformConfig,
+                peerPath: config.platformPeerConfig,
+                output: join(directory, 'firebase-rtdb-ready.json'),
+              },
+              {
+                run: (args) =>
+                  execFileSync(
+                    process.execPath,
+                    [new URL('./deploy-temporal-platform.mjs', import.meta.url).pathname, ...args],
+                    { stdio: 'inherit', timeout: 120000 }
+                  ),
+                readProof: async (path) => JSON.parse(await readFile(path, 'utf8')),
+              }
             );
             if (config.domains.includes('emails')) {
               const emailOutput = join(directory, 'email-ready.json');

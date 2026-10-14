@@ -299,6 +299,12 @@ export function validateSingleHostMedia(c, proof, now = Date.now()) {
   return proof;
 }
 
+// Reviewed VM ADC policy, stricter than Firebase's email AND (cloud-platform OR database) minimum.
+export const GCE_FIREBASE_ADC_SCOPES = Object.freeze([
+  'https://www.googleapis.com/auth/cloud-platform',
+  'https://www.googleapis.com/auth/firebase.database',
+  'https://www.googleapis.com/auth/userinfo.email',
+]);
 export function validateGceInstance(c, instance) {
   const vm = c.gce;
   if (
@@ -311,11 +317,15 @@ export function validateGceInstance(c, instance) {
     instance.serviceAccounts?.length !== 1 ||
     instance.serviceAccounts[0].email !== vm.serviceAccount ||
     !Array.isArray(instance.serviceAccounts[0].scopes) ||
-    !instance.serviceAccounts[0].scopes.some((scope) => scope === 'https://www.googleapis.com/auth/cloud-platform') ||
+    instance.serviceAccounts[0].scopes.length !== GCE_FIREBASE_ADC_SCOPES.length ||
+    new Set(instance.serviceAccounts[0].scopes).size !== GCE_FIREBASE_ADC_SCOPES.length ||
+    !instance.serviceAccounts[0].scopes.every(
+      (scope) => typeof scope === 'string' && GCE_FIREBASE_ADC_SCOPES.includes(scope)
+    ) ||
     instance.networkInterfaces?.[0]?.networkIP !== vm.privateIp
   )
     throw new Error(
-      'Actual VM must match reviewed instance/project/zone, private IP and attached keyless project identity'
+      'Actual VM must match reviewed instance/project/zone, private IP and attached keyless project identity with the exact three reviewed ADC scopes'
     );
   return instance;
 }
@@ -566,9 +576,16 @@ export function validateConfig(config, peer) {
     throw new Error('workerRoles must explicitly include orchestration and known domain roles without duplicates');
   if (config.firebaseProjectId === stagingSearch.projectId && config.workerRoles.includes('search')) {
     const search = config.search;
-    if (!search || search.appId !== stagingSearch.appId || search.configSecret !== 'temporal-search-config' ||
-        search.replicas !== 1 || JSON.stringify(search.instanceIds) !== JSON.stringify(stagingSearch.instances.map(i => i.instanceId)))
-      throw new Error('Staging search requires the reviewed app, exact five-instance private Secret and one bounded worker');
+    if (
+      !search ||
+      search.appId !== stagingSearch.appId ||
+      search.configSecret !== 'temporal-search-config' ||
+      search.replicas !== 1 ||
+      JSON.stringify(search.instanceIds) !== JSON.stringify(stagingSearch.instances.map((i) => i.instanceId))
+    )
+      throw new Error(
+        'Staging search requires the reviewed app, exact five-instance private Secret and one bounded worker'
+      );
   }
   if (config.workerRoles.includes('email')) {
     const e = config.emailEgress;
@@ -1629,6 +1646,99 @@ export function databaseCluster(c) {
   };
   const policy = databaseNetworkPolicy(c);
   return { apiVersion: 'v1', kind: 'List', items: [objectStore, cluster, visibility, scheduled, policy] };
+}
+
+/** The selected single-VM host uses Compute ADC; other credential modes retain their own admission policy. */
+export function requiresFirebaseRtdbCanary(c) {
+  return c.connectionMode === 'temporal-cloud' && c.workerHosting === 'gce-k3s';
+}
+
+export function assertFirebaseRtdbCanaryProof(proof, c) {
+  const keys = [
+    'ok',
+    'projectId',
+    'databaseURL',
+    'serviceAccountEmail',
+    'buildId',
+    'readSucceeded',
+    'noWrites',
+    'ownedSdkCleanupComplete',
+  ];
+  if (
+    !requiresFirebaseRtdbCanary(c) ||
+    !proof ||
+    Object.keys(proof).sort().join(',') !== keys.sort().join(',') ||
+    proof.ok !== true ||
+    proof.projectId !== c.firebaseProjectId ||
+    proof.databaseURL !== firebaseResourceEnvironment(c).FIREBASE_DATABASE_URL ||
+    proof.serviceAccountEmail !== c.gce.serviceAccount ||
+    proof.buildId !== c.workerBuildId ||
+    proof.readSucceeded !== true ||
+    proof.noWrites !== true ||
+    proof.ownedSdkCleanupComplete !== true
+  )
+    throw new Error('Reviewed worker Firebase RTDB identity/authentication/read/cleanup proof missing');
+  return proof;
+}
+
+/** One-shot capability proof using the same immutable image, host and Compute identity as the actual workers. */
+export function firebaseRtdbCanary(c, script) {
+  if (!requiresFirebaseRtdbCanary(c) || typeof script !== 'string' || !script.includes('runCli'))
+    throw new Error('Firebase RTDB canary requires the reviewed Compute ADC host and script');
+  const resources = firebaseResourceEnvironment(c);
+  return {
+    apiVersion: 'batch/v1',
+    kind: 'Job',
+    metadata: { generateName: 'temporal-firebase-rtdb-canary-', namespace: c.namespace },
+    spec: {
+      backoffLimit: 0,
+      activeDeadlineSeconds: 30,
+      ttlSecondsAfterFinished: 3600,
+      template: {
+        metadata: {
+          labels: {
+            'app.kubernetes.io/name': 'urm-temporal-worker',
+            'app.kubernetes.io/version': c.workerBuildId,
+            'urm.temporal/role': 'orchestration',
+          },
+        },
+        spec: {
+          automountServiceAccountToken: false,
+          nodeSelector: { 'kubernetes.io/hostname': c.gce.instanceName },
+          imagePullSecrets: c.imagePullSecrets.map((name) => ({ name })),
+          restartPolicy: 'Never',
+          securityContext: { runAsNonRoot: true, runAsUser: 1000, runAsGroup: 1000, fsGroup: 1000 },
+          containers: [
+            {
+              name: 'canary',
+              image: c.workerImage,
+              command: ['node', '-e', `${script}\nvoid module.exports.runCli();`],
+              securityContext: {
+                allowPrivilegeEscalation: false,
+                readOnlyRootFilesystem: true,
+                capabilities: { drop: ['ALL'] },
+              },
+              resources: { requests: { cpu: '100m', memory: '128Mi' }, limits: { cpu: '500m', memory: '256Mi' } },
+              env: [
+                { name: 'FIREBASE_PROJECT_ID', value: c.firebaseProjectId },
+                { name: 'FIREBASE_DATABASE_URL', value: resources.FIREBASE_DATABASE_URL },
+                { name: 'TEMPORAL_BUILD_ID', value: c.workerBuildId },
+                { name: 'TEMPORAL_EXPECTED_GOOGLE_SERVICE_ACCOUNT', value: c.gce.serviceAccount },
+                { name: 'TEMPORAL_EXPECTED_METADATA_SCOPES_JSON', value: JSON.stringify(GCE_FIREBASE_ADC_SCOPES) },
+              ],
+            },
+          ],
+        },
+      },
+    },
+  };
+}
+
+/** Actual controller call seam: admission cannot proceed until the launched CLI's exact proof is read and validated. */
+export async function verifyFirebaseRtdbReadiness(c, { configPath, peerPath, output }, { run, readProof }) {
+  if (!requiresFirebaseRtdbCanary(c)) return;
+  await run(['firebase-rtdb-canary', '--config', configPath, '--peer', peerPath, '--output', output, '--apply']);
+  return assertFirebaseRtdbCanaryProof(await readProof(output), c);
 }
 
 export function emailCanary(c, script) {
