@@ -1,0 +1,135 @@
+[
+  {
+    "name": "one nanosecond before rounded server boundary",
+    "read": [4600, 123999999],
+    "allowed": true
+  },
+  {
+    "name": "at rounded server boundary",
+    "read": [4600, 124000000],
+    "allowed": false
+  },
+  {
+    "name": "after full grace",
+    "read": [9000, 0],
+    "allowed": false
+  },
+  {
+    "name": "bad cutoff nanoseconds",
+    "read": [2000, 0],
+    "cutoff": [1000, 1000000000],
+    "allowed": false
+  },
+  {
+    "name": "unsafe cutoff seconds",
+    "read": [2000, 0],
+    "cutoff": [9007199254740992, 0],
+    "allowed": false
+  },
+  {
+    "name": "fractional read nanoseconds",
+    "read": [2000, 0.1],
+    "allowed": false
+  },
+  {
+    "name": "missing actual read time",
+    "read": null,
+    "allowed": false
+  },
+  {
+    "name": "short grace",
+    "read": [2000, 0],
+    "state": {
+      "legacySettlingGraceSeconds": 3599
+    },
+    "allowed": false
+  },
+  {
+    "name": "fractional grace",
+    "read": [2000, 0],
+    "state": {
+      "legacySettlingGraceSeconds": 3600.5
+    },
+    "allowed": false
+  },
+  {
+    "name": "runtime maximum exceeds grace",
+    "read": [2000, 0],
+    "state": {
+      "maximumLegacyExecutionSeconds": 4000
+    },
+    "allowed": false
+  },
+  {
+    "name": "release identity differs",
+    "read": [2000, 0],
+    "state": {
+      "releaseId": "other"
+    },
+    "allowed": false
+  },
+  {
+    "name": "readiness stamp differs",
+    "read": [2000, 0],
+    "state": {
+      "compatibilityVerifiedAt": {
+        "seconds": 1000,
+        "nanoseconds": 123456788
+      }
+    },
+    "allowed": false
+  },
+  {
+    "name": "pinned cutoff differs",
+    "read": [2000, 0],
+    "state": {
+      "legacySettlingCutoff": {
+        "seconds": 1001,
+        "nanoseconds": 123456789
+      }
+    },
+    "allowed": false
+  },
+  {
+    "name": "durable upgrade cannot revive origin legacy owner",
+    "read": [2000, 0],
+    "state": {
+      "mode": "durable-upgrade"
+    },
+    "allowed": false
+  },
+  {
+    "name": "grace exceeds maximum reviewed configuration",
+    "read": [2000, 0],
+    "state": {
+      "legacySettlingGraceSeconds": 86401
+    },
+    "allowed": false
+  },
+  {
+    "name": "null pinned timestamp",
+    "read": [2000, 0],
+    "state": {
+      "legacySettlingCutoff": null
+    },
+    "allowed": false
+  },
+  {
+    "name": "extra timestamp fields cannot assert native authority",
+    "read": [2000, 0],
+    "state": {
+      "legacySettlingCutoff": {
+        "seconds": 1000,
+        "nanoseconds": 123456789,
+        "toMillis": 123
+      }
+    },
+    "allowed": false
+  },
+  {
+    "name": "missing cutoff cannot revive a committed checkpoint",
+    "read": [2000, 0],
+    "noCutoff": true,
+    "allowed": false
+  }
+]

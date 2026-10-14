@@ -1,3 +1,10 @@
+import { getFirestore } from 'firebase-admin/firestore';
+import { getApp } from 'firebase-admin/app';
+import {
+  prepareLegacyMediaAdmission,
+  withLegacyMediaExecution,
+  type LegacyOriginalStorageSource,
+} from '@upperroom/orchestration/legacy-media-execution';
 import { randomUUID } from 'node:crypto';
 import type { Database } from 'firebase-admin/database';
 import { getFunctions, type TaskQueue } from 'firebase-admin/functions';
@@ -518,6 +525,9 @@ export async function queueOrReplaceProcessAudioRequest(args: {
   onlyIfMissing?: boolean;
   actorUid?: string;
   requestId?: string;
+  legacyAdmissionLeaseId?: string;
+  legacyOriginalStorageSource?: LegacyOriginalStorageSource;
+  legacyConfiguredSourceBucket?: string;
 }): Promise<QueueMutationResult> {
   const { database, payload, targetUri, ownerId, onlyIfMissing = false } = args;
   const sanitizedPayload = sanitizeProcessAudioPayload(payload);
@@ -526,117 +536,136 @@ export async function queueOrReplaceProcessAudioRequest(args: {
   // Only the explicit cutover flag changes orchestration ownership. Never fallback after admission fails.
   if (process.env.TASK_ORCHESTRATOR_MEDIA === 'temporal') {
     const { admitMedia } = await import('../../functions/src/temporal/bridge');
-    const result = await admitMedia(sanitizedPayload, args.actorUid ?? 'system:firebase-event',
-      args.requestId ?? ownerId, undefined, undefined, onlyIfMissing);
+    const result = await admitMedia(
+      sanitizedPayload,
+      args.actorUid ?? 'system:firebase-event',
+      args.requestId ?? ownerId,
+      undefined,
+      undefined,
+      onlyIfMissing
+    );
     return result.action === 'queued'
       ? { action: 'queued', requestVersion: result.ref.requestVersion, taskId: result.ref.jobId, sourceType }
       : { action: 'unchanged', requestVersion: result.ref.requestVersion, sourceType };
   }
+  const projectId = getApp().options.projectId!;
+  await prepareLegacyMediaAdmission({
+    firestore: getFirestore(),
+    projectId,
+    payload: sanitizedPayload,
+    sourceLeaseId: args.legacyAdmissionLeaseId,
+    originalStorageSource: args.legacyOriginalStorageSource,
+    configuredSourceBucket: args.legacyConfiguredSourceBucket,
+  });
   const queue = getFunctions().taskQueue<AddIntroOutroInputType>(getProcessAudioTaskQueueNameForSource(sourceType));
 
-  return await withProcessAudioQueueClaim(database, sanitizedPayload.id, ownerId, async () => {
-    const requestRef = database.ref(`${PROCESS_AUDIO_REQUESTS_PATH}/${sanitizedPayload.id}`);
-    const lockRef = database.ref(`${PROCESS_AUDIO_LOCKS_PATH}/${sanitizedPayload.id}`);
-    const [requestSnapshot, lockSnapshot] = await Promise.all([requestRef.get(), lockRef.get()]);
-    const now = getNowIsoString();
-    const taskId = computeProcessAudioTaskId(sanitizedPayload.id, requestVersion, `${ownerId}:${now}`);
-    const currentState = requestSnapshot.exists()
-      ? (requestSnapshot.val() as StoredProcessAudioRequestState)
-      : buildProcessAudioRequestState(sanitizedPayload, requestVersion, now);
-    const lockActive = isProcessAudioLockActive(lockSnapshot.val());
+  return await withLegacyMediaExecution({ firestore: getFirestore(), projectId, payload: sanitizedPayload }, () =>
+    withProcessAudioQueueClaim(database, sanitizedPayload.id, ownerId, async () => {
+      const requestRef = database.ref(`${PROCESS_AUDIO_REQUESTS_PATH}/${sanitizedPayload.id}`);
+      const lockRef = database.ref(`${PROCESS_AUDIO_LOCKS_PATH}/${sanitizedPayload.id}`);
+      const [requestSnapshot, lockSnapshot] = await Promise.all([requestRef.get(), lockRef.get()]);
+      const now = getNowIsoString();
+      const taskId = computeProcessAudioTaskId(sanitizedPayload.id, requestVersion, `${ownerId}:${now}`);
+      const currentState = requestSnapshot.exists()
+        ? (requestSnapshot.val() as StoredProcessAudioRequestState)
+        : buildProcessAudioRequestState(sanitizedPayload, requestVersion, now);
+      const lockActive = isProcessAudioLockActive(lockSnapshot.val());
 
-    const requestVersionAlreadyHandled =
-      requestSnapshot.exists() &&
-      (currentState.currentRequestVersion === requestVersion ||
-        currentState.nextRequestVersion === requestVersion ||
-        currentState.lastCompletedRequestVersion === requestVersion);
-    if (onlyIfMissing && requestVersionAlreadyHandled) {
-      return { action: 'unchanged', requestVersion, sourceType };
-    }
+      const requestVersionAlreadyHandled =
+        requestSnapshot.exists() &&
+        (currentState.currentRequestVersion === requestVersion ||
+          currentState.nextRequestVersion === requestVersion ||
+          currentState.lastCompletedRequestVersion === requestVersion);
+      if (onlyIfMissing && requestVersionAlreadyHandled) {
+        return { action: 'unchanged', requestVersion, sourceType };
+      }
 
-    if (lockActive) {
-      const nextPayload =
-        currentState.currentRequestVersion === requestVersion && !currentState.nextPayload
-          ? null
-          : currentState.nextRequestVersion === requestVersion && currentState.nextPayload
-          ? currentState.nextPayload
-          : sanitizedPayload;
-      await requestRef.set({
+      if (lockActive) {
+        const nextPayload =
+          currentState.currentRequestVersion === requestVersion && !currentState.nextPayload
+            ? null
+            : currentState.nextRequestVersion === requestVersion && currentState.nextPayload
+            ? currentState.nextPayload
+            : sanitizedPayload;
+        await requestRef.set({
+          ...currentState,
+          sermonId: sanitizedPayload.id,
+          sourceType,
+          currentPayload: sanitizedPayload,
+          currentRequestVersion: requestVersion,
+          nextPayload,
+          nextRequestVersion: nextPayload ? requestVersion : null,
+          nextUpdatedAt: nextPayload ? now : null,
+          transientRetryReason: null,
+          transientRetryCount: 0,
+          transientRetryNextRunAt: null,
+          transientRetryLastFailureMessage: null,
+          updatedAt: now,
+        } satisfies StoredProcessAudioRequestState);
+        return { action: 'running_replaced', requestVersion, sourceType };
+      }
+
+      const { queueState, deferredCount } = await getQueueStateAndDeferredCount(database);
+      const deferredRef = database.ref(`${YOUTUBE_QUEUE_DEFERRED_PATH}/${sanitizedPayload.id}`);
+      const deferredSnapshot = await deferredRef.get();
+      const alreadyDeferred = deferredSnapshot.exists();
+      const nextState: StoredProcessAudioRequestState = {
         ...currentState,
         sermonId: sanitizedPayload.id,
         sourceType,
         currentPayload: sanitizedPayload,
         currentRequestVersion: requestVersion,
-        nextPayload,
-        nextRequestVersion: nextPayload ? requestVersion : null,
-        nextUpdatedAt: nextPayload ? now : null,
+        nextPayload: null,
+        nextRequestVersion: null,
+        nextUpdatedAt: null,
+        runningRequestId: null,
+        runningTaskId: null,
+        runningRequestVersion: null,
+        runningAt: null,
         transientRetryReason: null,
         transientRetryCount: 0,
         transientRetryNextRunAt: null,
         transientRetryLastFailureMessage: null,
         updatedAt: now,
-      } satisfies StoredProcessAudioRequestState);
-      return { action: 'running_replaced', requestVersion, sourceType };
-    }
+      };
 
-    const { queueState, deferredCount } = await getQueueStateAndDeferredCount(database);
-    const deferredRef = database.ref(`${YOUTUBE_QUEUE_DEFERRED_PATH}/${sanitizedPayload.id}`);
-    const deferredSnapshot = await deferredRef.get();
-    const alreadyDeferred = deferredSnapshot.exists();
-    const nextState: StoredProcessAudioRequestState = {
-      ...currentState,
-      sermonId: sanitizedPayload.id,
-      sourceType,
-      currentPayload: sanitizedPayload,
-      currentRequestVersion: requestVersion,
-      nextPayload: null,
-      nextRequestVersion: null,
-      nextUpdatedAt: null,
-      runningRequestId: null,
-      runningTaskId: null,
-      runningRequestVersion: null,
-      runningAt: null,
-      transientRetryReason: null,
-      transientRetryCount: 0,
-      transientRetryNextRunAt: null,
-      transientRetryLastFailureMessage: null,
-      updatedAt: now,
-    };
+      if (sourceType === 'youtube' && isYouTubeQueuePaused(queueState)) {
+        await writeDeferredYouTubeRequest(
+          database,
+          sanitizedPayload,
+          requestVersion,
+          queueState.blockerReason || queueState.probeStatus,
+          queueState.probeMode ?? 'cookie_provider'
+        );
+        nextState.queuedTaskId = null;
+        nextState.queuedAt = null;
+        nextState.deferredAt = now;
+        await requestRef.set(nextState);
+        await database
+          .ref(YOUTUBE_QUEUE_STATE_PATH)
+          .update({ deferredYouTubeTaskCount: deferredCount + (alreadyDeferred ? 0 : 1) });
+        return { action: 'deferred', requestVersion, sourceType };
+      }
 
-    if (sourceType === 'youtube' && isYouTubeQueuePaused(queueState)) {
-      await writeDeferredYouTubeRequest(
-        database,
-        sanitizedPayload,
-        requestVersion,
-        queueState.blockerReason || queueState.probeStatus,
-        queueState.probeMode ?? 'cookie_provider'
+      await deleteExistingTask(queue, currentState.queuedTaskId);
+      await withLegacyMediaExecution({ firestore: getFirestore(), projectId, payload: sanitizedPayload, taskId }, () =>
+        queue.enqueue(sanitizedPayload, {
+          id: taskId,
+          dispatchDeadlineSeconds: 1800,
+          uri: targetUri,
+        })
       );
-      nextState.queuedTaskId = null;
-      nextState.queuedAt = null;
-      nextState.deferredAt = now;
-      await requestRef.set(nextState);
-      await database
-        .ref(YOUTUBE_QUEUE_STATE_PATH)
-        .update({ deferredYouTubeTaskCount: deferredCount + (alreadyDeferred ? 0 : 1) });
-      return { action: 'deferred', requestVersion, sourceType };
-    }
 
-    await deleteExistingTask(queue, currentState.queuedTaskId);
-    await queue.enqueue(sanitizedPayload, {
-      id: taskId,
-      dispatchDeadlineSeconds: 1800,
-      uri: targetUri,
-    });
+      await requestRef.set({
+        ...nextState,
+        queuedTaskId: taskId,
+        queuedAt: now,
+        deferredAt: null,
+      } satisfies StoredProcessAudioRequestState);
 
-    await requestRef.set({
-      ...nextState,
-      queuedTaskId: taskId,
-      queuedAt: now,
-      deferredAt: null,
-    } satisfies StoredProcessAudioRequestState);
-
-    return { action: 'queued', requestVersion, taskId, sourceType };
-  });
+      return { action: 'queued', requestVersion, taskId, sourceType };
+    })
+  );
 }
 
 export async function beginYouTubeQueueProbe(args: {
@@ -645,8 +674,7 @@ export async function beginYouTubeQueueProbe(args: {
   ownerId: string;
   probeMode: YouTubeQueueProbeMode;
 }): Promise<void> {
-  const { database, targetUri, ownerId } = args;
-  const queue = getYouTubeTaskQueue();
+  const { database } = args;
   const deferredSnapshot = await database.ref(YOUTUBE_QUEUE_DEFERRED_PATH).get();
   const deferredEntries = Object.values(
     (deferredSnapshot.val() as Record<string, LegacyStoredDeferredYouTubeRequest> | null) ?? {}
@@ -660,49 +688,24 @@ export async function beginYouTubeQueueProbe(args: {
   const probeCandidate = deferredEntries.sort(
     (left, right) => Date.parse(left.deferredAt) - Date.parse(right.deferredAt)
   )[0];
-  const deferredCount = deferredEntries.length;
-
   if (!probeCandidate) {
-    const currentState = parseYouTubeQueueState((await database.ref(YOUTUBE_QUEUE_STATE_PATH).get()).val());
-    if (currentState.deferredYouTubeTaskCount !== deferredCount) {
-      return;
-    }
-    await runGuardedYouTubeQueueStateTransaction(database, (currentQueueState) => {
-      if (
-        !matchesObservedYouTubeProbe(currentQueueState, currentState) ||
-        currentQueueState.deferredYouTubeTaskCount !== deferredCount ||
-        currentQueueState.probeStatus === 'probing' ||
-        !!currentQueueState.probeDispatchReservationId
-      ) {
-        return undefined;
-      }
-      const deferredYouTubeTaskCount = reconcileDeferredYouTubeTaskCount(
-        currentQueueState.deferredYouTubeTaskCount,
-        currentState.deferredYouTubeTaskCount,
-        deferredCount
-      );
-      const hasDeferredRequests = deferredYouTubeTaskCount > 0;
-      return {
-        ...currentQueueState,
-        blocked: false,
-        blockerReason: null,
-        blockedAt: null,
-        blockerEpisodeId: hasDeferredRequests ? currentQueueState.blockerEpisodeId : null,
-        alertSentAt: hasDeferredRequests ? currentQueueState.alertSentAt : null,
-        alertReservationId: hasDeferredRequests ? currentQueueState.alertReservationId ?? null : null,
-        probeStatus: hasDeferredRequests ? 'waiting_for_auth_required_request' : 'idle',
-        probeMode: null,
-        deferredYouTubeTaskCount,
-        probeTaskSermonId: null,
-        probeRequestVersion: null,
-        probeStartedAt: null,
-        probeDispatchReservationId: null,
-        probeLastFailureClass: null,
-        probeLastFailureMessage: null,
-      } satisfies StoredYouTubeQueueState;
-    });
+    await database.ref(YOUTUBE_QUEUE_STATE_PATH).get();
     return;
   }
+  if (probeCandidate)
+    return withLegacyMediaExecution(
+      { firestore: getFirestore(), projectId: getApp().options.projectId!, payload: probeCandidate.payload },
+      () => beginYouTubeQueueProbeUnderAdmission(args, probeCandidate)
+    );
+  return;
+}
+
+async function beginYouTubeQueueProbeUnderAdmission(
+  args: { database: Database; targetUri: string; ownerId: string; probeMode: YouTubeQueueProbeMode },
+  probeCandidate: StoredDeferredYouTubeRequest
+): Promise<void> {
+  const { database, targetUri, ownerId } = args;
+  const queue = getYouTubeTaskQueue();
 
   const selectedProbeMode = probeCandidate.probeMode;
 
@@ -784,11 +787,15 @@ export async function beginYouTubeQueueProbe(args: {
     try {
       await deleteExistingTask(queue, existingState.queuedTaskId);
       try {
-        await queue.enqueue(sanitizedPayload, {
-          id: taskId,
-          dispatchDeadlineSeconds: 1800,
-          uri: targetUri,
-        });
+        await withLegacyMediaExecution(
+          { firestore: getFirestore(), projectId: getApp().options.projectId!, payload: sanitizedPayload, taskId },
+          () =>
+            queue.enqueue(sanitizedPayload, {
+              id: taskId,
+              dispatchDeadlineSeconds: 1800,
+              uri: targetUri,
+            })
+        );
       } catch (error) {
         if (!isTaskAlreadyExistsError(error)) {
           throw error;

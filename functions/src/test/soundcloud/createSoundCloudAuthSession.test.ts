@@ -7,7 +7,7 @@ jest.mock('firebase-functions/v2/https', () => {
   return {
     ...actual,
     onCall: jest.fn((optsOrHandler: unknown, maybeHandler?: unknown) =>
-      (typeof optsOrHandler === 'function' ? optsOrHandler : maybeHandler)
+      typeof optsOrHandler === 'function' ? optsOrHandler : maybeHandler
     ),
   };
 });
@@ -39,11 +39,7 @@ const pendingAuthSessionRef = (adminUid: string) =>
   soundCloudAuthStateRef.collection(SOUND_CLOUD_PENDING_AUTH_COLLECTION).doc(adminUid);
 
 const toBase64Url = (bytes: Uint8Array): string =>
-  Buffer.from(bytes)
-    .toString('base64')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/g, '');
+  Buffer.from(bytes).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
 
 const buildCodeChallenge = (codeVerifier: string): string =>
   toBase64Url(createHash('sha256').update(codeVerifier).digest());
@@ -69,6 +65,22 @@ describe('createSoundCloudAuthSession', () => {
     process.env.SOUNDCLOUD_CLIENT_SECRET = 'client-secret';
     delete process.env.SOUNDCLOUD_REFRESH_TOKEN;
     await clearSoundCloudAuthDocs();
+    // Other emulator suites exercise partial/malformed release controls. Setup
+    // callables require their own explicit valid admission fixture, not test order.
+    await firestore.doc('_control/temporalProviderUsage').delete();
+    await firestore.doc('_control/temporalRelease').set({
+      schemaVersion: 1,
+      revision: 1,
+      releaseId: 'soundcloud-setup-test',
+      updatedAt: Date.now(),
+      admission: 'open',
+      domains: { accounts: { owner: 'temporal', admission: 'open' } },
+    });
+  });
+
+  afterAll(async () => {
+    await firestore.doc('_control/temporalRelease').delete();
+    await firestore.doc('_control/temporalProviderUsage').delete();
   });
 
   it('passes the admin uid and redirect URI through the callable wrapper', async () => {
@@ -89,10 +101,36 @@ describe('createSoundCloudAuthSession', () => {
       expiresAtMillis: 123,
     });
 
-    expect(createSessionSpy).toHaveBeenCalledWith({
-      adminUid: 'admin-1',
-      redirectUri: TEST_REDIRECT_URI,
+    expect(createSessionSpy).toHaveBeenCalledWith(
+      {
+        adminUid: 'admin-1',
+        redirectUri: TEST_REDIRECT_URI,
+      },
+      expect.any(Function)
+    );
+  });
+
+  it('rejects paused setup before session, lease or provider work', async () => {
+    const control = firestore.doc('_control/temporalRelease');
+    const beforeLeases = await firestore.collection('legacyAdmissionLeases').get();
+    const operation = jest.spyOn(soundcloudSecretsModule, 'createSoundCloudAuthorizationSession');
+    await control.set({
+      schemaVersion: 1,
+      revision: 1,
+      releaseId: 'paused-test',
+      updatedAt: Date.now(),
+      admission: 'paused',
+      domains: { accounts: { owner: 'temporal', admission: 'paused' } },
     });
+    try {
+      await expect(
+        handler({ auth: testCallableAuth('admin', 'admin-1'), data: { redirectUri: TEST_REDIRECT_URI } })
+      ).rejects.toMatchObject({ code: 'unavailable' });
+      expect(operation).not.toHaveBeenCalled();
+      expect((await firestore.collection('legacyAdmissionLeases').get()).size).toBe(beforeLeases.size);
+    } finally {
+      await control.delete();
+    }
   });
 
   it('rejects non-admin callers', async () => {

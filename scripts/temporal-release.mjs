@@ -24,7 +24,9 @@ import {
   validatePreopenSmoke,
   validateProviderUsageMarker,
   countPendingLegacyUploadAdmissions,
-  assertPendingLegacyUploadsDrainedInTransaction,
+  assertLegacyDrainInTransaction,
+  countPendingSeriesMetadataContinuations,
+  legacyMailRequiresDrain,
 } from './temporal-release-lib.mjs';
 
 import {
@@ -285,17 +287,11 @@ async function transition(revision, phase, update = {}, controlUpdate) {
       if (!['compatibility-ready', 'pause', 'resume', 'rollback-ui', 'restore-reviewed-ui'].includes(action))
         assertCompatibilityGraceElapsed(current.data(), currentState.data(), config, current.readTime);
     }
+    if (['legacy-drained', 'ownership-changed'].includes(phase))
+      await assertLegacyDrainInTransaction(tx, firestore, current.data(), config.domains, config.mailCollection);
     if (phase === 'ownership-changed') {
-      await assertPendingLegacyUploadsDrainedInTransaction(tx, firestore, current.data(), config.domains);
       const usage = await tx.get(firestore.doc('_control/temporalProviderUsage'));
       validateProviderUsageMarker(config, usage.data(), currentState.data().providerUsageEpoch);
-      const leases = await tx.get(
-        firestore
-          .collection('legacyAdmissionLeases')
-          .where('state', 'in', ['active', 'needs_attention'])
-          .select('domain', 'state')
-      );
-      if (leases.size) throw new Error('A legacy lease remains active or uncertain; audited reconciliation required');
     }
     if (phase === 'compatibility-ready') {
       if (currentState.data().phase !== 'ui-frozen')
@@ -411,7 +407,7 @@ async function legacyCounts() {
     const page = await query.get();
     for (const doc of page.docs) {
       const delivery = doc.data().delivery;
-      if (delivery?.orchestrator !== 'temporal' && !['SUCCESS', 'ERROR'].includes(delivery?.state)) legacyMailPending++;
+      if (legacyMailRequiresDrain(delivery)) legacyMailPending++;
     }
     cursor = page.size === 500 ? page.docs.at(-1) : undefined;
   } while (cursor);
@@ -422,9 +418,15 @@ async function legacyCounts() {
     .select('domain', 'state')
     .get();
   counts.unresolvedLegacyAdmissionLeases = leases.size;
+  const currentControl = (await controlRef.get()).data();
   counts.pendingLegacyUploadAdmissions = await countPendingLegacyUploadAdmissions(
     firestore,
-    (await controlRef.get()).data(),
+    currentControl,
+    config.domains
+  );
+  counts.pendingSeriesMetadataContinuations = await countPendingSeriesMetadataContinuations(
+    firestore,
+    currentControl,
     config.domains
   );
   assertDrainedCounts(counts);

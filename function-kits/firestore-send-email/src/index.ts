@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 /**
  * Copyright 2019 Google LLC
  *
@@ -29,7 +30,7 @@ import * as nodemailer from "nodemailer";
 import { expr } from "firebase-functions/params";
 import { setGlobalOptions } from "firebase-functions/v2/options";
 import { migratedOptions } from "./system-options";
-import { assertLegacyEmailRelease } from "./temporal/release";
+import { assertLegacyEmailRelease, assertNewLegacyEmailClaim } from "./temporal/release";
 import { secureMailOptions } from "./temporal/secure-options";
 import { enqueueTemporalEmail } from "./temporal/ingress";
 import { getEmailExpireAt as getExpireAt, getEmailExpiryPolicy } from "./temporal/expiry";
@@ -133,11 +134,13 @@ async function deliver(ref: DocumentReference): Promise<void> {
   logs.attemptingDelivery(ref);
 
   // Prepare the Firestore document for delivery updates
+  let smtpStarted = false, smtpAcknowledged = false;
   const update = {
     "delivery.attempts": FieldValue.increment(1),
     "delivery.endTime": FieldValue.serverTimestamp(),
     "delivery.error": null,
     "delivery.leaseExpireTime": null,
+    "delivery.smtpSubmissionState": "not_submitted",
   };
 
   try {
@@ -170,23 +173,30 @@ async function deliver(ref: DocumentReference): Promise<void> {
       ipPoolName: payload.sendGrid?.ipPoolName,
     };
 
+    const securedOptions = secureMailOptions(mailOptions);
+
     // Template/UID preparation may wait on Firestore. Recheck the actual owner,
     // delivery lease and document immediately before starting non-idempotent SMTP.
     const stillOwns = await db.runTransaction(async tx => {
       await assertLegacyEmailRelease(tx, db);
       const current = await tx.get(ref);
-      const delivery = current.data()?.delivery as Delivery & {orchestrator?: string};
+      const delivery = current.data()?.delivery as Delivery & {orchestrator?: string; smtpClaimId?: string; smtpSubmissionState?: string};
       if (!current.exists || !delivery || delivery.state !== "PROCESSING" || delivery.orchestrator === "temporal" || delivery.leaseExpireTime?.toMillis() !== snapshot.data().delivery.leaseExpireTime?.toMillis()) return false;
+      if (!delivery.smtpClaimId || delivery.smtpClaimId !== snapshot.data().delivery.smtpClaimId || delivery.smtpSubmissionState !== "not_submitted") return false;
       if (!delivery.leaseExpireTime || delivery.leaseExpireTime.toMillis() < Date.now()) {
         tx.update(ref, {"delivery.state": "ERROR", "delivery.error": "Lease expired before SMTP submission.", "delivery.endTime": FieldValue.serverTimestamp()});
         return false;
       }
+      tx.update(ref, {"delivery.smtpSubmissionState": "started", "delivery.smtpSubmissionStartedAt": FieldValue.serverTimestamp()});
       return true;
     });
     if (!stillOwns) return;
     logs.info("Sending queued email", { documentPath: ref.path });
-    const result = (await transport.sendMail(secureMailOptions(mailOptions))) as any;
+    smtpStarted = true;
+    const result = (await transport.sendMail(securedOptions)) as any;
 
+    smtpAcknowledged = true;
+    update["delivery.smtpSubmissionState"] = "accepted";
     const info: SendMailInfoLike = {
       messageId: result.messageId || null,
       sendgridQueueId: result.queueId || null,
@@ -204,6 +214,7 @@ async function deliver(ref: DocumentReference): Promise<void> {
   } catch (e) {
     // Update Firestore document to indicate failure
     update["delivery.state"] = "ERROR";
+    update["delivery.smtpSubmissionState"] = smtpAcknowledged ? "accepted" : smtpStarted ? "unknown" : "not_submitted";
     update["delivery.error"] = e.toString();
     logs.deliveryError(ref, e);
   }
@@ -211,8 +222,8 @@ async function deliver(ref: DocumentReference): Promise<void> {
   // Update the Firestore document transactionally to allow retries (#48)
   return db.runTransaction(async transaction => {
     const current = await transaction.get(ref);
-    const delivery = current.data()?.delivery as Delivery & {orchestrator?: string};
-    if (!current.exists || !delivery || delivery.orchestrator === "temporal" || delivery.state !== "PROCESSING" || delivery.leaseExpireTime?.toMillis() !== snapshot.data().delivery.leaseExpireTime?.toMillis()) return;
+    const delivery = current.data()?.delivery as Delivery & {orchestrator?: string; smtpClaimId?: string; smtpSubmissionState?: string};
+    if (!current.exists || !delivery || delivery.orchestrator === "temporal" || (delivery.state !== "PROCESSING" && !(delivery.state === "ERROR" && delivery.smtpSubmissionState === "unknown")) || delivery.smtpClaimId !== snapshot.data().delivery.smtpClaimId || delivery.leaseExpireTime?.toMillis() !== snapshot.data().delivery.leaseExpireTime?.toMillis()) return;
     transaction.update(ref, update);
   });
 }
@@ -323,6 +334,7 @@ async function processWrite(
             // Keeping error to avoid any breaking changes in the next minor update.
             // Error to be removed for the next major release.
             "delivery.error": "Message processing lease expired.",
+            "delivery.smtpSubmissionState": (payload.delivery as Delivery & {smtpSubmissionState?: string}).smtpSubmissionState === "not_submitted" ? "not_submitted" : "unknown",
           });
         }
         // Already being processed, so we don't need to do anything.
@@ -330,6 +342,10 @@ async function processWrite(
       }
 
       if (state === "PENDING" || state === "RETRY") {
+        const submission = (payload.delivery as Delivery & {smtpSubmissionState?: string}).smtpSubmissionState;
+        if ((submission && submission !== "not_submitted") || (!submission && (state === "RETRY" || (payload.delivery.attempts || 0) > 0)))
+          throw new Error("EMAIL_SMTP_OUTCOME_REQUIRES_REVIEW");
+        await assertNewLegacyEmailClaim(transaction, db, snapshot, config.mailCollection);
         const eventFn =
           state === "PENDING"
             ? events.recordPendingEvent
@@ -340,6 +356,8 @@ async function processWrite(
         // and set a lease time to prevent delivery from being attempted forever.
         transaction.update(ref, {
           "delivery.state": "PROCESSING",
+          "delivery.smtpClaimId": randomUUID(),
+          "delivery.smtpSubmissionState": "not_submitted",
           "delivery.leaseExpireTime": Timestamp.fromMillis(Date.now() + deliveryLeaseMillis),
         });
         return true;

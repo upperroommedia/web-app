@@ -21,6 +21,36 @@ image dependency must fail the probe. Monorepo hoisting cannot satisfy this chec
 
 ## Cutover
 
+The obsolete `saveimage` and `getimage` callables, `updateimagemetadata` HTTP
+maintenance endpoint, and `imageondelete` document trigger have been removed from
+the image codebase. The three callable/HTTP helpers have no application, script, or
+documented operational caller. `saveimage` downloaded
+arbitrary URLs and wrote image objects outside durable admission; `getimage` exposed
+an unbounded remote URL proxy and logged the entire authenticated request;
+`updateimagemetadata` exposed an unauthenticated, unbounded metadata repair.
+`imageondelete` duplicated durable cleanup and could delete a replacement Storage
+generation through an untracked continuation. Durable `image.delete` removes only
+the sealed generation, then checks the canonical source identity transactionally
+before deleting the canonical record. Raw administrator document deletion no longer
+implicitly deletes Storage objects; use the explicit durable deletion operation.
+ImageSelector continues to upload immutable source objects through
+`ingestDurableImage` and waits for the durable image job before selecting its result.
+
+Removing source exports does **not** prove the deployed endpoints have disappeared.
+During the guarded compatibility deployment, use Firebase CLI to retire exactly
+`saveimage`, `getimage`, `updateimagemetadata`, and `imageondelete` in the target
+project and deployed region, then verify all four are absent from the live Functions
+inventory before accepting paused-write evidence. Do not delete the retained
+`uploadimage` handler. Production retirement belongs to the separately approved production rollout.
+Any future metadata repair needs an authenticated, bounded durable operation rather
+than restoring a removed endpoint.
+
+The retained `uploadimage` finalize trigger acquires an atomic legacy `images`
+admission lease before reading source bytes or contacting providers. It uses ordinary
+open admission, never continuation admission, and acknowledges effects before
+download-token metadata or provider writes. A paused or Temporal-owned image domain
+rejects fresh legacy claims; already admitted work remains visible to release draining.
+
 Keep `TASK_ORCHESTRATOR_SEARCH=legacy` until the dispatcher, matching worker config/secrets and namespace are ready. Drain Cloud Tasks full-index pages and in-flight legacy leases before changing the deployed kit to `temporal`. The kit's trigger then creates durable jobs/outbox instead of calling Algolia. Never enable both execution owners intentionally. Runtime search configurations are server-owned and keyed by existing FIREBASE_KIT_INSTANCE_ID; the worker receives API keys privately. No key or record body belongs in jobs or history.
 
 Source image finalize admission and durable canonical commit use the common server bridge. Before activating image ownership, reconcile existing sources/receipts and ensure canonical generation fences are checked atomically with publication. An ambiguous ingest cannot be adopted by title, dimensions, MIME type, or a selected ID. Existing provider bytes cannot be proven identical through this API. Review retains the selected resource without PUT; the user starts a separate upload for new bytes.

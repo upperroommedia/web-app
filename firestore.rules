@@ -117,7 +117,9 @@ service cloud.firestore {
     match /_durableAccountClaimResources/{document=**} { allow read, write: if false; }
 
     match /users/{userId} {
-      allow read, write: if isAuthorized();
+      // Account records and durable job links are server-authored.
+      allow read: if isAdmin() || (isAuthorized() && request.auth.uid == userId);
+      allow write: if false;
     }
 
     match /images/{document} {
@@ -137,17 +139,18 @@ service cloud.firestore {
 
     match /subtitles/{document} {
       allow read: if isAuthorized();
-      allow write: if (isAdmin());
+      allow write: if false;
     }
 
     match /topics/{document} {
       allow read: if isAuthorized();
-      allow write: if (canUpload());
+      // Catalog maintenance is server-owned; the browser only selects topics.
+      allow write: if false;
     }
 
     match /transcriptions/{document} {
       allow read: if isAuthorized();
-      allow write: if (canUpload());
+      allow write: if false;
     }
 
     // Series permissions: only owner or admin can access

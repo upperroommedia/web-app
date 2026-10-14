@@ -4,9 +4,10 @@ import { logger } from 'firebase-functions/v2';
 import { FirestoreDataConverter, Query } from 'firebase-admin/firestore';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { BundleConfig, BundleMetadata } from '@upperroom/shared/shared/bundleConfigs';
-import { getFirebaseStorageBucket } from '@upperroom/shared/shared/firebaseProjectConfig';
+import { getFirebaseProjectId, getFirebaseStorageBucket } from '@upperroom/shared/shared/firebaseProjectConfig';
 import { Writable } from 'stream';
 import handleError from '../handleError';
+import { withLegacyAdmissionLease } from '../temporal/legacyAdmissionLease';
 
 const firestoreAdmin = firebaseAdmin.firestore();
 const storage = firebaseAdmin.storage();
@@ -58,28 +59,8 @@ export async function serveBundleFromStorage<T>(
     const timestampValue = storageMetadata.metadata?.timestamp;
     const bundleTimestamp = (typeof timestampValue === 'string' ? parseInt(timestampValue, 10) : null) || Date.now();
 
-    // Safely extract bundle count with type checking
-    const countValue = storageMetadata.metadata?.[`${config.bundleType}-count`];
-    const bundleCount = (typeof countValue === 'string' ? parseInt(countValue, 10) : null) || 0;
-
-    // Check if metadata exists in Realtime Database
-    const rtdbMetadataRef = database.ref(config.metadataDocPath);
-    const rtdbSnapshot = await rtdbMetadataRef.once('value');
-    const rtdbMetadata = rtdbSnapshot.val();
-
-    // If RTDB metadata doesn't exist but bundle exists, save metadata to RTDB
-    if (!rtdbMetadata) {
-      logger.info(`Bundle exists but metadata missing in Realtime Database, saving metadata for ${config.displayName}`);
-
-      const metadataUpdate = {
-        lastUpdated: bundleTimestamp,
-        [`${config.bundleType}-count`]: bundleCount,
-        storagePath: config.bundlePath,
-      } as BundleMetadata;
-
-      await rtdbMetadataRef.set(metadataUpdate);
-      logger.info(`Metadata saved to Realtime Database for ${config.displayName} bundle`);
-    }
+    // Public delivery is read-only. Generation owns metadata publication; a
+    // cache hit must remain available even while admissions are paused.
 
     // Set response headers
     response.set('Content-Type', 'application/octet-stream');
@@ -158,7 +139,9 @@ export async function generateAndStoreBundle<T>(
       storagePath: config.bundlePath,
     } as BundleMetadata;
 
-    if (options?.publishMetadata !== false) await database.ref(config.metadataDocPath).set(metadataUpdate);
+    // Preserve the listener's sibling _regeneration claim until its leased
+    // owner settles the cycle; replacing this node would erase that claim.
+    if (options?.publishMetadata !== false) await database.ref(config.metadataDocPath).update(metadataUpdate);
 
     logger.info(`New ${config.displayName} bundle generated and stored with ${snapshot.size} ${config.displayName}`);
 
@@ -200,10 +183,22 @@ export async function createBundleHandler<T>(
         response.status(503).json({ error: 'Bundle is being prepared. Please retry shortly.' });
         return;
       }
-      await (await import('../temporal/releaseControl')).assertLegacyAdmissionAllowed(firestoreAdmin, 'bundles');
-      // Generate new bundle if none exists
-      logger.info(`No cached ${config.displayName} bundle found, generating new one`);
-      await generateAndStoreBundle(config, response);
+      await withLegacyAdmissionLease(
+        firestoreAdmin,
+        {
+          domain: 'bundles',
+          actorUid: 'system:public-bundle',
+          operation: `bundle.http:${config.bundleType}`,
+          projectId: getFirebaseProjectId(),
+        },
+        async (lease) => {
+          // Pause conflicts with lease admission, and the admitted invocation
+          // stays visible to drain until storage and metadata publication finish.
+          await lease.markEffectsStarted();
+          logger.info(`No cached ${config.displayName} bundle found, generating new one`);
+          await generateAndStoreBundle(config, response);
+        }
+      );
     }
   } catch (error) {
     if (error instanceof HttpsError && ['unavailable', 'failed-precondition'].includes(error.code)) {

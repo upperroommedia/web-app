@@ -1,54 +1,42 @@
 jest.mock('firebase-functions/v2/firestore', () => ({ onDocumentUpdated: jest.fn() }));
 jest.mock('firebase-functions/v2', () => ({ logger: { log: jest.fn(), debug: jest.fn(), error: jest.fn() } }));
 jest.mock('@upperroom/shared/firebase/firebaseAdmin', () => ({ __esModule: true, default: { firestore: jest.fn() } }));
-jest.mock('../../firestoreDataConverter', () => ({ firestoreAdminSermonListConverter: {} }));
+jest.mock('../../DocumentListeners/currentCanonicalMirrors', () => ({
+  ...jest.requireActual('../../DocumentListeners/currentCanonicalMirrors'),
+  reconcileCurrentCanonicalMirrors: jest.fn(),
+}));
 jest.mock('../../handleError', () => ({ __esModule: true, default: (error: unknown) => error }));
-
 import { onDocumentUpdated } from 'firebase-functions/v2/firestore';
-import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
+import { reconcileCurrentCanonicalMirrors } from '../../DocumentListeners/currentCanonicalMirrors';
 import '../../DocumentListeners/Lists/listOnUpdate';
-
-type TestEvent = { params: { listId: string }; data: { before: { data: () => object }; after: { data: () => object } } };
-const handler = jest.mocked(onDocumentUpdated).mock.calls[0][1] as unknown as (event: TestEvent) => Promise<void>;
-const event: TestEvent = {
+const handler = jest.mocked(onDocumentUpdated).mock.calls[0][1] as unknown as (event: unknown) => Promise<void>;
+const event = (before: object, after: object) => ({
   params: { listId: 'list-1' },
-  data: {
-    before: { data: () => ({ id: 'list-1', name: 'Old name' }) },
-    after: { data: () => ({ id: 'list-1', name: 'New name' }) },
-  },
-};
-
-function configureFirestore(docCount: number, failCommit?: number) {
-  const docs = Array.from({ length: docCount }, (_, index) => ({ ref: { id: `sermon-${index}` } }));
-  const committed: Array<Array<{ id: string }>> = [];
-  const failure = new Error('commit failed');
-  const query = { withConverter: jest.fn().mockReturnThis(), where: jest.fn().mockReturnThis(), get: jest.fn().mockResolvedValue({ docs, size: docs.length }) };
-  const batch = jest.fn(() => {
-    const refs: Array<{ id: string }> = [];
-    return {
-      update: (ref: { id: string }) => { refs.push(ref); },
-      commit: async () => {
-        if (refs.length > 500) throw new Error('batch write limit exceeded');
-        committed.push(refs);
-        if (committed.length === failCommit) throw failure;
-      },
-    };
-  });
-  jest.mocked(firebaseAdmin.firestore).mockReturnValue({ collectionGroup: () => query, batch } as unknown as ReturnType<typeof firebaseAdmin.firestore>);
-  return { docs, committed, batch, failure };
-}
-
+  data: { before: { data: () => before }, after: { data: () => after } },
+});
 describe('listOnUpdate', () => {
-  it('updates every sermon mirror for a list linked to more than 500 sermons', async () => {
-    const { docs, committed } = configureFirestore(1001);
-    await handler(event);
-    expect(committed.map((refs) => refs.length)).toEqual([450, 450, 101]);
-    expect(committed.flat()).toEqual(docs.map((doc) => doc.ref));
+  beforeEach(() => {
+    jest.mocked(reconcileCurrentCanonicalMirrors).mockReset();
   });
-
-  it('propagates a failed commit without starting later batches', async () => {
-    const { failure, batch } = configureFirestore(1001, 2);
-    await expect(handler(event)).rejects.toBe(failure);
-    expect(batch).toHaveBeenCalledTimes(2);
+  it('uses only canonical identity to reconcile and does not pass stale event fields to the writer', async () => {
+    await handler(event({ id: 'list-1', name: 'Old' }, { id: 'list-1', name: 'Stale event name' }));
+    const [, options] = jest.mocked(reconcileCurrentCanonicalMirrors).mock.calls[0];
+    expect(options).toMatchObject({
+      sourcePath: 'lists/list-1',
+      collectionGroup: 'sermonLists',
+      parentCollection: 'sermons',
+      id: 'list-1',
+    });
+    expect(options.project({ id: 'list-1', name: 'Newest' }, {})).toEqual({ id: 'list-1', name: 'Newest' });
+  });
+  it('avoids fanout for count and timestamp-only changes', async () => {
+    await handler(
+      event({ name: 'Same', count: 1, updatedAtMillis: 1 }, { name: 'Same', count: 2, updatedAtMillis: 2 })
+    );
+    expect(reconcileCurrentCanonicalMirrors).not.toHaveBeenCalled();
+  });
+  it('propagates a failed reconciliation so the event can retry', async () => {
+    jest.mocked(reconcileCurrentCanonicalMirrors).mockRejectedValue(new Error('PAGE_FAILED'));
+    await expect(handler(event({ name: 'Old' }, { name: 'New' }))).rejects.toThrow('PAGE_FAILED');
   });
 });

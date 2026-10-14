@@ -5,4 +5,5 @@ ROOT_DIR=$(git rev-parse --show-toplevel)
 cd "$ROOT_DIR"
 
 git diff --check
+export PYTHONHASHSEED=0
 graphify update .

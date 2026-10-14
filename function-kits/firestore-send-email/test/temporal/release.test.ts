@@ -63,6 +63,7 @@ test('release importer must anchorpausedrevision and releaseidentity', async () 
 });
 test('expired leases and previous retries are uncertainty, never proofunsent', () => {
   const counts: LegacyEmailDrainCounts = {
+    smtpUncertain: 0,
     pendingFresh: 0,
     retryWithPriorAttempts: 0,
     processingActive: 0,
@@ -86,7 +87,8 @@ test('expired leases and previous retries are uncertainty, never proofunsent', (
     processingActive: 1,
     processingLeaseExpired: 1,
     terminalSuccess: 1,
-    terminalError: 1,
+    terminalError: 0,
+    smtpUncertain: 1,
     temporalOwned: 1,
     invalid: 0,
     total: 7,
@@ -107,7 +109,8 @@ test('drain scanner selects metadata only and rechecks fresh pausedcontrol', asy
     'delivery.state',
     'delivery.leaseExpireTime',
     'delivery.attempts',
-    'delivery.orchestrator'
+    'delivery.orchestrator',
+    'delivery.smtpSubmissionState'
   );
   h.db.runTransaction = async (operation: any) => {
     await operation({ get: async () => ({ docs: [] }) });
@@ -116,4 +119,45 @@ test('drain scanner selects metadata only and rechecks fresh pausedcontrol', asy
   await expect(
     scanLegacyEmailDrain(h.db, { mailCollection: 'mail', expectedControlRevision: 2, releaseId: 'r1' })
   ).rejects.toThrow('CONTROL_STALE');
+});
+
+test('the real scanner retains submission markers through its metadata projection', async () => {
+  const h = harness({ '_control/temporalRelease': control() });
+  let fields: string[] = [];
+  let rows: Record<string, unknown>[] = [
+    { state: 'ERROR', attempts: 1, smtpSubmissionState: 'not_submitted' },
+    { state: 'ERROR', attempts: 1, smtpSubmissionState: 'accepted' },
+  ];
+  const query: any = {
+    orderBy: () => query,
+    limit: () => query,
+    select: (...selected: string[]) => {
+      fields = selected;
+      return query;
+    },
+  };
+  h.db.collection = () => query;
+  h.db.runTransaction = async (callback: any) =>
+    callback({
+      get: async () => ({
+        docs: rows.map((row) => ({
+          get: () =>
+            Object.fromEntries(
+              fields
+                .map((field) => field.slice('delivery.'.length))
+                .filter((field) => field in row)
+                .map((field) => [field, row[field]])
+            ),
+        })),
+      }),
+    });
+  const input = { mailCollection: 'mail', expectedControlRevision: 2, releaseId: 'r1' };
+  const safe = await scanLegacyEmailDrain(h.db, input);
+  expect(fields).toContain('delivery.smtpSubmissionState');
+  expect(safe.drained).toBe(true);
+  expect(safe.counts).toMatchObject({ terminalError: 2, smtpUncertain: 0 });
+  rows = [{ state: 'ERROR', attempts: 0, smtpSubmissionState: 'unknown' }];
+  const uncertain = await scanLegacyEmailDrain(h.db, input);
+  expect(uncertain.drained).toBe(false);
+  expect(uncertain.counts.smtpUncertain).toBe(1);
 });

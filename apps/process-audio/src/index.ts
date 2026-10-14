@@ -1,3 +1,4 @@
+import { prepareLegacyMediaAdmission } from '@upperroom/orchestration/legacy-media-execution';
 import {
   sentryEnabled,
   sentryEnvironment,
@@ -6,6 +7,12 @@ import {
   sentryTracesSampleRate,
 } from './instrument';
 import express, { Request } from 'express';
+import {
+  authenticateNativeMediaCaller,
+  assertBoundNativeMediaTask,
+  nativeCallerConfiguration,
+} from './legacyMediaIngress';
+import { withNativeMediaHttpExecution, pinOriginalLegacySourceBucket } from './legacyMediaHttp';
 import { createProviderRelayRouter } from './providerRelay';
 import { rateLimit } from 'express-rate-limit';
 import { spawnSync } from 'node:child_process';
@@ -43,11 +50,7 @@ import {
 import type { BrowserFallbackErrorResponse } from '@upperroom/contracts/browserFallback';
 import { getProcessAudioConcurrencyConfig } from './concurrency';
 import { shouldCaptureProcessAudioFailure } from './processAudioFailureReporting';
-import {
-  getYouTubeFailureDisposition,
-  type StoredProcessAudioRequestState,
-  type YouTubeAcquisitionEvidence,
-} from '@upperroom/contracts/processAudioQueue';
+import { getYouTubeFailureDisposition, type YouTubeAcquisitionEvidence } from '@upperroom/contracts/processAudioQueue';
 import {
   buildYouTubeReadinessSnapshot,
   clampYouTubeMediaByteCanaryIntervalMs,
@@ -254,15 +257,6 @@ const bucket = firebaseAdmin.storage().bucket();
 const realtimeDB = firebaseAdmin.database();
 const db = firebaseAdmin.firestore();
 
-function shouldRecoverOrphanedHetznerStateOnStartup(): boolean {
-  if (runtimeProfile !== 'hetzner') {
-    return false;
-  }
-
-  const explicit = process.env.PROCESS_AUDIO_RECOVER_ORPHANED_STATE_ON_STARTUP?.trim().toLowerCase();
-  return !['0', 'false', 'no'].includes(explicit || '');
-}
-
 async function readPersistedYouTubeMediaByteCanaries(): Promise<{
   guest: YouTubeMediaByteCanaryDiagnostic;
   authenticated: YouTubeMediaByteCanaryDiagnostic;
@@ -466,146 +460,12 @@ function startDeferredYouTubeAuthReconciler(): void {
   interval.unref?.();
 }
 
+/** Legacy Cloud Tasks retry their immutable admission after the existing mutex expires.
+ * Startup must never clear shared Temporal progress, locks, or canonical sermon state.
+ * Uncertain historical records require the audited release reconciliation tooling.
+ */
 async function recoverOrphanedHetznerProcessAudioStateOnStartup(): Promise<void> {
-  if (!shouldRecoverOrphanedHetznerStateOnStartup()) {
-    return;
-  }
-
-  const startupLogger = createLoggerWithContext(createContext(undefined, 'startup-recovery'));
-  startupLogger.info('Scanning for orphaned process-audio state after worker startup');
-
-  const [locksSnapshot, requestsSnapshot, progressSnapshot] = await Promise.all([
-    realtimeDB.ref('processAudioLocks').get(),
-    realtimeDB.ref('processAudioRequests').get(),
-    realtimeDB.ref('addIntroOutro').get(),
-  ]);
-
-  const lockEntries = (locksSnapshot.val() as Record<string, unknown> | null) ?? {};
-  const requestEntries = (requestsSnapshot.val() as Record<string, StoredProcessAudioRequestState> | null) ?? {};
-  const progressEntries = (progressSnapshot.val() as Record<string, unknown> | null) ?? {};
-  const sermonIds = new Set<string>([
-    ...Object.keys(lockEntries),
-    ...Object.keys(requestEntries),
-    ...Object.keys(progressEntries),
-  ]);
-
-  if (sermonIds.size === 0) {
-    startupLogger.info('No orphaned process-audio state found on startup');
-    return;
-  }
-
-  let recoveredCount = 0;
-
-  for (const sermonId of sermonIds) {
-    const requestState = requestEntries[sermonId];
-    const hasRunningRequest = !!requestState?.runningRequestId;
-    const hasLock = sermonId in lockEntries;
-    const hasProgress = sermonId in progressEntries;
-
-    if (!hasRunningRequest && !hasLock && !hasProgress) {
-      continue;
-    }
-
-    recoveredCount += 1;
-    startupLogger.warn('Recovering orphaned process-audio state after restart', {
-      sermonId,
-      runningRequestId: requestState?.runningRequestId ?? null,
-      runningTaskId: requestState?.runningTaskId ?? null,
-      runningAt: requestState?.runningAt ?? null,
-      hasLock,
-      hasProgress,
-    });
-
-    const updates: Array<Promise<unknown>> = [
-      realtimeDB
-        .ref(`processAudioLocks/${sermonId}`)
-        .remove()
-        .catch((error) => {
-          startupLogger.error('Failed to remove orphaned process-audio lock', {
-            sermonId,
-            error: error instanceof Error ? error.message : String(error),
-          });
-        }),
-      realtimeDB
-        .ref(`addIntroOutro/${sermonId}`)
-        .remove()
-        .catch((error) => {
-          startupLogger.error('Failed to remove orphaned process progress node', {
-            sermonId,
-            error: error instanceof Error ? error.message : String(error),
-          });
-        }),
-    ];
-
-    if (requestState) {
-      updates.push(
-        realtimeDB
-          .ref(`processAudioRequests/${sermonId}`)
-          .set({
-            ...requestState,
-            runningRequestId: null,
-            runningTaskId: null,
-            runningRequestVersion: null,
-            runningAt: null,
-            updatedAt: new Date().toISOString(),
-          } satisfies StoredProcessAudioRequestState)
-          .catch((error) => {
-            startupLogger.error('Failed to clear orphaned process-audio request state', {
-              sermonId,
-              error: error instanceof Error ? error.message : String(error),
-            });
-          })
-      );
-    }
-
-    updates.push(
-      db
-        .collection('sermons')
-        .withConverter(firestoreAdminSermonConverter)
-        .doc(sermonId)
-        .get()
-        .then(async (snapshot) => {
-          if (!snapshot.exists) {
-            return;
-          }
-          const sermon = snapshot.data();
-          if (sermon?.status?.audioStatus !== sermonStatusType.PROCESSING) {
-            return;
-          }
-          await snapshot.ref.update({
-            status: {
-              ...sermon.status,
-              audioStatus: sermonStatusType.ERROR,
-              message: 'Audio processing was interrupted during worker restart. Retry required.',
-            },
-          });
-        })
-        .catch((error) => {
-          startupLogger.error('Failed to mark sermon as interrupted after startup recovery', {
-            sermonId,
-            error: error instanceof Error ? error.message : String(error),
-          });
-        })
-    );
-
-    await Promise.all(updates);
-  }
-
-  const { authenticated: authenticatedCanary } = await readPersistedYouTubeMediaByteCanaries();
-  const deferredQueueRecovery = isAuthenticatedCanaryEligibleForRecovery(authenticatedCanary)
-    ? await resumeDeferredYouTubeQueueOnStartup({
-        database: realtimeDB,
-        ctx: createContext(undefined, 'startup-recovery'),
-        authenticatedRecoveryGeneration: authenticatedCanary.checkedAt,
-      })
-    : { resumed: false, nextProbeSermonId: null, deferredRemaining: 0 };
-
-  startupLogger.info('Completed orphaned process-audio startup recovery', {
-    recoveredCount,
-    deferredQueueResumed: deferredQueueRecovery.resumed,
-    deferredQueueNextProbeSermonId: deferredQueueRecovery.nextProbeSermonId,
-    deferredQueueRemaining: deferredQueueRecovery.deferredRemaining,
-  });
+  return;
 }
 
 // Log Firestore connection details after initialization
@@ -928,7 +788,10 @@ app.get('/readyz', async (req, res) => {
   }
 });
 
-app.post('/process-audio', processAudioRateLimit, async (request: Request<{}, {}, { data: ProcessAudioInputType }>, res) => {
+const legacyProcessAudioHandler = async (
+  request: Request<{}, {}, { data: ProcessAudioInputType }>,
+  res: express.Response
+) => {
   const timeoutMillis = (TIMEOUT_SECONDS - 30) * 1000; // 30s less than timeoutSeconds
   const data = request.body?.data;
 
@@ -958,373 +821,508 @@ app.post('/process-audio', processAudioRateLimit, async (request: Request<{}, {}
 
   const audioSource = getAudioSource(data);
   const taskId = extractCloudTaskId(request.headers['x-cloudtasks-taskname']);
-  const docRef = db.collection('sermons').withConverter(firestoreAdminSermonConverter).doc(data.id);
-  const sermonStatus: sermonStatus = {
-    subsplash: uploadStatus.NOT_UPLOADED,
-    soundCloud: uploadStatus.NOT_UPLOADED,
-    audioStatus: sermonStatusType.PROCESSING,
-  };
-
-  if (audioSource.type === 'YouTubeUrl' && !youtubeProcessingEnabled) {
-    const message = 'This process-audio runtime only supports storage-backed audio processing.';
-    log.error('Rejected unsupported YouTube request for storage-only runtime', {
-      runtimeProfile,
-      runtimeHost,
-      runtimeEnv,
-      taskId,
-    });
-
-    try {
-      await completeProcessAudioFailure({
-        database: realtimeDB,
-        payload: data,
-        requestId: ctx.requestId,
-        taskId,
-      });
-    } catch (queueStateError) {
-      log.error('Failed to update process-audio queue state after unsupported request rejection', {
-        error: queueStateError instanceof Error ? queueStateError.message : String(queueStateError),
-      });
-    }
-
-    try {
-      await docRef.update({
-        status: {
-          ...sermonStatus,
-          audioStatus: sermonStatusType.ERROR,
-          message,
-        },
-      });
-    } catch (updateError) {
-      log.error('Failed to update document status after unsupported request rejection', { error: updateError });
-    }
-
-    res.status(409).json({ error: message });
-    return;
-  }
-
-  try {
-    const cancelToken = new CancelToken();
-    const processAudioResult = await executeWithTimeout(
-      () =>
-        processAudio(
-          ytdlpPath ?? 'yt-dlp',
-          cancelToken,
-          bucket,
-          realtimeDB,
-          db,
-          audioSource,
-          docRef,
-          sermonStatus,
-          data.startTime,
-          data.duration,
-          data.deleteOriginal,
-          data.skipTranscode,
-          data.introUrl,
-          data.outroUrl,
-          ctx,
-          taskId
-        ),
-      cancelToken.cancel,
-      timeoutMillis
-    );
-    if (processAudioResult.youtubeSuccessfulAcquisitionAuthority) {
-      ctx.youtubeSuccessfulAcquisitionAuthority = processAudioResult.youtubeSuccessfulAcquisitionAuthority;
-    }
-    await completeProcessAudioSuccess({
-      database: realtimeDB,
+  const existingRequest = await realtimeDB.ref(`processAudioRequests/${data.id}`).get();
+  assertBoundNativeMediaTask(data, taskId, existingRequest.exists() ? existingRequest.val() : null);
+  if ('storageFilePath' in data) {
+    const [object] = await bucket.file(data.storageFilePath).getMetadata();
+    await prepareLegacyMediaAdmission({
+      firestore: db,
+      projectId: firebaseAdmin.app().options.projectId!,
       payload: data,
-      requestId: ctx.requestId,
-      taskId,
-      ctx,
-      alreadyProcessed: processAudioResult.alreadyProcessed,
+      existingAdmissionOnly: true,
+      configuredSourceBucket: bucket.name,
+      originalStorageSource: {
+        kind: 'storage',
+        bucket: object.bucket!,
+        path: object.name!,
+        generation: String(object.generation ?? ''),
+        timeCreated: object.timeCreated!,
+      },
     });
-    log.info('Request completed successfully');
-    res.status(200).send();
-  } catch (e) {
-    let message = 'Something Went Wrong';
-    if (isAxiosError(e)) {
-      // Check Axios errors first since AxiosError extends Error
-      message = e.message;
-    } else if (e instanceof Error) {
-      message = e.message;
-    }
+  }
+  return await withNativeMediaHttpExecution(
+    { firestore: db, projectId: firebaseAdmin.app().options.projectId!, payload: data, taskId: taskId! },
+    res,
+    async (originalSource) => {
+      const sourceBucket = pinOriginalLegacySourceBucket(bucket, originalSource);
+      const docRef = db.collection('sermons').withConverter(firestoreAdminSermonConverter).doc(data.id);
+      const sermonStatus: sermonStatus = {
+        subsplash: uploadStatus.NOT_UPLOADED,
+        soundCloud: uploadStatus.NOT_UPLOADED,
+        audioStatus: sermonStatusType.PROCESSING,
+      };
 
-    if (isMissingSermonDocumentError(e)) {
-      log.warn(
-        'Sermon document disappeared before audio processing could begin; clearing queue state and skipping task',
-        {
-          sermonId: data.id,
-          documentPath: e.documentPath,
+      if (audioSource.type === 'YouTubeUrl' && !youtubeProcessingEnabled) {
+        const message = 'This process-audio runtime only supports storage-backed audio processing.';
+        log.error('Rejected unsupported YouTube request for storage-only runtime', {
+          runtimeProfile,
+          runtimeHost,
+          runtimeEnv,
           taskId,
+        });
+
+        try {
+          await completeProcessAudioFailure({
+            database: realtimeDB,
+            payload: data,
+            requestId: ctx.requestId,
+            taskId,
+          });
+        } catch (queueStateError) {
+          res.locals.legacySettlementFailed = true;
+          log.error('Failed to update process-audio queue state after unsupported request rejection', {
+            error: queueStateError instanceof Error ? queueStateError.message : String(queueStateError),
+          });
         }
-      );
+
+        try {
+          await docRef.update({
+            status: {
+              ...sermonStatus,
+              audioStatus: sermonStatusType.ERROR,
+              message,
+            },
+          });
+        } catch (updateError) {
+          res.locals.legacySettlementFailed = true;
+          log.error('Failed to update document status after unsupported request rejection', { error: updateError });
+        }
+
+        res.status(409).json({ error: message });
+        return;
+      }
 
       try {
-        await cleanupDeletedSermonProcessAudioState({
+        const cancelToken = new CancelToken();
+        const processAudioResult = await executeWithTimeout(
+          () =>
+            processAudio(
+              ytdlpPath ?? 'yt-dlp',
+              cancelToken,
+              bucket,
+              realtimeDB,
+              db,
+              audioSource,
+              docRef,
+              sermonStatus,
+              data.startTime,
+              data.duration,
+              data.deleteOriginal,
+              data.skipTranscode,
+              data.introUrl,
+              data.outroUrl,
+              ctx,
+              taskId,
+              sourceBucket
+            ),
+          cancelToken.cancel,
+          timeoutMillis
+        );
+        if (processAudioResult.youtubeSuccessfulAcquisitionAuthority) {
+          ctx.youtubeSuccessfulAcquisitionAuthority = processAudioResult.youtubeSuccessfulAcquisitionAuthority;
+        }
+        await completeProcessAudioSuccess({
           database: realtimeDB,
           payload: data,
           requestId: ctx.requestId,
           taskId,
           ctx,
+          alreadyProcessed: processAudioResult.alreadyProcessed,
         });
-      } catch (cleanupError) {
-        log.error('Failed to clear process-audio queue state for deleted sermon', {
-          error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
-          sermonId: data.id,
-          taskId,
-        });
-        res.status(500).json({ error: message });
-        return;
-      }
-
-      res.status(200).json({ skipped: true, reason: 'sermon_deleted' });
-      return;
-    }
-
-    if (isProcessAudioAlreadyRunningError(e)) {
-      log.info('Duplicate process-audio request detected while another request is already running', {
-        sermonId: data.id,
-        activeRequestId: e.activeRequestId,
-        lockAgeMs: e.lockAgeMs,
-        taskId,
-      });
-      res.status(202).json({
-        active: true,
-        reason: 'already_running',
-        activeRequestId: e.activeRequestId,
-      });
-      return;
-    }
-
-    const browserFallbackError = (e as Error & { browserFallbackError?: Partial<BrowserFallbackErrorResponse> })
-      ?.browserFallbackError;
-    const reportedAcquisitionEvidence = (
-      e as Error & {
-        youtubeAcquisitionEvidence?: YouTubeAcquisitionEvidence & {
-          terminalFailureClass?: 'account_required_content';
-          browserFallbackFailureClass?: string;
-        };
-      }
-    )?.youtubeAcquisitionEvidence;
-    const browserFallbackUnavailable =
-      browserFallbackError?.code === 'auth_required' || browserFallbackError?.code === 'session_unhealthy';
-    const youtubeAcquisitionEvidence =
-      audioSource.type === 'YouTubeUrl'
-        ? reportedAcquisitionEvidence ??
-          (browserFallbackUnavailable
-            ? {
-                attemptedModes: ['public_provider', 'cookie_provider'],
-                authenticatedFailureClass: 'browser_fallback_failed',
-                requiresAuthenticationRecovery: true,
-              }
-            : undefined)
-        : undefined;
-    const youtubeFailureDisposition = youtubeAcquisitionEvidence
-      ? getYouTubeFailureDisposition(youtubeAcquisitionEvidence)
-      : undefined;
-    const youtubeTerminalFailureClass = getTerminalYouTubeAcquisitionFailureClass(youtubeAcquisitionEvidence);
-    const youtubeFailureDispositionContext = youtubeTerminalFailureClass
-      ? { action: 'terminal', code: 'YOUTUBE_ACCOUNT_ACCESS_DENIED', retryable: false }
-      : youtubeFailureDisposition;
-    const youtubeFailureClass =
-      youtubeTerminalFailureClass ??
-      (youtubeAcquisitionEvidence?.requiresAuthenticationRecovery
-        ? youtubeAcquisitionEvidence.authenticatedFailureClass
-        : youtubeAcquisitionEvidence?.guestFailureClass);
-    const youtubeAlertCode = youtubeFailureClass
-      ? toYouTubeAlertCode(youtubeFailureClass as YouTubeFailureClass)
-      : null;
-
-    const captureProcessAudioException = (): void => {
-      Sentry.withScope((scope) => {
-        scope.setTag('route', 'process-audio');
-        scope.setTag('runtimeHost', runtimeHost);
-        scope.setTag('runtimeEnv', runtimeEnv);
-        scope.setTag('audioSourceType', audioSource.type);
-        if (youtubeAcquisitionEvidence) {
-          scope.setTag('youtube.attempted_modes', youtubeAcquisitionEvidence.attemptedModes.join(','));
-          scope.setTag('youtube.requires_auth_recovery', youtubeAcquisitionEvidence.requiresAuthenticationRecovery);
-          scope.setTag('youtube.guest_failure_class', youtubeAcquisitionEvidence.guestFailureClass ?? 'none');
-          scope.setTag(
-            'youtube.authenticated_failure_class',
-            youtubeAcquisitionEvidence.authenticatedFailureClass ?? 'none'
-          );
-          scope.setTag(
-            'youtube.failure_disposition',
-            youtubeTerminalFailureClass ? 'terminal' : youtubeFailureDisposition?.action ?? 'none'
-          );
-          scope.setTag('youtube.terminal_failure_class', youtubeTerminalFailureClass ?? 'none');
-          scope.setTag(
-            'youtube.dependency_scope',
-            youtubeFailureDisposition?.action === 'defer' ? youtubeFailureDisposition.dependencyScope : 'none'
-          );
+        log.info('Request completed successfully');
+        res.status(200).send();
+      } catch (e) {
+        let message = 'Something Went Wrong';
+        if (isAxiosError(e)) {
+          // Check Axios errors first since AxiosError extends Error
+          message = e.message;
+        } else if (e instanceof Error) {
+          message = e.message;
         }
-        scope.setContext('processAudio', {
-          sermonId: data.id,
-          requestId: ctx.requestId,
-          taskId: taskId ?? null,
-          audioSource: audioSource.source,
-          youtubeProcessingEnabled,
+
+        if (isMissingSermonDocumentError(e)) {
+          log.warn(
+            'Sermon document disappeared before audio processing could begin; clearing queue state and skipping task',
+            {
+              sermonId: data.id,
+              documentPath: e.documentPath,
+              taskId,
+            }
+          );
+
+          try {
+            await cleanupDeletedSermonProcessAudioState({
+              database: realtimeDB,
+              payload: data,
+              requestId: ctx.requestId,
+              taskId,
+              ctx,
+            });
+          } catch (cleanupError) {
+            log.error('Failed to clear process-audio queue state for deleted sermon', {
+              error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
+              sermonId: data.id,
+              taskId,
+            });
+            res.status(500).json({ error: message });
+            return;
+          }
+
+          res.status(200).json({ skipped: true, reason: 'sermon_deleted' });
+          return;
+        }
+
+        if (isProcessAudioAlreadyRunningError(e)) {
+          log.info('Duplicate process-audio request detected while another request is already running', {
+            sermonId: data.id,
+            activeRequestId: e.activeRequestId,
+            lockAgeMs: e.lockAgeMs,
+            taskId,
+          });
+          res.status(202).json({
+            active: true,
+            reason: 'already_running',
+            activeRequestId: e.activeRequestId,
+          });
+          return;
+        }
+
+        const browserFallbackError = (e as Error & { browserFallbackError?: Partial<BrowserFallbackErrorResponse> })
+          ?.browserFallbackError;
+        const reportedAcquisitionEvidence = (
+          e as Error & {
+            youtubeAcquisitionEvidence?: YouTubeAcquisitionEvidence & {
+              terminalFailureClass?: 'account_required_content';
+              browserFallbackFailureClass?: string;
+            };
+          }
+        )?.youtubeAcquisitionEvidence;
+        const browserFallbackUnavailable =
+          browserFallbackError?.code === 'auth_required' || browserFallbackError?.code === 'session_unhealthy';
+        const youtubeAcquisitionEvidence =
+          audioSource.type === 'YouTubeUrl'
+            ? reportedAcquisitionEvidence ??
+              (browserFallbackUnavailable
+                ? {
+                    attemptedModes: ['public_provider', 'cookie_provider'],
+                    authenticatedFailureClass: 'browser_fallback_failed',
+                    requiresAuthenticationRecovery: true,
+                  }
+                : undefined)
+            : undefined;
+        const youtubeFailureDisposition = youtubeAcquisitionEvidence
+          ? getYouTubeFailureDisposition(youtubeAcquisitionEvidence)
+          : undefined;
+        const youtubeTerminalFailureClass = getTerminalYouTubeAcquisitionFailureClass(youtubeAcquisitionEvidence);
+        const youtubeFailureDispositionContext = youtubeTerminalFailureClass
+          ? { action: 'terminal', code: 'YOUTUBE_ACCOUNT_ACCESS_DENIED', retryable: false }
+          : youtubeFailureDisposition;
+        const youtubeFailureClass =
+          youtubeTerminalFailureClass ??
+          (youtubeAcquisitionEvidence?.requiresAuthenticationRecovery
+            ? youtubeAcquisitionEvidence.authenticatedFailureClass
+            : youtubeAcquisitionEvidence?.guestFailureClass);
+        const youtubeAlertCode = youtubeFailureClass
+          ? toYouTubeAlertCode(youtubeFailureClass as YouTubeFailureClass)
+          : null;
+
+        const captureProcessAudioException = (): void => {
+          Sentry.withScope((scope) => {
+            scope.setTag('route', 'process-audio');
+            scope.setTag('runtimeHost', runtimeHost);
+            scope.setTag('runtimeEnv', runtimeEnv);
+            scope.setTag('audioSourceType', audioSource.type);
+            if (youtubeAcquisitionEvidence) {
+              scope.setTag('youtube.attempted_modes', youtubeAcquisitionEvidence.attemptedModes.join(','));
+              scope.setTag('youtube.requires_auth_recovery', youtubeAcquisitionEvidence.requiresAuthenticationRecovery);
+              scope.setTag('youtube.guest_failure_class', youtubeAcquisitionEvidence.guestFailureClass ?? 'none');
+              scope.setTag(
+                'youtube.authenticated_failure_class',
+                youtubeAcquisitionEvidence.authenticatedFailureClass ?? 'none'
+              );
+              scope.setTag(
+                'youtube.failure_disposition',
+                youtubeTerminalFailureClass ? 'terminal' : youtubeFailureDisposition?.action ?? 'none'
+              );
+              scope.setTag('youtube.terminal_failure_class', youtubeTerminalFailureClass ?? 'none');
+              scope.setTag(
+                'youtube.dependency_scope',
+                youtubeFailureDisposition?.action === 'defer' ? youtubeFailureDisposition.dependencyScope : 'none'
+              );
+            }
+            scope.setContext('processAudio', {
+              sermonId: data.id,
+              requestId: ctx.requestId,
+              taskId: taskId ?? null,
+              audioSource: audioSource.source,
+              youtubeProcessingEnabled,
+              browserFallbackConfigured,
+              browserFallbackEnabled,
+              ytDlpVersion: ytDlpVersion ?? null,
+              poTokenProviderConfigured: youtubeProcessingEnabled && !!process.env.YTDLP_POT_PROVIDER_BASE_URL,
+              youtubeAcquisitionEvidence: youtubeAcquisitionEvidence ?? null,
+              youtubeFailureDisposition: youtubeFailureDispositionContext ?? null,
+              browserFallbackError: browserFallbackError ?? null,
+              cookieRefreshAttempted: ctx.youtubeCookieRefreshAttempted ?? false,
+              cookieRefreshSucceeded: ctx.youtubeCookieRefreshSucceeded ?? false,
+            });
+
+            if (request.auth?.email) {
+              scope.setUser({
+                email: request.auth.email,
+                id: request.auth.sub,
+                username: request.auth.name,
+              });
+            }
+
+            Sentry.captureException(e);
+          });
+        };
+
+        log.error('Request failed', {
+          error: message,
+          errorType: e?.constructor?.name,
+          stack: e instanceof Error ? e.stack : undefined,
+          serviceRevision: process.env.K_REVISION || 'local',
           browserFallbackConfigured,
           browserFallbackEnabled,
-          ytDlpVersion: ytDlpVersion ?? null,
-          poTokenProviderConfigured: youtubeProcessingEnabled && !!process.env.YTDLP_POT_PROVIDER_BASE_URL,
+          poTokenProviderBaseUrl: process.env.YTDLP_POT_PROVIDER_BASE_URL || null,
           youtubeAcquisitionEvidence: youtubeAcquisitionEvidence ?? null,
-          youtubeFailureDisposition: youtubeFailureDispositionContext ?? null,
           browserFallbackError: browserFallbackError ?? null,
-          cookieRefreshAttempted: ctx.youtubeCookieRefreshAttempted ?? false,
-          cookieRefreshSucceeded: ctx.youtubeCookieRefreshSucceeded ?? false,
+          ytDlpSleepRequestsSeconds,
+          ytDlpSleepIntervalSeconds,
+          ytDlpMaxSleepIntervalSeconds,
         });
 
-        if (request.auth?.email) {
-          scope.setUser({
-            email: request.auth.email,
-            id: request.auth.sub,
-            username: request.auth.name,
+        if (youtubeAcquisitionEvidence) {
+          log.warn('Analyzed YouTube extraction failure', {
+            ...youtubeAcquisitionEvidence,
+            failureDisposition: youtubeFailureDispositionContext,
+            browserFallbackError: browserFallbackError ?? null,
+            browserFallbackConfigured,
+            browserFallbackEnabled,
+            poTokenProviderBaseUrl: process.env.YTDLP_POT_PROVIDER_BASE_URL || null,
+            ytDlpSleepRequestsSeconds,
+            ytDlpSleepIntervalSeconds,
+            ytDlpMaxSleepIntervalSeconds,
           });
         }
 
-        Sentry.captureException(e);
-      });
-    };
+        const cookieRefreshFailed =
+          audioSource.type === 'YouTubeUrl' &&
+          youtubeFailureClass === 'cookie_session_stale_or_challenged' &&
+          ctx.youtubeCookieRefreshAttempted === true &&
+          ctx.youtubeCookieRefreshSucceeded === false;
+        const alertCode = cookieRefreshFailed
+          ? 'YOUTUBE_COOKIE_REFRESH_STACK_DOWN'
+          : youtubeAlertCode ?? 'PROCESS_AUDIO_RUNTIME_FAILURE';
+        const alertSummary = cookieRefreshFailed
+          ? 'process-audio deferred a YouTube request because the shared browser refresh stack could not recover the authenticated session.'
+          : youtubeFailureClass && alertCode !== 'youtube_runtime_failure'
+          ? `process-audio Cloud Run request failed during YouTube extraction (${alertCode}).`
+          : 'process-audio Cloud Run request failed while processing sermon audio.';
+        let shouldEmitOperationalAlert = true;
+        let terminalYouTubeFailureMessage = youtubeTerminalFailureClass
+          ? 'YOUTUBE_ACCOUNT_ACCESS_DENIED: Public, cookie-backed, and browser-backed YouTube acquisition all completed, but the configured account cannot access this video. Verify the account membership, sharing, age, and regional permissions.'
+          : null;
 
-    log.error('Request failed', {
-      error: message,
-      errorType: e?.constructor?.name,
-      stack: e instanceof Error ? e.stack : undefined,
-      serviceRevision: process.env.K_REVISION || 'local',
-      browserFallbackConfigured,
-      browserFallbackEnabled,
-      poTokenProviderBaseUrl: process.env.YTDLP_POT_PROVIDER_BASE_URL || null,
-      youtubeAcquisitionEvidence: youtubeAcquisitionEvidence ?? null,
-      browserFallbackError: browserFallbackError ?? null,
-      ytDlpSleepRequestsSeconds,
-      ytDlpSleepIntervalSeconds,
-      ytDlpMaxSleepIntervalSeconds,
-    });
-
-    if (youtubeAcquisitionEvidence) {
-      log.warn('Analyzed YouTube extraction failure', {
-        ...youtubeAcquisitionEvidence,
-        failureDisposition: youtubeFailureDispositionContext,
-        browserFallbackError: browserFallbackError ?? null,
-        browserFallbackConfigured,
-        browserFallbackEnabled,
-        poTokenProviderBaseUrl: process.env.YTDLP_POT_PROVIDER_BASE_URL || null,
-        ytDlpSleepRequestsSeconds,
-        ytDlpSleepIntervalSeconds,
-        ytDlpMaxSleepIntervalSeconds,
-      });
-    }
-
-    const cookieRefreshFailed =
-      audioSource.type === 'YouTubeUrl' &&
-      youtubeFailureClass === 'cookie_session_stale_or_challenged' &&
-      ctx.youtubeCookieRefreshAttempted === true &&
-      ctx.youtubeCookieRefreshSucceeded === false;
-    const alertCode = cookieRefreshFailed
-      ? 'YOUTUBE_COOKIE_REFRESH_STACK_DOWN'
-      : youtubeAlertCode ?? 'PROCESS_AUDIO_RUNTIME_FAILURE';
-    const alertSummary = cookieRefreshFailed
-      ? 'process-audio deferred a YouTube request because the shared browser refresh stack could not recover the authenticated session.'
-      : youtubeFailureClass && alertCode !== 'youtube_runtime_failure'
-      ? `process-audio Cloud Run request failed during YouTube extraction (${alertCode}).`
-      : 'process-audio Cloud Run request failed while processing sermon audio.';
-    let shouldEmitOperationalAlert = true;
-    let terminalYouTubeFailureMessage = youtubeTerminalFailureClass
-      ? 'YOUTUBE_ACCOUNT_ACCESS_DENIED: Public, cookie-backed, and browser-backed YouTube acquisition all completed, but the configured account cannot access this video. Verify the account membership, sharing, age, and regional permissions.'
-      : null;
-
-    if (audioSource.type === 'YouTubeUrl' && youtubeFailureDisposition?.action === 'post_live_retry') {
-      const postLiveResult = await deferPostLiveArchiveYouTubeRequest({
-        database: realtimeDB,
-        payload: data,
-        requestId: ctx.requestId,
-        taskId,
-        failureClass: youtubeFailureClass ?? 'post_live_archive_not_ready',
-        failureMessage: message,
-      });
-
-      if (postLiveResult.scheduled) {
-        try {
-          await docRef.update({
-            status: {
-              ...sermonStatus,
-              audioStatus: sermonStatusType.PENDING,
-              message: 'Waiting for YouTube to finish processing the livestream archive before retrying.',
-            },
+        if (audioSource.type === 'YouTubeUrl' && youtubeFailureDisposition?.action === 'post_live_retry') {
+          const postLiveResult = await deferPostLiveArchiveYouTubeRequest({
+            database: realtimeDB,
+            payload: data,
+            requestId: ctx.requestId,
+            taskId,
+            failureClass: youtubeFailureClass ?? 'post_live_archive_not_ready',
+            failureMessage: message,
           });
-        } catch (updateError) {
-          log.error('Failed to update document status after post-live archive defer', { error: updateError });
+
+          if (postLiveResult.scheduled) {
+            try {
+              await docRef.update({
+                status: {
+                  ...sermonStatus,
+                  audioStatus: sermonStatusType.PENDING,
+                  message: 'Waiting for YouTube to finish processing the livestream archive before retrying.',
+                },
+              });
+            } catch (updateError) {
+              res.locals.legacySettlementFailed = true;
+              log.error('Failed to update document status after post-live archive defer', { error: updateError });
+            }
+
+            log.info('Deferred post-live YouTube archive processing until the VOD is ready', {
+              sermonId: data.id,
+              requestId: ctx.requestId,
+              scheduledTaskId: postLiveResult.scheduledTaskId,
+              scheduledFor: postLiveResult.scheduledFor,
+              retryCount: postLiveResult.retryCount,
+              maxRetryCount: postLiveResult.maxRetryCount,
+            });
+
+            res.status(202).json({
+              deferred: true,
+              reason: youtubeFailureClass,
+              retryCount: postLiveResult.retryCount,
+              scheduledFor: postLiveResult.scheduledFor,
+            });
+            return;
+          }
+
+          log.warn('Post-live YouTube archive retry budget exhausted; treating as process-audio failure', {
+            sermonId: data.id,
+            requestId: ctx.requestId,
+            retryCount: postLiveResult.retryCount,
+            maxRetryCount: postLiveResult.maxRetryCount,
+          });
         }
 
-        log.info('Deferred post-live YouTube archive processing until the VOD is ready', {
-          sermonId: data.id,
-          requestId: ctx.requestId,
-          scheduledTaskId: postLiveResult.scheduledTaskId,
-          scheduledFor: postLiveResult.scheduledFor,
-          retryCount: postLiveResult.retryCount,
-          maxRetryCount: postLiveResult.maxRetryCount,
-        });
-
-        res.status(202).json({
-          deferred: true,
-          reason: youtubeFailureClass,
-          retryCount: postLiveResult.retryCount,
-          scheduledFor: postLiveResult.scheduledFor,
-        });
-        return;
-      }
-
-      log.warn('Post-live YouTube archive retry budget exhausted; treating as process-audio failure', {
-        sermonId: data.id,
-        requestId: ctx.requestId,
-        retryCount: postLiveResult.retryCount,
-        maxRetryCount: postLiveResult.maxRetryCount,
-      });
-    }
-
-    if (audioSource.type === 'YouTubeUrl' && youtubeFailureDisposition?.action === 'defer') {
-      const authDeferralResult = await deferYouTubeRequestForAuthentication({
-        database: realtimeDB,
-        payload: data,
-        requestId: ctx.requestId,
-        failureClass: youtubeFailureClass ?? 'authentication_recovery_required',
-        failureMessage: message,
-        probeMode: browserFallbackUnavailable ? 'browser_fallback' : 'cookie_provider',
-      });
-      shouldEmitOperationalAlert = authDeferralResult.shouldAlert;
-
-      if (authDeferralResult.deferred) {
-        try {
-          await docRef.update({
-            status: {
-              ...sermonStatus,
-              audioStatus: sermonStatusType.PENDING,
-              message: `${youtubeFailureDisposition.code}: Waiting for the authenticated YouTube session to recover before retrying.`,
-            },
+        if (audioSource.type === 'YouTubeUrl' && youtubeFailureDisposition?.action === 'defer') {
+          const authDeferralResult = await deferYouTubeRequestForAuthentication({
+            database: realtimeDB,
+            payload: data,
+            requestId: ctx.requestId,
+            failureClass: youtubeFailureClass ?? 'authentication_recovery_required',
+            failureMessage: message,
+            probeMode: browserFallbackUnavailable ? 'browser_fallback' : 'cookie_provider',
           });
-        } catch (updateError) {
-          log.error('Failed to update document status after authenticated YouTube defer', { error: updateError });
+          shouldEmitOperationalAlert = authDeferralResult.shouldAlert;
+
+          if (authDeferralResult.deferred) {
+            try {
+              await docRef.update({
+                status: {
+                  ...sermonStatus,
+                  audioStatus: sermonStatusType.PENDING,
+                  message: `${youtubeFailureDisposition.code}: Waiting for the authenticated YouTube session to recover before retrying.`,
+                },
+              });
+            } catch (updateError) {
+              res.locals.legacySettlementFailed = true;
+              log.error('Failed to update document status after authenticated YouTube defer', { error: updateError });
+            }
+
+            if (
+              shouldCaptureProcessAudioFailure({
+                outcome: 'deferred',
+                shouldAlert: shouldEmitOperationalAlert,
+              })
+            ) {
+              captureProcessAudioException();
+            }
+
+            if (shouldEmitOperationalAlert) {
+              try {
+                await emitOperationalAlertEmail({
+                  alertCode: browserFallbackUnavailable ? 'browser_fallback_failed' : alertCode,
+                  youtubeAuthRecovery: true,
+                  summary:
+                    'process-audio deferred one YouTube request while the authenticated session recovers; guest-capable requests remain active.',
+                  error: e,
+                  sermonId: data?.id,
+                  context: {
+                    requestId: ctx.requestId,
+                    operation: ctx.operation,
+                    audioSourceType: audioSource.type,
+                    audioSource: audioSource.source,
+                    youtubeAcquisitionEvidence,
+                    dependencyScope: youtubeFailureDisposition.dependencyScope,
+                    blockerEpisodeId: authDeferralResult.blockerEpisodeId,
+                    authenticatedRecoveryAttemptCount: authDeferralResult.attemptCount,
+                    authenticatedRecoveryMaxAttemptCount: authDeferralResult.maxAttemptCount,
+                    browserFallbackError: browserFallbackError ?? null,
+                  },
+                });
+              } catch (alertError) {
+                log.error('Failed to queue operational alert email', {
+                  error: alertError instanceof Error ? alertError.message : String(alertError),
+                });
+                if (authDeferralResult.blockerEpisodeId && authDeferralResult.alertReservationId) {
+                  try {
+                    await releaseYouTubeAuthAlertReservation({
+                      database: realtimeDB,
+                      blockerEpisodeId: authDeferralResult.blockerEpisodeId,
+                      alertReservationId: authDeferralResult.alertReservationId,
+                    });
+                  } catch (releaseError) {
+                    log.error('Failed to release authenticated YouTube alert reservation after email failure', {
+                      error: releaseError instanceof Error ? releaseError.message : String(releaseError),
+                    });
+                  }
+                }
+              }
+            }
+
+            res.status(202).json({
+              deferred: true,
+              reason: youtubeFailureDisposition.code,
+              dependencyScope: youtubeFailureDisposition.dependencyScope,
+            });
+            return;
+          }
+
+          const exhaustedAuthRecoveryMessage =
+            `YOUTUBE_AUTH_RECOVERY_EXHAUSTED: The authenticated YouTube account could not access this video after ` +
+            `${authDeferralResult.attemptCount} attempts. Verify the account's access, membership, age, and regional permissions, then retry.`;
+          terminalYouTubeFailureMessage = exhaustedAuthRecoveryMessage;
+          Sentry.withScope((scope) => {
+            scope.setTag('route', 'process-audio');
+            scope.setTag('youtube.failure_disposition', 'terminal');
+            scope.setTag('youtube.terminal_code', 'YOUTUBE_AUTH_RECOVERY_EXHAUSTED');
+            scope.setTag('youtube.failure_class', youtubeFailureClass ?? 'unknown');
+            scope.setContext('youtubeAuthRecovery', {
+              sermonId: data.id,
+              requestId: ctx.requestId,
+              attemptCount: authDeferralResult.attemptCount,
+              maxAttemptCount: authDeferralResult.maxAttemptCount,
+              blockerEpisodeId: authDeferralResult.blockerEpisodeId,
+            });
+            Sentry.captureMessage(exhaustedAuthRecoveryMessage, 'error');
+          });
+          log.warn('Authenticated YouTube recovery budget exhausted; completing the request as a terminal error', {
+            sermonId: data.id,
+            requestId: ctx.requestId,
+            failureClass: youtubeFailureClass,
+            attemptCount: authDeferralResult.attemptCount,
+            maxAttemptCount: authDeferralResult.maxAttemptCount,
+            blockerEpisodeId: authDeferralResult.blockerEpisodeId,
+          });
         }
 
-        if (
-          shouldCaptureProcessAudioFailure({
-            outcome: 'deferred',
-            shouldAlert: shouldEmitOperationalAlert,
-          })
-        ) {
+        const finalFailureMessage = terminalYouTubeFailureMessage ?? message;
+        const finalAlertCode = youtubeTerminalFailureClass
+          ? 'YOUTUBE_ACCOUNT_ACCESS_DENIED'
+          : terminalYouTubeFailureMessage
+          ? 'YOUTUBE_AUTH_RECOVERY_EXHAUSTED'
+          : alertCode;
+        const finalAlertSummary = youtubeTerminalFailureClass
+          ? 'process-audio confirmed that the configured account cannot access a YouTube video after all acquisition authorities were exhausted.'
+          : terminalYouTubeFailureMessage
+          ? 'process-audio exhausted bounded authenticated YouTube recovery for an account or entitlement failure.'
+          : alertSummary;
+
+        if (shouldCaptureProcessAudioFailure({ outcome: 'unhandled' })) {
           captureProcessAudioException();
+        }
+
+        try {
+          await completeProcessAudioFailure({
+            database: realtimeDB,
+            payload: data,
+            requestId: ctx.requestId,
+            taskId,
+          });
+        } catch (queueStateError) {
+          res.locals.legacySettlementFailed = true;
+          log.error('Failed to update process-audio queue state after failure', {
+            error: queueStateError instanceof Error ? queueStateError.message : String(queueStateError),
+          });
         }
 
         if (shouldEmitOperationalAlert) {
           try {
             await emitOperationalAlertEmail({
-              alertCode: browserFallbackUnavailable ? 'browser_fallback_failed' : alertCode,
-              youtubeAuthRecovery: true,
-              summary:
-                'process-audio deferred one YouTube request while the authenticated session recovers; guest-capable requests remain active.',
+              alertCode: finalAlertCode,
+              summary: finalAlertSummary,
               error: e,
               sermonId: data?.id,
               context: {
@@ -1332,158 +1330,71 @@ app.post('/process-audio', processAudioRateLimit, async (request: Request<{}, {}
                 operation: ctx.operation,
                 audioSourceType: audioSource.type,
                 audioSource: audioSource.source,
-                youtubeAcquisitionEvidence,
-                dependencyScope: youtubeFailureDisposition.dependencyScope,
-                blockerEpisodeId: authDeferralResult.blockerEpisodeId,
-                authenticatedRecoveryAttemptCount: authDeferralResult.attemptCount,
-                authenticatedRecoveryMaxAttemptCount: authDeferralResult.maxAttemptCount,
-                browserFallbackError: browserFallbackError ?? null,
+                serviceRevision: process.env.K_REVISION || 'local',
+                runtimeHost,
+                runtimeEnv,
+                ytDlpVersion,
+                browserFallbackConfigured,
+                browserFallbackEnabled,
+                localBrowserProfileBrowser: localBrowserProfileDir ? localBrowserProfileBrowser : null,
+                poTokenProviderBaseUrl: process.env.YTDLP_POT_PROVIDER_BASE_URL || null,
+                youtubeFailureClass: youtubeFailureClass ?? null,
+                youtubeAcquisitionEvidence: youtubeAcquisitionEvidence ?? null,
+                youtubeFailureDisposition: youtubeFailureDispositionContext ?? null,
+                cookieRefreshAttempted: ctx.youtubeCookieRefreshAttempted ?? false,
+                cookieRefreshSucceeded: ctx.youtubeCookieRefreshSucceeded ?? false,
+                requesterEmail: request.auth?.email ?? null,
+                requesterUid: request.auth?.sub ?? null,
+                requesterName: request.auth?.name ?? null,
               },
             });
           } catch (alertError) {
             log.error('Failed to queue operational alert email', {
               error: alertError instanceof Error ? alertError.message : String(alertError),
             });
-            if (authDeferralResult.blockerEpisodeId && authDeferralResult.alertReservationId) {
-              try {
-                await releaseYouTubeAuthAlertReservation({
-                  database: realtimeDB,
-                  blockerEpisodeId: authDeferralResult.blockerEpisodeId,
-                  alertReservationId: authDeferralResult.alertReservationId,
-                });
-              } catch (releaseError) {
-                log.error('Failed to release authenticated YouTube alert reservation after email failure', {
-                  error: releaseError instanceof Error ? releaseError.message : String(releaseError),
-                });
-              }
-            }
           }
         }
 
-        res.status(202).json({
-          deferred: true,
-          reason: youtubeFailureDisposition.code,
-          dependencyScope: youtubeFailureDisposition.dependencyScope,
-        });
-        return;
-      }
-
-      const exhaustedAuthRecoveryMessage =
-        `YOUTUBE_AUTH_RECOVERY_EXHAUSTED: The authenticated YouTube account could not access this video after ` +
-        `${authDeferralResult.attemptCount} attempts. Verify the account's access, membership, age, and regional permissions, then retry.`;
-      terminalYouTubeFailureMessage = exhaustedAuthRecoveryMessage;
-      Sentry.withScope((scope) => {
-        scope.setTag('route', 'process-audio');
-        scope.setTag('youtube.failure_disposition', 'terminal');
-        scope.setTag('youtube.terminal_code', 'YOUTUBE_AUTH_RECOVERY_EXHAUSTED');
-        scope.setTag('youtube.failure_class', youtubeFailureClass ?? 'unknown');
-        scope.setContext('youtubeAuthRecovery', {
-          sermonId: data.id,
-          requestId: ctx.requestId,
-          attemptCount: authDeferralResult.attemptCount,
-          maxAttemptCount: authDeferralResult.maxAttemptCount,
-          blockerEpisodeId: authDeferralResult.blockerEpisodeId,
-        });
-        Sentry.captureMessage(exhaustedAuthRecoveryMessage, 'error');
-      });
-      log.warn('Authenticated YouTube recovery budget exhausted; completing the request as a terminal error', {
-        sermonId: data.id,
-        requestId: ctx.requestId,
-        failureClass: youtubeFailureClass,
-        attemptCount: authDeferralResult.attemptCount,
-        maxAttemptCount: authDeferralResult.maxAttemptCount,
-        blockerEpisodeId: authDeferralResult.blockerEpisodeId,
-      });
-    }
-
-    const finalFailureMessage = terminalYouTubeFailureMessage ?? message;
-    const finalAlertCode = youtubeTerminalFailureClass
-      ? 'YOUTUBE_ACCOUNT_ACCESS_DENIED'
-      : terminalYouTubeFailureMessage
-      ? 'YOUTUBE_AUTH_RECOVERY_EXHAUSTED'
-      : alertCode;
-    const finalAlertSummary = youtubeTerminalFailureClass
-      ? 'process-audio confirmed that the configured account cannot access a YouTube video after all acquisition authorities were exhausted.'
-      : terminalYouTubeFailureMessage
-      ? 'process-audio exhausted bounded authenticated YouTube recovery for an account or entitlement failure.'
-      : alertSummary;
-
-    if (shouldCaptureProcessAudioFailure({ outcome: 'unhandled' })) {
-      captureProcessAudioException();
-    }
-
-    try {
-      await completeProcessAudioFailure({
-        database: realtimeDB,
-        payload: data,
-        requestId: ctx.requestId,
-        taskId,
-      });
-    } catch (queueStateError) {
-      log.error('Failed to update process-audio queue state after failure', {
-        error: queueStateError instanceof Error ? queueStateError.message : String(queueStateError),
-      });
-    }
-
-    if (shouldEmitOperationalAlert) {
-      try {
-        await emitOperationalAlertEmail({
-          alertCode: finalAlertCode,
-          summary: finalAlertSummary,
-          error: e,
-          sermonId: data?.id,
-          context: {
-            requestId: ctx.requestId,
-            operation: ctx.operation,
-            audioSourceType: audioSource.type,
-            audioSource: audioSource.source,
-            serviceRevision: process.env.K_REVISION || 'local',
-            runtimeHost,
-            runtimeEnv,
-            ytDlpVersion,
-            browserFallbackConfigured,
-            browserFallbackEnabled,
-            localBrowserProfileBrowser: localBrowserProfileDir ? localBrowserProfileBrowser : null,
-            poTokenProviderBaseUrl: process.env.YTDLP_POT_PROVIDER_BASE_URL || null,
-            youtubeFailureClass: youtubeFailureClass ?? null,
-            youtubeAcquisitionEvidence: youtubeAcquisitionEvidence ?? null,
-            youtubeFailureDisposition: youtubeFailureDispositionContext ?? null,
-            cookieRefreshAttempted: ctx.youtubeCookieRefreshAttempted ?? false,
-            cookieRefreshSucceeded: ctx.youtubeCookieRefreshSucceeded ?? false,
-            requesterEmail: request.auth?.email ?? null,
-            requesterUid: request.auth?.sub ?? null,
-            requesterName: request.auth?.name ?? null,
-          },
-        });
-      } catch (alertError) {
-        log.error('Failed to queue operational alert email', {
-          error: alertError instanceof Error ? alertError.message : String(alertError),
-        });
+        try {
+          await docRef.update({
+            status: {
+              ...sermonStatus,
+              audioStatus: sermonStatusType.ERROR,
+              message: finalFailureMessage,
+            },
+          });
+        } catch (updateError) {
+          res.locals.legacySettlementFailed = true;
+          log.error('Failed to update document status', { error: updateError });
+        }
+        if (terminalYouTubeFailureMessage) {
+          res.status(200).json({
+            terminal: true,
+            reason: youtubeTerminalFailureClass ?? 'authentication_recovery_exhausted',
+            error: finalFailureMessage,
+          });
+        } else {
+          res.status(500).json({ error: finalFailureMessage });
+        }
+      } finally {
+        await logMemoryUsage('Final Memory Usage', ctx);
       }
     }
-
-    try {
-      await docRef.update({
-        status: {
-          ...sermonStatus,
-          audioStatus: sermonStatusType.ERROR,
-          message: finalFailureMessage,
-        },
-      });
-    } catch (updateError) {
-      log.error('Failed to update document status', { error: updateError });
-    }
-    if (terminalYouTubeFailureMessage) {
-      res.status(200).json({
-        terminal: true,
-        reason: youtubeTerminalFailureClass ?? 'authentication_recovery_exhausted',
-        error: finalFailureMessage,
-      });
-    } else {
-      res.status(500).json({ error: finalFailureMessage });
-    }
-  } finally {
-    await logMemoryUsage('Final Memory Usage', ctx);
+  );
+};
+app.post('/process-audio', processAudioRateLimit, async (request, res) => {
+  try {
+    await authenticateNativeMediaCaller(request.headers.authorization, nativeCallerConfiguration());
+  } catch {
+    res.status(401).json({ error: 'An authorized server identity is required.' });
+    return;
+  }
+  try {
+    await legacyProcessAudioHandler(request, res);
+  } catch (error) {
+    logger.warn('Rejected fenced legacy audio execution', { code: error instanceof Error ? error.name : 'UNKNOWN' });
+    if (!res.headersSent)
+      res.status(503).json({ error: 'This legacy audio request is unavailable or no longer admitted.' });
   }
 });
 

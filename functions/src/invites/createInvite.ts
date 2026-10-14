@@ -47,6 +47,8 @@ export const createInviteHandler = async (
         : null;
     const inviteUrl = buildInviteClaimUrl(rawToken);
 
+    // Persist the effect boundary before an invite can exist or mail can be queued.
+    await lease?.markEffectsStarted();
     const inviteRef = await firebaseAdmin
       .firestore()
       .collection(ROLE_INVITES_COLLECTION)

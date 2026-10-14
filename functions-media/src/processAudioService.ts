@@ -1,6 +1,4 @@
-import { GoogleAuth } from 'google-auth-library';
 import type { ProcessAudioSourceType } from '@upperroom/contracts/processAudioQueue';
-import type { GetYouTubeCookieStatusOutputType } from '@upperroom/contracts/getYouTubeCookieStatus';
 
 const PROCESS_AUDIO_BASE_URLS = {
   prod: {
@@ -14,16 +12,7 @@ const PROCESS_AUDIO_BASE_URLS = {
   local: 'http://127.0.0.1:8080',
 };
 
-type ValidateYouTubeCookiesResponse = {
-  ok: boolean;
-  message?: string;
-  validationUrl?: string;
-  status: GetYouTubeCookieStatusOutputType;
-};
-
 const normalizeBaseUrl = (value: string): string => value.replace(/\/process-audio\/?$/u, '').replace(/\/+$/u, '');
-
-const isGoogleRunUrl = (url: string): boolean => /\.run\.app$/u.test(new URL(url).hostname);
 
 export const getProcessAudioBaseUrl = (sourceType: ProcessAudioSourceType = 'storage'): string => {
   const configuredTarget =
@@ -53,57 +42,3 @@ export const getProcessAudioBaseUrl = (sourceType: ProcessAudioSourceType = 'sto
 
 export const getProcessAudioTargetUri = (sourceType: ProcessAudioSourceType = 'storage'): string =>
   `${getProcessAudioBaseUrl(sourceType)}/process-audio`;
-
-const extractValidationResponse = (error: unknown): ValidateYouTubeCookiesResponse | null => {
-  if (!error || typeof error !== 'object') return null;
-  const response = (error as { response?: { data?: unknown } }).response;
-  if (!response || typeof response !== 'object') return null;
-  const data = response.data;
-  if (!data || typeof data !== 'object') return null;
-  if (!('status' in data)) return null;
-  return data as ValidateYouTubeCookiesResponse;
-};
-
-export const validateProcessAudioYouTubeCookies = async (): Promise<ValidateYouTubeCookiesResponse> => {
-  const baseUrl = getProcessAudioBaseUrl('youtube');
-  const url = `${baseUrl}/validate-youtube-cookies`;
-
-  if (process.env.FUNCTIONS_EMULATOR === 'true' || !isGoogleRunUrl(baseUrl)) {
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    });
-
-    const data = (await response.json()) as ValidateYouTubeCookiesResponse;
-    if (!response.ok) {
-      throw Object.assign(new Error(data.message || `Validation endpoint returned HTTP ${response.status}`), {
-        validationResponse: data,
-      });
-    }
-    return data;
-  }
-
-  const auth = new GoogleAuth();
-  const client = await auth.getIdTokenClient(baseUrl);
-
-  try {
-    const response = await client.request<ValidateYouTubeCookiesResponse>({
-      url,
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    });
-    return response.data;
-  } catch (error) {
-    const validationResponse = extractValidationResponse(error);
-    if (validationResponse) {
-      throw Object.assign(new Error(validationResponse.message || 'Uploaded YouTube cookies failed validation.'), {
-        validationResponse,
-      });
-    }
-    throw error;
-  }
-};

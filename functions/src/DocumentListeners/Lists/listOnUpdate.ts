@@ -3,10 +3,10 @@ import { logger } from 'firebase-functions/v2';
 import { isEqual } from 'lodash';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { List } from '@upperroom/shared/types/List';
-import { firestoreAdminSermonListConverter } from '../../firestoreDataConverter';
+import { canonicalMirrorPatch, reconcileCurrentCanonicalMirrors } from '../currentCanonicalMirrors';
 import handleError from '../../handleError';
 
-const listOnUpdate = onDocumentUpdated('lists/{listId}', async (event) => {
+const listOnUpdate = onDocumentUpdated({ document: 'lists/{listId}', retry: true }, async (event) => {
   const change = event.data;
   const { listId } = event.params;
 
@@ -42,25 +42,27 @@ const listOnUpdate = onDocumentUpdated('lists/{listId}', async (event) => {
     return;
   }
   try {
-    // update all series instances of sermon
-
-    logger.log('Updating list: ', listId, ' in all sermon series');
-    const sermonListSnapshot = await firestore
-      .collectionGroup('sermonLists')
-      .withConverter(firestoreAdminSermonListConverter)
-      .where('id', '==', listId)
-      .get();
-    logger.log('Found ', sermonListSnapshot.size, ' sermon series to update');
-    // A popular list can be linked to more sermons than one write batch supports.
-    // Await each batch so a failed commit cannot leave background writes running.
-    const batchSize = 450;
-    for (let offset = 0; offset < sermonListSnapshot.docs.length; offset += batchSize) {
-      const batch = firestore.batch();
-      for (const doc of sermonListSnapshot.docs.slice(offset, offset + batchSize)) {
-        batch.update(doc.ref, { ...updatedList });
-      }
-      await batch.commit();
-    }
+    await reconcileCurrentCanonicalMirrors(firestore, {
+      sourcePath: `lists/${listId}`,
+      collectionGroup: 'sermonLists',
+      id: listId,
+      parentCollection: 'sermons',
+      project: (canonical, mirror) =>
+        canonicalMirrorPatch(canonical, mirror, [
+          'subsplashId',
+          'moreSermonsRef',
+          'manualOverflowRowId',
+          'manualOverflowTargetSubsplashId',
+          'isMoreSermonsList',
+          'isRootList',
+          'rootListId',
+          'overflowDepth',
+          'listTagAndPosition',
+          'logicalCount',
+          'hasOverflowPages',
+          'maxListSize',
+        ]),
+    });
   } catch (error) {
     throw handleError(error);
   }

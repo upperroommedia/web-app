@@ -1,7 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import type { Firestore } from 'firebase-admin/firestore';
 import { HttpsError } from 'firebase-functions/v2/https';
-import { assertLegacyAdmissionInTransaction, TEMPORAL_RELEASE_CONTROL_PATH } from './releaseControl';
+import {
+  assertAdministrativeIntegrationSetupInTransaction,
+  assertLegacyAdmissionInTransaction,
+  assertNewLegacyContinuationInTransaction,
+  assertOriginalLegacySourceBoundaryInTransaction,
+  TEMPORAL_RELEASE_CONTROL_PATH,
+} from './releaseControl';
 
 export const LEGACY_ADMISSION_LEASES_COLLECTION = 'legacyAdmissionLeases';
 export interface LegacyAdmissionLeaseRecord {
@@ -61,6 +67,42 @@ export async function withLegacyAdmissionLease<T>(
   options: LegacyAdmissionLeaseOptions,
   callback: (lease: LegacyAdmissionLease) => Promise<T>
 ): Promise<T> {
+  return withAdmissionLease(firestore, options, callback, async (tx) => {
+    const continuation = options.continuation || Boolean(options.legacySourceUpload);
+    await assertLegacyAdmissionInTransaction(tx, firestore, options.domain, { continuation });
+  });
+}
+
+/** One-time administrative OAuth grants stay synchronous, fenced and drain-visible under either owner. */
+export async function withAdministrativeCredentialSetupLease<T>(
+  firestore: Firestore,
+  options: {
+    actorUid: string;
+    actorRole: unknown;
+    operation: 'createSoundCloudAuthSession' | 'exchangeSoundCloudAuthCode' | 'setYouTubeCookies';
+    projectId: string;
+  },
+  callback: (lease: LegacyAdmissionLease) => Promise<T>
+): Promise<T> {
+  if (
+    options.actorRole !== 'admin' ||
+    !options.actorUid ||
+    options.actorUid.startsWith('system:') ||
+    !['createSoundCloudAuthSession', 'exchangeSoundCloudAuthCode', 'setYouTubeCookies'].includes(options.operation)
+  )
+    throw new HttpsError('permission-denied', 'Only administrators may configure this integration.');
+  const domain = options.operation === 'setYouTubeCookies' ? 'media' : 'accounts';
+  return withAdmissionLease(firestore, { ...options, domain }, callback, (tx) =>
+    assertAdministrativeIntegrationSetupInTransaction(tx, firestore, domain)
+  );
+}
+
+async function withAdmissionLease<T>(
+  firestore: Firestore,
+  options: LegacyAdmissionLeaseOptions,
+  callback: (lease: LegacyAdmissionLease) => Promise<T>,
+  assertAdmission: (tx: import('firebase-admin/firestore').Transaction) => Promise<void>
+): Promise<T> {
   if (!options.actorUid || !options.projectId || !options.operation || !options.domain)
     throw new HttpsError('invalid-argument', 'Legacy admission metadata is required.');
   const leaseId = `legacy-${randomUUID()}`,
@@ -82,9 +124,7 @@ export async function withLegacyAdmissionLease<T>(
         source.trimDurationSeconds <= 0)
     )
       throw new HttpsError('permission-denied', 'Only the verified initial source trigger may continue this upload.');
-    await assertLegacyAdmissionInTransaction(tx, firestore, options.domain, {
-      continuation: options.continuation || Boolean(source),
-    });
+    await assertAdmission(tx);
     const control = await tx.get(firestore.doc(TEMPORAL_RELEASE_CONTROL_PATH));
     if (source) {
       const sermon = await tx.get(firestore.doc(`sermons/${source.sermonId}`));
@@ -102,22 +142,11 @@ export async function withLegacyAdmissionLease<T>(
           'aborted',
           'The previously admitted source is no longer pending with this owner and selection.'
         );
-      const cutoff = control.get('legacyAdmissionCutoff') as { seconds?: number; nanoseconds?: number } | undefined;
-      if (cutoff && (control.get('admission') === 'paused' || control.get('domains.media.admission') === 'paused')) {
-        const created = sermon.createTime;
-        if (
-          !created ||
-          !Number.isSafeInteger(cutoff.seconds) ||
-          !Number.isSafeInteger(cutoff.nanoseconds) ||
-          created.seconds > cutoff.seconds! ||
-          (created.seconds === cutoff.seconds && created.nanoseconds > cutoff.nanoseconds!)
-        )
-          throw new HttpsError(
-            'aborted',
-            'This source was not admitted before the verified compatibility pause boundary.'
-          );
-      }
+      await assertOriginalLegacySourceBoundaryInTransaction(tx, firestore, sermon);
+    } else if (options.continuation) {
+      await assertNewLegacyContinuationInTransaction(tx, firestore);
     }
+
     const now = Date.now();
     const record: LegacyAdmissionLeaseRecord = {
       schemaVersion: 1,

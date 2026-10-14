@@ -32,7 +32,12 @@ beforeEach(async () => {
     await context
       .firestore()
       .doc('durableJobs/job-1')
-      .set({ requestedBy: 'owner', state: 'awaiting_source', result: { sourceUpload: { expectedFile: { size: 4 } } } });
+      .set({
+        requestedBy: 'owner',
+        kind: 'upload.source.start',
+        state: 'awaiting_source',
+        result: { sourceUpload: { storagePath: path, expectedFile: { size: 4 } } },
+      });
     await context
       .firestore()
       .doc('durableJobIntents/job-1')
@@ -244,6 +249,23 @@ describe('durable projection and immutable source rules', () => {
       )
     );
   });
+  it('allows only the legacy sermon owner to create its admitted source and never replace it', async () => {
+    const owner = environment.authenticatedContext('owner', { role: 'uploader' });
+    const other = environment.authenticatedContext('other', { role: 'admin' });
+    await environment.withSecurityRulesDisabled(async (context) => {
+      await context
+        .firestore()
+        .doc('sermons/owned-source')
+        .set({ uploaderId: 'owner', status: { audioStatus: 'PENDING' } });
+    });
+    const destination = 'sermons/owned-source';
+    const bytes = new Uint8Array([1, 2, 3]);
+    await assertFails(Promise.resolve(other.storage().ref(destination).put(bytes)));
+    await assertFails(Promise.resolve(owner.storage().ref('sermons/unadmitted').put(bytes)));
+    await assertSucceeds(Promise.resolve(owner.storage().ref(destination).put(bytes)));
+    await assertFails(Promise.resolve(owner.storage().ref(destination).put(bytes)));
+    await assertFails(owner.storage().ref(destination).delete());
+  });
   it('rejects wrong length and unreserved source paths', async () => {
     const owner = environment.authenticatedContext('owner', { role: 'uploader' }),
       metadata = { customMetadata: { durableJobId: 'job-1' } };
@@ -263,5 +285,237 @@ describe('durable projection and immutable source rules', () => {
           .put(new Uint8Array([1, 2, 3, 4]), { customMetadata: { durableJobId: 'unreserved' } })
       )
     );
+  });
+});
+
+describe('direct browser mutation boundaries', () => {
+  async function control(owner: string, admission = 'open', pausedDomain?: string) {
+    await environment.withSecurityRulesDisabled(async (context) => {
+      await context
+        .firestore()
+        .doc('_control/temporalRelease')
+        .set({
+          admission,
+          domains: Object.fromEntries(
+            ['media', 'images', 'accounts', 'publishing', 'bundles'].map((domain) => [
+              domain,
+              { owner, admission: domain === pausedDomain ? 'paused' : 'open' },
+            ])
+          ),
+        });
+    });
+  }
+  const bytes = new Uint8Array([1, 2, 3, 4]);
+  it('keeps accounts server-authored and reads private to self/admin in every release phase', async () => {
+    const owner = environment.authenticatedContext('owner', { role: 'uploader' });
+    const admin = environment.authenticatedContext('admin', { role: 'admin' });
+    const stranger = environment.authenticatedContext('stranger', { role: 'user' });
+    await environment.withSecurityRulesDisabled(async (context) => {
+      await context.firestore().doc('users/owner').set({ role: 'uploader', activeDurableJobs: {} });
+    });
+    for (const [engine, gate] of [
+      ['legacy', 'open'],
+      ['legacy', 'paused'],
+      ['temporal', 'open'],
+    ]) {
+      await control(engine, gate);
+      await assertSucceeds(owner.firestore().doc('users/owner').get());
+      await assertSucceeds(admin.firestore().doc('users/owner').get());
+      await assertFails(stranger.firestore().doc('users/owner').get());
+      await assertFails(owner.firestore().doc('users/owner').update({ role: 'admin' }));
+      await assertFails(
+        admin
+          .firestore()
+          .doc('users/owner')
+          .update({ activeDurableJobs: { forged: 'job' } })
+      );
+      await assertFails(stranger.firestore().doc('users/forged').set({ role: 'admin' }));
+      await assertFails(admin.firestore().doc('users/owner').delete());
+    }
+  });
+  it('preserves catalog reads and protects server-authored topics, subtitles, and transcription output', async () => {
+    const uploader = environment.authenticatedContext('owner', { role: 'uploader' });
+    const admin = environment.authenticatedContext('admin', { role: 'admin' });
+    await control('legacy');
+    await environment.withSecurityRulesDisabled(async (context) => {
+      await context.firestore().doc('topics/topic').set({ title: 'Topic' });
+    });
+    await assertFails(uploader.firestore().doc('topics/forged').set({ title: 'Topic' }));
+    for (const collection of ['subtitles', 'transcriptions']) {
+      await assertFails(admin.firestore().doc(`${collection}/forged`).set({ title: 'Forged' }));
+      await assertSucceeds(uploader.firestore().doc(`${collection}/missing`).get());
+    }
+    for (const [engine, gate, domain] of [
+      ['legacy', 'paused', undefined],
+      ['legacy', 'open', 'bundles'],
+      ['legacy', 'open', 'publishing'],
+      ['temporal', 'open', undefined],
+    ]) {
+      await control(engine!, gate!, domain);
+      await assertFails(uploader.firestore().doc('topics/topic').update({ title: 'Stale' }));
+      await assertFails(uploader.firestore().doc('topics/new-topic').set({ title: 'Stale' }));
+      await assertFails(uploader.firestore().doc('topics/topic').delete());
+      await assertSucceeds(uploader.firestore().doc('topics/topic').get());
+    }
+  });
+  it('denies arbitrary destinations, bundle overwrites, account assets, and workflow output to all browser roles', async () => {
+    await control('legacy');
+    for (const role of ['uploader', 'publisher', 'admin']) {
+      const context = environment.authenticatedContext(role, { role });
+      for (const destination of [
+        'unknown/file',
+        'bundles/topics-bundle.bin',
+        'workflow-audio/private',
+        'accounts/other/photo',
+        'processed-sermons/output',
+        'intro-outro-sermons/output',
+        'intros/default.mp3',
+        'outros/default.mp3',
+      ]) {
+        await assertFails(Promise.resolve(context.storage().ref(destination).put(bytes)));
+      }
+    }
+    await assertFails(
+      Promise.resolve(environment.unauthenticatedContext().storage().ref('speaker-images/anonymous.png').put(bytes))
+    );
+  });
+  it('fences speaker images by the images domain and preserves legacy authorized image writes only', async () => {
+    const uploader = environment.authenticatedContext('owner', { role: 'uploader' });
+    await control('legacy');
+    await assertSucceeds(Promise.resolve(uploader.storage().ref('speaker-images/legacy.png').put(bytes)));
+    for (const [engine, gate, domain] of [
+      ['legacy', 'paused', undefined],
+      ['legacy', 'open', 'images'],
+      ['temporal', 'open', undefined],
+    ]) {
+      await control(engine!, gate!, domain);
+      await assertFails(Promise.resolve(uploader.storage().ref('speaker-images/legacy.png').put(bytes)));
+      await assertFails(
+        uploader.storage().ref('speaker-images/legacy.png').updateMetadata({ contentType: 'image/png' })
+      );
+      await assertFails(uploader.storage().ref('speaker-images/legacy.png').delete());
+      await assertFails(uploader.firestore().doc('images/forged').set({ subsplashId: 'forged' }));
+    }
+  });
+  it('continues a genuinely reserved audio source during pause while rejecting unrelated or displaced job reservations', async () => {
+    const uploader = environment.authenticatedContext('owner', { role: 'uploader' });
+    await control('temporal', 'paused');
+    const cases = [
+      {
+        id: 'paused-audio-valid',
+        kind: 'upload.source.start',
+        storagePath: 'durable-upload-sources/owner/paused-audio-valid/source',
+        allowed: true,
+      },
+      {
+        id: 'paused-audio-wrong-kind',
+        kind: 'image.ingest',
+        storagePath: 'durable-upload-sources/owner/paused-audio-wrong-kind/source',
+        allowed: false,
+      },
+      { id: 'paused-audio-wrong-path', kind: 'upload.source.start', storagePath: 'different/path', allowed: false },
+    ];
+    await environment.withSecurityRulesDisabled(async (context) => {
+      for (const fixture of cases)
+        await context
+          .firestore()
+          .doc(`durableJobs/${fixture.id}`)
+          .set({
+            requestedBy: 'owner',
+            kind: fixture.kind,
+            state: 'awaiting_source',
+            result: { sourceUpload: { storagePath: fixture.storagePath, expectedFile: { size: 4 } } },
+          });
+    });
+    for (const fixture of cases) {
+      const source = uploader.storage().ref(`durable-upload-sources/owner/${fixture.id}/source`);
+      const upload = Promise.resolve(source.put(bytes, { customMetadata: { durableJobId: fixture.id } }));
+      if (fixture.allowed) {
+        await assertSucceeds(upload);
+        await assertFails(source.delete());
+      } else await assertFails(upload);
+    }
+  });
+  it('fences immutable speaker request sources by accounts admission while preserving the existing signed-in request flow', async () => {
+    const requester = environment.authenticatedContext('requester', { role: 'user' });
+    const metadata = { contentType: 'image/png' };
+    await control('temporal');
+    await assertSucceeds(
+      Promise.resolve(requester.storage().ref('speaker-request-images/request.png').put(bytes, metadata))
+    );
+    await assertFails(
+      Promise.resolve(requester.storage().ref('speaker-request-images/request.png').put(bytes, metadata))
+    );
+    await assertFails(
+      Promise.resolve(
+        requester
+          .storage()
+          .ref('speaker-request-images/executable')
+          .put(bytes, { contentType: 'application/octet-stream' })
+      )
+    );
+    await assertFails(requester.storage().ref('speaker-request-images/request.png').delete());
+    await control('temporal', 'paused');
+    await assertFails(
+      Promise.resolve(requester.storage().ref('speaker-request-images/paused.png').put(bytes, metadata))
+    );
+    await control('temporal', 'open', 'accounts');
+    await assertFails(
+      Promise.resolve(requester.storage().ref('speaker-request-images/domain-paused.png').put(bytes, metadata))
+    );
+  });
+});
+
+describe('explicit immutable image source transfer', () => {
+  it('requires Temporal images ownership and open global/domain admission, with actor-bound immutable image metadata', async () => {
+    const uploader = environment.authenticatedContext('owner', { role: 'uploader' });
+    const stranger = environment.authenticatedContext('stranger', { role: 'uploader' });
+    const plainUser = environment.authenticatedContext('owner', { role: 'user' });
+    const destination = 'durable-image-sources/owner/request-1/source';
+    const bytes = new Uint8Array([1, 2, 3, 4]);
+    const metadata = { contentType: 'image/png', customMetadata: { ownerUID: 'owner', durableRequestId: 'request-1' } };
+    await assertFails(Promise.resolve(uploader.storage().ref(destination).put(bytes, metadata)));
+    for (const [engine, global, domain] of [
+      ['legacy', 'open', 'open'],
+      ['temporal', 'paused', 'open'],
+      ['temporal', 'open', 'paused'],
+    ]) {
+      await environment.withSecurityRulesDisabled(async (context) => {
+        await context
+          .firestore()
+          .doc('_control/temporalRelease')
+          .set({ admission: global, domains: { images: { owner: engine, admission: domain } } });
+      });
+      await assertFails(Promise.resolve(uploader.storage().ref(destination).put(bytes, metadata)));
+    }
+    await environment.withSecurityRulesDisabled(async (context) => {
+      await context
+        .firestore()
+        .doc('_control/temporalRelease')
+        .set({ admission: 'open', domains: { images: { owner: 'temporal', admission: 'open' } } });
+    });
+    await assertFails(Promise.resolve(stranger.storage().ref(destination).put(bytes, metadata)));
+    await assertFails(Promise.resolve(plainUser.storage().ref(destination).put(bytes, metadata)));
+    await assertFails(
+      Promise.resolve(
+        uploader
+          .storage()
+          .ref(destination)
+          .put(bytes, { ...metadata, customMetadata: { ...metadata.customMetadata, durableRequestId: 'other' } })
+      )
+    );
+    await assertFails(
+      Promise.resolve(
+        uploader
+          .storage()
+          .ref(destination)
+          .put(bytes, { ...metadata, contentType: 'application/octet-stream' })
+      )
+    );
+    await assertSucceeds(Promise.resolve(uploader.storage().ref(destination).put(bytes, metadata)));
+    await assertFails(Promise.resolve(uploader.storage().ref(destination).put(bytes, metadata)));
+    await assertFails(uploader.storage().ref(destination).delete());
+    await assertFails(uploader.storage().ref(destination).updateMetadata({ contentType: 'image/jpeg' }));
+    await assertFails(stranger.storage().ref(destination).getMetadata());
   });
 });

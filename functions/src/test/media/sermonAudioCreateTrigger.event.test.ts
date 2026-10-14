@@ -68,6 +68,8 @@ describe('initial audio create event decoding', () => {
           createTime: '2026-10-13T00:14:28Z',
           updateTime: '2026-10-13T00:14:28Z',
           fields: {
+            sourceStartTime: { integerValue: '0' },
+            trimDurationSeconds: { integerValue: '30' },
             status: { mapValue: { fields: { audioStatus: { stringValue: sermonStatusType.PENDING } } } },
             activeDurableJobs: { mapValue: { fields: { upload: { stringValue: 'source-owner' } } } },
           },

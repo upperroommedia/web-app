@@ -1,0 +1,126 @@
+[
+  {
+    "name": "historical ERROR with attempts zero may have lost final write",
+    "delivery": {
+      "state": "ERROR",
+      "attempts": 0
+    },
+    "uncertain": true,
+    "requiresDrain": true
+  },
+  {
+    "name": "historical ERROR with prior attempts is uncertain",
+    "delivery": {
+      "state": "ERROR",
+      "attempts": 1
+    },
+    "uncertain": true,
+    "requiresDrain": true
+  },
+  {
+    "name": "known presubmit rejection is terminal safe",
+    "delivery": {
+      "state": "ERROR",
+      "attempts": 1,
+      "smtpSubmissionState": "not_submitted"
+    },
+    "uncertain": false,
+    "requiresDrain": false
+  },
+  {
+    "name": "acknowledged response is settled",
+    "delivery": {
+      "state": "SUCCESS",
+      "smtpSubmissionState": "accepted"
+    },
+    "uncertain": false,
+    "requiresDrain": false
+  },
+  {
+    "name": "legacy SUCCESS terminal acknowledgement is retained",
+    "delivery": {
+      "state": "SUCCESS"
+    },
+    "uncertain": false,
+    "requiresDrain": false
+  },
+  {
+    "name": "ERROR with known response is settled",
+    "delivery": {
+      "state": "ERROR",
+      "smtpSubmissionState": "accepted"
+    },
+    "uncertain": false,
+    "requiresDrain": false
+  },
+  {
+    "name": "started SMTP is uncertain even if ERROR",
+    "delivery": {
+      "state": "ERROR",
+      "smtpSubmissionState": "started"
+    },
+    "uncertain": true,
+    "requiresDrain": true
+  },
+  {
+    "name": "lost acknowledgement remains uncertain",
+    "delivery": {
+      "state": "ERROR",
+      "smtpSubmissionState": "unknown"
+    },
+    "uncertain": true,
+    "requiresDrain": true
+  },
+  {
+    "name": "unknown marker cannot be hidden behind SUCCESS",
+    "delivery": {
+      "state": "SUCCESS",
+      "smtpSubmissionState": "unknown"
+    },
+    "uncertain": true,
+    "requiresDrain": true
+  },
+  {
+    "name": "malformed submission marker fails closed",
+    "delivery": {
+      "state": "ERROR",
+      "smtpSubmissionState": "bogus"
+    },
+    "uncertain": true,
+    "requiresDrain": true
+  },
+  {
+    "name": "claimed but not submitted is still active work",
+    "delivery": {
+      "state": "PROCESSING",
+      "smtpSubmissionState": "not_submitted"
+    },
+    "uncertain": false,
+    "requiresDrain": true
+  },
+  {
+    "name": "explicit safe retry remains pending work",
+    "delivery": {
+      "state": "RETRY",
+      "smtpSubmissionState": "not_submitted"
+    },
+    "uncertain": false,
+    "requiresDrain": true
+  },
+  {
+    "name": "Temporal owns its own unknown receipt",
+    "delivery": {
+      "orchestrator": "temporal",
+      "state": "ERROR",
+      "smtpSubmissionState": "unknown"
+    },
+    "uncertain": false,
+    "requiresDrain": false
+  },
+  {
+    "name": "missing delivery is pending",
+    "delivery": null,
+    "uncertain": false,
+    "requiresDrain": true
+  }
+]

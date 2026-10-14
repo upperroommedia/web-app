@@ -1,3 +1,6 @@
+import { getApp } from 'firebase-admin/app';
+import { getFirestore } from 'firebase-admin/firestore';
+import { withLegacyMediaExecution } from '@upperroom/orchestration/legacy-media-execution';
 import type { Database } from 'firebase-admin/database';
 import { getFunctions, type TaskQueue } from 'firebase-admin/functions';
 import { GoogleAuth } from 'google-auth-library';
@@ -493,6 +496,12 @@ export function normalizeCloudTasksAccessToken(accessToken: CloudTasksAccessToke
   return null;
 }
 
+function getLegacyMediaTaskServiceAccount(): string {
+  const email = process.env.PROCESS_AUDIO_TASK_SERVICE_ACCOUNT_EMAIL?.trim();
+  if (!email || !/^[^@\s]+@[^@\s]+\.gserviceaccount\.com$/.test(email))
+    throw new Error('PROCESS_AUDIO_TASK_SERVICE_ACCOUNT_EMAIL is required for authenticated legacy dispatch.');
+  return email;
+}
 export function buildCloudTasksCreateTaskRequest(args: {
   payload: AddIntroOutroInputType;
   queueName: ProcessAudioTaskQueueName;
@@ -520,6 +529,10 @@ export function buildCloudTasksCreateTaskRequest(args: {
       dispatchDeadline: `${PROCESS_AUDIO_TASK_TIMEOUT_SECONDS}s`,
       httpRequest: {
         httpMethod: 'POST',
+        oidcToken: {
+          serviceAccountEmail: getLegacyMediaTaskServiceAccount(),
+          audience: getProcessAudioTargetUri(getProcessAudioSourceType(payload)),
+        },
         url: getProcessAudioTargetUri(getProcessAudioSourceType(payload)),
         headers: {
           'Content-Type': 'application/json',
@@ -550,64 +563,69 @@ export async function enqueueTaskViaCloudTasksApi(
   deps: CloudTasksApiDeps = {},
   options: { scheduledFor?: Date } = {}
 ): Promise<void> {
-  const fetchImpl = deps.fetchImpl ?? fetch;
-  const authClient =
-    (await deps.authFactory?.()) ??
-    (await new GoogleAuth({
-      scopes: [CLOUD_TASKS_SCOPE],
-    }).getClient());
-  const accessToken = normalizeCloudTasksAccessToken(await authClient.getAccessToken());
+  return withLegacyMediaExecution(
+    { firestore: getFirestore(), projectId: getApp().options.projectId!, payload, taskId },
+    async () => {
+      const fetchImpl = deps.fetchImpl ?? fetch;
+      const authClient =
+        (await deps.authFactory?.()) ??
+        (await new GoogleAuth({
+          scopes: [CLOUD_TASKS_SCOPE],
+        }).getClient());
+      const accessToken = normalizeCloudTasksAccessToken(await authClient.getAccessToken());
 
-  if (!accessToken) {
-    throw new Error(`Failed to acquire an access token for Cloud Tasks queue ${queueName}.`);
-  }
+      if (!accessToken) {
+        throw new Error(`Failed to acquire an access token for Cloud Tasks queue ${queueName}.`);
+      }
 
-  const request = buildCloudTasksCreateTaskRequest({
-    payload,
-    queueName,
-    taskId,
-    scheduledFor: options.scheduledFor,
-  });
-  const response = await fetchImpl(request.url, {
-    ...request.init,
-    headers: {
-      ...request.init.headers,
-      Authorization: `Bearer ${accessToken}`,
-    },
-  });
-
-  if (!response.ok) {
-    const responseBody = await response.text();
-    if (response.status === 409) {
-      const inspectionResponse = await fetchImpl(request.inspectionUrl, {
-        method: 'GET',
+      const request = buildCloudTasksCreateTaskRequest({
+        payload,
+        queueName,
+        taskId,
+        scheduledFor: options.scheduledFor,
+      });
+      const response = await fetchImpl(request.url, {
+        ...request.init,
         headers: {
+          ...request.init.headers,
           Authorization: `Bearer ${accessToken}`,
         },
       });
-      if (inspectionResponse.status === 404) {
-        throw new CloudTaskNameTombstonedError(taskId, queueName);
-      }
-      if (!inspectionResponse.ok) {
+
+      if (!response.ok) {
+        const responseBody = await response.text();
+        if (response.status === 409) {
+          const inspectionResponse = await fetchImpl(request.inspectionUrl, {
+            method: 'GET',
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+            },
+          });
+          if (inspectionResponse.status === 404) {
+            throw new CloudTaskNameTombstonedError(taskId, queueName);
+          }
+          if (!inspectionResponse.ok) {
+            throw new Error(
+              `Failed to inspect existing Cloud Task ${taskId} in queue ${queueName}: HTTP ${
+                inspectionResponse.status
+              } ${inspectionResponse.statusText || ''} ${(await inspectionResponse.text()).slice(0, 1000)}`.trim()
+            );
+          }
+
+          const inspectedTask = (await inspectionResponse.json()) as { name?: unknown };
+          if (inspectedTask.name !== request.taskName) {
+            throw new Error(`Existing Cloud Task ${taskId} did not match the expected task resource.`);
+          }
+          return;
+        }
         throw new Error(
-          `Failed to inspect existing Cloud Task ${taskId} in queue ${queueName}: HTTP ${inspectionResponse.status} ${
-            inspectionResponse.statusText || ''
-          } ${(await inspectionResponse.text()).slice(0, 1000)}`.trim()
+          `Failed to create Cloud Task ${taskId} in queue ${queueName}: HTTP ${response.status} ${
+            response.statusText || ''
+          } ${responseBody}`.trim()
         );
       }
-
-      const inspectedTask = (await inspectionResponse.json()) as { name?: unknown };
-      if (inspectedTask.name !== request.taskName) {
-        throw new Error(`Existing Cloud Task ${taskId} did not match the expected task resource.`);
-      }
-      return;
     }
-    throw new Error(
-      `Failed to create Cloud Task ${taskId} in queue ${queueName}: HTTP ${response.status} ${
-        response.statusText || ''
-      } ${responseBody}`.trim()
-    );
-  }
+  );
 }
 
 const isTaskMissingError = (error: unknown): boolean => {
@@ -864,8 +882,7 @@ async function drainDeferredYouTubeRequestsAfterProbe(args: {
           const queueStateSnapshot = await database.ref(YOUTUBE_QUEUE_STATE_PATH).get();
           const queueState = parseYouTubeQueueState(queueStateSnapshot.val());
           return (
-            queueState.probeStatus === 'probe_succeeded' &&
-            queueState.probeDispatchReservationId === drainReservationId
+            queueState.probeStatus === 'probe_succeeded' && queueState.probeDispatchReservationId === drainReservationId
           );
         }
       );
@@ -931,9 +948,15 @@ export async function markProcessAudioRequestRunning(args: {
   await withProcessAudioQueueClaim(database, sanitizedPayload.id, `running:${requestId}`, async () => {
     const requestRef = database.ref(`${PROCESS_AUDIO_REQUESTS_PATH}/${sanitizedPayload.id}`);
     const requestSnapshot = await requestRef.get();
-    const existingState = requestSnapshot.exists()
-      ? (requestSnapshot.val() as StoredProcessAudioRequestState)
-      : buildProcessAudioRequestState(sanitizedPayload, requestVersion, now);
+    const existingState = requestSnapshot.exists() ? (requestSnapshot.val() as StoredProcessAudioRequestState) : null;
+    if (
+      !existingState ||
+      !taskId ||
+      existingState.queuedTaskId !== taskId ||
+      existingState.currentRequestVersion !== requestVersion ||
+      computeProcessAudioRequestVersion(existingState.currentPayload!) !== requestVersion
+    )
+      throw new Error('A matching admitted queue request is required before marking audio running.');
 
     await requestRef.set({
       ...existingState,
@@ -1032,8 +1055,7 @@ export async function completeProcessAudioSuccess(args: {
             currentQueueState.probeStatus !== 'probing' ||
             currentQueueState.probeTaskSermonId !== sanitizedPayload.id ||
             currentQueueState.probeRequestVersion !== completionRequestVersion ||
-            (currentQueueState.probeDispatchReservationId ?? null) !==
-              (queueState.probeDispatchReservationId ?? null)
+            (currentQueueState.probeDispatchReservationId ?? null) !== (queueState.probeDispatchReservationId ?? null)
           ) {
             return undefined;
           }
@@ -1072,9 +1094,7 @@ export async function completeProcessAudioSuccess(args: {
       } else {
         const { queueState: observedQueueState, deferredEntries } = await getQueueStateAndDeferredEntries(database);
         const remainingDeferredEntries = deferredEntries.filter((entry) => entry.sermonId !== sanitizedPayload.id);
-        const completedProbeDeferredRef = database.ref(
-          `${YOUTUBE_QUEUE_DEFERRED_PATH}/${sanitizedPayload.id}`
-        );
+        const completedProbeDeferredRef = database.ref(`${YOUTUBE_QUEUE_DEFERRED_PATH}/${sanitizedPayload.id}`);
         const nextProbe = alreadyProcessed ? selectNextDeferredProbe(remainingDeferredEntries) : null;
 
         if (nextProbe) {
@@ -1929,9 +1949,17 @@ export async function resumeDeferredYouTubeQueueOnStartup(args: {
   force?: boolean;
   authenticatedRecoveryGeneration?: string;
 }): Promise<{ resumed: boolean; deferredRemaining: number; nextProbeSermonId: string | null }> {
-  const ownerId = `youtube-auth-recovery:${args.ctx?.requestId ?? randomUUID()}`;
-  return await withProcessAudioQueueClaim(args.database, '__youtube_auth_recovery__', ownerId, async () =>
-    resumeDeferredYouTubeQueueUnderClaim(args)
+  const deferred = await args.database.ref(YOUTUBE_QUEUE_DEFERRED_PATH).get();
+  const candidates = Object.values((deferred.val() as Record<string, StoredDeferredYouTubeRequest> | null) ?? {});
+  if (!candidates.length) return { resumed: false, deferredRemaining: 0, nextProbeSermonId: null };
+  return withLegacyMediaExecution(
+    { firestore: getFirestore(), projectId: getApp().options.projectId!, payload: candidates[0].payload },
+    async () => {
+      const ownerId = `youtube-auth-recovery:${args.ctx?.requestId ?? randomUUID()}`;
+      return await withProcessAudioQueueClaim(args.database, '__youtube_auth_recovery__', ownerId, async () =>
+        resumeDeferredYouTubeQueueUnderClaim(args)
+      );
+    }
   );
 }
 

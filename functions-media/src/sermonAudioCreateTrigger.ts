@@ -88,47 +88,41 @@ export const enqueueInitialSermonAudio = async (
 const createProductionDependencies = (
   bucket: Bucket,
   eventId: string,
-  sermon: Sermon
+  legacyAdmissionLeaseId?: string
 ): InitialAudioEnqueueDependencies => ({
   fileExists: async (path) => (await bucket.file(path).exists())[0],
   getDownloadUrl: async (path) => ensureFirebaseDownloadUrl(bucket.file(path)),
   enqueue: async (payload) => {
-    const enqueue = () =>
-      queueOrReplaceProcessAudioRequest({
-        database: firebaseAdmin.database(),
-        payload,
-        targetUri:
-          process.env.TASK_ORCHESTRATOR_MEDIA === 'temporal'
-            ? ''
-            : getProcessAudioTargetUri('youtubeUrl' in payload ? 'youtube' : 'storage'),
-        ownerId: `sermon-create:${eventId}`,
-        onlyIfMissing: true,
-      });
-    if (process.env.TASK_ORCHESTRATOR_MEDIA === 'temporal') return enqueue();
-    const projectId = firebaseAdmin.app().options.projectId;
-    if (!projectId) throw new Error('Firebase project is required.');
-    const uploaderId = sermon.uploaderId;
-    if (!uploaderId) throw new Error('Legacy source requires its admitted canonical uploader.');
-    return withLegacyAdmissionLease(
-      firebaseAdmin.firestore(),
-      {
-        projectId,
-        domain: 'media',
-        actorUid: 'system:firebase-event',
-        operation: 'sermonaudiocreatetrigger',
-        legacySourceUpload: {
-          sermonId: payload.id,
-          uploaderId,
-          sourceStartTime: payload.startTime,
-          trimDurationSeconds: payload.duration,
-          ...('youtubeUrl' in payload ? { youtubeUrl: payload.youtubeUrl } : {}),
-        },
-      },
-      async (lease) => {
-        await lease.markEffectsStarted();
-        return enqueue();
-      }
-    );
+    // The old browser completed file bytes before creating its canonical row.
+    // Capture only the configured bucket's exact original object identity; the
+    // shared source authority rejects a later overwrite by native creation time.
+    const original =
+      'storageFilePath' in payload && legacyAdmissionLeaseId
+        ? (await bucket.file(payload.storageFilePath).getMetadata())[0]
+        : undefined;
+    return queueOrReplaceProcessAudioRequest({
+      database: firebaseAdmin.database(),
+      payload,
+      targetUri:
+        process.env.TASK_ORCHESTRATOR_MEDIA === 'temporal'
+          ? ''
+          : getProcessAudioTargetUri('youtubeUrl' in payload ? 'youtube' : 'storage'),
+      ownerId: `sermon-create:${eventId}`,
+      onlyIfMissing: true,
+      legacyAdmissionLeaseId,
+      ...('storageFilePath' in payload && original
+        ? {
+            legacyConfiguredSourceBucket: bucket.name,
+            legacyOriginalStorageSource: {
+              kind: 'storage' as const,
+              bucket: original.bucket!,
+              path: original.name!,
+              generation: String(original.generation ?? ''),
+              timeCreated: original.timeCreated!,
+            },
+          }
+        : {}),
+    });
   },
 });
 
@@ -152,13 +146,72 @@ const sermonAudioCreateTrigger = onDocumentCreated({ document: 'sermons/{sermonI
   // Durable source confirmations own their enqueue and need no legacy continuation lookup.
   const durableSource = (created as Sermon & { activeDurableJobs?: { upload?: unknown } }).activeDurableJobs?.upload;
   const current = durableSource ? snapshot : await snapshot.ref.get();
-  if (!current.exists) return;
+  if (!current.exists || !current.createTime?.isEqual(snapshot.createTime!)) return;
   const sermon = current.data() as Sermon;
-  const result = await enqueueInitialSermonAudio(
-    event.params.sermonId,
-    sermon,
-    createProductionDependencies(firebaseAdmin.storage().bucket(), event.id, sermon)
-  );
+  const enqueue = (leaseId?: string) =>
+    enqueueInitialSermonAudio(
+      event.params.sermonId,
+      sermon,
+      createProductionDependencies(firebaseAdmin.storage().bucket(), event.id, leaseId)
+    );
+  let result: InitialAudioEnqueueResult;
+  if (
+    !Number.isFinite(sermon.sourceStartTime) ||
+    sermon.sourceStartTime < 0 ||
+    !Number.isFinite(sermon.trimDurationSeconds) ||
+    (sermon.trimDurationSeconds ?? 0) <= 0
+  ) {
+    result = { action: 'skipped', reason: 'invalid_trim_settings' };
+  } else if (
+    process.env.TASK_ORCHESTRATOR_MEDIA === 'temporal' ||
+    durableSource ||
+    sermon.status?.audioStatus !== sermonStatusType.PENDING
+  ) {
+    // The durable path resolves canonical sources without writing public download tokens.
+    if (
+      process.env.TASK_ORCHESTRATOR_MEDIA === 'temporal' &&
+      !durableSource &&
+      sermon.status?.audioStatus === sermonStatusType.PENDING
+    ) {
+      const { submitServerDurableJob } = await import('../../functions/src/temporal/bridge');
+      await submitServerDurableJob({
+        kind: 'audio.process',
+        entity: { type: 'sermon', id: event.params.sermonId },
+        actorUid: 'system:firebase-event',
+        requestId: `sermon-create:${event.id}`,
+        payload: { startTime: sermon.sourceStartTime, duration: sermon.trimDurationSeconds },
+      });
+      result = { action: 'enqueued', queueAction: 'durable' };
+    } else result = await enqueue();
+  } else {
+    const projectId = firebaseAdmin.app().options.projectId;
+    if (!projectId || !created.uploaderId)
+      throw new Error('Legacy source requires its canonical project and uploader.');
+    result = await withLegacyAdmissionLease(
+      firebaseAdmin.firestore(),
+      {
+        projectId,
+        domain: 'media',
+        actorUid: 'system:firebase-event',
+        operation: 'sermonaudiocreatetrigger',
+        legacySourceUpload: {
+          sermonId: event.params.sermonId,
+          // Bind the immutable create snapshot, not a later edited canonical
+          // selection. The transaction compares it with the current document
+          // before bumper-token writes or queue effects can begin.
+          uploaderId: created.uploaderId,
+          sourceStartTime: created.sourceStartTime,
+          trimDurationSeconds: created.trimDurationSeconds!,
+          ...(created.youtubeUrl?.trim() ? { youtubeUrl: created.youtubeUrl.trim() } : {}),
+        },
+      },
+      async (lease) => {
+        // Bumper URL resolution may persist a download token: admission must precede it.
+        await lease.markEffectsStarted();
+        return enqueue(lease.leaseId);
+      }
+    );
+  }
 
   logger.info('Reconciled initial sermon audio queue request', {
     sermonId: event.params.sermonId,

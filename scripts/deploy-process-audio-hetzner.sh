@@ -245,6 +245,18 @@ write_env_file() {
     | python3 -c 'import base64,sys; print(base64.b64encode(sys.stdin.buffer.read()).decode())'
   )"
 
+  : "${PROCESS_AUDIO_ALLOWED_CALLER_EMAILS:?Set the exact verified queue service-account email JSON allowlist}"
+  local native_task_service_account
+  native_task_service_account="$(printf '%s' "$service_account_json_b64" | python3 -c 'import base64,json,sys; print(json.loads(base64.b64decode(sys.stdin.buffer.read()))["client_email"])')"
+  PROCESS_AUDIO_ALLOWED_CALLER_EMAILS="$PROCESS_AUDIO_ALLOWED_CALLER_EMAILS" PROCESS_AUDIO_TASK_SERVICE_ACCOUNT_EMAIL="$native_task_service_account" python3 - <<'CHECK_NATIVE_CALLERS'
+import json, os, re
+value=json.loads(os.environ['PROCESS_AUDIO_ALLOWED_CALLER_EMAILS'])
+if not isinstance(value,list) or not value or any(not isinstance(v,str) or not re.fullmatch(r'[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.gserviceaccount\.com',v) for v in value):
+    raise SystemExit('Expected an explicit nonempty service-account email allowlist')
+if os.environ['PROCESS_AUDIO_TASK_SERVICE_ACCOUNT_EMAIL'] not in value:
+    raise SystemExit('The native runtime task identity must appear explicitly in its caller allowlist')
+CHECK_NATIVE_CALLERS
+
   cat > "$WORK_DIR/env/$env_file_name" <<EOF
 NODE_ENV=production
 PORT=8080
@@ -258,6 +270,9 @@ FIREBASE_SERVICE_ACCOUNT_JSON=${service_account_json_b64}
 RUNTIME_ALERT_RECIPIENTS=${runtime_alert_recipients}
 ADMIN_BASE_URL=${admin_base_url}
 PROCESS_AUDIO_PUBLIC_ORIGIN=${public_origin}
+PROCESS_AUDIO_OIDC_AUDIENCES=["${public_origin}","${public_origin}/process-audio"]
+PROCESS_AUDIO_ALLOWED_CALLER_EMAILS=${PROCESS_AUDIO_ALLOWED_CALLER_EMAILS}
+PROCESS_AUDIO_TASK_SERVICE_ACCOUNT_EMAIL=${native_task_service_account}
 PROCESS_AUDIO_NOVNC_SOCKET=/workspace/browser-desktop/novnc.sock
 SENTRY_DSN=${sentry_dsn}
 SENTRY_ENVIRONMENT=${env_name}

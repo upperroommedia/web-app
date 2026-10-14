@@ -84,8 +84,11 @@ jobs:
         run: |
           pnpm run test:temporal:contracts
           node --test scripts/temporal-recover-initial-compatibility.test.mjs
-      - name: Validate locally captured monitoring and OAuth transport
-        run: pnpm --dir apps/process-audio run test:sdk-upgrades
+      - name: Validate native audio admission, queueing, monitoring and OAuth transport
+        run: |
+          pnpm --dir apps/process-audio run test:legacy-ingress
+          pnpm --dir apps/process-audio run test:queue
+          pnpm --dir apps/process-audio run test:sdk-upgrades
       - name: Validate email and search kits
         run: |
           pnpm --dir function-kits/firestore-send-email test

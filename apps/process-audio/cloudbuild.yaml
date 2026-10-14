@@ -15,7 +15,8 @@ steps:
 
   # Step 1: Build Docker image
   - name: 'gcr.io/cloud-builders/docker'
-    args: [
+    args:
+      [
         'build',
         '--cache-from',
         '${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_AR_REPO}/${_IMAGE_NAME}:${_CACHE_TAG}',
@@ -73,9 +74,14 @@ steps:
   # Step 4: Deploy the storage-only Cloud Run service.
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: bash
+    env:
+      - 'PROCESS_AUDIO_ALLOWED_CALLER_EMAILS=${_PROCESS_AUDIO_ALLOWED_CALLER_EMAILS}'
+      - 'PROCESS_AUDIO_OIDC_AUDIENCES=${_PROCESS_AUDIO_OIDC_AUDIENCES}'
     args:
       - -ceu
       - |
+        oidc_audiences_csv="$$(python3 -c 'import json,os; a=json.loads(os.environ["PROCESS_AUDIO_OIDC_AUDIENCES"]); assert isinstance(a,list) and a; print(",".join(a))')"
+        python3 -c 'import json,os; a=json.loads(os.environ["PROCESS_AUDIO_ALLOWED_CALLER_EMAILS"]); assert isinstance(a,list) and a'
         set_secrets="RUNTIME_ALERT_RECIPIENTS=${_RUNTIME_ALERT_RECIPIENTS_SECRET}:latest"
 
         DEPLOY_ARGS=(
@@ -84,6 +90,7 @@ steps:
           --image "${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_AR_REPO}/${_IMAGE_NAME}:${COMMIT_SHA}"
           --region "${_REGION}"
           --platform managed
+          --service-account "${_PROCESS_AUDIO_TASK_SERVICE_ACCOUNT_EMAIL}"
           --cpu "${_CPU}"
           --memory "${_MEMORY}"
           --cpu-boost
@@ -93,8 +100,9 @@ steps:
           --max-instances "${_MAX_INSTANCES}"
           --timeout "${_TIMEOUT}"
           --clear-network
+          --add-custom-audiences "$${oidc_audiences_csv}"
           --set-secrets "$${set_secrets}"
-          --set-env-vars "NODE_ENV=production,FIREBASE_PROJECT_ID=${_FIREBASE_PROJECT_ID},FIREBASE_STORAGE_BUCKET=${_FIREBASE_STORAGE_BUCKET},FIREBASE_DATABASE_URL=${_FIREBASE_DATABASE_URL},PROCESS_AUDIO_RUNTIME_PROFILE=cloudrun,PROCESS_AUDIO_RUNTIME_HOST=cloud-run,PROCESS_AUDIO_RUNTIME_ENV=${_RUNTIME_ENV}"
+          --set-env-vars "^|^NODE_ENV=production|FIREBASE_PROJECT_ID=${_FIREBASE_PROJECT_ID}|FIREBASE_STORAGE_BUCKET=${_FIREBASE_STORAGE_BUCKET}|FIREBASE_DATABASE_URL=${_FIREBASE_DATABASE_URL}|PROCESS_AUDIO_RUNTIME_PROFILE=cloudrun|PROCESS_AUDIO_RUNTIME_HOST=cloud-run|PROCESS_AUDIO_RUNTIME_ENV=${_RUNTIME_ENV}|PROCESS_AUDIO_TASK_SERVICE_ACCOUNT_EMAIL=${_PROCESS_AUDIO_TASK_SERVICE_ACCOUNT_EMAIL}|PROCESS_AUDIO_ALLOWED_CALLER_EMAILS=$${PROCESS_AUDIO_ALLOWED_CALLER_EMAILS}|PROCESS_AUDIO_OIDC_AUDIENCES=$${PROCESS_AUDIO_OIDC_AUDIENCES}"
         )
 
         gcloud run "${DEPLOY_ARGS[@]}"
@@ -121,3 +129,7 @@ substitutions:
   _MIN_INSTANCES: '0'
   _MAX_INSTANCES: '10'
   _TIMEOUT: '3600'
+
+  _PROCESS_AUDIO_ALLOWED_CALLER_EMAILS: '[]'
+  _PROCESS_AUDIO_OIDC_AUDIENCES: '[]'
+  _PROCESS_AUDIO_TASK_SERVICE_ACCOUNT_EMAIL: ''

@@ -1,19 +1,11 @@
 import { createHash } from 'node:crypto';
 import type { Database } from 'firebase-admin/database';
-import { logger } from 'firebase-functions/v2';
 import { HttpsError } from 'firebase-functions/v2/https';
 import type { GetYouTubeCookieStatusOutputType } from '@upperroom/contracts/getYouTubeCookieStatus';
 import type { SetYouTubeCookiesInput } from '@upperroom/contracts/setYouTubeCookies';
-import { YOUTUBE_BROWSER_FALLBACK_BLOCKER_REASON } from '@upperroom/contracts/processAudioQueue';
 import type { YouTubeCookieMetadata } from '@upperroom/contracts/youtubeCookies';
 import { getBrowserFallbackSessionStatus } from './browserFallbackService';
-import {
-  beginYouTubeQueueProbe,
-  buildYouTubeCookieStatus,
-  getYouTubeQueueSnapshot,
-  recoverStaleYouTubeQueueProbe,
-} from './processAudioQueueStore';
-import { getProcessAudioTargetUri } from './processAudioService';
+import { buildYouTubeCookieStatus, getYouTubeQueueSnapshot } from './processAudioQueueStore';
 
 const COOKIE_KEY = 'yt-dlp-cookies';
 const COOKIE_META_KEY = 'yt-dlp-cookies-meta';
@@ -76,37 +68,8 @@ export const getYouTubeCookieStatus = async (database: Database): Promise<GetYou
   ]);
 
   const metadata = metadataSnapshot.exists() ? (metadataSnapshot.val() as YouTubeCookieMetadata) : null;
-  let { queueState, deferredCount } = await getYouTubeQueueSnapshot(database);
+  const { queueState, deferredCount } = await getYouTubeQueueSnapshot(database);
   const browserFallbackStatus = await getBrowserFallbackSessionStatus(database);
-  const browserFallbackReady = browserFallbackStatus.reachable && browserFallbackStatus.ok;
-
-  if (browserFallbackReady) {
-    const staleProbeRecovery = await recoverStaleYouTubeQueueProbe(database);
-    if (staleProbeRecovery.recovered) {
-      queueState = staleProbeRecovery.queueState;
-      deferredCount = staleProbeRecovery.deferredCount;
-    }
-  }
-
-  if (
-    queueState.blockerReason === YOUTUBE_BROWSER_FALLBACK_BLOCKER_REASON &&
-    browserFallbackReady
-  ) {
-    try {
-      await beginYouTubeQueueProbe({
-        database,
-        targetUri: getProcessAudioTargetUri('youtube'),
-        ownerId: `browser-status:${Date.now()}`,
-        probeMode: 'browser_fallback',
-      });
-      ({ queueState, deferredCount } = await getYouTubeQueueSnapshot(database));
-    } catch (error) {
-      logger.warn('Failed to schedule browser fallback YouTube queue probe while reading status', {
-        error,
-      });
-      ({ queueState, deferredCount } = await getYouTubeQueueSnapshot(database));
-    }
-  }
 
   return buildYouTubeCookieStatus(cookiesSnapshot.exists(), metadata, queueState, deferredCount, {
     configured: browserFallbackStatus.configured,
@@ -119,6 +82,13 @@ export const getYouTubeCookieStatus = async (database: Database): Promise<GetYou
     lastErrorCode: browserFallbackStatus.lastErrorCode,
     lastErrorMessage: browserFallbackStatus.lastErrorMessage,
   });
+};
+
+/** Pure validation belongs before creating an effects-started credential lease. */
+export const validateYouTubeCookiesInput = (input: SetYouTubeCookiesInput): void => {
+  if (!input || typeof input.cookiesBase64 !== 'string')
+    throw new HttpsError('invalid-argument', 'Cookie file content is required.');
+  validateCookiesText(decodeBase64(input.cookiesBase64));
 };
 
 export const writeYouTubeCookies = async (
@@ -152,10 +122,7 @@ export const writeYouTubeCookies = async (
     disabledUntil: null,
   };
 
-  await Promise.all([
-    database.ref(COOKIE_KEY).set(normalizedBase64),
-    database.ref(COOKIE_META_KEY).set(metadata),
-  ]);
+  await Promise.all([database.ref(COOKIE_KEY).set(normalizedBase64), database.ref(COOKIE_META_KEY).set(metadata)]);
 
   const { queueState, deferredCount } = await getYouTubeQueueSnapshot(database);
   return buildYouTubeCookieStatus(true, metadata, queueState, deferredCount);

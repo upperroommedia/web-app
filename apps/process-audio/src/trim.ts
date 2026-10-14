@@ -40,7 +40,8 @@ const trim = async (
   customMetadata: CustomMetadata,
   startTime?: number,
   duration?: number,
-  ctx?: LogContext
+  ctx?: LogContext,
+  sourceBucket: Bucket = bucket
 ): Promise<File> => {
   const log = createLoggerWithContext(ctx);
 
@@ -49,7 +50,7 @@ const trim = async (
   // Download the raw audio source from storage
   const rawSourceFile = createTempFile(`raw-${path.basename(storageFilePath)}`, tempFiles);
   log.debug('Downloading raw audio source', { source: storageFilePath, destination: rawSourceFile });
-  await bucket.file(storageFilePath).download({ destination: rawSourceFile });
+  await sourceBucket.file(storageFilePath).download({ destination: rawSourceFile });
 
   const outputFile = bucket.file(outputFilePath);
   const contentDisposition = customMetadata.title

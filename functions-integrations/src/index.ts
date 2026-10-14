@@ -23,9 +23,7 @@ import createnewsubsplashlist from '../../functions/src/createNewSubsplashList';
 import deletesubsplashlist from '../../functions/src/deleteSubsplashList';
 import editsubsplashlist from '../../functions/src/editSubsplashList';
 import repopulatelistfromspeakeritems from '../../functions/src/Scrapers/repopulateListFromSpeakerItems';
-import tagitemsinlist from '../../functions/src/Scrapers/tagItemsInList';
 import { fixPhantomListItems } from '../../functions/src/Scrapers/fixPhantomListItems';
-import { updateSubsplashTag } from '../../functions/src/Scrapers/updateSubsplashTag';
 import backfillholyweeklists from '../../functions/src/backfillHolyWeekLists';
 
 exports.generatesecuredapikey = generatesecuredapikey;
@@ -43,7 +41,5 @@ exports.createnewsubsplashlist = createnewsubsplashlist;
 exports.deletesubsplashlist = deletesubsplashlist;
 exports.editsubsplashlist = editsubsplashlist;
 exports.repopulatelistfromspeakeritems = repopulatelistfromspeakeritems;
-exports.tagitemsinlist = tagitemsinlist;
 exports.fixphantomlistitems = fixPhantomListItems;
-exports.updatesubsplashtag = updateSubsplashTag;
 exports.backfillholyweeklists = backfillholyweeklists;

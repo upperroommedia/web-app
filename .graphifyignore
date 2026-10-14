@@ -1,0 +1,33 @@
+# Build outputs only; keep hand-written source and tests in the graph.
+/.husky/_/
+/functions/lib/
+/functions-core/lib/
+/functions-media/lib/
+/functions-image/lib/
+/functions-integrations/lib/
+/function-kits/firestore-send-email/lib/
+/function-kits/firestore-algolia-search/lib/
+/function-kits/image-processing-api/source/lib/
+/packages/orchestration/lib/
+/apps/temporal-worker/lib/
+/apps/temporal-worker/dist/
+/apps/process-audio/dist/
+/apps/browser-fallback/dist/
+/apps/web/.next/
+# Adjacent TypeScript compiler output (same scope as these packages' tsconfig).
+/packages/shared/*.js
+/packages/shared/**/*.js
+/packages/shared/*.d.ts
+/packages/shared/**/*.d.ts
+/packages/shared/*.js.map
+/packages/shared/**/*.js.map
+/packages/shared/*.d.ts.map
+/packages/shared/**/*.d.ts.map
+/packages/contracts/*.js
+/packages/contracts/**/*.js
+/packages/contracts/*.d.ts
+/packages/contracts/**/*.d.ts
+/packages/contracts/*.js.map
+/packages/contracts/**/*.js.map
+/packages/contracts/*.d.ts.map
+/packages/contracts/**/*.d.ts.map
