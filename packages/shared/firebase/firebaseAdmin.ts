@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
-import { getApp, getApps, initializeApp } from 'firebase-admin/app';
+import { getApp, getApps, initializeApp, deleteApp } from 'firebase-admin/app';
+import { recordSharedFirebaseAppCreation } from './firebaseAdminOwnership';
 import { getAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
 import { getDatabase } from 'firebase-admin/database';
@@ -63,10 +64,16 @@ if (!getApps().length) {
     process.env.FIREBASE_AUTH_EMULATOR_HOST = '127.0.0.1:9099';
   }
 
-  initializeApp({
+  const createdApp = initializeApp({
     projectId,
     storageBucket: getFirebaseStorageBucket(),
     databaseURL: getFirebaseDatabaseUrl(),
+  });
+  recordSharedFirebaseAppCreation({
+    app: createdApp,
+    isRegistered: () => getApps().includes(createdApp),
+    terminateFirestore: () => getFirestore(createdApp).terminate(),
+    deleteApp: () => deleteApp(createdApp),
   });
 }
 // The application exposes only its configured services; SDK types and static

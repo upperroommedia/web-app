@@ -4,9 +4,12 @@ import { Runtime } from '@temporalio/worker';
 export function initializeWorkerObservability(
   projectId: string,
   buildId: string,
-  queues: readonly string[] = []
-): void {
-  Runtime.install({
+  queues: readonly string[] = [],
+  onRuntimeInstalled?: (runtime: Runtime) => void
+): Runtime {
+  const runtime = Runtime.install({
+    // The application drains dispatch before workers and owns every signal.
+    shutdownSignals: [],
     telemetryOptions: {
       metrics: {
         prometheus: {
@@ -16,6 +19,8 @@ export function initializeWorkerObservability(
       },
     },
   });
+  // Capture ownership even if subsequent Sentry initialization fails.
+  onRuntimeInstalled?.(runtime);
   // Own the process client before loading shared adapters, even when reporting is disabled.
   Sentry.init({
     dsn: process.env.TEMPORAL_SENTRY_DSN,
@@ -69,6 +74,7 @@ export function initializeWorkerObservability(
       return event;
     },
   });
+  return runtime;
 }
 export function reportWorkerFailure(code: string): void {
   if (process.env.TEMPORAL_SENTRY_DSN) Sentry.captureException(new Error(code));

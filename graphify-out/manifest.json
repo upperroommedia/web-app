@@ -3230,8 +3230,8 @@
     "semantic_hash": "d7ab97e2dbac9edf02e006756ebc91d8"
   },
   "packages/shared/firebase/firebaseAdmin.ts": {
-    "mtime": 1791961999.4254098,
-    "ast_hash": "a2c85db1fe9aaa704401f081b43d2902",
+    "mtime": 1791965881.233707,
+    "ast_hash": "bf13bba9d90d45795ca991cb44fc40f8",
     "semantic_hash": ""
   },
   "packages/shared/firebase/firestore.ts": {
@@ -4550,8 +4550,8 @@
     "semantic_hash": ""
   },
   "apps/temporal-worker/src/index.ts": {
-    "mtime": 1791961998.1978703,
-    "ast_hash": "a6d089d7f9ed65602bae18618b553f82",
+    "mtime": 1791966200.966298,
+    "ast_hash": "c3329f95b99051e986243010fad78288",
     "semantic_hash": ""
   },
   "apps/temporal-worker/src/integration/local-stack.test.ts": {
@@ -4690,8 +4690,8 @@
     "semantic_hash": ""
   },
   "apps/temporal-worker/src/runtime/observability.ts": {
-    "mtime": 1791961998.2088199,
-    "ast_hash": "0ea546da2c0eae6b1ec33da5efe91a59",
+    "mtime": 1791965817.6262567,
+    "ast_hash": "debede802f0bba109e1d5648b287684f",
     "semantic_hash": ""
   },
   "apps/temporal-worker/src/runtime/private-compilation.test.ts": {
@@ -6830,13 +6830,13 @@
     "semantic_hash": ""
   },
   "scripts/temporal-platform.mjs": {
-    "mtime": 1791961999.6328697,
-    "ast_hash": "a9c676d6cc1bf34857e0816055ccf0bd",
+    "mtime": 1791966309.957497,
+    "ast_hash": "623d9f0618eed643ff1728e0c36e5e30",
     "semantic_hash": ""
   },
   "scripts/temporal-platform.test.mjs": {
-    "mtime": 1791961999.6339304,
-    "ast_hash": "a34b1c3a845d277d5263748f19ecf1fe",
+    "mtime": 1791966309.9697785,
+    "ast_hash": "a6bca0288e8710050c1ea1ce7ad2eeac",
     "semantic_hash": ""
   },
   "scripts/temporal-reconcile-account-execution.mjs": {
@@ -6955,8 +6955,8 @@
     "semantic_hash": ""
   },
   "apps/temporal-worker/README.md": {
-    "mtime": 1791961998.1946237,
-    "ast_hash": "f219fab29c1093a579e4d030b5fac303",
+    "mtime": 1791965985.4038424,
+    "ast_hash": "87f354b14493ad74554f50a662885cf9",
     "semantic_hash": ""
   },
   "docs/NEXT_COMPILER.md": {
@@ -7652,6 +7652,36 @@
   "docs/PLAYER_MIGRATION.md": {
     "mtime": 1791962822.2050345,
     "ast_hash": "ee0ba8880f47d174d31bf619b4a921d3",
+    "semantic_hash": ""
+  },
+  "apps/temporal-worker/src/integration/worker-lifecycle.test.ts": {
+    "mtime": 1791966601.1930134,
+    "ast_hash": "e47775e310115219a87ba261cd4e6791",
+    "semantic_hash": ""
+  },
+  "apps/temporal-worker/src/runtime/entrypoint-lifecycle.test.ts": {
+    "mtime": 1791966256.9180074,
+    "ast_hash": "bfc74414ef951f4ee86fd0f755d3d59d",
+    "semantic_hash": ""
+  },
+  "apps/temporal-worker/src/runtime/shared-firebase-ownership.test.ts": {
+    "mtime": 1791966028.9852402,
+    "ast_hash": "f4b757578b41ba4115a825882b90de80",
+    "semantic_hash": ""
+  },
+  "apps/temporal-worker/src/runtime/worker-lifecycle.test.ts": {
+    "mtime": 1791965818.2980096,
+    "ast_hash": "ec968d41750444f4d61a3fd17971e631",
+    "semantic_hash": ""
+  },
+  "apps/temporal-worker/src/runtime/worker-lifecycle.ts": {
+    "mtime": 1791965888.082012,
+    "ast_hash": "f9c17c9661aeab245bdeb7ef7dbf0f4f",
+    "semantic_hash": ""
+  },
+  "packages/shared/firebase/firebaseAdminOwnership.ts": {
+    "mtime": 1791965888.145376,
+    "ast_hash": "ff81ba6d63cbcaae70c881449dbf20e2",
     "semantic_hash": ""
   }
 }

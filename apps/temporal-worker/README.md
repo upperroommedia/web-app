@@ -198,3 +198,40 @@ After replacing the worker process, the same handle must return the same run
 ID and `waiting` state. Signal `workerRestartProbe.release` to finish the probe.
 This checks ordinary original-run replay after a worker restart; it does not
 attest application effects or authorize disaster recovery.
+
+## Process shutdown ownership
+
+The application owns SIGTERM, SIGINT, SIGQUIT and SIGUSR2. The existing Temporal
+SDK Runtime installation uses `shutdownSignals: []` before any native connection
+is created; metrics and Sentry initialization remain in that same installation.
+Signal, credential-rotation, fatal worker and finally paths share one shutdown
+promise. Probes stop immediately, then outbox dispatch stops before requesting
+shutdown of each RUNNING worker once. All actual `run()` outcomes settle before
+SDK services are closed. The existing two-minute activity grace remains; no
+SDK force timeout or forced process exit declares an active activity drained.
+
+The side-effect-free shared Firebase ownership registry records an identity only
+at the actual `initializeApp` creation point. Teardown uses that creator SDK's
+bound functions, validates the default app's exact identity/project/registration,
+then terminates Firestore and deletes the owned app (including RTDB sockets and
+token-refresh timers). Pre-existing or replaced apps are never claimed or
+closed. Temporal client/native connections and Runtime close afterward. Sentry
+flushes last, and Node exits naturally. Every cleanup stage is attempted after
+drain; failures retain original causes in an AggregateError and exit nonzero.
+Production diagnostics expose bounded stage/error classes rather than provider
+inputs or credentials.
+
+The lifecycle unit/wiring suites cover concurrent shutdown, ordered drain,
+startup failures and app ownership. `src/integration/worker-lifecycle.test.ts`
+spawns the actual compiled entrypoint with local Temporal and the dedicated
+Firebase test emulators, keeps genuine RTDB and Firestore connections open, then
+requires natural exit0 after repeated signals. Its kill watchdog is failure
+cleanup only. Build the worker/shared dependencies first and run it serially via
+`firebase emulators:exec --config firebase.test.json`; never point this suite at
+a cloud project or a shared live dev emulator. A passing unit suite alone does
+not prove natural process exit or live rollout behavior.
+
+SDK authority: @temporalio/worker1.24.0 bundled RuntimeOptions/Worker types and
+source, Firebase Admin14.5.0 app/RTDB teardown implementation, and the official
+[Runtime options](https://typescript.temporal.io/api/interfaces/worker.RuntimeOptions).
+No SDK version migration or automated codemod is involved in this lifecycle fix.
