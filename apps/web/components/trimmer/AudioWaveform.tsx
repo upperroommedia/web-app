@@ -1,15 +1,17 @@
-import { useEffect, useRef, useState, memo, useCallback, useMemo } from 'react';
+import { useEffect, useRef, useState, memo, useMemo } from 'react';
 import Box from '@mui/material/Box';
-import { alpha, useTheme } from '@mui/material/styles';
+import { useTheme } from '@mui/material/styles';
 import { colors } from '../../styles/theme';
-import { keyframes } from '@mui/system';
-import { logWaveformPreviewFailure, readWaveformAudioData } from './trimmerMedia';
+import { waveformPreviewService } from './waveformPreview';
+import type { WaveformPreview } from './waveformPcm';
 
 interface AudioWaveformProps {
   /** URL of the audio file */
   url: string;
   /** Original local file/blob, if the URL is a browser object URL. */
   audioBlob?: Blob;
+  /** Actual duration from the playable media element, never caller file labels. */
+  duration?: number;
   /** Height of the waveform in pixels */
   height?: number;
   /** Color of the waveform bars */
@@ -17,19 +19,17 @@ interface AudioWaveformProps {
 }
 
 /**
- * Audio waveform visualization using Web Audio API and Canvas.
- * Decodes audio and renders a visual waveform representation.
+ * Optional bounded PCM peaks rendered on Canvas; playback does not depend on them.
  */
-function AudioWaveform({ url, audioBlob, height = 80, color }: AudioWaveformProps) {
+function AudioWaveform({ audioBlob, duration, height = 80, color }: AudioWaveformProps) {
   const theme = useTheme();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const [peaks, setPeaks] = useState<number[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const peaksComputedForUrl = useRef<string | null>(null);
-  const waveformUnavailableForUrl = useRef<string | null>(null);
-  const [barCount, setBarCount] = useState(0);
+  const [preview, setPreview] = useState<{ source: Blob; duration: number; result: WaveformPreview }>();
+  const peaks =
+    preview && preview.source === audioBlob && preview.duration === duration && preview.result.status === 'ready'
+      ? preview.result.peaks
+      : undefined;
 
   // Use theme accent color if not provided
   const waveformColor = useMemo(
@@ -37,217 +37,55 @@ function AudioWaveform({ url, audioBlob, height = 80, color }: AudioWaveformProp
     [color, theme.palette.mode]
   );
 
-  // Compute peaks from audio data
-  const computePeaks = useCallback(
-    async (audioBuffer: AudioBuffer): Promise<number[]> => {
-      const channelData = audioBuffer.getChannelData(0); // Use first channel
-      if (barCount <= 0) return [];
-
-      const samplesPerBar = Math.floor(channelData.length / barCount);
-      const computedPeaks: number[] = [];
-
-      for (let i = 0; i < barCount; i++) {
-        const start = i * samplesPerBar;
-        const end = Math.min(start + samplesPerBar, channelData.length);
-
-        // Find max absolute value in this segment
-        let max = 0;
-        for (let j = start; j < end; j++) {
-          const absValue = Math.abs(channelData[j]);
-          if (absValue > max) max = absValue;
-        }
-        computedPeaks.push(max);
+  // Optional local PCM preview only. Compressed/remote recordings remain fully
+  // playable and trimmable without downloading or decoding their entire content.
+  useEffect(() => {
+    if (!audioBlob || !duration || !Number.isFinite(duration)) return;
+    let current = true;
+    const stop = waveformPreviewService.observe(
+      audioBlob,
+      duration,
+      () => new Worker(new URL('./waveform.worker.ts', import.meta.url)),
+      (result) => {
+        if (current) setPreview({ source: audioBlob, duration, result });
       }
-
-      // Normalize peaks to 0-1 range
-      const maxPeak = Math.max(...computedPeaks, 0.01);
-      return computedPeaks.map((peak) => peak / maxPeak);
-    },
-    [barCount]
-  );
-
-  // Derive bar count from the visible width
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-
-    const updateBarCount = () => {
-      const width = container.clientWidth;
-      const targetBarWidth = 3; // px per bar including gap
-      const nextBarCount = Math.max(30, Math.floor(width / targetBarWidth));
-      setBarCount((prev) => (prev === nextBarCount ? prev : nextBarCount));
-    };
-
-    updateBarCount();
-
-    const resizeObserver = new ResizeObserver(updateBarCount);
-    resizeObserver.observe(container);
-
+    );
     return () => {
-      resizeObserver.disconnect();
+      current = false;
+      stop();
     };
-  }, []);
+  }, [audioBlob, duration]);
 
-  // Fetch and decode audio
+  // Resize redraws a fixed 8 KiB peak array; it never reads the source again.
   useEffect(() => {
-    // Skip if we've already computed peaks for this URL
-    if (
-      !barCount ||
-      peaksComputedForUrl.current === `${url}|${barCount}` ||
-      waveformUnavailableForUrl.current === url
-    ) {
-      return;
-    }
-
-    let cancelled = false;
-    const abortController = new AbortController();
-
-    const loadAudio = async () => {
-      let audioContext: AudioContext | null = null;
-      setIsLoading(true);
-      setError(null);
-
-      try {
-        const arrayBuffer = await readWaveformAudioData({
-          url,
-          blob: audioBlob,
-          signal: abortController.signal,
-        });
-        if (cancelled) return;
-
-        // Decode audio
-        const AudioContextCtor =
-          window.AudioContext || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-        if (!AudioContextCtor) {
-          throw new Error('Web Audio API is not supported in this browser');
-        }
-        audioContext = new AudioContextCtor();
-        const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-        if (cancelled) return;
-
-        // Compute peaks
-        const computedPeaks = await computePeaks(audioBuffer);
-        if (cancelled) return;
-
-        setPeaks(computedPeaks);
-        peaksComputedForUrl.current = `${url}|${barCount}`;
-        waveformUnavailableForUrl.current = null;
-      } catch (err) {
-        if (!cancelled) {
-          logWaveformPreviewFailure(err);
-          waveformUnavailableForUrl.current = url;
-          setError('Failed to load waveform');
-        }
-      } finally {
-        if (audioContext) {
-          await audioContext.close().catch(() => {});
-        }
-        if (!cancelled) {
-          setIsLoading(false);
-        }
-      }
-    };
-
-    loadAudio();
-
-    return () => {
-      cancelled = true;
-      abortController.abort();
-    };
-  }, [url, audioBlob, computePeaks, barCount]);
-
-  // Draw waveform on canvas
-  useEffect(() => {
-    if (!canvasRef.current || peaks.length === 0) return;
-
     const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    // Get device pixel ratio for sharp rendering
-    const dpr = window.devicePixelRatio || 1;
-
-    // Set canvas size accounting for device pixel ratio
-    const containerWidth = containerRef.current?.clientWidth || canvas.clientWidth;
-    canvas.width = containerWidth * dpr;
-    canvas.height = height * dpr;
-    canvas.style.width = `${containerWidth}px`;
-    canvas.style.height = `${height}px`;
-    ctx.scale(dpr, dpr);
-
-    // Clear canvas
-    ctx.clearRect(0, 0, containerWidth, height);
-
-    // Calculate bar dimensions
-    const barWidth = containerWidth / peaks.length;
-    const barGap = Math.max(1, barWidth * 0.2);
-    const actualBarWidth = barWidth - barGap;
-    const centerY = height / 2;
-    const maxBarHeight = height * 0.45; // Leave some padding
-
-    // Draw mirrored waveform
-    ctx.fillStyle = waveformColor;
-
-    peaks.forEach((peak, index) => {
-      const x = index * barWidth + barGap / 2;
-      const barHeight = Math.max(2, peak * maxBarHeight);
-
-      // Draw top half
-      ctx.fillRect(x, centerY - barHeight, actualBarWidth, barHeight);
-
-      // Draw bottom half (mirrored)
-      ctx.fillRect(x, centerY, actualBarWidth, barHeight);
-    });
-  }, [peaks, height, waveformColor]);
-
-  // Handle resize
-  useEffect(() => {
-    if (!canvasRef.current || peaks.length === 0) return;
-
-    const handleResize = () => {
-      // Trigger re-render by updating a dummy state
-      // The canvas will be redrawn in the drawing effect
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-
+    const container = containerRef.current;
+    if (!canvas || !container || !peaks) return;
+    const draw = () => {
+      const width = Math.min(4096, Math.max(1, container.clientWidth));
+      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      canvas.width = Math.ceil(width * dpr);
+      canvas.height = Math.ceil(height * dpr);
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
-
-      const dpr = window.devicePixelRatio || 1;
-      const containerWidth = containerRef.current?.clientWidth || canvas.clientWidth;
-      canvas.width = containerWidth * dpr;
-      canvas.height = height * dpr;
-      canvas.style.width = `${containerWidth}px`;
-      canvas.style.height = `${height}px`;
       ctx.scale(dpr, dpr);
-
-      // Redraw
-      ctx.clearRect(0, 0, containerWidth, height);
-
-      const barWidth = containerWidth / peaks.length;
-      const barGap = Math.max(1, barWidth * 0.2);
-      const actualBarWidth = barWidth - barGap;
-      const centerY = height / 2;
-      const maxBarHeight = height * 0.45;
-
+      ctx.clearRect(0, 0, width, height);
       ctx.fillStyle = waveformColor;
-
-      peaks.forEach((peak, index) => {
-        const x = index * barWidth + barGap / 2;
-        const barHeight = Math.max(2, peak * maxBarHeight);
-        ctx.fillRect(x, centerY - barHeight, actualBarWidth, barHeight);
-        ctx.fillRect(x, centerY, actualBarWidth, barHeight);
-      });
+      const bars = Math.max(1, Math.min(peaks.length, Math.floor(width / 3)));
+      const barWidth = width / bars;
+      for (let bar = 0; bar < bars; bar++) {
+        const from = Math.floor((bar * peaks.length) / bars);
+        const until = Math.floor(((bar + 1) * peaks.length) / bars);
+        let peak = 0;
+        for (let i = from; i < until; i++) peak = Math.max(peak, peaks[i]);
+        const barHeight = Math.max(1, peak * height * 0.45);
+        ctx.fillRect(bar * barWidth, height / 2 - barHeight, Math.max(1, barWidth - 1), barHeight * 2);
+      }
     };
-
-    const resizeObserver = new ResizeObserver(handleResize);
-    if (containerRef.current) {
-      resizeObserver.observe(containerRef.current);
-    }
-
-    return () => {
-      resizeObserver.disconnect();
-    };
+    draw();
+    const observer = new ResizeObserver(draw);
+    observer.observe(container);
+    return () => observer.disconnect();
   }, [peaks, height, waveformColor]);
 
   return (
@@ -259,10 +97,16 @@ function AudioWaveform({ url, audioBlob, height = 80, color }: AudioWaveformProp
         overflow: 'hidden',
       }}
     >
-      {isLoading ? (
-        <WaveformLoadingAnimation color={waveformColor} height={height} barCount={barCount / 2} />
-      ) : error ? (
+      {peaks ? (
+        <canvas
+          ref={canvasRef}
+          aria-hidden="true"
+          style={{ display: 'block', width: '100%', height: '100%', opacity: 0.5 }}
+        />
+      ) : (
         <Box
+          role="img"
+          aria-label="Waveform preview unavailable. Audio playback and trimming are still available."
           sx={{
             position: 'absolute',
             inset: 0,
@@ -273,71 +117,7 @@ function AudioWaveform({ url, audioBlob, height = 80, color }: AudioWaveformProp
             opacity: 0.3,
           }}
         />
-      ) : (
-        <canvas
-          ref={canvasRef}
-          style={{
-            display: 'block',
-            width: '100%',
-            height: '100%',
-            opacity: 0.5,
-          }}
-        />
       )}
-    </Box>
-  );
-}
-
-// Animated waveform loading placeholder
-const waveAnimation = keyframes`
-  0%, 100% {
-    transform: scaleY(0.3);
-  }
-  50% {
-    transform: scaleY(1);
-  }
-`;
-
-function WaveformLoadingAnimation({ color, height, barCount }: { color: string; height: number; barCount: number }) {
-  const safeBarCount = Math.max(30, barCount);
-  const bars = useMemo(() => {
-    return Array.from({ length: safeBarCount }, (_, i) => {
-      // Create a wave pattern with deterministic "noise" to avoid re-randomizing every render
-      const t = safeBarCount > 1 ? i / (safeBarCount - 1) : 0;
-      const envelope = Math.sin(Math.PI * t); // Taller in the middle, tapered edges
-      const ripple = 0.6 + 0.4 * Math.sin(t * Math.PI * 4 + i * 0.35);
-      const noise = 0.85 + 0.15 * Math.sin(i * 12.9898);
-      const baseHeight = (0.2 + 0.8 * envelope) * ripple * noise;
-      const duration = 1.05 + (i % 10) * 0.04;
-      const opacity = 0.2 + envelope * 0.6;
-      return { baseHeight, duration, opacity };
-    });
-  }, [safeBarCount]);
-
-  return (
-    <Box
-      sx={{
-        position: 'absolute',
-        inset: 0,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-      }}
-    >
-      {bars.map((bar, i) => (
-        <Box
-          key={i}
-          sx={{
-            flex: 1,
-            mx: '1px',
-            height: `${bar.baseHeight * height * 0.8}px`,
-            bgcolor: alpha(color, bar.opacity),
-            borderRadius: '2px',
-            animation: `${waveAnimation} ${bar.duration}s ease-in-out infinite`,
-            transformOrigin: 'center',
-          }}
-        />
-      ))}
     </Box>
   );
 }

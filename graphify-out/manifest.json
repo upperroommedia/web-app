@@ -295,8 +295,8 @@
     "semantic_hash": "dea6f78d0b082ef3b0aec2320ca55127"
   },
   "apps/web/components/DropZone.tsx": {
-    "mtime": 1791956872.0202293,
-    "ast_hash": "e6250a4d68d71225cacf7f962ae6997b",
+    "mtime": 1791960278.419254,
+    "ast_hash": "e72e0df22363b8e5887d585573139cdc",
     "semantic_hash": ""
   },
   "apps/web/components/EditSermonForm.tsx": {
@@ -495,9 +495,9 @@
     "semantic_hash": "2c2f6b9607ab5fa220cd18900f2763c2"
   },
   "apps/web/components/audioTrimmerComponents/AudioTrimmer.tsx": {
-    "mtime": 1791956872.0310864,
-    "ast_hash": "386449a8a7885d9c03f09aa9a2eda095",
-    "semantic_hash": "386449a8a7885d9c03f09aa9a2eda095"
+    "mtime": 1791960278.4199712,
+    "ast_hash": "bf1095e642db1f9e3c6340e7a91fefb9",
+    "semantic_hash": ""
   },
   "apps/web/components/audioTrimmerComponents/AudioTrimmerComponent.tsx": {
     "mtime": 1791956872.0311837,
@@ -515,9 +515,9 @@
     "semantic_hash": "398bbf833dd2f13b1fcf0d2478114328"
   },
   "apps/web/components/trimmer/AudioWaveform.tsx": {
-    "mtime": 1791956872.032988,
-    "ast_hash": "e39de836eb8ffd78425321ea6dbc5869",
-    "semantic_hash": "e39de836eb8ffd78425321ea6dbc5869"
+    "mtime": 1791960278.4206474,
+    "ast_hash": "273bc32619667274b49929185c0bee66",
+    "semantic_hash": ""
   },
   "apps/web/components/trimmer/EditableTimeInput.tsx": {
     "mtime": 1791956872.0332973,
@@ -550,9 +550,9 @@
     "semantic_hash": "df5adedf0a7555b127706804ff931bcc"
   },
   "apps/web/components/trimmer/trimmerMedia.ts": {
-    "mtime": 1791956872.0347486,
-    "ast_hash": "3e9f17f63a39dfcb6036209fd7de242b",
-    "semantic_hash": "3e9f17f63a39dfcb6036209fd7de242b"
+    "mtime": 1791960278.4211953,
+    "ast_hash": "452d2b89b6b6253b74ffbf0978c4326b",
+    "semantic_hash": ""
   },
   "apps/web/components/trimmer/useTrimmerDrag.ts": {
     "mtime": 1791956872.0349746,
@@ -605,8 +605,8 @@
     "semantic_hash": ""
   },
   "apps/web/components/uploaderComponents/UploaderComponent.tsx": {
-    "mtime": 1791956872.03887,
-    "ast_hash": "234b43bfd401ace717e63df25f09790e",
+    "mtime": 1791960278.4242227,
+    "ast_hash": "161d13320d69dcfff1d44a54806f54c9",
     "semantic_hash": ""
   },
   "apps/web/components/uploaderComponents/UploaderDatePicker.tsx": {
@@ -925,8 +925,8 @@
     "semantic_hash": ""
   },
   "apps/web/tests/audio-trimmer.spec.ts": {
-    "mtime": 1791956872.0876448,
-    "ast_hash": "706e75ac363217b18945e565abad1e92",
+    "mtime": 1791960278.4248662,
+    "ast_hash": "4f87f578375da3533e65a0d2b7170d2d",
     "semantic_hash": ""
   },
   "apps/web/tests/helpers/seedPlayableSermon.ts": {
@@ -985,9 +985,9 @@
     "semantic_hash": ""
   },
   "apps/web/tests/utils/trimmerMedia.test.ts": {
-    "mtime": 1791956872.0972419,
-    "ast_hash": "db79ab6acab5cfb6f6082568b9d82b8e",
-    "semantic_hash": "db79ab6acab5cfb6f6082568b9d82b8e"
+    "mtime": 1791960278.4254754,
+    "ast_hash": "40e14bb8517a4bb508277a74767762ef",
+    "semantic_hash": ""
   },
   "apps/web/tests/youtube-trimmer.spec.ts": {
     "mtime": 1791956872.0976093,
@@ -7437,6 +7437,46 @@
   "docs/DEPENDENCY_SECURITY.md": {
     "mtime": 1791959174.8248858,
     "ast_hash": "7d889bf0e3a34e072960b844cc76522d",
+    "semantic_hash": ""
+  },
+  "apps/web/components/trimmer/waveform.worker.ts": {
+    "mtime": 1791960278.4213703,
+    "ast_hash": "a284a14f46adbd7162f17f1dac6da69c",
+    "semantic_hash": ""
+  },
+  "apps/web/components/trimmer/waveformPcm.ts": {
+    "mtime": 1791960278.4215448,
+    "ast_hash": "c9f8141a5c7b77e33e86445c069ba390",
+    "semantic_hash": ""
+  },
+  "apps/web/components/trimmer/waveformPreview.ts": {
+    "mtime": 1791960278.421711,
+    "ast_hash": "7a840f76898471ab59c11991266b4c39",
+    "semantic_hash": ""
+  },
+  "apps/web/hooks/useOwnedAudioSource.ts": {
+    "mtime": 1791960278.424435,
+    "ast_hash": "70dfafd93eb2e50268577b9ac68638d0",
+    "semantic_hash": ""
+  },
+  "apps/web/tests/utils/waveformPcm.test.ts": {
+    "mtime": 1791960278.4256546,
+    "ast_hash": "2ef5e805c32737f86a3ceb20fa23d7ff",
+    "semantic_hash": ""
+  },
+  "apps/web/tests/utils/waveformPreview.test.ts": {
+    "mtime": 1791960278.4258614,
+    "ast_hash": "cf0cc98d9b52792e86d49d0ba0dbf1a3",
+    "semantic_hash": ""
+  },
+  "apps/web/utils/audioSourceOwnership.test.ts": {
+    "mtime": 1791960278.4260492,
+    "ast_hash": "01d0fb42dad0b965813a221e97e5a757",
+    "semantic_hash": ""
+  },
+  "apps/web/utils/audioSourceOwnership.ts": {
+    "mtime": 1791960278.4262059,
+    "ast_hash": "be5d0c422c4f6124e6902d0dd98fa56f",
     "semantic_hash": ""
   }
 }

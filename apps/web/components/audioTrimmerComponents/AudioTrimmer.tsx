@@ -58,6 +58,8 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({
       audio.removeEventListener('canplay', handleMediaReady);
       audio.removeEventListener('error', handleMediaError);
       audio.pause();
+      audio.removeAttribute('src');
+      audio.load();
       if (audioRef.current === audio) {
         audioRef.current = null;
       }
@@ -118,8 +120,8 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({
   );
 
   const waveformElement = useMemo(
-    () => <AudioWaveform url={url} audioBlob={audioBlob} height={80} />,
-    [url, audioBlob]
+    () => <AudioWaveform url={url} audioBlob={audioBlob} duration={duration} height={80} />,
+    [url, audioBlob, duration]
   );
 
   return (

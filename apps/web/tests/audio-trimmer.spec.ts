@@ -259,3 +259,87 @@ test.describe('Audio trimmer', () => {
     expect(browserErrors).toEqual([]);
   });
 });
+
+test.describe('Bounded optional waveform lifetime', () => {
+  test('reuses local PCM peaks across viewport changes and releases its preview on SPA navigation', async ({
+    page,
+  }) => {
+    await page.addInitScript(() => {
+      const probe = { created: [] as string[], revoked: [] as string[], previewReads: 0 };
+      Object.assign(window, { __waveformLifetimeProbe: probe });
+      const create = URL.createObjectURL.bind(URL),
+        revoke = URL.revokeObjectURL.bind(URL);
+      URL.createObjectURL = (value) => {
+        const url = create(value);
+        if (value instanceof File && value.name === 'bounded-preview.wav') probe.created.push(url);
+        return url;
+      };
+      URL.revokeObjectURL = (url) => {
+        probe.revoked.push(url);
+        revoke(url);
+      };
+      const post = Worker.prototype.postMessage;
+      Worker.prototype.postMessage = function (
+        message: unknown,
+        options?: Transferable[] | StructuredSerializeOptions
+      ) {
+        if (
+          message &&
+          typeof message === 'object' &&
+          'blob' in message &&
+          message.blob instanceof Blob &&
+          'duration' in message &&
+          typeof message.duration === 'number'
+        )
+          probe.previewReads++;
+        Reflect.apply(post, this, [message, options ?? {}]);
+      };
+    });
+    await loginAsDevAdmin(page);
+    const dropzone = page.getByText('Drag & drop audio files here, or click to select files').locator('..');
+    await dropzone
+      .locator('input')
+      .setInputFiles({ name: 'bounded-preview.wav', mimeType: 'audio/wav', buffer: createSilentWav(1) });
+    await expect(page.getByTestId('audio-trim-timeline').locator('canvas')).toBeVisible();
+    const snapshot = () =>
+      page.evaluate(
+        () =>
+          (
+            window as unknown as {
+              __waveformLifetimeProbe: { created: string[]; revoked: string[]; previewReads: number };
+            }
+          ).__waveformLifetimeProbe
+      );
+    const before = await snapshot();
+    for (const width of [420, 800, 500, 1000, 360]) await page.setViewportSize({ width, height: 800 });
+    await expect(page.getByRole('button', { name: 'Play', exact: true })).toBeEnabled();
+    expect((await snapshot()).previewReads).toBe(before.previewReads);
+    page.on('dialog', (dialog) => dialog.accept());
+    await page.locator('a[href="/admin/activity"]').first().click();
+    await expect(page.getByRole('heading', { name: 'Activity', exact: true })).toBeVisible();
+    await expect
+      .poll(async () => {
+        const current = await snapshot();
+        return current.created.length > 0 && current.created.every((url) => current.revoked.includes(url));
+      })
+      .toBe(true);
+  });
+
+  test('keeps playback and trim controls available when optional preview exceeds its budget', async ({ page }) => {
+    await loginAsDevAdmin(page);
+    const dropzone = page.getByText('Drag & drop audio files here, or click to select files').locator('..');
+    // Input stays valid/playable PCM, but exceeds the preview's 32 MiB input budget.
+    await dropzone.locator('input').setInputFiles({
+      name: 'long-recording.wav',
+      mimeType: 'audio/wav',
+      buffer: createSilentWav(400, 44100),
+    });
+    await expect(page.getByRole('img', { name: /Waveform preview unavailable/ })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Play', exact: true })).toBeEnabled();
+    const start = page.getByRole('textbox', { name: 'Trim Start' });
+    await expect(start).toBeEnabled();
+    await start.fill('00:00:01.0');
+    await start.blur();
+    await expect(start).toHaveValue('00:00:01.0');
+  });
+});

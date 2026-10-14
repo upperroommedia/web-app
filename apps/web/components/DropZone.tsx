@@ -1,7 +1,6 @@
-import { Dispatch, SetStateAction, useCallback, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { FileRejection, useDropzone } from 'react-dropzone';
 import styles from '../styles/DropZone.module.css';
-import { AudioSource } from '../utils/uploadFile';
 import { UploaderFieldError } from '../context/types';
 import { getErrorMessage, showError } from './uploaderComponents/utils';
 export interface UploadableFile {
@@ -10,13 +9,8 @@ export interface UploadableFile {
   preview: string;
 }
 
-export function revokeUploadableFilePreview(source: UploadableFile | undefined): void {
-  if (!source?.preview || !Url) return;
-  Url.revokeObjectURL(source.preview);
-}
-
 interface DropZoneProps {
-  setAudioSource: Dispatch<SetStateAction<AudioSource | undefined>>;
+  selectAudioFile: (file: File | undefined) => void;
   audioSourceError?: UploaderFieldError;
   setAudioSourceError: (error: boolean, message: string) => void;
 }
@@ -30,38 +24,24 @@ function fileTypeValidator(file: File) {
   return null;
 }
 
-let Url: typeof URL | null = null;
-if (typeof window !== 'undefined') {
-  Url = window.URL || (window as Window & { webkitURL?: typeof URL }).webkitURL || null;
-}
-const DropZone = ({ setAudioSource, audioSourceError, setAudioSourceError }: DropZoneProps) => {
+const DropZone = ({ selectAudioFile, audioSourceError, setAudioSourceError }: DropZoneProps) => {
   const [fileRejections, setFileRejections] = useState<FileRejection[]>([]);
   const onDrop = useCallback(
     (acceptedFiles: File[], fileRejections: FileRejection[]) => {
       setFileRejections(fileRejections);
       if (acceptedFiles.length === 0) {
-        setAudioSource(undefined);
+        selectAudioFile(undefined);
         setAudioSourceError(true, 'You must select an audio source before uploading');
         return;
       }
       setAudioSourceError(false, '');
-      if (!Url) {
-        setAudioSourceError(true, 'Unable to access browser URL API for file preview');
-        return;
+      try {
+        selectAudioFile(acceptedFiles[0]);
+      } catch {
+        setAudioSourceError(true, 'Unable to create an audio preview. Please select the file again.');
       }
-      const mappedAccepted = {
-        file: acceptedFiles[0],
-        preview: Url.createObjectURL(acceptedFiles[0]),
-        name: acceptedFiles[0].name.replace(/\.[^/.]+$/, ''),
-      };
-      setAudioSource((currentSource) => {
-        if (currentSource?.type === 'File') {
-          revokeUploadableFilePreview(currentSource.source);
-        }
-        return { source: mappedAccepted, type: 'File' };
-      });
     },
-    [setAudioSource, setAudioSourceError]
+    [selectAudioFile, setAudioSourceError]
   );
 
   const { getRootProps, getInputProps, isFocused } = useDropzone({
