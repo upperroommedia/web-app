@@ -1,3 +1,4 @@
+import { useProviderEnvironment } from '../../../context/provider/ProviderEnvironmentContext';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
@@ -110,6 +111,8 @@ const SpeakerImageSummary = ({ images }: { images: ImageType[] }) => {
 };
 
 const SpeakerDetailsPage = () => {
+  const environment = useProviderEnvironment();
+  const liveProviderLinks = !environment.loading && !environment.error && environment.status?.mode === 'live';
   const router = useRouter();
   const { user, loading } = useAuth();
   const speakerId = router.query.speakerId as string;
@@ -371,7 +374,7 @@ const SpeakerDetailsPage = () => {
                       />
                     </Stack>
                   </Box>
-                  {speaker.tagId && (
+                  {speaker.tagId && liveProviderLinks && (
                     <MuiLink
                       href={`https://dashboard.subsplash.com/-d/#/library/tags/speakers/${speaker.tagId}`}
                       target="_blank"
@@ -556,13 +559,17 @@ const SpeakerDetailsPage = () => {
                                       Subsplash list id:
                                     </Typography>
                                     <MuiLink
-                                      href={`https://dashboard.subsplash.com/-d/#/library/lists/standard/${speakerList.subsplashId}`}
+                                      href={
+                                        liveProviderLinks
+                                          ? `https://dashboard.subsplash.com/-d/#/library/lists/standard/${speakerList.subsplashId}`
+                                          : undefined
+                                      }
                                       target="_blank"
                                       rel="noreferrer"
                                       sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5 }}
                                     >
                                       <Typography variant="body2">{speakerList.subsplashId}</Typography>
-                                      <OpenInNewIcon fontSize="inherit" />
+                                      {liveProviderLinks && <OpenInNewIcon fontSize="inherit" />}
                                     </MuiLink>
                                   </Box>
                                 )}

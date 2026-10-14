@@ -5,6 +5,7 @@ import { mkdtemp, mkdir, writeFile, readFile, rm, symlink } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { assertCheckoutSource } from './temporal-deploy-source.mjs';
+import { providerRuntimeEnvironment } from './provider-runtime-environment.mjs';
 import { materializedPackageContents } from './materialize-catalog-for-firebase.mjs';
 import {
   firebaseEnvironmentSources,
@@ -224,7 +225,11 @@ test('Actual Firebase source surface permits exact current-project control gener
         for (const [file, original] of Object.entries(sourceFiles))
           await writeFile(
             join(root, file),
-            upsertFunctionFlags(original, { ...flagsForControl(generatedControl), TEMPORAL_RELEASE_COMMIT: commit })
+            upsertFunctionFlags(original, {
+              ...flagsForControl(generatedControl),
+              ...providerRuntimeEnvironment(project),
+              TEMPORAL_RELEASE_COMMIT: commit,
+            })
           );
         const options = { project, control: generatedControl };
         const legacyControl = {
@@ -236,7 +241,11 @@ test('Actual Firebase source surface permits exact current-project control gener
         for (const [file, original] of Object.entries(sourceFiles))
           await writeFile(
             join(root, file),
-            upsertFunctionFlags(original, { ...flagsForControl(legacyControl), TEMPORAL_RELEASE_COMMIT: commit })
+            upsertFunctionFlags(original, {
+              ...flagsForControl(legacyControl),
+              ...providerRuntimeEnvironment(project),
+              TEMPORAL_RELEASE_COMMIT: commit,
+            })
           );
         assert.equal(assertCheckoutSource(root, commit, { project, control: legacyControl }), commit);
         assert.throws(() => assertCheckoutSource(root, commit, options), /source differs/);
@@ -247,7 +256,11 @@ test('Actual Firebase source surface permits exact current-project control gener
         for (const [file, original] of Object.entries(sourceFiles))
           await writeFile(
             join(root, file),
-            upsertFunctionFlags(original, { ...flagsForControl(generatedControl), TEMPORAL_RELEASE_COMMIT: commit })
+            upsertFunctionFlags(original, {
+              ...flagsForControl(generatedControl),
+              ...providerRuntimeEnvironment(project),
+              TEMPORAL_RELEASE_COMMIT: commit,
+            })
           );
 
         assert.equal(assertCheckoutSource(root, commit, options), commit);
@@ -356,7 +369,11 @@ test('staging search env generation needs an explicit matching reviewed release 
       };
       await writeFile(
         join(root, file),
-        upsertFunctionFlags('# Provider settings\n', { ...flagsForControl(control), TEMPORAL_RELEASE_COMMIT: commit })
+        upsertFunctionFlags('# Provider settings\n', {
+          ...flagsForControl(control),
+          ...providerRuntimeEnvironment('urm-app-staging'),
+          TEMPORAL_RELEASE_COMMIT: commit,
+        })
       );
       const options = { project: 'urm-app-staging', control, release, includeStagingSearch: true };
       assert.equal(assertCheckoutSource(root, commit, options), commit);

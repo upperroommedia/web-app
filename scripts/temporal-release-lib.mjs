@@ -220,7 +220,8 @@ export function upsertFunctionFlags(contents, flags) {
     .split(/\r?\n/)
     .filter(
       (line) =>
-        line !== marker && !/^\s*(?:export\s+)?(?:TASK_ORCHESTRATOR_[A-Z_]+|TEMPORAL_RELEASE_COMMIT)\s*=/.test(line)
+        line !== marker &&
+        !/^\s*(?:export\s+)?(?:TASK_ORCHESTRATOR_[A-Z_]+|TEMPORAL_RELEASE_COMMIT|STAGING_PROVIDER_MODE)\s*=/.test(line)
     );
   while (lines.at(-1) === '') lines.pop();
   return [...lines, marker, ...Object.entries(flags).map(([key, value]) => `${key}=${value}`), ''].join('\n');

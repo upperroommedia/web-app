@@ -3,7 +3,7 @@ import { providerPayloadFingerprint } from './temporal/publishing/providerReceip
 import { assertSynchronousProviderMutationCompleted } from './temporal/publishing/providerMutationCompletion';
 import {reserveSubsplashAssociation} from './temporal/publishing/providerAssociations';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
-import axios from 'axios';
+import axios from './providerSandbox/http';
 import { logger } from 'firebase-functions/v2';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
 import { ImageType } from '@upperroom/shared/types/Image';

@@ -1,3 +1,4 @@
+import { useProviderEnvironment } from '../../context/provider/ProviderEnvironmentContext';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { NextPage } from 'next';
 import Alert from '@mui/material/Alert';
@@ -117,6 +118,9 @@ const AdvancedAdminPage: NextPage & { PageLayout?: React.ComponentType<{ childre
   const [notice, setNotice] = useState<NoticeState>(null);
 
   const isAdmin = user?.isAdmin() ?? false;
+  const environment = useProviderEnvironment();
+  const simulation = environment.status?.mode === 'sandbox';
+  const modeReady = !environment.loading && !environment.error && environment.status?.ready === true;
   const canRunScripts = isAdmin && user?.email?.trim().toLowerCase() === SCRIPT_RUNNER_EMAIL;
   const redirectUri = useMemo(() => {
     if (typeof window === 'undefined') {
@@ -128,7 +132,7 @@ const AdvancedAdminPage: NextPage & { PageLayout?: React.ComponentType<{ childre
   }, [status?.callbackPath]);
 
   const loadStatus = useCallback(async () => {
-    if (!isAdmin) {
+    if (!isAdmin || !modeReady) {
       setIsLoadingStatus(false);
       return;
     }
@@ -146,7 +150,7 @@ const AdvancedAdminPage: NextPage & { PageLayout?: React.ComponentType<{ childre
     } finally {
       setIsLoadingStatus(false);
     }
-  }, [isAdmin]);
+  }, [isAdmin, modeReady]);
 
   useEffect(() => {
     loadStatus();
@@ -174,7 +178,7 @@ const AdvancedAdminPage: NextPage & { PageLayout?: React.ComponentType<{ childre
   }, [loadStatus, router, router.isReady, router.query.message, router.query.soundcloud]);
 
   const startSoundCloudConnect = useCallback(async () => {
-    if (!status?.clientId || !redirectUri) {
+    if (!modeReady || !status?.clientId || !redirectUri) {
       setNotice({
         severity: 'error',
         text: 'SoundCloud client configuration is missing. Set SOUNDCLOUD_CLIENT_ID and SOUNDCLOUD_CLIENT_SECRET first.',
@@ -192,13 +196,17 @@ const AdvancedAdminPage: NextPage & { PageLayout?: React.ComponentType<{ childre
       >('createSoundCloudAuthSession');
 
       const { authorizeUrl } = await createAuthSession({ redirectUri });
-      window.location.assign(authorizeUrl);
+      const target = new URL(authorizeUrl);
+      if (simulation && (target.origin !== window.location.origin || target.pathname !== '/auth/soundcloud/sandbox')) {
+        throw new Error('The server did not return a staging simulation authorization page.');
+      }
+      window.location.assign(target.href);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to start the SoundCloud authorization flow.';
       setNotice({ severity: 'error', text: message });
       setIsConnecting(false);
     }
-  }, [redirectUri, status?.clientId]);
+  }, [redirectUri, status?.clientId, modeReady, simulation]);
 
   const runUpdateAllSpeakerTags = useCallback(async () => {
     if (!canRunScripts) {
@@ -357,11 +365,18 @@ const AdvancedAdminPage: NextPage & { PageLayout?: React.ComponentType<{ childre
               >
                 <Box>
                   <Typography variant="h6" fontWeight={700}>
-                    SoundCloud
+                    {simulation ? 'SoundCloud simulation' : 'SoundCloud'}
                   </Typography>
                   <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                    Uses SoundCloud&apos;s OAuth 2.1 authorization-code flow with PKCE. One admin login grants a refresh
-                    token that the server can use to rotate access tokens automatically for future publishes.
+                    {simulation ? (
+                      'Connect the simulated staging account to test authorization, token renewal and publishing. This does not connect a real SoundCloud account.'
+                    ) : (
+                      <>
+                        Uses SoundCloud&apos;s OAuth 2.1 authorization-code flow with PKCE. One admin login grants a
+                        refresh token that the server can use to rotate access tokens automatically for future
+                        publishes.
+                      </>
+                    )}
                   </Typography>
                 </Box>
                 {isLoadingStatus ? (
@@ -383,7 +398,9 @@ const AdvancedAdminPage: NextPage & { PageLayout?: React.ComponentType<{ childre
                   {redirectUri || 'Loading...'}
                 </Typography>
                 <Typography variant="caption" color="text.secondary">
-                  This exact URL must be registered in the SoundCloud app configuration.
+                  {simulation
+                    ? 'The simulation returns to this staging callback. No external account is used.'
+                    : 'This exact URL must be registered in the SoundCloud app configuration.'}
                 </Typography>
               </Stack>
 
@@ -407,9 +424,24 @@ const AdvancedAdminPage: NextPage & { PageLayout?: React.ComponentType<{ childre
                 <Button
                   variant="contained"
                   onClick={startSoundCloudConnect}
-                  disabled={!isAdmin || isLoadingStatus || isConnecting || !status?.configured || !status?.clientId}
+                  disabled={
+                    !isAdmin ||
+                    !modeReady ||
+                    isLoadingStatus ||
+                    isConnecting ||
+                    !status?.configured ||
+                    !status?.clientId
+                  }
                 >
-                  {isConnecting ? 'Redirecting...' : status?.connected ? 'Reconnect SoundCloud' : 'Connect SoundCloud'}
+                  {isConnecting
+                    ? 'Redirecting...'
+                    : simulation
+                    ? status?.connected
+                      ? 'Reconnect simulated account'
+                      : 'Connect simulated account'
+                    : status?.connected
+                    ? 'Reconnect SoundCloud'
+                    : 'Connect SoundCloud'}
                 </Button>
                 <Button variant="outlined" onClick={loadStatus} disabled={!isAdmin || isLoadingStatus || isConnecting}>
                   Refresh Status
@@ -425,10 +457,18 @@ const AdvancedAdminPage: NextPage & { PageLayout?: React.ComponentType<{ childre
                 </Button>
               </Stack>
 
-              {!status?.configured ? (
+              {!modeReady ? (
+                <Alert severity="warning">Publishing mode must be verified before connecting an account.</Alert>
+              ) : !status?.configured ? (
                 <Alert severity="warning">
-                  Functions still need <code>SOUNDCLOUD_CLIENT_ID</code> and <code>SOUNDCLOUD_CLIENT_SECRET</code>{' '}
-                  configured before this flow can run.
+                  {simulation ? (
+                    'The staging simulation is not configured yet.'
+                  ) : (
+                    <>
+                      Functions still need <code>SOUNDCLOUD_CLIENT_ID</code> and <code>SOUNDCLOUD_CLIENT_SECRET</code>{' '}
+                      configured before this flow can run.
+                    </>
+                  )}
                 </Alert>
               ) : null}
             </Stack>

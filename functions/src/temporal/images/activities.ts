@@ -1,4 +1,5 @@
-import axios from 'axios';
+import axios from '../../providerSandbox/http';
+import { currentSandboxProfile } from '../../providerSandbox/http';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
@@ -45,7 +46,8 @@ export interface ImageDependencies {
 }
 
 export function configuredImageProviderAccount(): ImageIntent['providerAccount'] {
-  const principal = process.env.SUBSPLASH_EMAIL?.trim().toLowerCase();
+  const profile = currentSandboxProfile();
+  const principal = profile ? `${profile.profileId}@provider-sandbox.invalid` : process.env.SUBSPLASH_EMAIL?.trim().toLowerCase();
   return principal
     ? { appKey: '9XTSHD', principalHash: createHash('sha256').update(`app:9XTSHD:${principal}`).digest('hex') }
     : undefined;

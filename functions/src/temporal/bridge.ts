@@ -1,3 +1,4 @@
+import { prepareProviderAdmission, assertProviderAdmissionCatalog } from '../providerSandbox/admission';
 import { createHash } from 'node:crypto';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { HttpsError } from 'firebase-functions/v2/https';
@@ -230,6 +231,8 @@ export async function submitServerDurableJob(args: {
     ...(args.expectedGeneration === undefined ? {} : { expectedGeneration: args.expectedGeneration }),
   };
   validateRequest(request);
+  if (args.payload.providerExecution !== undefined)
+    throw new HttpsError('invalid-argument', 'Provider execution provenance is server-authored.');
   const projectId = temporalProjectId(),
     key = admissionKey(args.actorUid, args.requestId),
     hash = requestHash(request),
@@ -469,6 +472,14 @@ export async function submitServerDurableJob(args: {
         : undefined;
     entity = { ...entity, ...entityLabel(canonicalEntity?.name ?? canonicalEntity?.title ?? desiredName) };
   }
+  const providerBinding = prepareProviderAdmission(
+    projectId,
+    args.kind,
+    payload,
+    role,
+    args.payload.providerSimulationScenario
+  );
+  if (providerBinding) payload = { ...payload, providerExecution: providerBinding.execution };
   const entityDoc = db().collection('durableJobEntities').doc(durableEntityKey(projectId, entity, args.kind));
   const receipt = await db().runTransaction(async (transaction) =>
     withProviderIndexedTransaction(
@@ -481,6 +492,7 @@ export async function submitServerDurableJob(args: {
           if (dedupe.get('inputHash') !== hash) throw new HttpsError('already-exists', 'Request ID already used.');
           return dedupe.get('receipt') as DurableAdmissionReceipt;
         }
+        await assertProviderAdmissionCatalog(tx, db(), providerBinding);
         await assertAdmissionReleaseInTransaction(tx, db(), args.kind, {
           continuation: args.continuation === true && internalBundle,
           domain: domainForIntent(args.kind, payload),
@@ -842,13 +854,15 @@ export async function enqueueSystemJob(input: {
     const generation = Number(entityState.get('generation') ?? 0) + 1,
       createdAt = Date.now();
     const dispatch = { ...input.dispatch, ref };
+    const providerBinding = prepareProviderAdmission(projectId, input.kind, input.payload, 'system', undefined);
+    await assertProviderAdmissionCatalog(tx, db(), providerBinding);
     const store = createDurableJobStore({ firestore: db(), projectId });
     const admission = {
       ref,
       kind: input.kind,
       entity,
       actorUid,
-      payload: input.payload,
+      payload: providerBinding ? { ...input.payload, providerExecution: providerBinding.execution } : input.payload,
       requestId,
       generation,
       dispatch,

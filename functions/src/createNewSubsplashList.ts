@@ -1,7 +1,7 @@
 import {reserveSubsplashAssociation} from './temporal/publishing/providerAssociations';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 // create a new Subsplash List
-import axios from 'axios';
+import axios from './providerSandbox/http';
 import { executeProviderCreate,providerReceiptId } from './temporal/publishing/providerReceipts';
 import { logger } from 'firebase-functions/v2';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';

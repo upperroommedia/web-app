@@ -7,7 +7,7 @@ import {
   runPublishingProviderMutation,
 } from './durableOperationContext';
 import { createHash } from 'node:crypto';
-import axios from 'axios';
+import axios from '../../providerSandbox/http';
 import { FieldValue, type Transaction } from 'firebase-admin/firestore';
 import type { CallableRequest } from 'firebase-functions/v2/https';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';

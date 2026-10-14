@@ -10,6 +10,7 @@ import { selectKitDeployConfig, selectLegacyDeployConfig } from './create-kit-de
 import { deployedKitSources, validateKitNpmLock } from './kit-npm-lock-contract.mjs';
 import { assertStagingSearchEnvironmentRelease } from './temporal-staging-search-env.mjs';
 import { firebaseEnvironmentSources, flagsForControl, upsertFunctionFlags } from './temporal-release-lib.mjs';
+import { providerRuntimeEnvironment } from './provider-runtime-environment.mjs';
 
 export function assertCheckoutCommit(actual, claimed) {
   if (!/^[a-f0-9]{40}$/.test(actual ?? '') || claimed !== actual)
@@ -78,7 +79,11 @@ export function assertCheckoutSource(root, commit, { project, control, includeSt
     else if (file === 'functions/src/sentryBuildInfo.ts')
       expected = `export const sentryBuildGitSha = '${commit}' as const;\n`;
     else if (environmentFiles.includes(file) && control)
-      expected = upsertFunctionFlags(original(file), { ...flagsForControl(control), TEMPORAL_RELEASE_COMMIT: commit });
+      expected = upsertFunctionFlags(original(file), {
+        ...flagsForControl(control),
+        ...providerRuntimeEnvironment(project),
+        TEMPORAL_RELEASE_COMMIT: commit,
+      });
     if (expected === undefined || actual !== expected)
       throw new Error(`Deployment source differs from pinned commit: ${file}`);
   }

@@ -1,4 +1,4 @@
-import axios from 'axios';
+import axios from './providerSandbox/http';
 import { onCall, CallableRequest } from 'firebase-functions/v2/https';
 import { authenticateSubsplash, createAxiosConfig } from './subsplashUtils';
 

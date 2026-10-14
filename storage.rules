@@ -55,7 +55,7 @@ service firebase.storage {
       allow write: if canUpload() && legacyWritesAllowed('images');
     }
     match /{topLevel}/{remaining=**} {
-      allow read: if !(topLevel in ['durable-upload-sources', 'durable-image-sources', 'speaker-request-images']);
+      allow read: if !(topLevel in ['durable-upload-sources', 'durable-image-sources', 'speaker-request-images', '_providerSandbox']);
     }
     match /speaker-request-images/{fileName} {
       allow create: if resource == null && request.auth != null && admissionOpen('accounts')

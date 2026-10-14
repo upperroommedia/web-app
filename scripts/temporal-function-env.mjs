@@ -12,6 +12,7 @@ import {
   validateReleaseConfig,
 } from './temporal-release-lib.mjs';
 import { assertStagingSearchEnvironmentRelease } from './temporal-staging-search-env.mjs';
+import { providerRuntimeEnvironment } from './provider-runtime-environment.mjs';
 const args = process.argv.slice(2);
 const project = args[args.indexOf('--project') + 1];
 const file = args.includes('--control-file') ? args[args.indexOf('--control-file') + 1] : undefined;
@@ -21,7 +22,7 @@ const root = resolve(new URL('..', import.meta.url).pathname);
 const control = file
   ? JSON.parse(await readFile(file, 'utf8'))
   : (await firebaseAdmin(project).firestore.doc(CONTROL_PATH).get()).data();
-const flags = flagsForControl(control);
+const flags = { ...flagsForControl(control), ...providerRuntimeEnvironment(project) };
 const commit = args.includes('--commit')
   ? args[args.indexOf('--commit') + 1]
   : process.env.GITHUB_SHA ||

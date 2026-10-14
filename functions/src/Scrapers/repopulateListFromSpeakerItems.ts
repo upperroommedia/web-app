@@ -1,6 +1,6 @@
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 // add sermon to series and handle condition when list is full
-import axios from 'axios';
+import axios from '../providerSandbox/http';
 import { logger } from 'firebase-functions/v2';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
 import handleError from '../handleError';

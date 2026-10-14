@@ -1,4 +1,5 @@
-import axios, { AxiosRequestConfig } from 'axios';
+import axios from './providerSandbox/http';
+import { AxiosRequestConfig } from 'axios';
 import { logger } from 'firebase-functions';
 import { onObjectFinalized } from 'firebase-functions/v2/storage';
 import { authenticateSubsplash, createAxiosConfig } from './subsplashUtils';

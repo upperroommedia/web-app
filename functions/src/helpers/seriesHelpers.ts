@@ -7,7 +7,7 @@ import {reserveSubsplashAssociation} from '../temporal/publishing/providerAssoci
  * Helper functions for Subsplash Media Series API operations
  */
 
-import axios from 'axios';
+import axios from '../providerSandbox/http';
 import { logger } from 'firebase-functions/v2';
 import { HttpsError } from 'firebase-functions/v2/https';
 import { createAxiosConfig } from '../subsplashUtils';

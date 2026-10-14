@@ -1,4 +1,5 @@
-import axios from 'axios';
+import axios from '../../providerSandbox/http';
+import { probeProviderAudioUrl } from '../../providerSandbox/http';
 import {
   listProviderAcknowledgementsForJob,
   sameResourceAcknowledgementProvesReceipt,
@@ -25,36 +26,7 @@ export const isUploadedSubsplashAudioOutput = (output: SubsplashAudioOutput): bo
 /** GET is required: the verified Subsplash download resource does not support HEAD. */
 export async function probeSubsplashAudioOutput(output: SubsplashAudioOutput, token: string): Promise<boolean> {
   if (!isUploadedSubsplashAudioOutput(output)) return false;
-  let url = new URL(output._links!.download!.href!);
-  for (let redirects = 0; redirects < 5; redirects += 1) {
-    if (url.protocol !== 'https:') return false;
-    const headers: Record<string, string> = { Range: 'bytes=0-1023' };
-    // Never forward a provider credential to a CDN or storage redirect.
-    if (url.hostname === 'core.subsplash.com') headers.Authorization = `Bearer ${token}`;
-    const response = await fetch(url, { headers, redirect: 'manual', signal: AbortSignal.timeout(15000) });
-    if (response.status >= 300 && response.status < 400) {
-      const location = response.headers.get('location');
-      await response.body?.cancel();
-      if (!location) return false;
-      url = new URL(location, url);
-      continue;
-    }
-    if (!response.ok || !response.body) {
-      await response.body?.cancel();
-      return false;
-    }
-    const mime = response.headers.get('content-type') ?? '';
-    const reader = response.body.getReader();
-    try {
-      const first = await reader.read();
-      return (
-        !first.done && first.value.byteLength > 0 && (/^audio\//.test(mime) || /^application\/octet-stream/.test(mime))
-      );
-    } finally {
-      await reader.cancel();
-    }
-  }
-  return false;
+  return probeProviderAudioUrl(output._links!.download!.href!, token);
 }
 
 export async function isSubsplashAudioPlayable(audioId: string, token: string): Promise<boolean> {

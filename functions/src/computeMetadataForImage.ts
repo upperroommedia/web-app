@@ -3,7 +3,7 @@ import { MMCQ } from '@vibrant/quantizer-mmcq';
 import { DefaultGenerator } from '@vibrant/generator-default';
 import { logger } from 'firebase-functions';
 import sharp from 'sharp';
-import axios from 'axios';
+import axios from './providerSandbox/http';
 import { readFile } from 'fs/promises';
 
 interface ImageMetadata {

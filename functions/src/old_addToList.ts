@@ -1,5 +1,5 @@
 // add sermon to series and handle condition when list is full
-import axios from 'axios';
+import axios from './providerSandbox/http';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { FieldValue } from 'firebase-admin/firestore';
 import { logger } from 'firebase-functions/v2';

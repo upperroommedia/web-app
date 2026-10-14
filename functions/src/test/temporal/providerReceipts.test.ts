@@ -14,6 +14,7 @@ import {
   isProviderReceiptExplicitlyRetained,
   inferProviderReceiptScope,
   listProviderReceiptsForJob,
+  assertProviderReceiptExecutionProfile,
 } from '../../temporal/publishing/providerReceipts';
 
 const memoryStore = (transaction?: Transaction) => {
@@ -673,4 +674,37 @@ it('rejects every provider allocation in dedicated critical-repair scope before 
   expect(records.size).toBe(0);
   expect(prepare).not.toHaveBeenCalled();
   expect(execute).not.toHaveBeenCalled();
+});
+
+describe('provider execution environment provenance', () => {
+  const virtual = { mode: 'sandbox' as const, profileId: 'urm-app-staging-publishing-v1', version: 1 as const };
+  test('new sandbox evidence cannot be reused as live evidence or vice versa', () => {
+    expect(() => assertProviderReceiptExecutionProfile(undefined, undefined)).not.toThrow();
+    expect(() =>
+      assertProviderReceiptExecutionProfile(virtual, { version: 1, profileId: virtual.profileId, mode: 'sandbox' })
+    ).not.toThrow();
+    expect(() => assertProviderReceiptExecutionProfile(undefined, virtual)).toThrow('different execution');
+    expect(() => assertProviderReceiptExecutionProfile(virtual, undefined)).toThrow('different execution');
+    expect(() => assertProviderReceiptExecutionProfile(virtual, { ...virtual, profileId: 'other' })).toThrow(
+      'different execution'
+    );
+  });
+  test('a confirmed virtual receipt is rejected before live replay or another provider call', async () => {
+    const { records, store } = memoryStore();
+    const receiptId = providerReceiptId(options.operationKey, options.step);
+    records.set(receiptId, {
+      ...options,
+      fingerprint: providerPayloadFingerprint(options.payload),
+      state: 'confirmed',
+      result: { id: 'virtual-id' },
+      updatedAtMillis: 1,
+      providerExecutionProfile: virtual,
+    });
+    const execute = jest.fn(async () => ({ id: 'real-id' }));
+    await expect(executeProviderCreate({ ...options, store, execute })).rejects.toMatchObject({
+      details: { reason: 'PROVIDER_RECEIPT_PROFILE_MISMATCH' },
+    });
+    expect(execute).not.toHaveBeenCalled();
+    expect(records.get(receiptId)?.result).toEqual({ id: 'virtual-id' });
+  });
 });

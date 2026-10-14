@@ -1,4 +1,9 @@
 import { useMemo, useState } from 'react';
+import TextField from '@mui/material/TextField';
+import MenuItem from '@mui/material/MenuItem';
+import { useProviderEnvironment } from '../context/provider/ProviderEnvironmentContext';
+import { SIMULATION_SCENARIO_LABELS } from '../utils/providerSimulation';
+import type { ProviderSimulationScenario } from '@upperroom/contracts/temporal';
 import Alert from '@mui/material/Alert';
 import Button from '@mui/material/Button';
 import Checkbox from '@mui/material/Checkbox';
@@ -28,6 +33,10 @@ interface SermonPublishPanelProps {
 
 function SermonPublishPanel({ sermon, initialAdvancedOpen = false, onRequestAddToSeries }: SermonPublishPanelProps) {
   const { user } = useAuth();
+  const environment = useProviderEnvironment();
+  const [scenario, setScenario] = useState<ProviderSimulationScenario>('success');
+  const simulation = environment.status?.mode === 'sandbox';
+  const modeUnavailable = environment.loading || environment.error || !environment.status?.ready;
   const entity = useMemo(() => ({ type: 'sermon' as const, id: sermon.id }), [sermon.id]);
   const { jobs, loading: jobsLoading, error: jobsError, stale } = useEntityJobs(entity, sermon.activeDurableJobs);
   const listsRef = useMemo(
@@ -77,6 +86,7 @@ function SermonPublishPanel({ sermon, initialAdvancedOpen = false, onRequestAddT
   const busy = acceptedRequestBusy || jobs.some((job) => !isDurableJobTerminal(job.state));
   const unavailable =
     !user?.canPublish() ||
+    modeUnavailable ||
     submitting ||
     Boolean(uncertainIntent) ||
     busy ||
@@ -115,7 +125,12 @@ function SermonPublishPanel({ sermon, initialAdvancedOpen = false, onRequestAddT
       const intent = {
         kind: mode === 'unpublish' ? ('sermon.unpublish' as const) : ('sermon.publish' as const),
         entity,
-        payload,
+        payload: {
+          ...payload,
+          ...(simulation && environment.status?.scenarioSelectionAllowed
+            ? { providerSimulationScenario: scenario }
+            : {}),
+        },
       };
       setUncertainIntent(intent);
       const receipt = await submitDurableIntent(intent);
@@ -164,6 +179,30 @@ function SermonPublishPanel({ sermon, initialAdvancedOpen = false, onRequestAddT
         Publishing continues in the background. Each destination is confirmed separately, and completed destinations
         stay visible if another needs attention.
       </Typography>
+      {modeUnavailable && (
+        <Alert severity="warning">Publishing is paused until the server confirms the publishing mode.</Alert>
+      )}
+      {simulation && environment.status?.scenarioSelectionAllowed && (
+        <Stack spacing={1}>
+          <TextField
+            select
+            label="Scenario for the next simulated request"
+            value={scenario}
+            disabled={unavailable}
+            onChange={(event) => setScenario(event.target.value as ProviderSimulationScenario)}
+          >
+            {Object.entries(SIMULATION_SCENARIO_LABELS).map(([value, label]) => (
+              <MenuItem key={value} value={value}>
+                {label}
+              </MenuItem>
+            ))}
+          </TextField>
+          <Typography variant="caption" color="text.secondary">
+            Applies to publish and unpublish requests. Retries keep the task’s original scenario. Missing staging
+            catalog resources must be imported before testing.
+          </Typography>
+        </Stack>
+      )}
       {notice && <Alert severity={notice.severity}>{notice.message}</Alert>}
       {acceptedExecution.error && (
         <Alert severity="warning">

@@ -1,5 +1,5 @@
 import { createAxiosConfig } from '../subsplashUtils';
-import axios from 'axios';
+import axios from '../providerSandbox/http';
 import { logger } from 'firebase-functions/v2';
 import { Sermon } from '@upperroom/shared/types/SermonTypes';
 import { withSubsplashLocks } from '../locks/withSubsplashLocks';

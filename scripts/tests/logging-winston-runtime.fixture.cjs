@@ -27,6 +27,13 @@ for (const method of Object.keys(require('node:dns').promises)) {
 require('node:http2').connect = block('http2.connect');
 require('node:dgram').createSocket = block('dgram.createSocket');
 globalThis.fetch = block('fetch');
+// Explicit synthetic identity: these children intentionally inherit no ADC/project
+// environment. SDK metadata discovery is separately disabled before imports; the
+// actual transport and every raw network denial remain exercised.
+process.env.GOOGLE_CLOUD_PROJECT = 'demo-logging-contract';
+process.env.GCLOUD_PROJECT = 'demo-logging-contract';
+process.env.METADATA_SERVER_DETECTION = 'none';
+process.env.GOOGLE_APPLICATION_CREDENTIALS = resolve(root, 'nonexistent-logging-contract-adc.json');
 process.env.NODE_ENV = 'production';
 process.env.ENABLE_CLOUD_LOGGING = 'true';
 process.env.K_SERVICE = 'dependency-fixture';

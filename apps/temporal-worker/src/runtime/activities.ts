@@ -72,6 +72,9 @@ import { createPublishingEvidenceWakeup } from './evidence-wakeup';
 import { createCriticalRepairCompilationActivities } from './private-compilation';
 import { createMutationSettlementProjection } from './mutation-settlement';
 import { assertLiveProviderMutationProject } from './provider-isolation';
+import { isSandboxProviderIntent } from '../../../../functions/src/providerSandbox/admission';
+import { withSandboxRequestContext } from '../../../../functions/src/providerSandbox/http';
+import { getProviderExecutionProfile, assertSandboxIntentProfile, assertMatchingSandboxProfile, assertSandboxCatalogReady, sandboxProfileDocumentPath } from '../../../../functions/src/providerSandbox/profile';
 import { safeActivities, safeCancellation, type ActivityFailureProjection } from './safe-activities';
 
 export function createRuntimeActivities(
@@ -485,7 +488,7 @@ export function createRuntimeActivities(
   const retrySteps: Record<string, { id: string; label: string }> = {
     preparePublishingDeletePlan: { id: 'delete-plan', label: 'Prepare deletion' },
     repairPublishingCritical: { id: 'cleanup', label: 'Repair applied publishing changes' },
-    deliverEmail: { id: 'deliver', label: 'Deliver email' },
+    deliverEmail: { id: 'deliver', label: 'Process email' },
     acquireMedia: { id: 'downloading', label: 'Download audio' },
     mergeMedia: { id: 'merging', label: 'Prepare final audio' },
     publishMedia: { id: 'publishing', label: 'Save audio' },
@@ -618,6 +621,21 @@ export function createRuntimeActivities(
             ].includes(name)
           )
             assertLiveProviderMutationProject(projectId);
+          const ref = args[0] as DurableJobRef | undefined;
+          if (projectId === 'urm-app-staging' && ref?.projectId === projectId && typeof ref.jobId === 'string') {
+            const intent = await store.loadIntent(ref);
+            if (isSandboxProviderIntent(intent.kind, intent.payload as Record<string, unknown>)) {
+              const profile = getProviderExecutionProfile(projectId);
+              if (profile.mode === 'sandbox') {
+                const job = await store.loadJob(ref);
+                const pinned = assertSandboxIntentProfile(profile, intent);
+                assertMatchingSandboxProfile(profile, job.providerExecution);
+                if (job.providerExecution?.scenario !== pinned.scenario) throw new Error('PROVIDER_INTENT_PROFILE_MISMATCH');
+                const marker = await db.doc(sandboxProfileDocumentPath(profile)).get();
+                assertSandboxCatalogReady(profile, marker.data());
+              }
+            }
+          }
           // Source catalogue enrollment binds the public parent step to this
           // already registered SDK execution. Establish it before source work,
           // rather than waiting for the provider result to create the step.
@@ -636,7 +654,9 @@ export function createRuntimeActivities(
               executions.currentStepIds()
             );
           }
-          return await run();
+          return await (ref?.projectId === projectId && typeof ref.jobId === 'string'
+            ? withSandboxRequestContext({ jobId: ref.jobId, sourceStepIds: executions.currentStepIds() }, run)
+            : run());
         } finally {
           mutations.clearCurrent();
         }

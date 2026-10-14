@@ -82,3 +82,36 @@ optional dependencies are present for Cloud Build. Before packing/deploying run
 is no install-time `prepare` hook, so a production-only install can use the
 compiled functions without requiring TypeScript. Both Linux `npm ci` and
 `npm ci --omit=dev` are verified.
+
+## Staging mail capture
+
+See [the staging sandbox guide](../../docs/STAGING_PROVIDER_SANDBOX.md) for rollout and test boundaries. This section describes source behavior; it is not a live-deployment receipt.
+
+This application's `urm-app-staging` runtime requires `STAGING_PROVIDER_MODE=sandbox`.
+The initialized Admin app and its exact Firestore instance authorize capture;
+mail fields and environment project-name aliases cannot enable it. Production
+(`urm-app`) keeps the live transport and rejects sandbox configuration. Missing
+or foreign project identities fail closed.
+
+Staging retains the real Temporal email workflow, payload/template/UID preparation,
+secure inline attachment checks, generation fences and durable delivery receipts.
+It never initializes SMTP, SendGrid, OAuth or DNS transport configuration. Prepared
+envelopes are captured in server-only `_mailSandboxCaptures` documents under a
+hash of the deterministic message ID. Concurrent identical attempts reuse that
+capture; changed content under the same ID is rejected. No address receives mail.
+
+`deliveryProfile` freezes the capture profile in the private durable receipt;
+`delivery.info.deliveryTransport` and `delivery.deliveryTransport` identify the
+simulated acceptance. Public job results expose only safe profile/capture hashes
+and `externalDelivery: false`; email content remains private. A successful capture
+means **captured in staging**, never SMTP delivery. Existing unprofiled/live or
+mismatched receipts require review, including prepared and uncertain submissions;
+this mode does not reset or automatically retry them. The legacy trigger refuses
+SMTP fallback in staging even if its orchestration flag is misconfigured.
+
+This sink covers queued application notifications and operational alerts. Firebase
+Authentication password-reset emails bypass the queue and are unavailable in the
+staging sandbox UI. Account claim changes still affect the staging Auth project;
+use dedicated test identities. Scripted provider faults are suppressed from
+external operational reporting only when their trusted server class and actual
+staging sandbox profile both match; genuine defects remain observable.

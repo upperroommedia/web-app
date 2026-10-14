@@ -1,6 +1,6 @@
 import { acknowledgedProjectionDigest as hash } from '../temporal/publishing/acknowledgedProjectionDigest';
 import { createHash } from 'node:crypto';
-import axios from 'axios';
+import axios from '../providerSandbox/http';
 import { FieldPath, type Firestore, type Query, type Transaction } from 'firebase-admin/firestore';
 import type { DurableJobRef } from '@upperroom/contracts/temporal';
 import { createAxiosConfig } from '../subsplashUtils';

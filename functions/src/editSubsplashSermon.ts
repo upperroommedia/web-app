@@ -2,7 +2,7 @@ import {assertSynchronousProviderMutationCompleted} from './temporal/publishing/
 import {runPublishingProviderMutation,markPublishingCritical,isDurablePublishingOperation} from './temporal/publishing/durableOperationContext';
 import { logger } from 'firebase-functions/v2';
 import { onCall, CallableRequest, HttpsError } from 'firebase-functions/v2/https';
-import axios from 'axios';
+import axios from './providerSandbox/http';
 import { authenticateSubsplash, createAxiosConfig } from './subsplashUtils';
 import { UPLOAD_TO_SUBSPLASH_INCOMING_DATA } from './uploadToSubsplash';
 import { canUserRolePublish } from '@upperroom/shared/types/User';

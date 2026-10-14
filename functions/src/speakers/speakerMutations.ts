@@ -2,7 +2,8 @@ import { prepareSpeakerDeletionMirrors, removeSpeakerDeletionMirrors, type Speak
 import { assertSynchronousProviderMutationCompleted } from '../temporal/publishing/providerMutationCompletion';
 import {markPublishingCritical, getPublishingMutationOperation, runPublishingProviderMutation, prepareProviderMutationPlanCommit, prepareAcknowledgedProjectionPlan, publishingMutationRequestFingerprint} from '../temporal/publishing/durableOperationContext';
 import {reserveSubsplashAssociation} from '../temporal/publishing/providerAssociations';
-import axios, { isAxiosError } from 'axios';
+import axios from '../providerSandbox/http';
+import { isAxiosError } from 'axios';
 import { isDurablePublishingOperation, runDurableTransaction, commitDurableProjection } from '../temporal/publishing/durableOperationContext';
 import { executeProviderCreate, providerPayloadFingerprint,providerReceiptId } from '../temporal/publishing/providerReceipts';
 import {acknowledgedProjectionDigest} from '../temporal/publishing/criticalAcknowledgedRepair';

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import axios from 'axios';
+import axios from '../providerSandbox/http';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import {
   FieldPath,

@@ -7,7 +7,7 @@ import { FieldValue, type DocumentReference, type SetOptions } from 'firebase-ad
 import type { List } from '../../../packages/shared/types/List';
 import { uploadStatus } from '../../../packages/shared/types/SermonTypes';
 import { HttpsError } from 'firebase-functions/v2/https';
-import axios from 'axios';
+import axios from '../providerSandbox/http';
 import type {
   GetListOverflowChainIssue,
   GetListOverflowChainNode,

@@ -4,6 +4,7 @@ import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BlockList, isIP } from 'node:net';
+import { providerRuntimeEnvironment } from './provider-runtime-environment.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const stagingSearch = JSON.parse(await readFile(resolve(root, 'packages/contracts/staging-search.json'), 'utf8'));
@@ -894,6 +895,7 @@ export function renderPlatform(c) {
                 TEMPORAL_DEPLOYMENT_NAME: c.workerDeploymentName,
                 TEMPORAL_BUILD_ID: c.workerBuildId,
                 FIREBASE_PROJECT_ID: c.firebaseProjectId,
+                ...providerRuntimeEnvironment(c.firebaseProjectId),
                 PORT: String(c.workerPort),
                 GOOGLE_APPLICATION_CREDENTIALS: '/run/firebase/service-account.json',
                 TEMPORAL_METRICS_ADDRESS: '0.0.0.0:9464',

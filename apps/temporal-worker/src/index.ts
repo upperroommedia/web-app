@@ -8,6 +8,7 @@ import { assertRuntimeNamespace, loadRuntimeConfig, runtimeCredentialFingerprint
 import { initializeWorkerObservability, reportWorkerFailure, flushWorkerObservability } from './runtime/observability';
 import { OutboxDispatcher } from './runtime/dispatcher';
 import { WorkerLifecycle, WorkerLifecycleFailure } from './runtime/worker-lifecycle';
+import { verifyProviderSandboxReadiness, type ProviderSandboxReadiness } from './runtime/provider-sandbox-readiness';
 
 export async function runWorkerProcess(bindShutdown?: (shutdown: () => Promise<void>) => void): Promise<void> {
   const config = loadRuntimeConfig();
@@ -23,6 +24,7 @@ export async function runWorkerProcess(bindShutdown?: (shutdown: () => Promise<v
   let certificateProbe: ReturnType<typeof setInterval> | undefined;
   let probe: Promise<void> | undefined;
   let temporalHealthy = true;
+  let providerSandbox: ProviderSandboxReadiness | undefined;
   const assertOwnedApp = () => {
     if (!ownedFirebase) return;
     if (
@@ -130,6 +132,7 @@ export async function runWorkerProcess(bindShutdown?: (shutdown: () => Promise<v
     if (lifecycle.draining) return;
     const { createRuntimeActivities } = await import('./runtime/activities');
     const { db, queues } = createRuntimeActivities(config.projectId, config.queues, client, witness);
+    providerSandbox = await verifyProviderSandboxReadiness(db, config.projectId, config.queues, true);
     if (lifecycle.draining) return;
     // Retain every created worker even if a subsequent create fails.
     for (const queue of config.queues) {
@@ -191,6 +194,7 @@ export async function runWorkerProcess(bindShutdown?: (shutdown: () => Promise<v
           projectId: config.projectId,
           buildId: config.buildId,
           dispatcherEnabled: config.dispatcherEnabled,
+          ...(providerSandbox ? { providerSandbox } : {}),
         })
       );
     });

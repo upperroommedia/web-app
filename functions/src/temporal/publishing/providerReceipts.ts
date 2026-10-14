@@ -1,3 +1,4 @@
+import { getProviderExecutionProfile, assertSandboxIntentProfile } from '../../providerSandbox/profile';
 import { CRITICAL_REPAIR_SOURCE_CATALOGS, assertCriticalRepairCatalogClaimAllowed } from './criticalRepairCatalog';
 import { isPublishingSourceProtocolIntent } from '@upperroom/orchestration/job-store';
 import type { DurableJobKind } from '@upperroom/contracts/temporal';
@@ -22,6 +23,38 @@ export type ProviderAdoptionAudit = {
   evidenceReference: string;
   reason: string;
 };
+export interface ProviderExecutionProfile {
+  mode: 'sandbox';
+  profileId: string;
+  version: 1;
+}
+export function assertProviderReceiptExecutionProfile(
+  expected: ProviderExecutionProfile | undefined,
+  actual: ProviderExecutionProfile | undefined
+): void {
+  if (providerPayloadFingerprint(expected) !== providerPayloadFingerprint(actual))
+    throw new HttpsError('failed-precondition', 'Provider receipt belongs to a different execution environment.', {
+      reason: 'PROVIDER_RECEIPT_PROFILE_MISMATCH',
+    });
+}
+async function currentReceiptExecutionProfile(scope?: {
+  projectId: string;
+  jobId: string;
+}): Promise<ProviderExecutionProfile | undefined> {
+  const project = typeof firebaseAdmin.app === 'function' ? firebaseAdmin.app().options.projectId : undefined;
+  if (project !== 'urm-app-staging') return undefined;
+  const profile = getProviderExecutionProfile(project);
+  if (
+    profile.mode !== 'sandbox' ||
+    !scope ||
+    scope.projectId !== project ||
+    getDurablePublishingJobId() !== scope.jobId
+  )
+    throw new HttpsError('permission-denied', 'Sandbox provider receipts require the admitted job profile.');
+  const intent = (await firebaseAdmin.firestore().collection('durableJobIntents').doc(scope.jobId).get()).data();
+  const pin = assertSandboxIntentProfile(profile, intent ?? {});
+  return { mode: pin.mode, profileId: pin.profileId, version: pin.version };
+}
 export interface ProviderAccountBinding {
   provider: 'subsplash' | 'soundcloud';
   account: string;
@@ -37,6 +70,7 @@ export interface ProviderAcknowledgementReview {
   reviewedAtMillis: number;
 }
 export interface ProviderAcknowledgementFact {
+  providerExecutionProfile?: ProviderExecutionProfile;
   schemaVersion: 1;
   providerAccount?: ProviderAccountBinding;
   receiptId: string;
@@ -71,6 +105,7 @@ export const acknowledgementHasReviewedDisposition = (fact: ProviderAcknowledgem
   );
 };
 export type ProviderReceipt = {
+  providerExecutionProfile?: ProviderExecutionProfile;
   providerAccount?: ProviderAccountBinding;
   operationKey: string;
   projectId?: string;
@@ -254,6 +289,8 @@ export const sameResourceAcknowledgementProvesReceipt = (
       fact.attemptOwner === receipt.owner &&
       fact.payloadFingerprint === receipt.fingerprint &&
       providerPayloadFingerprint(fact.providerAccount) === providerPayloadFingerprint(receipt.providerAccount) &&
+      providerPayloadFingerprint(fact.providerExecutionProfile) ===
+        providerPayloadFingerprint(receipt.providerExecutionProfile) &&
       Number.isInteger(fact.claimRevision) &&
       fact.claimRevision >= 1 &&
       (receipt.revision ?? 0) >= fact.claimRevision + 1 &&
@@ -312,6 +349,7 @@ const firestoreStore: ProviderReceiptStore = {
 };
 
 type ProviderAcknowledgementClaim = {
+  providerExecutionProfile?: ProviderExecutionProfile;
   providerAccount?: ProviderAccountBinding;
   receiptId: string;
   operationKey: string;
@@ -348,7 +386,9 @@ const matchesClaim = (
       receipt.projectId === claim.projectId &&
       receipt.jobId === claim.jobId &&
       receipt.owner === claim.owner &&
-      providerPayloadFingerprint(receipt.providerAccount) === providerPayloadFingerprint(claim.providerAccount)
+      providerPayloadFingerprint(receipt.providerAccount) === providerPayloadFingerprint(claim.providerAccount) &&
+      providerPayloadFingerprint(receipt.providerExecutionProfile) ===
+        providerPayloadFingerprint(claim.providerExecutionProfile)
   );
 
 /** A provider ACK is a private fact, not a canonical authorization decision. The first POST claim stays fenced.
@@ -358,6 +398,18 @@ const recordAcknowledgement = async (
   result: unknown
 ): Promise<'confirmed' | 'same_resource' | 'orphaned'> => {
   const db = firebaseAdmin.firestore();
+  // The admitted claim already pinned the private intent. Factual late ACK settlement
+  // must survive actor/generation cancellation; do not re-authorize or reload that intent here.
+  const actualProject = typeof firebaseAdmin.app === 'function' ? firebaseAdmin.app().options.projectId : undefined;
+  let expectedProfile: ProviderExecutionProfile | undefined;
+  if (actualProject === 'urm-app-staging') {
+    const profile = getProviderExecutionProfile(actualProject);
+    if (profile.mode === 'sandbox')
+      expectedProfile = { mode: 'sandbox', profileId: profile.profileId, version: profile.version };
+  }
+  if (actualProject && claim.projectId && actualProject !== claim.projectId)
+    throw new HttpsError('permission-denied', 'Provider acknowledgement project changed.');
+  assertProviderReceiptExecutionProfile(expectedProfile, claim.providerExecutionProfile);
   const receiptRef = db.collection(PROVIDER_RECEIPTS_COLLECTION).doc(claim.receiptId);
   return db.runTransaction(async (tx) => {
     const snapshot = await tx.get(receiptRef);
@@ -395,6 +447,7 @@ const recordAcknowledgement = async (
     if (!previous.exists) {
       const fact: ProviderAcknowledgementFact = {
         schemaVersion: 1,
+        ...(claim.providerExecutionProfile ? { providerExecutionProfile: claim.providerExecutionProfile } : {}),
         ...(claim.providerAccount ? { providerAccount: claim.providerAccount } : {}),
         receiptId: claim.receiptId,
         ...(claim.projectId ? { projectId: claim.projectId } : {}),
@@ -440,6 +493,7 @@ export const executeProviderCreate = async <T>(options: {
     if (projectId && projectId !== scope.projectId)
       throw new HttpsError('permission-denied', 'The durable provider key does not belong to this configured project.');
   }
+  const providerExecutionProfile = await currentReceiptExecutionProfile(scope);
   const id = providerReceiptId(operationKey, step);
   const fingerprint = providerPayloadFingerprint(payload);
   const owner = randomUUID();
@@ -456,6 +510,7 @@ export const executeProviderCreate = async <T>(options: {
     );
   // Preparing is safe to replay. No remote side effect is permitted before executing is durable.
   const initial = await store.update<{ replay: boolean; result?: T }>(id, (existing) => {
+    if (existing) assertProviderReceiptExecutionProfile(providerExecutionProfile, existing.providerExecutionProfile);
     if (existing && existing.fingerprint !== fingerprint)
       throw new HttpsError('failed-precondition', 'An operation key cannot be reused with different content.', {
         reason: 'PROVIDER_PAYLOAD_CHANGED',
@@ -468,6 +523,7 @@ export const executeProviderCreate = async <T>(options: {
         ? undefined
         : {
             operationKey,
+            ...(providerExecutionProfile ? { providerExecutionProfile } : {}),
             ...(scope ?? {}),
             step,
             fingerprint,
@@ -505,6 +561,7 @@ export const executeProviderCreate = async <T>(options: {
   )
     throw new HttpsError('failed-precondition', 'Provider account binding is invalid.');
   const claim = await store.update<{ replay: boolean; result: T | undefined; revision?: number }>(id, (existing) => {
+    if (existing) assertProviderReceiptExecutionProfile(providerExecutionProfile, existing.providerExecutionProfile);
     if (
       !existing ||
       existing.fingerprint !== fingerprint ||
@@ -534,6 +591,7 @@ export const executeProviderCreate = async <T>(options: {
     if (result === undefined) throw new Error('Provider creation did not return a durable result.');
     if (typeof claim.revision !== 'number') throw ambiguity();
     const acknowledgement: ProviderAcknowledgementClaim = {
+      ...(providerExecutionProfile ? { providerExecutionProfile } : {}),
       receiptId: id,
       operationKey,
       step,
@@ -621,6 +679,11 @@ export const resolveProviderReceipt = async (options: {
   if (!options.actorUid?.trim() || !/^[a-f0-9]{64}$/.test(options.receiptId))
     throw new HttpsError('invalid-argument', 'A verified actor and valid receipt are required.');
   const receipt = await readProviderReceipt(options.receiptId, store);
+  if (receipt)
+    assertProviderReceiptExecutionProfile(
+      await currentReceiptExecutionProfile(inferProviderReceiptScope(receipt.operationKey)),
+      receipt.providerExecutionProfile
+    );
   if (receipt?.step === 'image-create' && options.cleanupOnly !== true)
     throw new HttpsError(
       'failed-precondition',

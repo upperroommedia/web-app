@@ -66,7 +66,7 @@ import { removeFromSeriesDomain } from '../../removeFromSeries';
 import { createSeriesDomain } from '../../createSeries';
 import { editSubsplashSermonDomain } from '../../editSubsplashSermon';
 import { editSoundCloudSermonDomain } from '../../editSoundCloudSermon';
-import axios from 'axios';
+import axios from '../../providerSandbox/http';
 import { isSubsplashMediaPlayable, isSoundCloudTrackPlayable } from './providerReadiness';
 import { createAxiosConfig } from '../../subsplashUtils';
 import { cancelPublishingEffects } from './cancellation';

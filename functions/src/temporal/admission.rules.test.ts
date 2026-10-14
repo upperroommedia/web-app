@@ -379,6 +379,30 @@ describe('direct browser mutation boundaries', () => {
       Promise.resolve(environment.unauthenticatedContext().storage().ref('speaker-images/anonymous.png').put(bytes))
     );
   });
+  it('keeps provider sandbox copies private to server SDKs while public images remain readable', async () => {
+    const privatePath = '_providerSandbox/urm-app-staging-publishing-v1/assets/source.png';
+    const publicPath = 'speaker-images/public.png';
+    await environment.withSecurityRulesDisabled(async (context) => {
+      await context.storage().ref(privatePath).put(bytes, { contentType: 'image/png' });
+      await context.storage().ref(publicPath).put(bytes, { contentType: 'image/png' });
+    });
+    const contexts = [
+      environment.unauthenticatedContext(),
+      ...['uploader', 'publisher', 'admin'].map((role) => environment.authenticatedContext(role, { role })),
+    ];
+    for (const context of contexts) {
+      const copy = context.storage().ref(privatePath);
+      await assertFails(copy.getMetadata());
+      await assertFails(context.storage().ref('_providerSandbox').listAll());
+      await assertFails(Promise.resolve(copy.put(bytes)));
+      await assertFails(
+        Promise.resolve(context.storage().ref('_providerSandbox/new-profile/assets/new.png').put(bytes))
+      );
+      await assertFails(copy.updateMetadata({ contentType: 'image/jpeg' }));
+      await assertFails(copy.delete());
+      await assertSucceeds(context.storage().ref(publicPath).getMetadata());
+    }
+  });
   it('fences speaker images by the images domain and preserves legacy authorized image writes only', async () => {
     const uploader = environment.authenticatedContext('owner', { role: 'uploader' });
     await control('legacy');

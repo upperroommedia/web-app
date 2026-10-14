@@ -1,12 +1,8 @@
-/** Separate Firebase projects do not serialize a shared external provider account.
- * The current staging Subsplash app is production's app. Until reviewed account
- * identities or a shared authority are configured, only production may mutate. */
+/** Provider activities require the authoritative production or isolated staging
+ * profile. This never permits a staging request to use live vendor transport. */
+import { getProviderExecutionProfile } from '../../../../functions/src/providerSandbox/profile';
 export function assertLiveProviderMutationProject(projectId: string): void {
-  if (projectId !== 'urm-app') {
-    throw Object.assign(new Error('Isolated provider accounts are required'), {
-      code: 'PROVIDER_ACCOUNT_ISOLATION_REQUIRED',
-    });
-  }
+  getProviderExecutionProfile(projectId);
 }
 /** This permits private emulator journals, never a live provider transport. */
 export function isPrivateProviderMutationSimulation(): boolean {

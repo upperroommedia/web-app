@@ -1,6 +1,6 @@
 import { providerPayloadFingerprint } from '../temporal/publishing/providerReceipts';
 import { createDurableWriteBatch, isDurablePublishingOperation, commitDurableProjection } from '../temporal/publishing/durableOperationContext';
-import axios from 'axios';
+import axios from '../providerSandbox/http';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { FieldValue } from 'firebase-admin/firestore';
 import { HttpsError } from 'firebase-functions/v2/https';

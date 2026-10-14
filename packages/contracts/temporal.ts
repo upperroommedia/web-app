@@ -115,7 +115,22 @@ export interface DurableDestinationResult {
   remoteId?: string;
   message?: string;
 }
+/** Server-authored simulation provenance, never a client authorization capability. */
+export type ProviderSimulationScenario =
+  | 'success'
+  | 'delayed-processing'
+  | 'transient-failure'
+  | 'permanent-failure'
+  | 'commit-then-lost-response';
+export interface ProviderExecution {
+  mode: 'sandbox';
+  profileId: string;
+  version: 1;
+  scenario: ProviderSimulationScenario;
+}
+
 export interface DurableJob extends DurableJobRef {
+  providerExecution?: ProviderExecution;
   schemaVersion: 1;
   kind: DurableJobKind;
   entity: DurableEntityRef;

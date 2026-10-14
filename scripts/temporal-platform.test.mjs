@@ -215,6 +215,7 @@ test('separate domain workers use scoped provider and Firebase secrets while sha
     const env = Object.fromEntries(pod.containers[0].env.map((e) => [e.name, e.value]));
     assert.equal(env.TEMPORAL_DEPLOYMENT_NAME, config.workerDeploymentName);
     assert.equal(env.TEMPORAL_BUILD_ID, config.workerBuildId);
+    assert.equal(env.STAGING_PROVIDER_MODE, 'sandbox');
     assert.equal(env.TEMPORAL_TASK_QUEUES, `urm-${role}`);
     assert.equal(env.TEMPORAL_DISPATCHER_ENABLED, String(role === 'orchestration'));
     assert.equal(pod.containers[0].envFrom[0].secretRef.name, `temporal-worker-${role}-runtime`);

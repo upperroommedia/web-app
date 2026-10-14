@@ -1,5 +1,5 @@
 import { prepareListDeletionReady, readListDeletionReadyCompletion } from '../../helpers/listDeletionReady';
-import axios from 'axios';
+import axios from '../../providerSandbox/http';
 import type { ReviewedEntityCreatePlan } from './reviewedCreateContinuation';
 import { capturePublishingAllocationSource } from './allocationBarrier';
 import {

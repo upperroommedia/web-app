@@ -1,3 +1,8 @@
+import {
+  SIMULATION_SCENARIO_LABELS,
+  hasConfirmedCapturedEmail,
+  hasStagingEmailCaptureProfile,
+} from '../../utils/providerSimulation';
 import { useState } from 'react';
 import Link from 'next/link';
 import type { DurableAction, DurableJob } from '@upperroom/contracts/temporal';
@@ -176,6 +181,31 @@ export default function JobStatusPanel({ job, compact = false, stale = false, sh
             }
           />
         </Stack>
+        {hasConfirmedCapturedEmail(job) ? (
+          <Alert severity="info">Email captured for staging. No external email was sent.</Alert>
+        ) : hasStagingEmailCaptureProfile(job) ? (
+          <Alert severity="info">
+            External email delivery is disabled for this staging task. Capture is not confirmed.
+          </Alert>
+        ) : null}
+        {job.providerExecution?.mode === 'sandbox' && (
+          <Stack spacing={0.5}>
+            <Chip size="small" color="info" label="Simulated Subsplash / SoundCloud" sx={{ alignSelf: 'flex-start' }} />
+            {canReview && (
+              <Button
+                component={Link}
+                href={`/admin/simulation/${encodeURIComponent(job.jobId)}`}
+                sx={{ alignSelf: 'flex-start' }}
+              >
+                Inspect simulated destinations
+              </Button>
+            )}
+            <Typography variant="caption" color="text.secondary">
+              Scenario: {SIMULATION_SCENARIO_LABELS[job.providerExecution.scenario]}. Retries retain this scenario.{' '}
+              Profile: {job.providerExecution.profileId} · version {job.providerExecution.version}.
+            </Typography>
+          </Stack>
+        )}
         {job.entity.label && (
           <Typography variant="body2" fontWeight={600} sx={{ overflowWrap: 'anywhere' }}>
             {job.entity.label}
@@ -738,7 +768,9 @@ export default function JobStatusPanel({ job, compact = false, stale = false, sh
               }}
             >
               <Alert severity="warning">
-                Email delivery could not be confirmed. Review provider logs before deciding whether to send again.
+                {hasStagingEmailCaptureProfile(job)
+                  ? 'Staging email capture could not be confirmed. Review private capture records before deciding whether to try again.'
+                  : 'Email delivery could not be confirmed. Review provider logs before deciding whether to send again.'}
               </Alert>
               <TextField
                 select

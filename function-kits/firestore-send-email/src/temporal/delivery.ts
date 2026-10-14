@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { Firestore, FieldValue, Transaction } from 'firebase-admin/firestore';
 import { EmailRuntime, isDefinitelyUnsent } from './runtime';
 import { ExtendedSendMailOptions } from '../types';
+import { assertEmailCaptureReceiptProfile } from './capture';
 
 export type EmailOutcome = 'confirmed' | 'safe_retry' | 'invalid' | 'rejected' | 'unknown' | 'partial' | 'cancelled';
 export interface EmailDeliveryIntent {
@@ -20,10 +21,13 @@ export async function deliverDurableEmail(
   intent: EmailDeliveryIntent,
   fence?: { assertCurrent(): Promise<void>; assertInTransaction(tx: Transaction): Promise<void> }
 ): Promise<EmailOutcome> {
+  if (runtime.deliveryProfile && ref.projectId !== runtime.deliveryProfile.projectId)
+    throw new Error('EMAIL_DELIVERY_PROFILE_MISMATCH');
   const receipt = db.collection('durableEmailReceipts').doc(ref.jobId);
   const mail = db.doc(intent.mailPath);
   const messageId = emailMessageId(ref.projectId, ref.jobId);
   const existing = await receipt.get();
+  assertEmailCaptureReceiptProfile(existing, runtime.deliveryProfile);
   const state = existing.get('state');
   if (state === 'accepted') return 'confirmed';
   if (state === 'cancelled') return 'cancelled';
@@ -51,9 +55,17 @@ export async function deliverDurableEmail(
       const current = await tx.get(receipt);
       if (fence) await fence.assertInTransaction(tx);
       if (!current.exists)
-        tx.create(receipt, { state: 'prepared', messageId, options, preparedAt: FieldValue.serverTimestamp() });
+        tx.create(receipt, {
+          state: 'prepared',
+          messageId,
+          options,
+          ...(runtime.deliveryProfile ? { deliveryProfile: runtime.deliveryProfile } : {}),
+          preparedAt: FieldValue.serverTimestamp(),
+        });
     });
-    options = (await receipt.get()).get('options');
+    const prepared = await receipt.get();
+    assertEmailCaptureReceiptProfile(prepared, runtime.deliveryProfile);
+    options = prepared.get('options');
   }
   try {
     await runtime.verify();
@@ -65,6 +77,7 @@ export async function deliverDurableEmail(
   const permission = await db.runTransaction(async (tx) => {
     const job = db.collection('durableJobs').doc(ref.jobId);
     const [current, projection, mailSnapshot] = await Promise.all([tx.get(receipt), tx.get(job), tx.get(mail)]);
+    assertEmailCaptureReceiptProfile(current, runtime.deliveryProfile);
     if (current.get('state') !== 'prepared') return 'blocked';
     const entity = projection.get('entity') as { type?: string; id?: string } | undefined;
     let superseded = !projection.exists || !entity?.type || !entity?.id;
@@ -129,6 +142,7 @@ export async function deliverDurableEmail(
   // No raw provider exceptions leave this activity or enter workflow history/UI.
   await db.runTransaction(async (tx) => {
     const current = await tx.get(receipt);
+    assertEmailCaptureReceiptProfile(current, runtime.deliveryProfile);
     if (current.get('token') !== token) throw new Error('EMAIL_RECEIPT_FENCE_CONFLICT');
     if (fence) await fence.assertInTransaction(tx);
     const receiptState = outcome === 'confirmed' ? 'accepted' : outcome === 'safe_retry' ? 'prepared' : outcome;
@@ -141,16 +155,17 @@ export async function deliverDurableEmail(
       'delivery.error': success
         ? null
         : outcome === 'unknown'
-        ? 'Provider acceptance is unknown. Review required before retry.'
-        : outcome === 'partial'
-        ? 'Some recipients were not confirmed. Review required.'
-        : outcome === 'rejected'
-        ? 'Provider rejected all recipients.'
-        : 'Connection failed before email was submitted.',
+          ? 'Provider acceptance is unknown. Review required before retry.'
+          : outcome === 'partial'
+            ? 'Some recipients were not confirmed. Review required.'
+            : outcome === 'rejected'
+              ? 'Provider rejected all recipients.'
+              : 'Connection failed before email was submitted.',
       'delivery.endTime': FieldValue.serverTimestamp(),
       'delivery.leaseExpireTime': null,
     };
     if (providerInfo) update['delivery.info'] = providerInfo;
+    if (providerInfo?.deliveryTransport) update['delivery.deliveryTransport'] = providerInfo.deliveryTransport;
     tx.update(mail, update);
   });
   return outcome;

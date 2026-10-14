@@ -1,5 +1,6 @@
 import {assertSynchronousProviderMutationCompleted} from './temporal/publishing/providerMutationCompletion';
-import axios, { isAxiosError } from 'axios';
+import axios from './providerSandbox/http';
+import { isAxiosError } from 'axios';
 import { logger } from 'firebase-functions/v2';
 import { CallableRequest, HttpsError, FunctionsErrorCode, onCall } from 'firebase-functions/v2/https';
 import { authenticateSubsplash, createAxiosConfig } from './subsplashUtils';

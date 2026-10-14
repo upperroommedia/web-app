@@ -1,6 +1,9 @@
 /* Regression tests for the migrated sender. All network and SMTP calls are mocked. */
 const mockSend = jest.fn();
 const mockInitialize = jest.fn();
+let mockProjectId = 'urm-app';
+const originalSandboxMode = process.env.STAGING_PROVIDER_MODE;
+const originalEmailOrchestrator = process.env.TASK_ORCHESTRATOR_EMAILS;
 let mockPayload: any;
 let mockExists = true;
 let mockControl: any;
@@ -34,7 +37,7 @@ const mockDb = {
     return work;
   }),
 };
-jest.mock('firebase-admin/app', () => ({ getApps: () => [{}], initializeApp: () => mockInitialize() }));
+jest.mock('firebase-admin/app', () => ({ getApps: () => [{options: {projectId: mockProjectId}}], initializeApp: () => mockInitialize() }));
 jest.mock('firebase-admin/firestore', () => ({
   getFirestore: () => mockDb,
   FieldValue: {increment: () => ({increment: true}), serverTimestamp: () => ({})},
@@ -56,7 +59,13 @@ jest.mock('../src/logs', () => ({start: jest.fn(), info: jest.fn(), attemptingDe
 import {processQueue} from '../src/index';
 const execute: any = processQueue;
 function event() {const snapshot = {...mockPayload, delivery: mockPayload.delivery && {...mockPayload.delivery}}; return {data: {before: {exists: true}, after: {exists: mockExists, ref: mockRef, data: () => snapshot}}};}
+afterEach(() => {
+  if (originalSandboxMode === undefined) delete process.env.STAGING_PROVIDER_MODE; else process.env.STAGING_PROVIDER_MODE = originalSandboxMode;
+  if (originalEmailOrchestrator === undefined) delete process.env.TASK_ORCHESTRATOR_EMAILS; else process.env.TASK_ORCHESTRATOR_EMAILS = originalEmailOrchestrator;
+});
 beforeEach(() => {
+  mockProjectId = 'urm-app';
+  delete process.env.STAGING_PROVIDER_MODE;
   mockPayload = {message: {subject: 'test', text: 'body'}};
   mockExists = true;
   mockControl = undefined; mockRelease = undefined; mockReadTime = undefined; mockCreatedTime = undefined; mockDuringPrepare = undefined;
@@ -231,4 +240,20 @@ test('an old SMTP acknowledgement cannot overwrite a different claim identity', 
   await execute(event());
   expect(mockPayload.delivery.smtpClaimId).toBe('different-claim');
   expect(mockPayload.delivery.smtpSubmissionState).toBe('unknown');
+});
+
+test('staging sandbox legacy flag refuses real delivery before preparation or SMTP submission', async () => {
+  mockProjectId = 'urm-app-staging';
+  process.env.STAGING_PROVIDER_MODE = 'sandbox';
+  process.env.TASK_ORCHESTRATOR_EMAILS = 'legacy';
+  mockPayload.delivery = { state: 'PENDING', attempts: 0 };
+  await expect(execute(event())).rejects.toThrow('EMAIL_SANDBOX_REQUIRES_TEMPORAL_CAPTURE');
+  expect(mockSend).not.toHaveBeenCalled();
+  expect(mockPayload.delivery).toEqual({ state: 'PENDING', attempts: 0 });
+});
+test.each(['other', ''])('unknown initialized project %s cannot fall back to SMTP', async (projectId) => {
+  mockProjectId = projectId;
+  process.env.TASK_ORCHESTRATOR_EMAILS = 'legacy';
+  await expect(execute(event())).rejects.toThrow('EMAIL_CAPTURE_PROJECT_MISMATCH');
+  expect(mockSend).not.toHaveBeenCalled();
 });

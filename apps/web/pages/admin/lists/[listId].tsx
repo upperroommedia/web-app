@@ -1,3 +1,4 @@
+import { useProviderEnvironment } from '../../../context/provider/ProviderEnvironmentContext';
 import Head from 'next/head';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
@@ -648,6 +649,8 @@ const loadListDetailsPageDataSingleFlight = (
 };
 
 const ListDetailsPage = () => {
+  const environment = useProviderEnvironment();
+  const liveProviderLinks = !environment.loading && !environment.error && environment.status?.mode === 'live';
   const router = useRouter();
   const theme = useTheme();
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -1011,9 +1014,10 @@ const ListDetailsPage = () => {
     [chainView?.nodes]
   );
   const hasMoreVisibleItems = renderedItems.length < items.length;
-  const subsplashListUrl = list?.subsplashId
-    ? `https://dashboard.subsplash.com/-d/#/library/lists/standard/${list.subsplashId}`
-    : undefined;
+  const subsplashListUrl =
+    liveProviderLinks && list?.subsplashId
+      ? `https://dashboard.subsplash.com/-d/#/library/lists/standard/${list.subsplashId}`
+      : undefined;
 
   const handleDragEnd = useCallback(
     (event: DragEndEvent) => {

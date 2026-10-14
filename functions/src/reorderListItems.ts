@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import axios, { isAxiosError } from 'axios';
+import axios from './providerSandbox/http';
+import { isAxiosError } from 'axios';
 import {
   markPublishingCritical,
   getPublishingMutationOperation,

@@ -1,4 +1,4 @@
-import axios from 'axios';
+import axios from '../providerSandbox/http';
 import { createAxiosConfig } from '../subsplashUtils';
 import type { SubsplashImage } from '../types/Subsplash';
 

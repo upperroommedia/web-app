@@ -1,10 +1,13 @@
+import { getProviderExecutionProfile, assertSandboxIntentProfile } from '../../providerSandbox/profile';
+import { assertProviderAdmissionCatalog } from '../../providerSandbox/admission';
 import type { Firestore } from 'firebase-admin/firestore';
-import type { DurableJobRef, DurableEntityRef } from '@upperroom/contracts/temporal';
+import type { DurableJobRef, DurableEntityRef, ProviderExecution } from '@upperroom/contracts/temporal';
 import { type DurableJobPatch, createDurableJobStore } from '../../../../packages/orchestration/src/job-store';
 import { prepareProviderBinding } from '../../../../packages/orchestration/src/provider-usage';
 import { assertAdmissionReleaseInTransaction } from '../releaseControl';
 import {
   acknowledgementHasReviewedDisposition,
+  assertProviderReceiptExecutionProfile,
   providerAcknowledgementFingerprint,
   providerPayloadFingerprint,
   providerReceiptId,
@@ -12,8 +15,9 @@ import {
   type ProviderReceipt,
 } from './providerReceipts';
 
-export interface ProviderOrphanReviewIntent {
+export interface ProviderOrphanReviewIntent extends Record<string, unknown> {
   schemaVersion: 1;
+  providerExecution?: ProviderExecution;
   sourceJobId: string;
   sourceAcknowledgementId: string;
   acknowledgementFingerprint: string;
@@ -55,11 +59,41 @@ export function validateProviderOrphanAcknowledgement(
     receipt.step !== fact.step ||
     receipt.fingerprint !== fact.payloadFingerprint ||
     providerPayloadFingerprint(receipt.providerAccount) !== providerPayloadFingerprint(fact.providerAccount) ||
+    providerPayloadFingerprint(receipt.providerExecutionProfile) !==
+      providerPayloadFingerprint(fact.providerExecutionProfile) ||
     !fact.providerAccount ||
     !['subsplash', 'soundcloud'].includes(fact.providerAccount.provider) ||
     !identity(fact.providerAccount.account)
   )
     throw new Error('Provider orphan acknowledgement proof is invalid');
+}
+
+/** A late factual ACK inherits its original environment/scenario, never a newly selected default. */
+export function providerOrphanReviewPayload(
+  sourceRef: DurableJobRef,
+  acknowledgementId: string,
+  fact: ProviderAcknowledgementFact,
+  original: Record<string, any>
+): ProviderOrphanReviewIntent {
+  let providerExecution: ProviderExecution | undefined;
+  if (sourceRef.projectId === 'urm-app-staging') {
+    const profile = getProviderExecutionProfile(sourceRef.projectId);
+    if (profile.mode !== 'sandbox') throw new Error('Provider orphan profile unavailable');
+    providerExecution = assertSandboxIntentProfile(profile, original);
+  }
+  assertProviderReceiptExecutionProfile(
+    providerExecution
+      ? { mode: providerExecution.mode, profileId: providerExecution.profileId, version: providerExecution.version }
+      : undefined,
+    fact.providerExecutionProfile
+  );
+  return {
+    schemaVersion: 1,
+    sourceJobId: sourceRef.jobId,
+    sourceAcknowledgementId: acknowledgementId,
+    acknowledgementFingerprint: providerAcknowledgementFingerprint(fact),
+    ...(providerExecution ? { providerExecution } : {}),
+  };
 }
 
 /** Fact-first trigger admission can retry through release/index pauses. Terminal originals stay terminal. */
@@ -96,15 +130,24 @@ export async function ensureProviderOrphanReview(
       !original.entity
     )
       throw new Error('Provider orphan original intent is unavailable');
+    const payload = providerOrphanReviewPayload(sourceRef, acknowledgementId, fact, original);
     if (childSnapshot.exists) {
       const childIntent = await tx.get(firestore.collection('durableJobIntents').doc(ref.jobId));
       if (
         childIntent.get('kind') !== 'provider.orphan_review' ||
         childIntent.get('payload.sourceAcknowledgementId') !== acknowledgementId ||
-        childIntent.get('payload.acknowledgementFingerprint') !== providerAcknowledgementFingerprint(fact)
+        childIntent.get('payload.acknowledgementFingerprint') !== providerAcknowledgementFingerprint(fact) ||
+        providerPayloadFingerprint(childIntent.get('payload')) !== providerPayloadFingerprint(payload) ||
+        providerPayloadFingerprint(childSnapshot.get('providerExecution')) !==
+          providerPayloadFingerprint(payload.providerExecution)
       )
         throw new Error('Provider orphan review identity collision');
       return;
+    }
+    if (payload.providerExecution) {
+      const profile = getProviderExecutionProfile(sourceRef.projectId);
+      if (profile.mode !== 'sandbox') throw new Error('Provider orphan profile unavailable');
+      await assertProviderAdmissionCatalog(tx, firestore, { profile });
     }
     await assertAdmissionReleaseInTransaction(tx, firestore, 'provider.orphan_review', { continuation: true });
     const reviewSeal = await tx.get(
@@ -144,12 +187,7 @@ export async function ensureProviderOrphanReview(
       requestId: `provider-ack-review:${acknowledgementId}`,
       generation: 1,
       createdAt: Date.now(),
-      payload: {
-        schemaVersion: 1,
-        sourceJobId: sourceRef.jobId,
-        sourceAcknowledgementId: acknowledgementId,
-        acknowledgementFingerprint: providerAcknowledgementFingerprint(fact),
-      },
+      payload,
       dispatch: {
         ref,
         workflowType: 'ProviderOrphanReview',
@@ -206,7 +244,16 @@ export async function loadValidatedProviderOrphanReview(firestore: Firestore, re
     providerAcknowledgementFingerprint(fact) !== intent.payload.acknowledgementFingerprint ||
     original.get('projectId') !== ref.projectId ||
     original.get('jobId') !== intent.payload.sourceJobId ||
-    original.get('actorUid') !== intent.actorUid
+    original.get('actorUid') !== intent.actorUid ||
+    providerPayloadFingerprint(intent.payload) !==
+      providerPayloadFingerprint(
+        providerOrphanReviewPayload(
+          { projectId: ref.projectId, jobId: intent.payload.sourceJobId },
+          intent.payload.sourceAcknowledgementId,
+          fact,
+          original.data() ?? {}
+        )
+      )
   )
     throw new Error('Provider orphan review immutable evidence changed');
   return { intent, fact, receipt };

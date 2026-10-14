@@ -73,7 +73,7 @@ interface InternalProof extends PublishingMutationTargetProof {
 
 async function defaultReader(): Promise<PublishingMutationTargetReader> {
   const [{ default: axios }, { authenticateSubsplash, createAxiosConfig }] = await Promise.all([
-    import('axios'),
+    import('../../providerSandbox/http'),
     import('../../subsplashUtils'),
   ]);
   const token = await authenticateSubsplash();

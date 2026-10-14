@@ -44,7 +44,7 @@ import {
 } from './criticalRepairCatalog';
 import { finalizeRetainedSoundCloudSermonDeletion } from './retainedSoundCloudSermonDeletion';
 import { createHash } from 'node:crypto';
-import axios from 'axios';
+import axios from '../../providerSandbox/http';
 import { FieldValue, type Firestore, type Transaction } from 'firebase-admin/firestore';
 import type { DurableJobRef } from '@upperroom/contracts/temporal';
 import { DURABLE_COLLECTIONS } from '../../../../packages/orchestration/src/job-store';

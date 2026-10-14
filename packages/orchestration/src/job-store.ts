@@ -12,6 +12,7 @@ import {
   type DurableJobState,
   type DurableJobStep,
   type DurableWorkflowDispatch,
+  type ProviderExecution,
 } from '@upperroom/contracts/temporal';
 
 export const DURABLE_COLLECTIONS = {
@@ -1243,8 +1244,29 @@ export function createDurableJobStore(options: {
     boundedString(dispatch.taskQueue, 'task queue');
     if (input.initialState && !['queued', 'awaiting_source'].includes(input.initialState))
       invalid('Invalid admission state');
+    let providerExecution: ProviderExecution | undefined;
+    if (input.payload.providerExecution !== undefined) {
+      const pin = input.payload.providerExecution as ProviderExecution;
+      if (
+        projectId !== 'urm-app-staging' ||
+        pin.mode !== 'sandbox' ||
+        pin.profileId !== 'urm-app-staging-publishing-v1' ||
+        pin.version !== 1 ||
+        ![
+          'success',
+          'delayed-processing',
+          'transient-failure',
+          'permanent-failure',
+          'commit-then-lost-response',
+        ].includes(pin.scenario) ||
+        Object.keys(pin).some((key) => !['mode', 'profileId', 'version', 'scenario'].includes(key))
+      )
+        invalid('Invalid server provider execution provenance');
+      providerExecution = { ...pin };
+    }
     const job: DurableJob = {
       schemaVersion: 1,
+      ...(providerExecution ? { providerExecution } : {}),
       jobId: input.ref.jobId,
       projectId: input.ref.projectId,
       kind: input.kind,

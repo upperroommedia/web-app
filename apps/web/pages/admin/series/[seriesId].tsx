@@ -1,3 +1,4 @@
+import { useProviderEnvironment } from '../../../context/provider/ProviderEnvironmentContext';
 /**
  * Series Details Page
  * - View and edit series metadata
@@ -835,6 +836,8 @@ const SortableItem = memo(
 SortableItem.displayName = 'SortableItem';
 
 const SeriesDetailsPage = () => {
+  const environment = useProviderEnvironment();
+  const liveProviderLinks = !environment.loading && !environment.error && environment.status?.mode === 'live';
   const router = useRouter();
   const { user } = useAuth();
   const theme = useTheme();
@@ -1610,36 +1613,38 @@ const SeriesDetailsPage = () => {
                               },
                             }}
                           />
-                          <Box
-                            component="a"
-                            href={`https://dashboard.subsplash.com/-d/#/library/media/series/${series.subsplashId}`}
-                            target="_blank"
-                            rel="noreferrer"
-                            sx={{
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: 0.5,
-                              color: 'primary.main',
-                              textDecoration: 'none',
-                              maxWidth: '100%',
-                              '&:hover': {
-                                textDecoration: 'underline',
-                              },
-                            }}
-                          >
-                            <Typography
-                              variant="body2"
-                              color="inherit"
+                          {liveProviderLinks && (
+                            <Box
+                              component="a"
+                              href={`https://dashboard.subsplash.com/-d/#/library/media/series/${series.subsplashId}`}
+                              target="_blank"
+                              rel="noreferrer"
                               sx={{
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                                whiteSpace: 'nowrap',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 0.5,
+                                color: 'primary.main',
+                                textDecoration: 'none',
+                                maxWidth: '100%',
+                                '&:hover': {
+                                  textDecoration: 'underline',
+                                },
                               }}
                             >
-                              View in Subsplash
-                            </Typography>
-                            <OpenInNewIcon sx={{ fontSize: 16 }} />
-                          </Box>
+                              <Typography
+                                variant="body2"
+                                color="inherit"
+                                sx={{
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap',
+                                }}
+                              >
+                                View in Subsplash
+                              </Typography>
+                              <OpenInNewIcon sx={{ fontSize: 16 }} />
+                            </Box>
+                          )}
                         </Box>
                       ) : (
                         <Chip icon={<PendingIcon />} label="Not Published" color="warning" size="small" />

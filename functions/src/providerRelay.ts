@@ -1,3 +1,4 @@
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import axios, { type InternalAxiosRequestConfig } from 'axios';
 import { defineSecret } from 'firebase-functions/params';
 
@@ -41,6 +42,18 @@ export const getProviderRelayUrl = (originalUrl: string, relayOrigin: string): s
 if (axios.interceptors?.request) {
   axios.interceptors.request.use((request) => {
     const config = request as ProviderRelayRequestConfig;
+    if (firebaseAdmin.app().options.projectId === 'urm-app-staging' && typeof config.url === 'string') {
+      const upstream = new URL(config.url.trim(), config.baseURL);
+      if (
+        ['https://core.subsplash.com', 'https://api.soundcloud.com', 'https://secure.soundcloud.com'].includes(
+          upstream.origin
+        )
+      ) {
+        throw Object.assign(new Error('Staging provider HTTP must use the isolated simulator'), {
+          code: 'PROVIDER_SANDBOX_TRANSPORT_REQUIRED',
+        });
+      }
+    }
     const sharedToken = process.env.PROVIDER_EGRESS_RELAY_TOKEN?.trim();
     const relayOrigin = getRelayOrigin();
     if (!sharedToken || !relayOrigin || !config.url || config.providerRelayOriginalUrl) return config;

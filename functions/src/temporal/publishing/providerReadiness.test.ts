@@ -4,7 +4,10 @@ jest.mock('./providerReceipts', () => ({
 }));
 jest.mock('@upperroom/shared/firebase/firebaseAdmin', () => ({
   __esModule: true,
-  default: { firestore: () => ({ collection: () => ({ doc: () => ({ get: async () => ({ exists: false }) }) }) }) },
+  default: {
+    app: () => ({ options: { projectId: 'urm-app' } }),
+    firestore: () => ({ collection: () => ({ doc: () => ({ get: async () => ({ exists: false }) }) }) }),
+  },
 }));
 jest.mock('axios', () => ({ __esModule: true, default: jest.fn() }));
 jest.mock('../../subsplashUtils', () => ({

@@ -1,4 +1,4 @@
-import axios from 'axios';
+import axios from '../providerSandbox/http';
 import { CollectionReference, Firestore } from 'firebase-admin/firestore';
 import { logger } from 'firebase-functions/v2';
 import { ImageType } from '@upperroom/shared/types/Image';

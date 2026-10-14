@@ -1,4 +1,4 @@
-import axios from 'axios';
+import axios from '../providerSandbox/http';
 import { logger } from 'firebase-functions/v2';
 import { createAxiosConfig } from '../subsplashUtils';
 import { List, ListType, OverflowBehavior } from '@upperroom/shared/types/List';

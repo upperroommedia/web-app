@@ -1,3 +1,5 @@
+import { stagingPasswordResetMessage } from '../utils/providerSimulation';
+import { getFirebaseProjectId } from '../shared/firebaseProjectConfig';
 // import Button from '@mui/material/Button';
 // import TextField from '@mui/material/TextField';
 import { useRouter } from 'next/router';
@@ -19,6 +21,7 @@ const INVITE_LOGIN_NOTICE_KEY = 'invite-claim-login-notice';
 
 const Login = () => {
   const router = useRouter();
+  const passwordResetUnavailable = stagingPasswordResetMessage(getFirebaseProjectId());
   const { user, loading, loginWithGoogle, loginWithApple, loginWithMicrosoft, login } = useAuth();
   const [devLoginLoading, setDevLoginLoading] = useState(false);
   const [providerLoginLoading, setProviderLoginLoading] = useState<string | null>(null);
@@ -77,9 +80,7 @@ const Login = () => {
 
     const candidate = error as { code?: unknown; message?: unknown };
     return (
-      typeof candidate.code === 'string' &&
-      candidate.code.startsWith('auth/') &&
-      typeof candidate.message === 'string'
+      typeof candidate.code === 'string' && candidate.code.startsWith('auth/') && typeof candidate.message === 'string'
     );
   }
 
@@ -146,14 +147,21 @@ const Login = () => {
       return;
     } catch (error) {
       if (isAuthError(error)) {
-        if (error.code === AuthErrorCodes.CREDENTIAL_ALREADY_IN_USE || error.code === AuthErrorCodes.NEED_CONFIRMATION) {
+        if (
+          error.code === AuthErrorCodes.CREDENTIAL_ALREADY_IN_USE ||
+          error.code === AuthErrorCodes.NEED_CONFIRMATION
+        ) {
           setTitle('Account Exists With Different Credential');
-          setErrorMessage('This email is already associated with another sign-in method. Please sign in with your existing provider.');
+          setErrorMessage(
+            'This email is already associated with another sign-in method. Please sign in with your existing provider.'
+          );
           setOpen(true);
           return;
         } else if (error.code === 'auth/requires-existing-provider-signin') {
           setTitle('Account Linking Required');
-          setErrorMessage('This email is already associated with another sign-in method. Please sign in with your existing provider first, then try linking Microsoft from your profile.');
+          setErrorMessage(
+            'This email is already associated with another sign-in method. Please sign in with your existing provider first, then try linking Microsoft from your profile.'
+          );
           setOpen(true);
           return;
         } else if (
@@ -165,7 +173,9 @@ const Login = () => {
           return;
         } else if (error.code === AuthErrorCodes.POPUP_BLOCKED) {
           setTitle('Popup Blocked');
-          setErrorMessage('Your browser blocked the authentication popup. Please allow popups for this site and try again.');
+          setErrorMessage(
+            'Your browser blocked the authentication popup. Please allow popups for this site and try again.'
+          );
           setOpen(true);
           return;
         }
@@ -196,6 +206,11 @@ const Login = () => {
         alignItems: 'center',
       }}
     >
+      {passwordResetUnavailable && (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          {passwordResetUnavailable}
+        </Alert>
+      )}
       {/* <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -260,18 +275,18 @@ const Login = () => {
           <MicrosoftLoginButton onClick={() => handleLogin('microsoft', loginWithMicrosoft)} />
           <AppleLoginButton onClick={() => handleLogin('apple', loginWithApple)} />
         </div>
-        
+
         {isDevelopment && (
           <>
-            <div style={{ 
-              borderTop: '1px solid #ccc', 
-              margin: '20px 0', 
-              paddingTop: '20px',
-              textAlign: 'center'
-            }}>
-              <p style={{ color: '#666', fontSize: '12px', marginBottom: '10px' }}>
-                Development Mode Only
-              </p>
+            <div
+              style={{
+                borderTop: '1px solid #ccc',
+                margin: '20px 0',
+                paddingTop: '20px',
+                textAlign: 'center',
+              }}
+            >
+              <p style={{ color: '#666', fontSize: '12px', marginBottom: '10px' }}>Development Mode Only</p>
               <Button
                 variant="contained"
                 color="warning"

@@ -1,14 +1,16 @@
-import {assertProviderMutationTransportAllowed} from './temporal/publishing/providerTransportPolicy';
+import { assertProviderMutationTransportAllowed } from './temporal/publishing/providerTransportPolicy';
 // Utils file for subsplash functions
 
 import { randomUUID } from 'node:crypto';
-import axios, { AxiosRequestConfig, isAxiosError } from 'axios';
+import axios from './providerSandbox/http';
+import { AxiosRequestConfig, isAxiosError } from 'axios';
 import { logger } from 'firebase-functions/v2';
 import { HttpsError } from 'firebase-functions/v2/https';
 import FormData from 'form-data';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { getHtmlEdgeBlock } from './helpers/upstreamHttpErrors';
 import './providerRelay';
+import { currentSandboxProfile } from './providerSandbox/http';
 
 const AUTH_CACHE_ROOT_PATH = 'subsplashAuthSession';
 const AUTH_REFRESH_LOCK_PATH = `${AUTH_CACHE_ROOT_PATH}/refreshLock`;
@@ -41,8 +43,7 @@ let inMemoryAccessToken: string | null = null;
 let inMemoryAccessTokenExpiresAtMs = 0;
 let inFlightAuthentication: Promise<string> | null = null;
 
-const sleep = async (durationMs: number): Promise<void> =>
-  new Promise((resolve) => setTimeout(resolve, durationMs));
+const sleep = async (durationMs: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, durationMs));
 
 axios.interceptors?.response?.use(undefined, async (error: unknown) => {
   const edgeBlock = getHtmlEdgeBlock(error);
@@ -67,7 +68,7 @@ axios.interceptors?.response?.use(undefined, async (error: unknown) => {
       retry,
       requestId: blockedRequestId,
     });
-    await sleep(300 * (2 ** (retry - 1)));
+    await sleep(300 * 2 ** (retry - 1));
     try {
       const retryConfig: EdgeRetryRequestConfig = { ...config, skipSubsplashEdgeRetry: true };
       return await axios(retryConfig);
@@ -81,7 +82,10 @@ axios.interceptors?.response?.use(undefined, async (error: unknown) => {
   logger.error('Subsplash API request remained blocked by its edge network', {
     requestId: blockedRequestId,
   });
-  throw new HttpsError('unavailable', 'Subsplash is temporarily blocking requests from our server. Please retry shortly.');
+  throw new HttpsError(
+    'unavailable',
+    'Subsplash is temporarily blocking requests from our server. Please retry shortly.'
+  );
 });
 
 const getDatabaseRef = (path: string) => firebaseAdmin.database().ref(path);
@@ -238,7 +242,9 @@ const fetchFreshAccessToken = async (): Promise<SubsplashAuthCacheRecord> => {
       break;
     } catch (error) {
       const edgeBlock = getHtmlEdgeBlock(error);
-      const transportFailure = isAxiosError(error) && !error.response &&
+      const transportFailure =
+        isAxiosError(error) &&
+        !error.response &&
         ['ECONNRESET', 'ETIMEDOUT', 'EAI_AGAIN', 'ECONNABORTED'].includes(error.code || '');
       if (!edgeBlock && !transportFailure) {
         throw error;
@@ -255,7 +261,7 @@ const fetchFreshAccessToken = async (): Promise<SubsplashAuthCacheRecord> => {
           'Subsplash is temporarily blocking requests from our server. Please retry shortly.'
         );
       }
-      await sleep(300 * (2 ** attempt));
+      await sleep(300 * 2 ** attempt);
     }
   }
   const accessToken = response.data?.access_token;
@@ -282,6 +288,9 @@ const fetchFreshAccessToken = async (): Promise<SubsplashAuthCacheRecord> => {
 };
 
 export const authenticateSubsplash = async (): Promise<string> => {
+  const sandbox = currentSandboxProfile();
+  if (sandbox) return `provider-sandbox:${sandbox.profileId}:subsplash`;
+
   if (inMemoryAccessToken && isAccessTokenFresh(inMemoryAccessTokenExpiresAtMs)) {
     return inMemoryAccessToken;
   }
@@ -349,7 +358,7 @@ export const createAxiosConfig = (
   /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
   additionalHeaders?: any
 ): AxiosRequestConfig => {
-  if(['POST','PUT','PATCH','DELETE'].includes(method))assertProviderMutationTransportAllowed('subsplash');
+  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) assertProviderMutationTransportAllowed('subsplash');
   const headers: Headers = {
     'Cache-Control': 'no-cache',
     Authority: 'core.subsplash.com',
@@ -366,7 +375,7 @@ export const createAxiosConfig = (
     url: endpoint_url,
     headers: headers,
     timeout: 60_000,
-    ...(['POST','PUT','PATCH','DELETE'].includes(method)?{maxRedirects:0,skipSubsplashEdgeRetry:true}:{}),
+    ...(['POST', 'PUT', 'PATCH', 'DELETE'].includes(method) ? { maxRedirects: 0, skipSubsplashEdgeRetry: true } : {}),
     data,
   };
 };

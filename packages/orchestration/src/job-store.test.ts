@@ -869,3 +869,59 @@ test('public stopped metadata rejects misleading dispositions, partial descripto
   ])
     await expect(store.project(ref, { result })).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
 });
+
+describe('server-authored provider simulation projection', () => {
+  test('staging immutable intent profile becomes public provenance, including replacement admissions', async () => {
+    const { firestore, docs } = memoryFirestore(),
+      projectId = 'urm-app-staging',
+      store = createDurableJobStore({ firestore, projectId });
+    const pin = {
+      mode: 'sandbox',
+      profileId: 'urm-app-staging-publishing-v1',
+      version: 1,
+      scenario: 'transient-failure',
+    };
+    const input = admission({
+      ref: { projectId, jobId: 'sandbox-job' },
+      payload: { providerExecution: pin },
+      dispatch: {
+        workflowType: 'PublishSermon',
+        workflowId: 'sandbox-workflow',
+        taskQueue: 'urm-orchestration',
+        ref: { projectId, jobId: 'sandbox-job' },
+      },
+    });
+    await firestore.runTransaction(async (tx) => {
+      store.createInTransaction(tx, input);
+    });
+    expect(docs.get('durableJobs/sandbox-job')?.providerExecution).toEqual(pin);
+    expect((docs.get('durableJobIntents/sandbox-job')?.payload as Record<string, unknown>).providerExecution).toEqual(
+      pin
+    );
+    const replacement = {
+      ...input,
+      ref: { projectId, jobId: 'replacement' },
+      generation: 2,
+      dispatch: { ...input.dispatch, ref: { projectId, jobId: 'replacement' } },
+      payload: structuredClone(input.payload),
+    };
+    await firestore.runTransaction(async (tx) => {
+      store.createInTransaction(tx, replacement);
+    });
+    expect(docs.get('durableJobs/replacement')?.providerExecution).toEqual(pin);
+  });
+  test('invalid or production simulation provenance never projects', async () => {
+    const { firestore } = memoryFirestore(),
+      store = createDurableJobStore({ firestore, projectId: ref.projectId });
+    await expect(
+      firestore.runTransaction(async (tx) =>
+        store.createInTransaction(
+          tx,
+          admission({
+            payload: { providerExecution: { mode: 'sandbox', profileId: 'fake', version: 1, scenario: 'success' } },
+          })
+        )
+      )
+    ).rejects.toThrow('provenance');
+  });
+});

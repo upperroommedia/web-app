@@ -2,9 +2,9 @@ import { createHash } from 'node:crypto';
 import { deliverDurableEmail, emailMessageId } from '../../src/temporal/delivery';
 import { isDefinitelyUnsent, EmailRuntime } from '../../src/temporal/runtime';
 
-function harness(initial: Record<string, any> = {}) {
+function harness(initial: Record<string, any> = {}, projectId = 'p1') {
   const headId = createHash('sha256')
-    .update(JSON.stringify(['p1', 'mail', 'mail/m1', 'email']))
+    .update(JSON.stringify([projectId, 'mail', 'mail/m1', 'email']))
     .digest('hex');
   const records: Record<string, any> = {
     'mail/m1': {},
@@ -173,4 +173,63 @@ test('private execution epoch is fenced before reservations and immediately befo
   };
   await expect(deliverDurableEmail(h.db, h.runtime, ref, intent, fence)).rejects.toThrow('LEASE_LOST');
   expect(h.runtime.send).not.toHaveBeenCalled();
+});
+
+test.each(['prepared', 'sending', 'unknown', 'accepted'])(
+  'capture refuses historical live %s receipt before any effect',
+  async (state) => {
+    const h = harness({ 'durableEmailReceipts/j1': { state } });
+    Object.assign(h.runtime, {
+      deliveryProfile: {
+        schemaVersion: 1,
+        mode: 'capture',
+        projectId: 'urm-app-staging',
+        profileId: 'urm-app-staging-mail-capture-v1',
+        version: 1,
+      },
+    });
+    await expect(
+      deliverDurableEmail(h.db, h.runtime, { ...ref, projectId: 'urm-app-staging' }, intent)
+    ).rejects.toThrow('PROFILE_MISMATCH');
+    expect(h.runtime.prepare).not.toHaveBeenCalled();
+    expect(h.runtime.verify).not.toHaveBeenCalled();
+    expect(h.runtime.send).not.toHaveBeenCalled();
+    expect(h.records['durableEmailReceipts/j1']).toEqual({ state });
+  }
+);
+
+test('capture profile is frozen before submission and explicit simulation provenance reaches private and mail receipts', async () => {
+  const h = harness({}, 'urm-app-staging');
+  const deliveryProfile = {
+    schemaVersion: 1 as const,
+    mode: 'capture' as const,
+    projectId: 'urm-app-staging' as const,
+    profileId: 'urm-app-staging-mail-capture-v1' as const,
+    version: 1 as const,
+  };
+  const deliveryTransport = { ...deliveryProfile, captureId: 'c'.repeat(64), payloadSha256: 'd'.repeat(64) };
+  Object.assign(h.runtime, { deliveryProfile });
+  (h.runtime.send as jest.Mock).mockImplementation(async (options) => {
+    expect(h.records['durableEmailReceipts/j1'].deliveryProfile).toEqual(deliveryProfile);
+    expect(h.records['durableEmailReceipts/j1'].state).toBe('sending');
+    return {
+      messageId: options.messageId,
+      accepted: ['private@example.org'],
+      rejected: [],
+      pending: [],
+      response: 'Captured privately; no external email sent.',
+      sendgridQueueId: null,
+      deliveryTransport,
+    };
+  });
+  const stageRef = { ...ref, projectId: 'urm-app-staging' };
+  await expect(deliverDurableEmail(h.db, h.runtime, stageRef, intent)).resolves.toBe('confirmed');
+  expect(h.records['durableEmailReceipts/j1']).toMatchObject({
+    state: 'accepted',
+    deliveryProfile,
+    info: { deliveryTransport },
+  });
+  expect(h.records['mail/m1']['delivery.deliveryTransport']).toEqual(deliveryTransport);
+  await expect(deliverDurableEmail(h.db, h.runtime, stageRef, intent)).resolves.toBe('confirmed');
+  expect(h.runtime.send).toHaveBeenCalledTimes(1);
 });

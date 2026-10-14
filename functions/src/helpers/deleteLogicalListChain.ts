@@ -3,7 +3,8 @@ import { providerPayloadFingerprint } from '../temporal/publishing/providerRecei
 import { assertSynchronousProviderMutationCompleted } from '../temporal/publishing/providerMutationCompletion';
 import { FieldPath, type DocumentReference } from 'firebase-admin/firestore';
 import { isDurablePublishingOperation } from '../temporal/publishing/durableOperationContext';
-import axios, { isAxiosError } from 'axios';
+import axios from '../providerSandbox/http';
+import { isAxiosError } from 'axios';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { logger } from 'firebase-functions/v2';
 import { createAxiosConfig, authenticateSubsplash } from '../subsplashUtils';

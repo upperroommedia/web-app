@@ -6,8 +6,16 @@ import Templates from '../templates';
 import { preparePayload, setDependencies } from '../prepare-payload';
 import { ExtendedSendMailOptions } from '../types';
 import { secureMailOptions } from './secure-options';
+import {
+  createMailCapture,
+  emailCaptureProfile,
+  authoritativeEmailProject,
+  type EmailCaptureProfile,
+  type EmailCaptureProvenance,
+} from './capture';
 
 export interface EmailProviderReceipt {
+  deliveryTransport?: EmailCaptureProvenance;
   messageId: string;
   accepted: string[];
   rejected: string[];
@@ -16,6 +24,7 @@ export interface EmailProviderReceipt {
   sendgridQueueId: string | null;
 }
 export interface EmailRuntime {
+  readonly deliveryProfile?: EmailCaptureProfile;
   prepare(payload: Record<string, any>, messageId: string): Promise<ExtendedSendMailOptions>;
   verify(): Promise<void>;
   send(options: ExtendedSendMailOptions, beforeSend?: () => Promise<void>): Promise<EmailProviderReceipt>;
@@ -29,8 +38,10 @@ export interface EmailRuntime {
 export function createEmailRuntime(db: Firestore): EmailRuntime {
   const templates = config.templatesCollection ? new Templates(db.collection(config.templatesCollection)) : undefined;
   setDependencies(db, templates);
-  const transport = createEmailProviderRuntime();
+  const profile = emailCaptureProfile(authoritativeEmailProject(db));
+  const transport = profile ? createMailCapture(db, profile) : createEmailProviderRuntime();
   return {
+    ...(profile ? { deliveryProfile: profile } : {}),
     async prepare(input, messageId) {
       const payload = await preparePayload(structuredClone(input));
       if (!payload.to.length && !payload.cc.length && !payload.bcc.length) throw new Error('MAIL_RECIPIENT_REQUIRED');
@@ -67,7 +78,8 @@ export function createEmailRuntime(db: Firestore): EmailRuntime {
         rejected: result.rejected || [],
         pending: result.pending || [],
         response: result.response || null,
-        sendgridQueueId: result.queueId || null,
+        sendgridQueueId: result.sendgridQueueId || result.queueId || null,
+        ...(result.deliveryTransport ? { deliveryTransport: result.deliveryTransport } : {}),
       };
     },
     close() {

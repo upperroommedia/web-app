@@ -13,7 +13,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import type { Transaction } from 'firebase-admin/firestore';
 import type { ProviderMutationResource } from '../temporal/publishing/providerMutationGuard';
 import { reserveSubsplashAssociation } from '../temporal/publishing/providerAssociations';
-import axios from 'axios';
+import axios from '../providerSandbox/http';
 import { executeProviderCreate, providerPayloadFingerprint } from '../temporal/publishing/providerReceipts';
 import { normalizeSubsplashListPatchAck } from './subsplashMutationAck';
 import { assertSynchronousProviderMutationCompleted } from '../temporal/publishing/providerMutationCompletion';

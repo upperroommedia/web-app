@@ -17,7 +17,8 @@ import auth from '../../firebase/auth';
 import { SignupForm, userCredentials } from '../types';
 import nookies from 'nookies';
 import { canUserRolePublish, canUserRoleUpload, isUserRoleAdmin, User, UserRoleType } from '../../types/User';
-import { getFirebaseAuthDomain } from '../../shared/firebaseProjectConfig';
+import { stagingPasswordResetMessage } from '../../utils/providerSimulation';
+import { getFirebaseAuthDomain, getFirebaseProjectId } from '../../shared/firebaseProjectConfig';
 import { shouldPreferFirebaseRedirectAuth } from '../../utils/authRedirect';
 
 const getAuthErrorCode = (error: unknown): string | undefined =>
@@ -212,6 +213,8 @@ export const UserProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const resetPassword = async (email: string) => {
+    const unavailable = stagingPasswordResetMessage(getFirebaseProjectId());
+    if (unavailable) return new Error(unavailable);
     try {
       await sendPasswordResetEmail(auth, email);
     } catch (error: unknown) {

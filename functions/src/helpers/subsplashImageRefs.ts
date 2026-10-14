@@ -1,4 +1,5 @@
-import axios, { AxiosRequestConfig } from 'axios';
+import axios from '../providerSandbox/http';
+import { AxiosRequestConfig } from 'axios';
 import { executeProviderCreate } from '../temporal/publishing/providerReceipts';
 import { logger } from 'firebase-functions/v2';
 import { HttpsError } from 'firebase-functions/v2/https';

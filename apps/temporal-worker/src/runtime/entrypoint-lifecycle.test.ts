@@ -111,6 +111,7 @@ jest.mock('@upperroom/shared/firebase/firebaseAdminOwnership', () => ({
 }));
 jest.mock('@upperroom/shared/firebase/firebaseAdmin', () => ({}));
 jest.mock('./worker-witness', () => ({ loadWorkerWitness: async () => ({ instanceId: 'test' }) }));
+jest.mock('./provider-sandbox-readiness', () => ({ verifyProviderSandboxReadiness: jest.fn().mockResolvedValue(undefined) }));
 jest.mock('./activities', () => ({ createRuntimeActivities: () => ({ db: {}, queues: { 'urm-controls': {} } }) }));
 jest.mock('./dispatcher', () => ({
   OutboxDispatcher: class {

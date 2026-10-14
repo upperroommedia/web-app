@@ -1,6 +1,6 @@
 import { assertSynchronousProviderMutationCompleted } from './providerMutationCompletion';
 import { preparePublishingAllocationReplacement } from './allocationBarrier';
-import axios from 'axios';
+import axios from '../../providerSandbox/http';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { getDownloadURL } from 'firebase-admin/storage';
 import { FieldValue, type Transaction } from 'firebase-admin/firestore';

@@ -1,4 +1,5 @@
 import handleError from './handleError';
+import { isTrustedScriptedSandboxFault } from './providerSandbox/scriptedFailure';
 import { randomUUID } from 'node:crypto';
 import { executeProviderCreate } from './temporal/publishing/providerReceipts';
 import {
@@ -77,7 +78,7 @@ const uploadToSoundCloudCall = onCall(
 
 export const uploadToSoundCloudDomain = async (
   data: UploadToSoundCloudInputType,
-  trustedOptions: {expectedProviderAccount?:string} = {}
+  trustedOptions: { expectedProviderAccount?: string } = {}
 ): Promise<UploadToSoundCloudReturnType> => {
   const bucket = firebaseAdmin.storage().bucket();
   logger.log('uploadToSoundCloud.start', {
@@ -109,7 +110,13 @@ export const uploadToSoundCloudDomain = async (
               payload: data,
               prepare: async () => {
                 originalAccount = await getAuthenticatedSoundCloudAccountId(token);
-                if(trustedOptions.expectedProviderAccount && originalAccount!==trustedOptions.expectedProviderAccount)throw Object.assign(new Error('Original SoundCloud account changed'),{code:'PUBLISHING_PROVIDER_REPAIR_REQUIRED'});
+                if (
+                  trustedOptions.expectedProviderAccount &&
+                  originalAccount !== trustedOptions.expectedProviderAccount
+                )
+                  throw Object.assign(new Error('Original SoundCloud account changed'), {
+                    code: 'PUBLISHING_PROVIDER_REPAIR_REQUIRED',
+                  });
                 prepared = await prepareMultipartUpload({
                   bucket,
                   audioStoragePath: data.audioStoragePath,
@@ -142,6 +149,7 @@ export const uploadToSoundCloudDomain = async (
       ...(uploadResult.permalinkUrl ? { soundCloudTrackUrl: uploadResult.permalinkUrl } : {}),
     };
   } catch (error) {
+    if (isTrustedScriptedSandboxFault(error)) throw error;
     if (error instanceof HttpsError) {
       await emitSoundCloudReconnectAlertIfNeeded({
         error,

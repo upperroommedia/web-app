@@ -6,7 +6,8 @@
  * After the initial admin consent flow, we persist the refresh token in
  * Firestore and refresh access tokens automatically for publish/edit/delete.
  */
-import axios, { isAxiosError } from 'axios';
+import axios from './providerSandbox/http';
+import { isAxiosError } from 'axios';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { defineSecret } from 'firebase-functions/params';
@@ -18,6 +19,12 @@ import { functionsSentryDsnSecret } from './sentry';
 import { createSoundCloudReconnectRequiredError } from './soundcloudAuthErrors';
 import { getHtmlEdgeBlock } from './helpers/upstreamHttpErrors';
 import { providerEgressRelayTokenSecret } from './providerRelay';
+import { currentSandboxProfile } from './providerSandbox/http';
+import {
+  getSandboxOAuthConfiguration,
+  sandboxSoundCloudAuthDocumentPath,
+  buildSandboxSoundCloudAuthorizeUrl,
+} from './providerSandbox/oauth';
 
 const SOUND_CLOUD_TOKEN_URL = 'https://secure.soundcloud.com/oauth/token';
 const SOUND_CLOUD_AUTH_STATE_COLLECTION = '_integrationAuth';
@@ -34,7 +41,7 @@ const MAX_EDGE_BLOCK_RETRIES = 3;
 // may supersede a claim after twice that bound; expiry never proves no effect.
 const OAUTH_ABANDONED_AFTER_SECONDS = 120;
 type OAuthAdmission = { admissionLeaseId: string };
-const oauthAttemptRef = (attempt: string) => soundcloudAuthStateRef.collection('oauthAttempts').doc(attempt);
+const oauthAttemptRef = (attempt: string) => soundcloudAuthStateRef().collection('oauthAttempts').doc(attempt);
 const nativeTimeReached = (now: Timestamp, deadline: Timestamp): boolean =>
   now.seconds > deadline.seconds || (now.seconds === deadline.seconds && now.nanoseconds >= deadline.nanoseconds);
 
@@ -106,27 +113,38 @@ export type CreateSoundCloudAuthorizationSessionResult = {
 const soundcloudClientIdSecret = defineSecret('SOUNDCLOUD_CLIENT_ID');
 const soundcloudClientSecretSecret = defineSecret('SOUNDCLOUD_CLIENT_SECRET');
 
-const soundcloudAuthStateRef = firebaseAdmin
-  .firestore()
-  .collection(SOUND_CLOUD_AUTH_STATE_COLLECTION)
-  .doc(SOUND_CLOUD_AUTH_STATE_DOC);
+const soundcloudAuthStateRef = () => {
+  const profile = currentSandboxProfile();
+  return profile
+    ? firebaseAdmin.firestore().doc(sandboxSoundCloudAuthDocumentPath(profile))
+    : firebaseAdmin.firestore().collection(SOUND_CLOUD_AUTH_STATE_COLLECTION).doc(SOUND_CLOUD_AUTH_STATE_DOC);
+};
 
 const soundcloudPendingAuthSessionRef = (adminUid: string) =>
-  soundcloudAuthStateRef.collection(SOUND_CLOUD_PENDING_AUTH_COLLECTION).doc(adminUid);
+  soundcloudAuthStateRef().collection(SOUND_CLOUD_PENDING_AUTH_COLLECTION).doc(adminUid);
 
 const readConfiguredValue = (value: string | undefined): string | null => {
   const trimmed = value?.trim();
   return trimmed && trimmed.length > 0 ? trimmed : null;
 };
 
-const getConfiguredClientId = (): string | null =>
-  readConfiguredValue(soundcloudClientIdSecret.value()) ?? readConfiguredValue(process.env.SOUNDCLOUD_CLIENT_ID);
+const getConfiguredClientId = (): string | null => {
+  const profile = currentSandboxProfile();
+  return profile
+    ? getSandboxOAuthConfiguration(profile).clientId
+    : readConfiguredValue(soundcloudClientIdSecret.value()) ?? readConfiguredValue(process.env.SOUNDCLOUD_CLIENT_ID);
+};
 
-const getConfiguredClientSecret = (): string | null =>
-  readConfiguredValue(soundcloudClientSecretSecret.value()) ??
-  readConfiguredValue(process.env.SOUNDCLOUD_CLIENT_SECRET);
+const getConfiguredClientSecret = (): string | null => {
+  const profile = currentSandboxProfile();
+  return profile
+    ? getSandboxOAuthConfiguration(profile).clientSecret
+    : readConfiguredValue(soundcloudClientSecretSecret.value()) ??
+        readConfiguredValue(process.env.SOUNDCLOUD_CLIENT_SECRET);
+};
 
-const getBootstrapRefreshToken = (): string | null => readConfiguredValue(process.env.SOUNDCLOUD_REFRESH_TOKEN);
+const getBootstrapRefreshToken = (): string | null =>
+  currentSandboxProfile() ? null : readConfiguredValue(process.env.SOUNDCLOUD_REFRESH_TOKEN);
 
 const nowMillis = (): number => Date.now();
 
@@ -187,7 +205,7 @@ const normalizeRedirectUri = (redirectUri: string): string => {
 };
 
 const readAuthState = async (): Promise<SoundCloudAuthState | null> => {
-  const snapshot = await soundcloudAuthStateRef.get();
+  const snapshot = await soundcloudAuthStateRef().get();
   if (!snapshot.exists) {
     return null;
   }
@@ -373,7 +391,7 @@ const writeTokenState = async (
   const pendingRef = soundcloudPendingAuthSessionRef(options.connectedByUid!);
   await firebaseAdmin.firestore().runTransaction(async (transaction) => {
     const pending = await transaction.get(pendingRef);
-    const auth = await transaction.get(soundcloudAuthStateRef);
+    const auth = await transaction.get(soundcloudAuthStateRef());
     const attempt = await transaction.get(oauthAttemptRef(options.exchangeAttempt));
     if (
       attempt.get('status') !== 'active' ||
@@ -383,7 +401,7 @@ const writeTokenState = async (
     )
       throw new HttpsError('aborted', 'SoundCloud connection ownership changed during authorization.');
     transaction.set(
-      soundcloudAuthStateRef,
+      soundcloudAuthStateRef(),
       { ...updateData, oauthExchangeOwner: FieldValue.delete() },
       { merge: true }
     );
@@ -422,7 +440,7 @@ export const createSoundCloudAuthorizationSession = async (
 
   await beforeEffects();
   await firebaseAdmin.firestore().runTransaction(async (transaction) => {
-    const auth = await transaction.get(soundcloudAuthStateRef);
+    const auth = await transaction.get(soundcloudAuthStateRef());
     const oldOwner = auth.get('oauthExchangeOwner');
     if (oldOwner) {
       if (typeof oldOwner !== 'string' || !/^[a-f0-9-]{36}$/.test(oldOwner))
@@ -469,7 +487,7 @@ export const createSoundCloudAuthorizationSession = async (
         supersededByAdminUid: adminUid,
         supersedingSessionStateHash: createHash('sha256').update(state).digest('hex'),
       });
-      transaction.set(soundcloudAuthStateRef, { oauthExchangeOwner: FieldValue.delete() }, { merge: true });
+      transaction.set(soundcloudAuthStateRef(), { oauthExchangeOwner: FieldValue.delete() }, { merge: true });
     }
     transaction.set(soundcloudPendingAuthSessionRef(adminUid), {
       state,
@@ -480,6 +498,12 @@ export const createSoundCloudAuthorizationSession = async (
     });
   });
 
+  const profile = currentSandboxProfile();
+  if (profile)
+    return {
+      authorizeUrl: buildSandboxSoundCloudAuthorizeUrl(profile, { redirectUri, state, codeChallenge, clientId }),
+      expiresAtMillis,
+    };
   const authorizeUrl = new URL('https://secure.soundcloud.com/authorize');
   authorizeUrl.searchParams.set('response_type', 'code');
   authorizeUrl.searchParams.set('client_id', clientId);
@@ -536,7 +560,7 @@ export const exchangeSoundCloudAuthorizationCode = async (
   await beforeEffects();
   await firebaseAdmin.firestore().runTransaction(async (transaction) => {
     const pending = await transaction.get(pendingRef);
-    const auth = await transaction.get(soundcloudAuthStateRef);
+    const auth = await transaction.get(soundcloudAuthStateRef());
     if (
       !pending.exists ||
       pending.get('state') !== state ||
@@ -597,7 +621,7 @@ export const exchangeSoundCloudAuthorizationCode = async (
     // Clearing an expired refresh owner is a fence: its late response cannot
     // satisfy the refresh transaction's existing owner/token compare-and-set.
     transaction.set(
-      soundcloudAuthStateRef,
+      soundcloudAuthStateRef(),
       {
         oauthExchangeOwner: exchangeAttempt,
         ...(refreshOwner
@@ -626,14 +650,14 @@ export const exchangeSoundCloudAuthorizationCode = async (
     try {
       await firebaseAdmin.firestore().runTransaction(async (transaction) => {
         const pending = await transaction.get(pendingRef);
-        const auth = await transaction.get(soundcloudAuthStateRef);
+        const auth = await transaction.get(soundcloudAuthStateRef());
         const attempt = await transaction.get(oauthAttemptRef(exchangeAttempt));
         if (attempt.get('status') === 'active')
           transaction.update(attempt.ref, { status: 'uncertain', outcome: 'unknown', failedAt: auth.readTime });
         if (pending.get('exchangeAttempt') === exchangeAttempt)
           transaction.update(pendingRef, { exchangeStatus: 'uncertain' });
         if (auth.get('oauthExchangeOwner') === exchangeAttempt)
-          transaction.set(soundcloudAuthStateRef, { oauthExchangeOwner: FieldValue.delete() }, { merge: true });
+          transaction.set(soundcloudAuthStateRef(), { oauthExchangeOwner: FieldValue.delete() }, { merge: true });
       });
     } catch {
       logger.error(
@@ -692,10 +716,10 @@ const refreshSoundCloudTokens = async (refreshToken: string): Promise<Required<R
 
 const clearRefreshLease = async (leaseOwner: string): Promise<void> => {
   await firebaseAdmin.firestore().runTransaction(async (transaction) => {
-    const snapshot = await transaction.get(soundcloudAuthStateRef);
+    const snapshot = await transaction.get(soundcloudAuthStateRef());
     if (snapshot.data()?.refreshLeaseOwner !== leaseOwner) return;
     transaction.set(
-      soundcloudAuthStateRef,
+      soundcloudAuthStateRef(),
       {
         refreshLeaseOwner: FieldValue.delete(),
         refreshLeaseExpiresAtMillis: FieldValue.delete(),
@@ -723,7 +747,7 @@ const acquireRefreshLease = async (
   const currentTimeMillis = nowMillis();
 
   return firebaseAdmin.firestore().runTransaction(async (transaction) => {
-    const snapshot = await transaction.get(soundcloudAuthStateRef);
+    const snapshot = await transaction.get(soundcloudAuthStateRef());
     const state = (snapshot.exists ? (snapshot.data() as SoundCloudAuthState) : null) ?? {};
 
     if (state.oauthExchangeOwner) return { kind: 'wait' as const };
@@ -745,7 +769,7 @@ const acquireRefreshLease = async (
     }
 
     transaction.set(
-      soundcloudAuthStateRef,
+      soundcloudAuthStateRef(),
       {
         refreshToken: activeRefreshToken,
         refreshLeaseOwner: leaseOwner,
@@ -779,7 +803,7 @@ const resolveSoundCloudAccessToken = async (forceRefresh: boolean): Promise<stri
     try {
       const refreshedTokens = await refreshSoundCloudTokens(resolution.refreshToken);
       return await firebaseAdmin.firestore().runTransaction(async (transaction) => {
-        const snapshot = await transaction.get(soundcloudAuthStateRef);
+        const snapshot = await transaction.get(soundcloudAuthStateRef());
         const state = snapshot.data() as SoundCloudAuthState | undefined;
         if (state?.refreshLeaseOwner !== resolution.leaseOwner || state.refreshToken !== resolution.refreshToken) {
           if (isAccessTokenFresh(state ?? null, nowMillis())) return state!.accessToken!;
@@ -787,7 +811,7 @@ const resolveSoundCloudAccessToken = async (forceRefresh: boolean): Promise<stri
         }
         const updatedAtMillis = nowMillis();
         transaction.set(
-          soundcloudAuthStateRef,
+          soundcloudAuthStateRef(),
           {
             accessToken: refreshedTokens.access_token,
             refreshToken: refreshedTokens.refresh_token,

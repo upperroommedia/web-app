@@ -1,3 +1,4 @@
+import { assertLegacyEmailTransportAllowed, emailCaptureProfile } from './temporal/capture';
 import { randomUUID } from 'node:crypto';
 /**
  * Copyright 2019 Google LLC
@@ -387,6 +388,9 @@ export const processQueue = onDocumentWritten(
   },
   async (event) => {
     if (!event.data) return;
+    const authoritativeApp = getApps()[0] ?? initializeApp();
+    const authoritativeDb = getFirestore(authoritativeApp, config.database);
+    emailCaptureProfile(authoritativeApp.options.projectId);
     if (process.env.TASK_ORCHESTRATOR_EMAILS === "temporal") {
       if (!event.data.after.exists) return;
       const app = getApps()[0] ?? initializeApp();
@@ -400,6 +404,7 @@ export const processQueue = onDocumentWritten(
     const app = getApps()[0] ?? initializeApp();
     const ownershipDb = getFirestore(app, config.database);
     await ownershipDb.runTransaction(tx => assertLegacyEmailRelease(tx, ownershipDb));
+    assertLegacyEmailTransportAllowed(app.options.projectId);
     await initialize();
     logs.start();
 

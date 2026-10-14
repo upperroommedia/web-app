@@ -1,5 +1,6 @@
 import '../styles/globals.css';
 import type { AppProps } from 'next/app';
+import { ProviderEnvironmentProvider } from '../context/provider/ProviderEnvironmentContext';
 import { UserProvider } from '../context/user/UserContext';
 import { ThemeProvider as MuiThemeProvider } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
@@ -99,11 +100,13 @@ Upper Room Media is a ministry of the Coptic Orthodox Church that brings to you 
         }
       `}</style>
       <UserProvider>
-        <NextThemesProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
-          <AlgoliaSearchProvider>
-            <AppContent Component={Component} pageProps={pageProps} />
-          </AlgoliaSearchProvider>
-        </NextThemesProvider>
+        <ProviderEnvironmentProvider>
+          <NextThemesProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
+            <AlgoliaSearchProvider>
+              <AppContent Component={Component} pageProps={pageProps} />
+            </AlgoliaSearchProvider>
+          </NextThemesProvider>
+        </ProviderEnvironmentProvider>
       </UserProvider>
     </>
   );

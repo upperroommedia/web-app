@@ -1,4 +1,4 @@
-import axios from 'axios';
+import axios from '../../providerSandbox/http';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { FieldPath, type Transaction } from 'firebase-admin/firestore';
 import type { DurableJobRef } from '@upperroom/contracts/temporal';

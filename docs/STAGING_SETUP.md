@@ -2,6 +2,12 @@
 
 This repository is now configured for staging-first promotions and selective Firebase backend deploys. App Hosting remains connected to GitHub through the Firebase console. Complete these one-time external setup steps before the first staging deployment.
 
+## Publishing simulation
+
+For isolated Subsplash and SoundCloud testing, follow [Staging provider sandbox](STAGING_PROVIDER_SANDBOX.md) and the [simulation UI guide](STAGING_PROVIDER_SIMULATION_UI.md). The sandbox keeps real Firebase and Temporal processing while storing simulated destination changes privately in staging. Email delivery is captured privately too. Deployment configuration and a reviewed catalog import are required before these flows are available; merging the code alone does not enable them.
+
+Use the release controller for admission changes. During a controlled migration, keep automatic App Hosting rollouts paused until the controller restores them; the normal setup below describes the steady state after that release completes.
+
 ## 1. Upgrade staging project billing (required)
 
 App Hosting requires Blaze:

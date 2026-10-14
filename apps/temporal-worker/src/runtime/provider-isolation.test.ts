@@ -1,6 +1,11 @@
+let mockActualProject = 'urm-app';
+jest.mock('@upperroom/shared/firebase/firebaseAdmin', () => ({
+  __esModule: true,
+  default: { app: () => ({ options: { projectId: mockActualProject } }) },
+}));
 import { assertLiveProviderMutationProject, isPrivateProviderMutationSimulation } from './provider-isolation';
 test('shared staging provider accounts cannot mutate or claim isolated ownership', () => {
-  expect(() => assertLiveProviderMutationProject('urm-app-staging')).toThrow('Isolated provider accounts are required');
+  expect(() => assertLiveProviderMutationProject('urm-app-staging')).toThrow();
   expect(() => assertLiveProviderMutationProject('unreviewed-project')).toThrow();
   expect(() => assertLiveProviderMutationProject('urm-app')).not.toThrow();
 });
@@ -29,5 +34,21 @@ test('private emulator simulation never grants live provider transport authority
     }))
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
+  }
+});
+
+test('a selected sandbox profile authorizes only its actual project', () => {
+  const previous = process.env.STAGING_PROVIDER_MODE;
+  try {
+    mockActualProject = 'urm-app-staging';
+    process.env.STAGING_PROVIDER_MODE = 'sandbox';
+    expect(() => assertLiveProviderMutationProject('urm-app-staging')).not.toThrow();
+    expect(() => assertLiveProviderMutationProject('urm-app')).toThrow();
+    mockActualProject = 'unreviewed-project';
+    expect(() => assertLiveProviderMutationProject('unreviewed-project')).toThrow();
+  } finally {
+    mockActualProject = 'urm-app';
+    if (previous === undefined) delete process.env.STAGING_PROVIDER_MODE;
+    else process.env.STAGING_PROVIDER_MODE = previous;
   }
 });

@@ -1,5 +1,5 @@
-import {assertSynchronousProviderMutationCompleted} from './temporal/publishing/providerMutationCompletion';
-import {assertProviderMutationTransportAllowed} from './temporal/publishing/providerTransportPolicy';
+import { assertSynchronousProviderMutationCompleted } from './temporal/publishing/providerMutationCompletion';
+import { assertProviderMutationTransportAllowed } from './temporal/publishing/providerTransportPolicy';
 /**
  * SoundCloud API client for upload, update, and delete of tracks.
  * Uses OAuth 2.1 access token (Authorization: OAuth <token>).
@@ -8,7 +8,9 @@ import {assertProviderMutationTransportAllowed} from './temporal/publishing/prov
  * refresh state server-side and refresh access tokens automatically.
  */
 
-import axios, { AxiosError, isAxiosError } from 'axios';
+import axios from './providerSandbox/http';
+import { currentSandboxProfile, sandboxStageAsset, sandboxTrackMutation } from './providerSandbox/http';
+import { AxiosError, isAxiosError } from 'axios';
 import FormData from 'form-data';
 import { Bucket } from '@google-cloud/storage';
 import { createSoundCloudReconnectRequiredError } from './soundcloudAuthErrors';
@@ -226,6 +228,43 @@ export interface PreparedSoundCloudUpload {
   dispose(): void;
 }
 export async function prepareMultipartUpload(params: UploadTrackParams): Promise<PreparedSoundCloudUpload> {
+  if (currentSandboxProfile()) {
+    // Resolve exact source generations before the receipt-wrapped post; do not create
+    // FormData or buffer/parse the audio. The engine reads the bounded Storage stream.
+    const audio = await sandboxStageAsset(params.audioStoragePath, params.bucket.name);
+    const artwork = params.imageSource ? await sandboxStageAsset(params.imageSource, params.bucket.name) : undefined;
+    let disposed = false,
+      posted = false;
+    return {
+      dispose: () => {
+        disposed = true;
+      },
+      async post(accessToken) {
+        if (disposed || posted) throw new Error('A prepared SoundCloud upload can only be posted once.');
+        posted = true;
+        assertProviderMutationTransportAllowed('soundcloud');
+        const track = await sandboxTrackMutation(
+          {
+            audio,
+            artwork,
+            metadata: {
+              ...params.providerMetadata,
+              title: params.title,
+              tag_list: formatTagList(params.tags),
+              description: params.description,
+            },
+          },
+          accessToken
+        );
+        const trackIdentifier = getTrackIdentifier(track);
+        if (!trackIdentifier) throw new Error('Simulated upload response is missing track identity');
+        return {
+          trackIdentifier,
+          ...(typeof track.permalink_url === 'string' ? { permalinkUrl: track.permalink_url } : {}),
+        };
+      },
+    };
+  }
   const streams: Readable[] = [];
   const form = new FormData();
   let disposed = false;
@@ -348,6 +387,26 @@ export async function updateTrack(
 ): Promise<SoundCloudTrackResult | undefined> {
   assertProviderMutationTransportAllowed('soundcloud');
   const trackIdentifier = trackId.trim();
+  if (currentSandboxProfile()) {
+    const artwork =
+      params.imageSource && params.bucket ? await sandboxStageAsset(params.imageSource, params.bucket.name) : undefined;
+    const track = await sandboxTrackMutation(
+      {
+        trackId: trackIdentifier,
+        artwork,
+        metadata: {
+          ...(params.title != null ? { title: params.title } : {}),
+          ...(params.description != null ? { description: params.description } : {}),
+          ...(params.tags != null ? { tag_list: formatTagList(params.tags) } : {}),
+        },
+      },
+      accessToken
+    );
+    return {
+      trackIdentifier,
+      ...(typeof track.permalink_url === 'string' ? { permalinkUrl: track.permalink_url } : {}),
+    };
+  }
   const hasArtwork = params.imageSource && params.bucket;
   if (hasArtwork) {
     const form = new FormData();
@@ -368,7 +427,7 @@ export async function updateTrack(
       maxBodyLength: Infinity,
       maxContentLength: Infinity,
       timeout: 60_000,
-      maxRedirects:0,
+      maxRedirects: 0,
     });
     assertSynchronousProviderMutationCompleted(response);
     return {
@@ -391,7 +450,7 @@ export async function updateTrack(
           'Content-Type': 'application/json',
         },
         timeout: 60_000,
-        maxRedirects:0,
+        maxRedirects: 0,
       }
     );
     assertSynchronousProviderMutationCompleted(response);
@@ -407,7 +466,11 @@ export async function updateTrack(
 /**
  * Delete a track by id.
  */
-export async function deleteTrack(accessToken: string, trackId: string, options?: { onResponse?: (response: { status: number }) => void }): Promise<void> {
+export async function deleteTrack(
+  accessToken: string,
+  trackId: string,
+  options?: { onResponse?: (response: { status: number }) => void }
+): Promise<void> {
   assertProviderMutationTransportAllowed('soundcloud');
   const response = await axios.delete(`${SOUNDCLOUD_API_BASE}/tracks/${encodeTrackIdentifier(trackId)}`, {
     headers: authHeaders(accessToken),

@@ -2,6 +2,7 @@
  * AppLayout - Main wrapper for authenticated pages
  * Handles auth checks and uses the sidebar navigation layout
  */
+import ProviderSimulationBanner from '../components/ProviderSimulationBanner';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Card from '@mui/material/Card';
@@ -161,6 +162,7 @@ const AppLayout = ({ children }: { children: React.ReactNode }) => {
               maxWidth: '100%',
             }}
           >
+            <ProviderSimulationBanner />
             {children}
           </Box>
         </Box>

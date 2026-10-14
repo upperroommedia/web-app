@@ -65,7 +65,23 @@ const toHttpsError = (error: unknown): HttpsError => {
   if (error instanceof HttpsError) {
     return error;
   }
-  if(error instanceof Error&&error.name==='ProviderMutationGuardError'&&'code' in error&&['PROVIDER_MUTATION_UNRESOLVED','PROVIDER_MUTATION_RESULT_REPAIR_REQUIRED'].includes(String(error.code))){const sessionId='mutationSessionId' in error&&typeof error.mutationSessionId==='string'&&/^[a-f0-9]{64}$/.test(error.mutationSessionId)?error.mutationSessionId:undefined;return new HttpsError('failed-precondition','An earlier provider mutation requires verified recovery.',{code:error.code,...(sessionId?{mutationSessionId:sessionId}:{})});}
+  if (
+    error instanceof Error &&
+    error.name === 'ProviderMutationGuardError' &&
+    'code' in error &&
+    ['PROVIDER_MUTATION_UNRESOLVED', 'PROVIDER_MUTATION_RESULT_REPAIR_REQUIRED'].includes(String(error.code))
+  ) {
+    const sessionId =
+      'mutationSessionId' in error &&
+      typeof error.mutationSessionId === 'string' &&
+      /^[a-f0-9]{64}$/.test(error.mutationSessionId)
+        ? error.mutationSessionId
+        : undefined;
+    return new HttpsError('failed-precondition', 'An earlier provider mutation requires verified recovery.', {
+      code: error.code,
+      ...(sessionId ? { mutationSessionId: sessionId } : {}),
+    });
+  }
   if (isAxiosError(error)) {
     const axiosError = error as AxiosError;
     const status = getAxiosStatus(axiosError);
@@ -119,7 +135,8 @@ const getTriggeringUserContext = (request?: CallableRequest<unknown>): Triggerin
     return undefined;
   }
 
-  const email = typeof request.auth.token.email === 'string' ? request.auth.token.email.trim().toLowerCase() : undefined;
+  const email =
+    typeof request.auth.token.email === 'string' ? request.auth.token.email.trim().toLowerCase() : undefined;
   const displayName = typeof request.auth.token.name === 'string' ? request.auth.token.name.trim() : undefined;
   const role = request.auth.token.role;
 
@@ -140,7 +157,7 @@ const handleError = (error: unknown, options: HandleErrorOptions = {}): HttpsErr
     ...(options.context ?? {}),
   };
 
-  if (options.suppressReporting || isExpectedOperationalError(httpsError)) {
+  if (options.suppressReporting || isExpectedOperationalError(error) || isExpectedOperationalError(httpsError)) {
     return httpsError;
   }
 

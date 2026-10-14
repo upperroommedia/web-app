@@ -7,7 +7,7 @@ import {
 import { providerPayloadFingerprint } from './temporal/publishing/providerReceipts';
 import { assertSynchronousProviderMutationCompleted } from './temporal/publishing/providerMutationCompletion';
 import { createDurableWriteBatch, runDurableTransaction } from './temporal/publishing/durableOperationContext';
-import axios from 'axios';
+import axios from './providerSandbox/http';
 import { FieldValue } from 'firebase-admin/firestore';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
 import handleError from './handleError';

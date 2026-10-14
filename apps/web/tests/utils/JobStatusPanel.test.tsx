@@ -29,6 +29,54 @@ const job = (patch: Partial<DurableJob> = {}): DurableJob => ({
   ...patch,
 });
 describe('accessible truthful job details', () => {
+  it('claims email capture only for a completed staging receipt with full safe provenance', () => {
+    const deliveryTransport = {
+      schemaVersion: 1,
+      mode: 'capture',
+      projectId: 'urm-app-staging',
+      profileId: 'urm-app-staging-mail-capture-v1',
+      version: 1,
+      captureId: 'a'.repeat(64),
+      payloadSha256: 'b'.repeat(64),
+    };
+    const capture = job({
+      kind: 'email.deliver',
+      projectId: 'urm-app-staging',
+      state: 'succeeded',
+      result: { deliveryTransport, externalDelivery: false },
+    });
+    expect(renderToStaticMarkup(<JobStatusPanel job={capture} />)).toContain('No external email was sent');
+    for (const patch of [
+      { state: 'retrying' as const },
+      { state: 'needs_attention' as const },
+      { projectId: 'urm-app' },
+      { result: { deliveryTransport, externalDelivery: true } },
+      { result: { deliveryTransport: { ...deliveryTransport, captureId: undefined }, externalDelivery: false } },
+    ]) {
+      expect(renderToStaticMarkup(<JobStatusPanel job={{ ...capture, ...patch }} />)).not.toContain(
+        'Email captured for staging'
+      );
+    }
+  });
+  it('labels simulated history using the recorded server profile and original scenario', () => {
+    const html = renderToStaticMarkup(
+      <JobStatusPanel
+        job={job({
+          providerExecution: {
+            mode: 'sandbox',
+            profileId: 'urm-app-staging-publishing-v1',
+            version: 1,
+            scenario: 'commit-then-lost-response',
+          },
+        })}
+      />
+    );
+    expect(html).toContain('Simulated Subsplash / SoundCloud');
+    expect(html).toContain('Confirmation lost after saving');
+    expect(html).toContain('Retries retain this scenario');
+    const live = renderToStaticMarkup(<JobStatusPanel job={job()} />);
+    expect(live).not.toContain('Simulated Subsplash / SoundCloud');
+  });
   beforeEach(() => {
     child = undefined;
     identity.user = { uid: 'admin', isAdmin: () => true };

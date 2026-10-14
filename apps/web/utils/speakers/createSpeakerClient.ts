@@ -4,12 +4,6 @@ import type {
 } from '@upperroom/contracts/speakers/createSpeakerTypes';
 import type { ImageType } from '../../types/Image';
 
-export const SUBSPLASH_SPEAKER_LIST_LINK =
-  'https://dashboard.subsplash.com/-d/#/library/lists/standard/2d040f78-a3e1-447a-b5b3-5e80b608dbc6';
-
-export const SPEAKER_LIST_SUCCESS_INSTRUCTION =
-  'Your speaker list was created sucessfully - please following the subsplash link and add the newly created list to the correct location to the speakers list if you want it to appear there in the app.';
-
 export interface BuildCreateSpeakerPayloadInput {
   name: string;
   images: ImageType[];

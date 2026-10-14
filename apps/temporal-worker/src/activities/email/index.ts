@@ -70,54 +70,70 @@ export function createEmailActivities({
         const attempt = Number.isSafeInteger(receipt.get('attempts')) ? receipt.get('attempts') : 0;
         await store.recordStep(ref, {
           id: 'deliver',
-          label: 'Deliver email',
+          label: runtime.deliveryProfile ? 'Capture staging email' : 'Deliver email',
           state: success
             ? 'succeeded'
             : cancelled
-            ? 'cancelled'
-            : safeRetry
-            ? 'retrying'
-            : uncertain
-            ? 'waiting'
-            : 'failed',
+              ? 'cancelled'
+              : safeRetry
+                ? 'retrying'
+                : uncertain
+                  ? 'waiting'
+                  : 'failed',
           attempt,
         });
         await store.project(ref, {
           state: success
             ? 'succeeded'
             : cancelled
-            ? 'cancelled'
-            : safeRetry
-            ? 'retrying'
-            : uncertain
-            ? 'needs_attention'
-            : 'failed',
+              ? 'cancelled'
+              : safeRetry
+                ? 'retrying'
+                : uncertain
+                  ? 'needs_attention'
+                  : 'failed',
           actions: uncertain ? ['resolve'] : safeRetry ? ['cancel'] : [],
           attention: undefined,
           error: undefined,
           destinations: [
             {
               destination: 'email',
+              ...(runtime.deliveryProfile
+                ? {
+                    message: success
+                      ? 'Staging simulation: captured privately; no external email sent.'
+                      : 'Staging simulation: external email delivery is disabled.',
+                  }
+                : {}),
               state: success
                 ? 'confirmed'
                 : cancelled
-                ? 'absent'
-                : uncertain
-                ? 'unknown'
-                : safeRetry
-                ? 'pending'
-                : 'failed',
+                  ? 'absent'
+                  : uncertain
+                    ? 'unknown'
+                    : safeRetry
+                      ? 'pending'
+                      : 'failed',
             },
           ],
+          ...(runtime.deliveryProfile
+            ? {
+                result: {
+                  deliveryTransport: receipt.get('info.deliveryTransport') ?? runtime.deliveryProfile,
+                  externalDelivery: false,
+                },
+              }
+            : {}),
           ...(uncertain
             ? {
                 attention: {
                   kind: 'external_result_unknown' as const,
-                  message:
-                    result === 'partial'
+                  message: runtime.deliveryProfile
+                    ? 'Staging capture acceptance is uncertain. Review the private capture receipt; no external email was sent.'
+                    : result === 'partial'
                       ? 'Some recipients were accepted. Review before taking another action.'
                       : 'Email provider acceptance is unknown. Review provider evidence before retrying.',
-                  provider: 'smtp' as const,
+                  ...(runtime.deliveryProfile ? {} : { provider: 'smtp' as const }),
                   stepId: 'deliver',
                 },
               }
@@ -126,9 +142,15 @@ export function createEmailActivities({
             ? {
                 error: {
                   code: `EMAIL_${result.toUpperCase()}`,
-                  message: uncertain ? 'Email delivery requires review.' : 'Email could not be delivered.',
+                  message: runtime.deliveryProfile
+                    ? uncertain
+                      ? 'Staging email capture requires review.'
+                      : 'Staging email could not be captured.'
+                    : uncertain
+                      ? 'Email delivery requires review.'
+                      : 'Email could not be delivered.',
                   retryable: false,
-                  provider: 'smtp' as const,
+                  ...(runtime.deliveryProfile ? {} : { provider: 'smtp' as const }),
                 },
               }
             : {}),
@@ -136,6 +158,26 @@ export function createEmailActivities({
         return result;
       } catch (error) {
         if (error instanceof ApplicationFailure) throw error;
+        if (error instanceof Error && error.message === 'EMAIL_DELIVERY_PROFILE_MISMATCH') {
+          await store.project(ref, {
+            state: 'needs_attention',
+            actions: [],
+            attention: {
+              kind: 'source_unavailable',
+              message: 'Email transport profile changed. Review the original receipt; no new email was sent.',
+              stepId: 'deliver',
+            },
+            error: {
+              code: 'EMAIL_DELIVERY_PROFILE_MISMATCH',
+              message: 'Email receipt requires transport-profile review.',
+              retryable: false,
+            },
+          });
+          throw ApplicationFailure.nonRetryable(
+            'Email transport profile requires review',
+            'EMAIL_DELIVERY_PROFILE_MISMATCH'
+          );
+        }
         if (
           ['STALE_GENERATION', 'TERMINAL_JOB', 'PROJECT_MISMATCH', 'INVALID_ARGUMENT'].includes(
             (error as { code?: string }).code || ''

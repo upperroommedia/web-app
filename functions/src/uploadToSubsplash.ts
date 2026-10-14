@@ -1,13 +1,15 @@
 import { logger } from 'firebase-functions/v2';
 import { onCall, CallableRequest, HttpsError } from 'firebase-functions/v2/https';
-import axios, { AxiosError, AxiosResponse, isAxiosError } from 'axios';
+import axios from './providerSandbox/http';
+import { currentSandboxProfile } from './providerSandbox/http';
+import { AxiosError, AxiosResponse, isAxiosError } from 'axios';
 import { authenticateSubsplash, createAxiosConfig } from './subsplashUtils';
 import { ISpeaker } from '@upperroom/shared/types/Speaker';
 import { ImageType } from '@upperroom/shared/types/Image';
 import { canUserRolePublish } from '@upperroom/shared/types/User';
 import handleError from './handleError';
 import { executeProviderCreate, providerReceiptId } from './temporal/publishing/providerReceipts';
-import {reserveDurableProviderBindings} from './temporal/publishing/durableOperationContext';
+import { reserveDurableProviderBindings } from './temporal/publishing/durableOperationContext';
 import { withSubsplashLocks } from './locks/withSubsplashLocks';
 import { emitOperationalAlert } from './notifications/emitOperationalAlert';
 import { subsplashSecretsWithRuntimeAlerts } from './subsplashSecrets';
@@ -69,7 +71,10 @@ const uploadToSubsplash = onCall(
         'The function must be called while authenticated with publish permissions.'
       );
     }
-    if (process.env.SUBSPLASH_EMAIL == undefined || process.env.SUBSPLASH_PASSWORD == undefined) {
+    if (
+      !currentSandboxProfile() &&
+      (process.env.SUBSPLASH_EMAIL == undefined || process.env.SUBSPLASH_PASSWORD == undefined)
+    ) {
       throw new HttpsError('failed-precondition', 'SUBSPLASH_EMAIL or SUBSPLASH_PASSWORD is not set.');
     }
 
@@ -105,7 +110,7 @@ export interface SubsplashCreatedMedia {
 /** Server-only callbacks: the callable transport never accepts or forwards these hooks. */
 export interface TrustedSubsplashUploadCallbacks {
   readExistingMedia(): Promise<string | undefined>;
-  beforeCreateMedia?():Promise<void>;
+  beforeCreateMedia?(): Promise<void>;
   commitCreatedMedia(result: SubsplashCreatedMedia): Promise<void>;
 }
 export const uploadToSubsplashDomain = async (
@@ -162,7 +167,12 @@ export const uploadToSubsplashDomain = async (
           operationKey,
           step: 'subsplash-transcode',
           payload: data,
-          prepare:()=>reserveDurableProviderBindings([{provider:'subsplash',account:'app:9XTSHD',remoteId:audioId}], `${operationKey}:transcode-audio`, {targetReceiptId:providerReceiptId(operationKey,'subsplash-transcode')}),
+          prepare: () =>
+            reserveDurableProviderBindings(
+              [{ provider: 'subsplash', account: 'app:9XTSHD', remoteId: audioId }],
+              `${operationKey}:transcode-audio`,
+              { targetReceiptId: providerReceiptId(operationKey, 'subsplash-transcode') }
+            ),
           execute: async () => (await transcodeAudio(data.audioUrl, audioId, bearerToken)).data,
         });
         logger.info(`Transcode Statues: ${transcodeResponse.status}`);
@@ -205,7 +215,18 @@ export const uploadToSubsplashDomain = async (
           operationKey,
           step: 'subsplash-media-item',
           payload: data,
-          prepare:()=>reserveDurableProviderBindings([{provider:'subsplash',account:'app:9XTSHD',remoteId:audioId},...repairedImages.map(image=>image.subsplashId || image.id).filter((id):id is string=>typeof id==='string' && !!id).map(remoteId=>({provider:'subsplash' as const,account:'app:9XTSHD',remoteId}))], `${operationKey}:media-resources`, {targetReceiptId:providerReceiptId(operationKey,'subsplash-media-item')}),
+          prepare: () =>
+            reserveDurableProviderBindings(
+              [
+                { provider: 'subsplash', account: 'app:9XTSHD', remoteId: audioId },
+                ...repairedImages
+                  .map((image) => image.subsplashId || image.id)
+                  .filter((id): id is string => typeof id === 'string' && !!id)
+                  .map((remoteId) => ({ provider: 'subsplash' as const, account: 'app:9XTSHD', remoteId })),
+              ],
+              `${operationKey}:media-resources`,
+              { targetReceiptId: providerReceiptId(operationKey, 'subsplash-media-item') }
+            ),
           execute: async () => {
             const result = (await axios({ ...config, ...{ skipSubsplashEdgeRetry: true } })).data;
             if (typeof result?.id !== 'string' || !result.id.trim()) throw new Error('Missing media item ID');
