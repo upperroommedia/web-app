@@ -4,6 +4,8 @@ import {
   reconcileAppHostingRollout,
   rolloutIdentity,
   prepareLegacyRolloutIdentityMigration,
+  sameAppHostingResource,
+  verifyAppHostingBuild,
   restoreReviewedUiRecovery,
   ensureFrozenRecoveryPolicy,
 } from './temporal-apphosting-rollout.mjs';
@@ -396,4 +398,124 @@ test('migration requires an actual404 rather than an empty successful resource r
     h.existing.set(h.previous.buildName, value);
     await assert.rejects(h.run(), /already exists/);
   }
+});
+
+test('unresolved initial build is observed pending with unchanged identity and no rollout POST', async () => {
+  const h = harness();
+  h.setCheckpoint(h.identity);
+  const build = {
+    name: h.identity.buildName,
+    state: 'BUILDING',
+    reconciling: true,
+    source: { codebase: { commit: '', hash: '' } },
+  };
+  h.resources.set(h.identity.buildName, build);
+  assert.equal((await h.run()).status, 'pending');
+  assert.equal(h.posts.length, 0);
+  build.source.codebase = { commit: config.uiCommit, hash: config.uiCommit };
+  assert.equal((await h.run()).status, 'pending');
+  assert.equal(h.posts.length, 1);
+  assert(h.posts[0].path.includes('/rollouts?'));
+  h.ready();
+  build.reconciling = false;
+  assert.equal((await h.run()).status, 'ready');
+  assert.equal(h.posts.length, 1);
+  assert.deepEqual(h.checkpoint, h.identity);
+});
+test('immutable source accepts exact input commit when optional output hash is empty and rejects any populated mismatch', () => {
+  const identity = rolloutIdentity(config);
+  for (const source of [
+    { commit: config.uiCommit, hash: '' },
+    { hash: config.uiCommit },
+    { commit: config.uiCommit, hash: config.uiCommit },
+  ])
+    assert.equal(
+      verifyAppHostingBuild({ name: identity.buildName, state: 'READY', source: { codebase: source } }, identity),
+      true
+    );
+  for (const source of [
+    { commit: 'b'.repeat(40), hash: config.uiCommit },
+    { commit: config.uiCommit, hash: 'b'.repeat(40) },
+    { hash: '12345678' },
+  ])
+    assert.throws(
+      () =>
+        verifyAppHostingBuild(
+          { name: identity.buildName, state: 'BUILDING', reconciling: true, source: { codebase: source } },
+          identity
+        ),
+      /immutable/
+    );
+  assert.throws(
+    () => verifyAppHostingBuild({ name: identity.buildName, state: 'READY', source: { codebase: {} } }, identity),
+    /immutable/
+  );
+});
+test('canonical project number alias requires verified number and identical location/backend/kind/full resource ID', () => {
+  const expected = rolloutIdentity(config).buildName,
+    actual = expected.replace('projects/urm-app-staging/', 'projects/251680231116/');
+  assert.equal(sameAppHostingResource(actual, expected, '251680231116'), true);
+  for (const number of [undefined, '999', 'not-a-number'])
+    assert.equal(sameAppHostingResource(actual, expected, number), false);
+  for (const changed of [
+    actual.replace('us-central1', 'us-east1'),
+    actual.replace('web-staging', 'web-prod'),
+    actual.replace('/builds/', '/rollouts/'),
+    actual + '-different',
+    actual.replace('251680231116', '251680231117'),
+  ])
+    assert.equal(sameAppHostingResource(changed, expected, '251680231116'), false);
+});
+test('same accepted rollout and traffic reconcile canonical project numbers without duplicate build or rollout creation', async () => {
+  const h = harness();
+  await h.run();
+  h.ready();
+  const alias = (name) => name.replace('projects/urm-app-staging/', 'projects/251680231116/');
+  const api = async (...args) => {
+    const value = structuredClone(await h.api(...args));
+    if (value.name) value.name = alias(value.name);
+    if (value.build) value.build = alias(value.build);
+    for (const row of value.rollouts ?? []) {
+      row.name = alias(row.name);
+      row.build = alias(row.build);
+    }
+    for (const row of value.current?.splits ?? []) row.build = alias(row.build);
+    return value;
+  };
+  const before = h.posts.length;
+  const result = await reconcileAppHostingRollout({
+    config,
+    checkpoint: h.identity,
+    api,
+    projectNumber: '251680231116',
+    saveIdentity: async () => assert.fail('must preserve original identity'),
+  });
+  assert.equal(result.status, 'ready');
+  assert.equal(h.posts.length, before);
+  await assert.rejects(
+    reconcileAppHostingRollout({
+      config,
+      checkpoint: h.identity,
+      api,
+      projectNumber: '999',
+      saveIdentity: async () => {},
+    })
+  );
+});
+test('reviewed recovery recognizes canonical traffic alias and never patches already serving correct build', async () => {
+  const h = recoveryHarness();
+  h.traffic.current.splits[0].build = h.input.buildName.replace('projects/urm-app-staging/', 'projects/251680231116/');
+  await restoreReviewedUiRecovery({ ...h.input, projectNumber: '251680231116' });
+  assert.equal(h.patches.length, 0);
+  await restoreReviewedUiRecovery({
+    ...h.input,
+    api: async (...args) => {
+      const value = await h.input.api(...args);
+      if (value.name === h.input.buildName)
+        value.name = value.name.replace('projects/urm-app-staging/', 'projects/251680231116/');
+      return value;
+    },
+    projectNumber: '251680231116',
+  });
+  assert.equal(h.patches.length, 0);
 });

@@ -99,3 +99,36 @@ test('actual controller migrates only absent legacy identity under native CAS an
   assert.equal(proof.cases.length, 5);
   assert.equal(proof.noAppHostingWrites, true);
 });
+
+test('actual 13-action controller accepts only verified canonical project-number UI names', async () => {
+  const { stdout } = await exec(
+    process.execPath,
+    [
+      '--experimental-vm-modules',
+      new URL('./tests/fixtures/temporal-search-sequential-release.mjs', import.meta.url).pathname,
+      'ui-canonical',
+    ],
+    { timeout: 60000, maxBuffer: 2 * 1024 * 1024 }
+  );
+  const proof = JSON.parse(stdout.trim());
+  assert.equal(proof.phase, 'complete');
+  assert.equal(proof.actions.length, 13);
+});
+
+test('actual complete UI pause/resume verifies canonical build against explicit saved checkpoint', async () => {
+  const { stdout } = await exec(
+    process.execPath,
+    [
+      '--experimental-vm-modules',
+      new URL('./tests/fixtures/temporal-search-sequential-release.mjs', import.meta.url).pathname,
+      'ui-canonical-recovery',
+    ],
+    { timeout: 60000, maxBuffer: 2 * 1024 * 1024 }
+  );
+  const proof = JSON.parse(stdout.trim());
+  assert.equal(proof.phase, 'ui-ready');
+  assert.deepEqual(
+    proof.actions.slice(-2).map((row) => row.action),
+    ['pause', 'resume']
+  );
+});

@@ -28,6 +28,8 @@ import {
   reconcileAppHostingRollout,
   prepareLegacyRolloutIdentityMigration,
   rolloutIdentity,
+  sameAppHostingResource,
+  verifyAppHostingBuild,
   restoreReviewedUiRecovery,
   ensureFrozenRecoveryPolicy,
 } from './temporal-apphosting-rollout.mjs';
@@ -368,14 +370,25 @@ await runWithCleanup(
           }
           return platform;
         }
-        async function verifyUiCommit() {
+        async function verifyUiCommit(checkpoint) {
           const traffic = await appApi(`${parent}/traffic`);
-          const live = traffic.current?.splits?.find((split) => split.percent === 100);
+          const splits = traffic.current?.splits ?? [];
+          const live = splits.length === 1 && splits[0].percent === 100 ? splits[0] : undefined;
           if (!live || traffic.reconciling) throw new Error('Reviewed UI rollout has not settled');
-          const build = await appApi(live.build);
+          const expectedBuild = checkpoint.uiBuild;
+          if (!expectedBuild || !sameAppHostingResource(live.build, expectedBuild, resourceIdentity.projectNumber))
+            throw new Error('Live UI does not match the reviewed immutable build');
+          const build = await appApi(expectedBuild);
           if (
+            !expectedBuild ||
+            !sameAppHostingResource(live.build, expectedBuild, resourceIdentity.projectNumber) ||
+            !verifyAppHostingBuild(
+              build,
+              { buildName: expectedBuild, uiCommit: config.uiCommit },
+              resourceIdentity.projectNumber
+            ) ||
             build.state !== 'READY' ||
-            (build.source?.codebase?.hash ?? build.source?.codebase?.commit) !== config.uiCommit
+            build.reconciling
           )
             throw new Error('Live UI does not match the reviewed immutable commit');
         }
@@ -1125,6 +1138,7 @@ await runWithCleanup(
               const migration = await prepareLegacyRolloutIdentityMigration({
                 config: uiConfig,
                 checkpoint: state.uiRolloutIdentity,
+                projectNumber: resourceIdentity.projectNumber,
                 api: appApi,
               });
               await transition(control.revision, 'ui-rollout-started', {
@@ -1142,6 +1156,7 @@ await runWithCleanup(
             const result = await reconcileAppHostingRollout({
               config: { parent, releaseId: config.releaseId, uiCommit: config.uiCommit },
               checkpoint: state.uiRolloutIdentity,
+              projectNumber: resourceIdentity.projectNumber,
               api: appApi,
               saveIdentity: async (identity) =>
                 transition(control.revision, 'ui-rollout-started', {
@@ -1216,7 +1231,7 @@ await runWithCleanup(
               : ['open', 'complete'].includes(state.pausedFrom)
               ? 'ui-ready'
               : state.pausedFrom;
-            if (phase === 'ui-ready') await verifyUiCommit();
+            if (phase === 'ui-ready') await verifyUiCommit(state);
             await transition(control.revision, phase, { resumedAt: Date.now() });
           } else if (action === 'restore-reviewed-ui') {
             requirePhase(state, ['paused-for-recovery']);
@@ -1224,6 +1239,7 @@ await runWithCleanup(
               parent,
               uiCommit: config.uiCommit,
               buildName: state.uiBuild,
+              projectNumber: resourceIdentity.projectNumber,
               savedRolloutPolicy: state.savedRolloutPolicy,
               api: appApi,
               settleOperation,
