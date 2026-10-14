@@ -10,6 +10,11 @@ import createSeries, { CreateSeriesInputType, CreateSeriesOutputType } from '../
 import * as seriesHelpers from '../../helpers/seriesHelpers';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import {
+  DEFAULT_LOCK_WAIT_TIMEOUT_MS,
+  DEFAULT_LOCK_WAIT_POLL_INTERVAL_MS,
+  SUBSPLASH_LOCK_BUSY_CODE,
+} from '../../locks/lockTypes';
+import {
   PROVIDER_RECEIPTS_COLLECTION,
   providerReceiptId,
   providerPayloadFingerprint,
@@ -561,33 +566,121 @@ describe('createSeries - Locking and Idempotency', () => {
     expect(createSpy).toHaveBeenCalledTimes(1);
   });
 
-  it('should create one remote series when concurrent callers use the same Firestore series', async () => {
-    const originalCreateSubsplashSeries = seriesHelpers.createSubsplashSeries;
-    const createSpy = jest.spyOn(seriesHelpers, 'createSubsplashSeries').mockImplementation(async (...args) => {
-      await new Promise((resolve) => setTimeout(resolve, 50));
-      return originalCreateSubsplashSeries(...args);
-    });
+  it('creates one remote series and reuses it after bounded concurrent contention', async () => {
+    const createSpy = jest.spyOn(seriesHelpers, 'createSubsplashSeries');
     const firestoreId = await createSeriesDocument({
       name: 'Concurrent Create Series',
       subsplashId: '',
       status: 'draft',
     });
 
-    const results = await Promise.all(
-      ['concurrent-create-1', 'concurrent-create-2', 'concurrent-create-3'].map((operationKey) =>
-        createSeriesHandler({
-          auth: testCallableAuth('admin'),
-          data: {
-            title: 'Concurrent Create Series',
-            ownerId: TEST_USER_ID,
-            firestoreId,
-            operationKey,
+    const requests = ['concurrent-create-1', 'concurrent-create-2', 'concurrent-create-3'].map((operationKey) => ({
+      auth: testCallableAuth('admin'),
+      data: {
+        title: 'Concurrent Create Series',
+        ownerId: TEST_USER_ID,
+        firestoreId,
+        operationKey,
+      },
+    }));
+    // The real lock has a bounded wait. A slow emulator/provider may correctly
+    // reject a contender; arbitrary failures must never count as safe retries.
+    const attempts = await Promise.allSettled(requests.map((request) => createSeriesHandler(request)));
+    const initialSuccesses = attempts.flatMap((attempt) => (attempt.status === 'fulfilled' ? [attempt.value] : []));
+    expect(initialSuccesses.length).toBeGreaterThanOrEqual(1);
+    for (const attempt of attempts) {
+      if (attempt.status === 'rejected') {
+        expect(attempt.reason).toMatchObject({
+          code: 'aborted',
+          details: {
+            code: SUBSPLASH_LOCK_BUSY_CODE,
+            locked_keys: [`series:${firestoreId}`],
+            wait_ms: DEFAULT_LOCK_WAIT_TIMEOUT_MS,
+            retry_after_ms: DEFAULT_LOCK_WAIT_POLL_INTERVAL_MS,
           },
-        })
-      )
-    );
-
+        });
+      }
+    }
+    // Retry unchanged operation keys only after every initial caller has
+    // settled, including the owner releasing its actual provider lock.
+    const results = [...initialSuccesses];
+    for (const request of requests) results.push(await createSeriesHandler(request));
+    expect(results.every((result) => result.status === 'success' && result.firestoreId === firestoreId)).toBe(true);
+    expect(results[0].subsplashId).toBeTruthy();
     expect(new Set(results.map((result) => result.subsplashId)).size).toBe(1);
+    const stored = await firebaseAdmin.firestore().collection('series').doc(firestoreId).get();
+    expect(stored.get('subsplashId')).toBe(results[0].subsplashId);
+    expect(createSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns a bounded busy response while the provider is held and safely retries the same operation', async () => {
+    let markProviderEntered!: () => void;
+    let releaseProvider!: () => void;
+    const providerEntered = new Promise<void>((resolve) => {
+      markProviderEntered = resolve;
+    });
+    const providerMayComplete = new Promise<void>((resolve) => {
+      releaseProvider = resolve;
+    });
+    const originalCreate = seriesHelpers.createSubsplashSeries;
+    const createSpy = jest.spyOn(seriesHelpers, 'createSubsplashSeries').mockImplementation(async (...args) => {
+      markProviderEntered();
+      await providerMayComplete;
+      return originalCreate(...args);
+    });
+    const firestoreId = await createSeriesDocument({ name: 'Held Create Series', subsplashId: '', status: 'draft' });
+    const request = (operationKey: string): TestRequest<CreateSeriesInputType> => ({
+      auth: testCallableAuth('admin'),
+      data: { title: 'Held Create Series', ownerId: TEST_USER_ID, firestoreId, operationKey },
+    });
+    const ownerRequest = request('held-create-owner');
+    const waiterRequest = request('held-create-waiter');
+    let watchdogTimer!: ReturnType<typeof setTimeout>;
+    const watchdog = new Promise<never>((_resolve, reject) => {
+      // Bound this fixture's artificial barrier below Jest's timeout while
+      // retaining the real application's complete ten-second lock wait.
+      watchdogTimer = setTimeout(
+        () => reject(new Error('Held-provider test phase exceeded its watchdog')),
+        DEFAULT_LOCK_WAIT_TIMEOUT_MS + 30_000
+      );
+    });
+    const owner = createSeriesHandler(ownerRequest);
+    let waiter: Promise<CreateSeriesOutputType> | undefined;
+    let waiterAssertion: Promise<unknown> | undefined;
+    try {
+      await Promise.race([
+        providerEntered,
+        owner.then(() => {
+          throw new Error('Owner completed without reaching the held provider boundary');
+        }),
+        watchdog,
+      ]);
+      waiter = createSeriesHandler(waiterRequest);
+      waiterAssertion = expect(waiter).rejects.toMatchObject({
+        code: 'aborted',
+        details: {
+          code: SUBSPLASH_LOCK_BUSY_CODE,
+          locked_keys: [`series:${firestoreId}`],
+          wait_ms: DEFAULT_LOCK_WAIT_TIMEOUT_MS,
+          retry_after_ms: DEFAULT_LOCK_WAIT_POLL_INTERVAL_MS,
+        },
+      });
+      await Promise.race([waiterAssertion, watchdog]);
+      expect(createSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      clearTimeout(watchdogTimer);
+      releaseProvider();
+      // Release the artificial barrier before draining every started caller
+      // and assertion, including a waiter that unexpectedly entered it. The
+      // owner's original outcome remains checked below after successful setup.
+      await Promise.allSettled([owner, ...(waiter ? [waiter] : []), ...(waiterAssertion ? [waiterAssertion] : [])]);
+    }
+    const first = await owner;
+    const retried = await createSeriesHandler(waiterRequest);
+    expect(first.status).toBe('success');
+    expect(retried).toEqual(first);
+    const stored = await firebaseAdmin.firestore().collection('series').doc(firestoreId).get();
+    expect(stored.get('subsplashId')).toBe(first.subsplashId);
     expect(createSpy).toHaveBeenCalledTimes(1);
   });
 
