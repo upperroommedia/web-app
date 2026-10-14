@@ -1,3 +1,4 @@
+import { getFirebaseEmulatorPort } from '../../../packages/shared/firebase/emulatorPorts';
 /* eslint-disable no-console */
 
 import {
@@ -35,7 +36,7 @@ const firestore = typeof window === 'undefined' ? getFirestore(firebase) : creat
 if (isDevelopment && !globalThis.__URM_FIRESTORE_EMULATOR_CONNECTED__) {
   console.log('Connecting to Firestore emulator');
   globalThis.__URM_FIRESTORE_EMULATOR_CONNECTED__ = true;
-  connectFirestoreEmulator(firestore, '127.0.0.1', 8081);
+  connectFirestoreEmulator(firestore, '127.0.0.1', getFirebaseEmulatorPort('firestore'));
 }
 export default firestore;
 export * from 'firebase/firestore';

@@ -1,3 +1,4 @@
+import { getFirebaseEmulatorPort } from './emulatorPorts';
 import { readFileSync } from 'node:fs';
 import { getApp, getApps, initializeApp, deleteApp } from 'firebase-admin/app';
 import { recordSharedFirebaseAppCreation } from './firebaseAdminOwnership';
@@ -61,7 +62,7 @@ if (isTemporalCloud) {
 if (!getApps().length) {
   if (isDevelopment) {
     console.warn('Setting Admin SDK to use emulator');
-    process.env.FIREBASE_AUTH_EMULATOR_HOST = '127.0.0.1:9099';
+    process.env.FIREBASE_AUTH_EMULATOR_HOST ??= `127.0.0.1:${getFirebaseEmulatorPort('auth')}`;
   }
 
   const createdApp = initializeApp({

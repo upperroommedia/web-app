@@ -670,39 +670,39 @@
     "semantic_hash": ""
   },
   "apps/web/firebase/auth.ts": {
-    "mtime": 1791961998.2610807,
-    "ast_hash": "ddf588a08e6c343721a8e0cd28ca9fe0",
+    "mtime": 1792008621.7762659,
+    "ast_hash": "46de8cbcee1ebc06b97db5620372e033",
     "semantic_hash": ""
   },
   "apps/web/firebase/database.ts": {
-    "mtime": 1791961998.2614133,
-    "ast_hash": "7e49ad690c90603f5fa575fc4ad9a052",
-    "semantic_hash": "7e49ad690c90603f5fa575fc4ad9a052"
+    "mtime": 1792008621.7911756,
+    "ast_hash": "3341e78fb3ac980f7422ec178af549e9",
+    "semantic_hash": ""
   },
   "apps/web/firebase/firebase.ts": {
-    "mtime": 1791961998.2615895,
-    "ast_hash": "d7ab97e2dbac9edf02e006756ebc91d8",
-    "semantic_hash": "d7ab97e2dbac9edf02e006756ebc91d8"
+    "mtime": 1792008621.8042037,
+    "ast_hash": "f2d0a837f36a49013182734fec687273",
+    "semantic_hash": ""
   },
   "apps/web/firebase/firebaseAdmin.ts": {
-    "mtime": 1791961998.2618084,
-    "ast_hash": "b701e6f3e3e893ce7397f010d3356613",
+    "mtime": 1792008573.291518,
+    "ast_hash": "b3aa6edcf8eb0682d0ff5219207ce71f",
     "semantic_hash": ""
   },
   "apps/web/firebase/firestore.ts": {
-    "mtime": 1791961998.2624424,
-    "ast_hash": "c40a22f7ee37d3b175bdb64868569aa7",
+    "mtime": 1792008573.2910032,
+    "ast_hash": "c37d426c4dde8dbeac1dfdfc1c6bf2b1",
     "semantic_hash": ""
   },
   "apps/web/firebase/functions.ts": {
-    "mtime": 1791961998.2625678,
-    "ast_hash": "b130037a18163d008d389505b602ba2a",
-    "semantic_hash": "b130037a18163d008d389505b602ba2a"
+    "mtime": 1792008621.797644,
+    "ast_hash": "631592a5abe40bee292e05dcfd92009d",
+    "semantic_hash": ""
   },
   "apps/web/firebase/storage.ts": {
-    "mtime": 1791961998.2627125,
-    "ast_hash": "d71855718249c600e39ef168c8c67e3f",
-    "semantic_hash": "d71855718249c600e39ef168c8c67e3f"
+    "mtime": 1792008621.7945092,
+    "ast_hash": "3a26a0cf37443351b895a4b311de554a",
+    "semantic_hash": ""
   },
   "apps/web/hooks/useDebounce.tsx": {
     "mtime": 1791961998.2631302,
@@ -920,13 +920,13 @@
     "semantic_hash": ""
   },
   "apps/web/tests/audio-player.spec.ts": {
-    "mtime": 1791962931.927566,
-    "ast_hash": "a5b0d24eab7d508c3edecc4249d1ca07",
+    "mtime": 1792008783.4614863,
+    "ast_hash": "d26156920336453c190113a143334c72",
     "semantic_hash": ""
   },
   "apps/web/tests/audio-trimmer.spec.ts": {
-    "mtime": 1791961998.3086252,
-    "ast_hash": "4f87f578375da3533e65a0d2b7170d2d",
+    "mtime": 1792008783.4617782,
+    "ast_hash": "516a4e7e2caa28ac87943e11731cef0a",
     "semantic_hash": ""
   },
   "apps/web/tests/helpers/seedPlayableSermon.ts": {
@@ -945,8 +945,8 @@
     "semantic_hash": ""
   },
   "apps/web/tests/player-clear-on-upload.spec.ts": {
-    "mtime": 1791961998.3113446,
-    "ast_hash": "6993b81e6ff6e38508b3d953f25cc9bf",
+    "mtime": 1792008783.461897,
+    "ast_hash": "2116f61f76b22267d025a57ce83cec72",
     "semantic_hash": ""
   },
   "apps/web/tests/utils/categoryScopedLists.test.ts": {
@@ -3215,39 +3215,39 @@
     "semantic_hash": "fa4531273f2e27a18d790b4135aea334"
   },
   "packages/shared/firebase/auth.ts": {
-    "mtime": 1791961999.4240997,
-    "ast_hash": "277592e548009412013cd7ce3ad78444",
-    "semantic_hash": "277592e548009412013cd7ce3ad78444"
+    "mtime": 1792008621.8110034,
+    "ast_hash": "1c0f8375c2c766dc2a900ce53eafcef5",
+    "semantic_hash": ""
   },
   "packages/shared/firebase/database.ts": {
-    "mtime": 1791961999.4247174,
-    "ast_hash": "7e49ad690c90603f5fa575fc4ad9a052",
-    "semantic_hash": "7e49ad690c90603f5fa575fc4ad9a052"
+    "mtime": 1792008621.8162022,
+    "ast_hash": "970b96c13bc66ddb4e6164107a555fb2",
+    "semantic_hash": ""
   },
   "packages/shared/firebase/firebase.ts": {
-    "mtime": 1791961999.4249468,
-    "ast_hash": "d7ab97e2dbac9edf02e006756ebc91d8",
-    "semantic_hash": "d7ab97e2dbac9edf02e006756ebc91d8"
+    "mtime": 1792008621.8259008,
+    "ast_hash": "174fb3290d1499c55e26e44a7fb8b2c9",
+    "semantic_hash": ""
   },
   "packages/shared/firebase/firebaseAdmin.ts": {
-    "mtime": 1791965881.233707,
-    "ast_hash": "bf13bba9d90d45795ca991cb44fc40f8",
+    "mtime": 1792008573.2923357,
+    "ast_hash": "27972ece9d756c35fd696208c6f420a1",
     "semantic_hash": ""
   },
   "packages/shared/firebase/firestore.ts": {
-    "mtime": 1791961999.425568,
-    "ast_hash": "11ce2023feb597fd2ce34260b6a191e6",
-    "semantic_hash": "11ce2023feb597fd2ce34260b6a191e6"
+    "mtime": 1792008621.813515,
+    "ast_hash": "e75d4bdcfa3a43387d76713c249a171d",
+    "semantic_hash": ""
   },
   "packages/shared/firebase/functions.ts": {
-    "mtime": 1791961999.4257226,
-    "ast_hash": "cdc450cb966e5eb3d8ce667037a05a52",
-    "semantic_hash": "cdc450cb966e5eb3d8ce667037a05a52"
+    "mtime": 1792008621.8218088,
+    "ast_hash": "56007e9cd745e9a4a8d4e83a47217a6a",
+    "semantic_hash": ""
   },
   "packages/shared/firebase/storage.ts": {
-    "mtime": 1791961999.425865,
-    "ast_hash": "d71855718249c600e39ef168c8c67e3f",
-    "semantic_hash": "d71855718249c600e39ef168c8c67e3f"
+    "mtime": 1792008621.8196776,
+    "ast_hash": "867269457ce7b052a8bd8af402e693ca",
+    "semantic_hash": ""
   },
   "packages/shared/package.json": {
     "mtime": 1791961999.426685,
@@ -4240,8 +4240,8 @@
     "semantic_hash": ""
   },
   "docs/STAGING_SETUP.md": {
-    "mtime": 1792007846.126452,
-    "ast_hash": "775d34ebd2c49bee4019f930d2eceef1",
+    "mtime": 1792008771.4989069,
+    "ast_hash": "66c8f7a15729998c0fa1820104a63efc",
     "semantic_hash": ""
   },
   "docs/YOUTUBE_TRIMMER_IOS.md": {
@@ -6935,8 +6935,8 @@
     "semantic_hash": ""
   },
   ".github/workflows/temporal-application-validation.yml": {
-    "mtime": 1791961998.1239982,
-    "ast_hash": "fa51af13a5c9f859411af4055675a306",
+    "mtime": 1792008827.8366253,
+    "ast_hash": "146c2904b4bf6bbfdd7474243281d8aa",
     "semantic_hash": ""
   },
   ".github/workflows/temporal-platform-deploy.yml": {
@@ -7967,6 +7967,31 @@
   "function-kits/firestore-send-email/test/temporal/capture.firestore.test.ts": {
     "mtime": 1792007245.5085511,
     "ast_hash": "356348278fdb7f71ed2152888e97ec51",
+    "semantic_hash": ""
+  },
+  "apps/web/tests/helpers/providerStatusFixture.ts": {
+    "mtime": 1792008784.321282,
+    "ast_hash": "ba85768120d569ca2a6b36e6093df55f",
+    "semantic_hash": ""
+  },
+  "packages/shared/firebase/emulatorPorts.test.mjs": {
+    "mtime": 1792008664.511199,
+    "ast_hash": "4a859b7306f3fab03e673a4243de12c6",
+    "semantic_hash": ""
+  },
+  "packages/shared/firebase/emulatorPorts.ts": {
+    "mtime": 1792008621.8361318,
+    "ast_hash": "714cf5f2b746b45e0639c02e4398dd3f",
+    "semantic_hash": ""
+  },
+  "scripts/tests/authenticated-player-browser.mjs": {
+    "mtime": 1792008919.300038,
+    "ast_hash": "8d5e6ee08d69e29074a2108a5bfd6d7f",
+    "semantic_hash": ""
+  },
+  "scripts/tests/authenticated-player-browser.test.mjs": {
+    "mtime": 1792008903.4152992,
+    "ast_hash": "35b191f02bafbd15867bd7187747ca81",
     "semantic_hash": ""
   }
 }

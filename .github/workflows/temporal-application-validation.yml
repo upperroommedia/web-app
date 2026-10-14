@@ -84,6 +84,15 @@ jobs:
         run: |
           pnpm run test:temporal:contracts
           node --test scripts/temporal-recover-initial-compatibility.test.mjs
+          node --test scripts/provider-http-inventory.test.mjs
+          node --test packages/shared/firebase/emulatorPorts.test.mjs
+      - name: Validate release and recovery through the real Firestore SDK
+        env:
+          RELEASE_RUNTIME_TEST_ROOT: ${{ github.workspace }}
+          BUNDLE_RECOVERY_TEST_RUNTIME_ROOT: ${{ github.workspace }}
+        run: |
+          pnpm --dir functions exec firebase emulators:exec --project demo-release-runtime --only auth,firestore,database,storage --config ../firebase.test.json 'node ../scripts/tests/temporal-release-runtime.firestore.test.mjs'
+          pnpm --dir functions exec firebase emulators:exec --project demo-bundle-recovery --only auth,firestore,database,storage --config ../firebase.test.json 'node ../scripts/tests/temporal-bundle-bootstrap-recovery.firestore.test.mjs'
       - name: Validate native audio admission, queueing, monitoring and OAuth transport
         run: |
           pnpm --dir apps/process-audio run test:legacy-ingress
@@ -93,6 +102,17 @@ jobs:
         run: |
           pnpm --dir function-kits/firestore-send-email test
           pnpm --dir function-kits/firestore-algolia-search test
+      - name: Validate native email capture without a provider connection
+        env:
+          URM_EMAIL_CAPTURE_EMULATOR_TEST: 'true'
+          URM_EMAIL_CAPTURE_TEST_CONFIG: ${{ github.workspace }}/firebase.test.json
+        run: |
+          pnpm --dir functions exec firebase emulators:exec --project demo-email-capture --only auth,firestore,database,storage --config ../firebase.test.json 'NODE_OPTIONS=--experimental-vm-modules pnpm --dir ../function-kits/firestore-send-email exec jest --runInBand --watchman=false --forceExit test/temporal/capture.firestore.test.ts'
+      - name: Verify authenticated player, trimming and upload navigation
+        run: |
+          node --test scripts/tests/authenticated-player-browser.test.mjs
+          pnpm --dir apps/web exec playwright install --with-deps chromium
+          node scripts/tests/authenticated-player-browser.mjs
       - name: Build the production web application
         env:
           NEXT_PUBLIC_FIREBASE_PROJECT_ID: demo-temporal-ci

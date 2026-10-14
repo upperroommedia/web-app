@@ -1,3 +1,4 @@
+import { getFirebaseEmulatorPort } from '../../../packages/shared/firebase/emulatorPorts';
 import { getApp, getApps, initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
@@ -15,7 +16,7 @@ const projectId = getFirebaseProjectId();
 if (!getApps().length) {
   if (isDevelopment) {
     console.warn('Setting Admin SDK to use emulator');
-    process.env.FIREBASE_AUTH_EMULATOR_HOST = '127.0.0.1:9099';
+    process.env.FIREBASE_AUTH_EMULATOR_HOST ??= `127.0.0.1:${getFirebaseEmulatorPort('auth')}`;
   }
 
   initializeApp({

@@ -8,6 +8,20 @@ For isolated Subsplash and SoundCloud testing, follow [Staging provider sandbox]
 
 Use the release controller for admission changes. During a controlled migration, keep automatic App Hosting rollouts paused until the controller restores them; the normal setup below describes the steady state after that release completes.
 
+### Local verification
+
+Emulator-backed tests use the unchanged `firebase.test.json` configuration. Browser test helpers derive their emulator endpoints from that file and pass these development-only overrides to Next.js:
+
+| Service | Public port override | Normal dev default |
+| --- | --- | --- |
+| Auth | `NEXT_PUBLIC_FIREBASE_AUTH_EMULATOR_PORT` | 9099 |
+| Firestore | `NEXT_PUBLIC_FIREBASE_FIRESTORE_EMULATOR_PORT` | 8081 |
+| Realtime Database | `NEXT_PUBLIC_FIREBASE_DATABASE_EMULATOR_PORT` | 9000 |
+| Storage | `NEXT_PUBLIC_FIREBASE_STORAGE_EMULATOR_PORT` | 9199 |
+| Functions | `NEXT_PUBLIC_FIREBASE_FUNCTIONS_EMULATOR_PORT` | 5001 |
+
+Hosts remain `127.0.0.1`; overrides must be integer ports from 1 through 65535. These values do not select a publishing mode or change production endpoints. An existing Admin Auth emulator endpoint supplied by `firebase emulators:exec` is preserved.
+
 ## 1. Upgrade staging project billing (required)
 
 App Hosting requires Blaze:

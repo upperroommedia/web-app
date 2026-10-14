@@ -1,5 +1,10 @@
+import { installMediaProviderStatusFixture } from './helpers/providerStatusFixture';
 import { expect, test } from '@playwright/test';
 import type { ConsoleMessage, Page } from '@playwright/test';
+
+test.beforeEach(async ({ page }) => {
+  await installMediaProviderStatusFixture(page);
+});
 
 function createSilentWav(durationSeconds = 0.5, sampleRate = 44100) {
   const numSamples = Math.floor(durationSeconds * sampleRate);

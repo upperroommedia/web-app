@@ -1,5 +1,10 @@
+import { installMediaProviderStatusFixture } from './helpers/providerStatusFixture';
 import { expect, test } from '@playwright/test';
 import { seedPlayableSermon } from './helpers/seedPlayableSermon';
+
+test.beforeEach(async ({ page }) => {
+  await installMediaProviderStatusFixture(page);
+});
 
 async function loginAsDevAdmin(page: import('@playwright/test').Page) {
   await page.goto('/login?callbackurl=/');

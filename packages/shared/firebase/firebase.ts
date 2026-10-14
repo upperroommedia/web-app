@@ -1,3 +1,4 @@
+import { getFirebaseEmulatorPort } from './emulatorPorts';
 import { FirebaseApp, getApps, initializeApp } from 'firebase/app';
 import {
   getFirebaseAuthDomain,
@@ -26,7 +27,8 @@ const getFirebaseDefaultsConfig = (): FirebaseDefaultsConfig => {
     return {};
   }
 
-  const defaults = (globalThis as { __FIREBASE_DEFAULTS__?: { config?: FirebaseDefaultsConfig } }).__FIREBASE_DEFAULTS__;
+  const defaults = (globalThis as { __FIREBASE_DEFAULTS__?: { config?: FirebaseDefaultsConfig } })
+    .__FIREBASE_DEFAULTS__;
   return defaults?.config ?? {};
 };
 if (!apps.length) {
@@ -40,7 +42,7 @@ if (!apps.length) {
     appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID || defaults.appId || '',
     measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID || defaults.measurementId,
     databaseURL: isDevelopment
-      ? `http://127.0.0.1:9000/?ns=${projectId}-default-rtdb`
+      ? `http://127.0.0.1:${getFirebaseEmulatorPort('database')}/?ns=${projectId}-default-rtdb`
       : getFirebaseDatabaseUrl(),
   });
 } else {

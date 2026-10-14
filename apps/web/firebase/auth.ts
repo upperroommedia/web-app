@@ -1,5 +1,6 @@
+import { getFirebaseEmulatorPort } from '../../../packages/shared/firebase/emulatorPorts';
 /* eslint-disable no-console */
- 
+
 import {
   browserLocalPersistence,
   browserPopupRedirectResolver,
@@ -39,7 +40,7 @@ const auth = initializeBrowserAuth();
 if (isDevelopment && process.env.AUTH_EMULATOR_STARTED !== 'true') {
   console.log('Connecting to Auth emulator');
   process.env.AUTH_EMULATOR_STARTED = 'true';
-  connectAuthEmulator(auth, 'http://127.0.0.1:9099');
+  connectAuthEmulator(auth, `http://127.0.0.1:${getFirebaseEmulatorPort('auth')}`);
 }
 
 export default auth;
