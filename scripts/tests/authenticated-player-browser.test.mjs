@@ -1,8 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { DEV_ADMIN_EMAIL, DEV_ADMIN_PASSWORD } from '../../apps/web/context/user/devAuth.ts';
 import { readFileSync } from 'node:fs';
 import {
   emulatorPorts,
+  devAdminSeed,
   isLoadedDotenv,
   isolatedEnvironment,
   validateEmulatorContext,
@@ -221,4 +223,17 @@ test('rejects only loadable dotenv files, permits tracked inert templates', () =
     assert.equal(isLoadedDotenv(name), true);
   for (const name of ['.env.template', '.env.example', '.env.defaults', 'env'])
     assert.equal(isLoadedDotenv(name), false);
+});
+
+test('seeds the real emulator dev-login fixture without duplicating its credentials', () => {
+  assert.deepEqual(devAdminSeed(), {
+    uid: 'ci-player-admin',
+    email: DEV_ADMIN_EMAIL,
+    password: DEV_ADMIN_PASSWORD,
+    emailVerified: true,
+  });
+  const source = readFileSync(new URL('./authenticated-player-browser.mjs', import.meta.url), 'utf8');
+  assert.equal(source.includes(DEV_ADMIN_EMAIL), false);
+  assert.equal(source.includes(DEV_ADMIN_PASSWORD), false);
+  assert.match(source, /await auth\.createUser\(devAdminSeed\(\)\)/);
 });

@@ -1,5 +1,6 @@
 // CI-only authenticated UI checks. Never loads a real project or credential file.
 import assert from 'node:assert/strict';
+import { DEV_ADMIN_EMAIL, DEV_ADMIN_PASSWORD } from '../../apps/web/context/user/devAuth.ts';
 import { spawn } from 'node:child_process';
 import { readFile, readdir } from 'node:fs/promises';
 import { createRequire } from 'node:module';
@@ -22,6 +23,10 @@ const SERVICE_ENV = {
 };
 const owned = new WeakSet();
 const delay = (ms) => new Promise((r) => setTimeout(r, ms));
+
+export function devAdminSeed() {
+  return { uid: 'ci-player-admin', email: DEV_ADMIN_EMAIL, password: DEV_ADMIN_PASSWORD, emailVerified: true };
+}
 
 export function isLoadedDotenv(name) {
   return /^\.env(?:\.(?:local|(?:development|production|test)(?:\.local)?))?$/.test(name);
@@ -186,12 +191,7 @@ async function main() {
       const app = initializeApp({ projectId: PROJECT }, 'ci-player-seed');
       try {
         const auth = getAuth(app);
-        await auth.createUser({
-          uid: 'ci-player-admin',
-          email: 'dev-admin@test.local',
-          password: 'devadmin123',
-          emailVerified: true,
-        });
+        await auth.createUser(devAdminSeed());
         await auth.setCustomUserClaims('ci-player-admin', { role: 'admin' });
       } finally {
         await deleteApp(app);
