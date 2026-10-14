@@ -178,3 +178,27 @@ test('deployed trigger path preserves CLI-resolved parameter expression', () => 
   assert.equal(kit.executeIndexOperation.__endpoint.eventTrigger.retry, true);
   assert.deepEqual(kit.executeIndexOperation.__endpoint.secretEnvironmentVariables, [{key: 'ALGOLIA_API_KEY'}]);
 });
+test('replacement staging live and full ingress refuse legacy ownership before any effects', async () => {
+  reset();
+  const saved = {...process.env};
+  try {
+    process.env.GCLOUD_PROJECT = 'urm-app-staging';
+    process.env.ALGOLIA_APP_ID = '2VZFOFLFHE';
+    process.env.TASK_ORCHESTRATOR_SEARCH = 'legacy';
+    process.env.STAGING_TEMPORAL_SEARCH_ONLY = 'true';
+    process.env.DO_FULL_INDEXING = 'false';
+    docs.set('sermons/a', {title: 'Held'});
+    await assert.rejects(event(snap('sermons/a', undefined), snap('sermons/a')), /held until Temporal/);
+    await assert.rejects(kit.executeFullIndexOperation.run({data: {}}), /retry required/);
+    assert.equal(records.size, 0);
+    assert.equal(locks.size, 0);
+    assert.equal(enqueued.length, 0);
+    // Removing the explicit parameter cannot bypass the replacement-app fence.
+    delete process.env.STAGING_TEMPORAL_SEARCH_ONLY;
+    await assert.rejects(event(snap('sermons/a', undefined), snap('sermons/a')), /held until Temporal/);
+    assert.equal(records.size, 0);
+  } finally {
+    for (const name of Object.keys(process.env)) if (!(name in saved)) delete process.env[name];
+    Object.assign(process.env, saved);
+  }
+});

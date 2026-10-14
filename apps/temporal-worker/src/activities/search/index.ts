@@ -15,6 +15,7 @@ export interface SearchConfig extends RecordConfig {
   appId: string;
   indexName: string;
   collectionPath: string;
+  recordPolicy?: string;
 }
 export interface SearchIntent {
   instanceId: string;
@@ -73,6 +74,10 @@ export function createSearchActivities(deps: SearchDependencies): SearchActiviti
   return {
     async syncSearchDocument(ref) {
       const { intent, config, client } = await configuration(ref);
+      if (config.recordPolicy === 'empty-private') {
+        await deps.project(ref, { state: 'succeeded' });
+        return;
+      }
       if (!intent.documentPath)
         throw ApplicationFailure.nonRetryable('Search source is missing', 'SearchSourceInvalid');
       const lock = deps.firestore

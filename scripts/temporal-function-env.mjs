@@ -9,7 +9,9 @@ import {
   firebaseEnvironmentSources,
   upsertFunctionFlags,
   CONTROL_PATH,
+  validateReleaseConfig,
 } from './temporal-release-lib.mjs';
+import { assertStagingSearchEnvironmentRelease } from './temporal-staging-search-env.mjs';
 const args = process.argv.slice(2);
 const project = args[args.indexOf('--project') + 1];
 const file = args.includes('--control-file') ? args[args.indexOf('--control-file') + 1] : undefined;
@@ -30,10 +32,18 @@ const commit = args.includes('--commit')
     }).trim();
 const actualCheckout = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
 assertCheckoutCommit(actualCheckout, commit);
-assertCheckoutSource(root, commit, { project, control });
 flags.TEMPORAL_RELEASE_COMMIT = commit;
 const manifest = JSON.parse(await readFile(resolve(root, 'firebase.json'), 'utf8'));
-const sources = firebaseEnvironmentSources(manifest, project);
+const includeStagingSearch = args.includes('--include-staging-search');
+let searchRelease;
+if (includeStagingSearch) {
+  const releasePath = args.includes('--release') ? args[args.indexOf('--release') + 1] : undefined;
+  if (!releasePath) throw new Error('Search environment opt-in requires --release PATH');
+  searchRelease = validateReleaseConfig(JSON.parse(await readFile(releasePath, 'utf8')));
+  assertStagingSearchEnvironmentRelease({ project, release: searchRelease, control, commit });
+}
+assertCheckoutSource(root, commit, { project, control, release: searchRelease, includeStagingSearch });
+const sources = firebaseEnvironmentSources(manifest, project, { includeStagingSearch });
 for (const source of sources) {
   const directory = resolve(root, source);
   const pathFromRoot = relative(root, directory);

@@ -280,3 +280,12 @@ All three kit upload roots also contain committed npm v3 locks. Run `./scripts/w
 The image kit must preserve Sharp's complete optional platform dependency graph, including the Linux x64 bindings and libvips. A lock generated from an existing macOS install can omit those packages; [Sharp's cross-platform installation guidance](https://sharp.pixelplumbing.com/install/#cross-platform) documents this npm limitation. Do not disable optional dependencies or copy workstation dependencies into the upload.
 
 CI runs `node --test scripts/tests/kits-isolated-startup.test.mjs` on Linux x64 with Node22. Each test builds an isolated kit export, performs normal-lifecycle `npm ci --omit=dev`, and starts its real handler through an isolated Functions Framework 3.5.1 layer. Credentials and local environment files are excluded, and external network access is blocked during startup. The image check exercises an HTTP PNG transformation and requires the actual Linux native Sharp binding; the original Darwin-only lock is a negative regression fixture. These checks validate packaging and native startup, not live provider publishing or delivery.
+
+## Separate staging search onboarding
+
+The replacement staging Algolia application uses a separate search-only initial
+cutover after the existing six-domain release is complete. Follow the
+[staging search guide](STAGING_SEARCH_ONBOARDING.md) for private keys, explicit
+target deployment, real pause/grace, settings, controller `bootstrap-search`, UI
+convergence gates and post-open validation. Automatic broad kit deploys continue
+to exclude search; a compiled search UI must not roll out before this gate.

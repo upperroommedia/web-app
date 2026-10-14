@@ -6,6 +6,11 @@ on:
       - staging
   workflow_dispatch:
     inputs:
+      staging_search_release:
+        description: 'Reviewed search-only initial-cutover release JSON path; empty excludes search'
+        required: false
+        default: ''
+        type: string
       force_full_redeploy:
         description: 'Deploy all staging targets regardless of changed files'
         required: false
@@ -61,6 +66,7 @@ jobs:
           WORKFLOW_FILE: staging-selective-deploy.yml
           GITHUB_TOKEN: ${{ github.token }}
           FORCE_FULL_REDEPLOY: ${{ github.event.inputs.force_full_redeploy || 'false' }}
+          STAGING_SEARCH_RELEASE: ${{ github.event.inputs.staging_search_release || '' }}
         run: |
           set -euo pipefail
 
@@ -182,7 +188,14 @@ jobs:
           deploy_functions_media=false
           deploy_functions_image=false
           deploy_functions_integrations=false
-          if [[ "$force_full" == "true" ]]; then
+          if [[ -n "$STAGING_SEARCH_RELEASE" ]]; then
+            if [[ "$EVENT_NAME" != "workflow_dispatch" || "$force_full" == "true" ]]; then
+              echo "Search candidate requires a dedicated manual run without force_full_redeploy" >&2
+              exit 1
+            fi
+            # The separate guarded job deploys only search. No unrelated targets join this run.
+            :
+          elif [[ "$force_full" == "true" ]]; then
             deploy_firestore=true
             deploy_database=true
             deploy_storage=true
@@ -511,3 +524,22 @@ jobs:
           ignore_missing: true
           ignore_empty: true
           working_directory: .
+
+  deploy-search-candidate:
+    runs-on: ubuntu-latest
+    # Search never joins automatic or force-full kit deployment.
+    if: github.event_name == 'workflow_dispatch' && inputs.staging_search_release != '' && inputs.force_full_redeploy != true
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: ./.github/actions/setup-backend-deploy
+        with:
+          gcp_project: ${{ env.FIREBASE_PROJECT }}
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER_STAGING || secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL_STAGING || secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
+          run_install_scripts: 'false'
+      - name: Install only the reviewed search kit
+        run: node scripts/create-kit-deploy-config.mjs --install --only-search
+      - name: Deploy reviewed search-only candidate
+        env:
+          SEARCH_RELEASE: ${{ inputs.staging_search_release }}
+        run: node scripts/temporal-deploy-guard.mjs --project "$FIREBASE_PROJECT" --release "$SEARCH_RELEASE" --phase ownership-changed --include-staging-search --materialize-function-env -- ./scripts/firebase-deploy-with-quota-retry.sh deploy --project "$FIREBASE_PROJECT" --config firebase.kits.json --only functions --non-interactive --force

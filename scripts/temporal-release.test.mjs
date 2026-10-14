@@ -263,3 +263,13 @@ test('provider ownership cannot change or open with missing, building or replace
   assert.throws(() => validateProviderUsageMarker(config, { ...marker, epoch: 'new-unverified-epoch' }, marker.epoch));
   assert.throws(() => validateProviderUsageMarker(config, { ...marker, projectId: 'urm-app' }, marker.epoch));
 });
+
+test('search initial onboarding is separate and settings-bound, while later durable upgrades remain supported', () => {
+  const search = { ...config, domains: ['search'], searchSettingsEvidence: '/secure/settings.json' };
+  assert.equal(validateReleaseConfig(search), search);
+  assert.throws(() => validateReleaseConfig({ ...search, searchSettingsEvidence: undefined }));
+  assert.throws(() => validateReleaseConfig({ ...search, domains: ['media', 'search'] }));
+  assert.doesNotThrow(() =>
+    validateReleaseConfig({ ...config, mode: 'durable-upgrade', domains: ['media', 'search'] })
+  );
+});

@@ -109,3 +109,51 @@ test('duplicate admitted event remains readable during a release pause', async (
   await enqueueSearchIntent(db, input);
   assert.equal([...db.records.keys()].filter((key) => key.startsWith('durableJobs/')).length, 1);
 });
+
+const stagedDocument = () => ({projectId:'urm-app-staging', appId:'2VZFOFLFHE', instanceId:'sermons-index', requestId:'staging-paused-event', documentPath:'sermons/current-document', documentEventContinuation:true});
+function pauseSearch(db) {
+  const control = db.records.get('_control/temporalRelease');
+  control.admission = 'paused';
+  control.domains.search.admission = 'paused';
+  return control;
+}
+test('trusted replacement-app staging document events durably converge during global/search pause', async () => {
+  const db = memoryDb(); pauseSearch(db);
+  await enqueueSearchIntent(db,stagedDocument());
+  const job = [...db.records].find(([path])=>path.startsWith('durableJobs/'))[1];
+  assert.equal(job.kind,'search.sync');
+  assert.equal(job.projectId,'urm-app-staging');
+  const intent = db.records.get('durableJobIntents/'+job.jobId);
+  assert.deepEqual(intent.payload,{instanceId:'sermons-index',documentPath:'sermons/current-document'});
+  assert.equal(JSON.stringify(intent).includes('documentEventContinuation'),false);
+  const outbox = db.records.get('durableJobOutbox/'+job.jobId);
+  assert.equal(outbox.dispatch.workflowType,'SearchDocument');
+  assert.equal(outbox.state,'pending');
+  await enqueueSearchIntent(db,stagedDocument());
+  assert.equal([...db.records.keys()].filter(path=>path.startsWith('durableJobs/')).length,1);
+});
+test('paused continuation is denied for unmarked/full-backfill/foreign target or malformed source authority', async () => {
+  for (const patch of [
+    {documentEventContinuation:undefined}, {documentEventContinuation:false}, {documentPath:undefined},
+    {projectId:'urm-app'}, {projectId:'other'}, {appId:'8OY'}, {appId:undefined},
+    {instanceId:'kit-sermons-index'}, {instanceId:'other'}, {documentPath:'users/one'},
+    {documentPath:'sermons/'}, {documentPath:'/sermons/one'}, {documentPath:'sermons/one/subcollection/two'},
+    {documentPath:'sermons/..'}, {documentPath:'sermons/.'},
+  ]) {
+    const db = memoryDb(); pauseSearch(db);
+    await assert.rejects(enqueueSearchIntent(db,{...stagedDocument(),...patch}));
+    assert.equal([...db.records.keys()].some(path=>path.startsWith('durableJobs/')),false);
+  }
+  for (const mutate of [control=>control.domains.search.owner='legacy', control=>control.projectId='urm-app', control=>control.admission='unknown', control=>control.domains.search.admission='unknown']) {
+    const db = memoryDb(); mutate(pauseSearch(db));
+    await assert.rejects(enqueueSearchIntent(db,stagedDocument()));
+    assert.equal([...db.records.keys()].some(path=>path.startsWith('durableJobs/')),false);
+  }
+});
+test('trusted document continuation does not broaden production pause behavior', async () => {
+  const db=memoryDb(); pauseSearch(db);
+  await assert.rejects(enqueueSearchIntent(db,{...stagedDocument(),projectId:'urm-app',appId:'8OYPRODUCTION'}));
+  const control=db.records.get('_control/temporalRelease'); control.admission='open';control.domains.search.admission='open';
+  await enqueueSearchIntent(db,{...stagedDocument(),projectId:'urm-app',appId:'8OYPRODUCTION'});
+  assert.equal([...db.records.keys()].filter(path=>path.startsWith('durableJobs/')).length,1);
+});

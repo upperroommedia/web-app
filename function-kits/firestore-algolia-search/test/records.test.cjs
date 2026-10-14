@@ -59,3 +59,32 @@ test('Algolia failures and continuously changing documents reject for retry', as
   let version = 0;
   await assert.rejects(converge(async () => snapshot({}, ++version), async () => {}, 2), /kept changing/);
 });
+test('staging projection excludes unknown nested fields and preserves UI array/object shapes', async () => {
+  const schema = require('../src/staging-search.json').instances.find(row => row.collectionPath === 'sermons');
+  const record = await extract(snapshot({title: 'Safe', uploaderId: 'owner', uploaderEmail: 'private@example.test',
+    status: {subsplash: 'UPLOADED', soundCloud: 'ERROR', audioStatus: 'PROCESSED', message: 'private stack'},
+    speakers: [{id: 'speaker', name: 'Name', email: 'private@example.test', description: 'not needed'}],
+    images: [{id: 'image', downloadLink: 'https://image.test', privateToken: 'private'}],
+    publishActivity: {listOperation: 'publish', updatedAtMillis: 5, listIds: ['not needed']}, topics: ['allowed', {secret: 'not a string'}], seriesName: {secret: 'not a string'}, privateAccount: {secret: 'hidden'},
+  }), {...config, projectId: 'urm-app-staging', fields: schema.fields.join(',')});
+  assert.equal(record.uploaderId, 'owner');
+  assert.equal(record.uploaderEmail, undefined);
+  assert.deepEqual(record.status, {subsplash: 'UPLOADED', soundCloud: 'ERROR', audioStatus: 'PROCESSED'});
+  assert.deepEqual(record.speakers, [{id: 'speaker', name: 'Name'}]);
+  assert.deepEqual(record.images, [{id: 'image', downloadLink: 'https://image.test'}]);
+  assert.deepEqual(record.publishActivity, {listOperation: 'publish', updatedAtMillis: 5});
+  assert.equal(record.privateAccount, undefined);
+  assert.deepEqual(record.topics, ['allowed']);
+  assert.equal(record.seriesName, undefined);
+});
+test('staging refuses whole-document, unknown fields, alternate identity, transforms and users projections', async () => {
+  const schema = require('../src/staging-search.json').instances.find(row => row.collectionPath === 'sermons');
+  const stage = {...config, projectId: 'urm-app-staging', fields: schema.fields.join(',')};
+  for (const patch of [{fields: ''}, {fields: stage.fields + ',private'}, {altObjectId: 'title'}, {transformFunction: 'unreviewed'}]) {
+    await assert.rejects(extract(snapshot({title: 'Safe'}), {...stage, ...patch}), /exact reviewed/);
+  }
+  const user = {...snapshot({email: 'private@example.test'}), ref: {path: 'users/document-1'}};
+  await assert.rejects(extract(user, {...stage, fields: '__empty_private_index__'}), /empty\/private/);
+  // Production keeps its existing full-document policy until a separately reviewed migration.
+  assert.equal((await extract(snapshot({private: 'legacy'}), {...config, projectId: 'urm-app'})).private, 'legacy');
+});

@@ -50,6 +50,7 @@ const config = {
   workerReplicas: 2,
   workerRoles: ['orchestration', 'controls', 'media', 'email', 'images', 'search'],
   workerPort: 8080,
+  search: { appId: '2VZFOFLFHE', configSecret: 'temporal-search-config', replicas: 1, instanceIds: ['users-index', 'speakers-index', 'sermons-index', 'images-index', 'lists-index'] },
   emailEgress: {
     schemaVersion: 1,
     provider: 'smtp',
@@ -1045,7 +1046,7 @@ test('Single-host upgrade checks actual retained CPU/memory demand and never del
   const c = vmConfig(),
     worker = renderPlatform(c).worker,
     node = { status: { allocatable: { cpu: '4', memory: '15Gi' } } };
-  assert.equal(validateSingleHostCapacity(c, node, [], worker).cpu, 2250);
+  assert.equal(validateSingleHostCapacity(c, node, [], worker).cpu, 2100);
   const old = worker.items
     .filter((item) => item.kind === 'Deployment')
     .map((deployment) => ({
@@ -1064,7 +1065,7 @@ test('Single-host upgrade checks actual retained CPU/memory demand and never del
       spec: deployment.spec.template.spec,
       status: { phase: 'Running' },
     }));
-  assert.equal(validateSingleHostCapacity(c, node, same, worker).cpu, 2250);
+  assert.equal(validateSingleHostCapacity(c, node, same, worker).cpu, 2100);
 });
 test('Single-host dedicated scratch proof rejects an unmounted root filesystem, small GB disk, stale identity or missing mount', () => {
   const c = vmConfig(),
@@ -1472,4 +1473,13 @@ test('Public DNS email IPv4 policy is explicit, role/port scoped and cannot be o
       vmConfig('production')
     )
   );
+});
+
+test('staging search has one bounded worker, private config mount and exact reviewed target', () => {
+  for (const search of [undefined, {...config.search,appId:'8OY'}, {...config.search,instanceIds:['sermons-index']}])
+    assert.throws(() => validateConfig({...config,search},peer), /Staging search/);
+  const deployment=renderPlatform(config).worker.items.find(item=>item.kind==='Deployment' && item.metadata.labels['urm.temporal/role']==='search');
+  assert.equal(deployment.spec.replicas,1);
+  assert.deepEqual(deployment.spec.template.spec.containers[0].resources,{requests:{cpu:'100m',memory:'256Mi'},limits:{cpu:'1',memory:'512Mi'}});
+  assert.equal(deployment.spec.template.spec.volumes.find(v=>v.name==='search').secret.defaultMode,0o440);
 });

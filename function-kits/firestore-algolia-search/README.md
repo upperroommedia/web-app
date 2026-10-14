@@ -39,3 +39,62 @@ Source reads and `_algoliaSyncLocks` metadata writes incur Firestore charges in 
 The legacy extension swallowed indexing failures, allowing missing records to persist. This kit propagates failures and enables event retries. It serializes writes per document, reads the latest source, waits for the Algolia indexing task, and rereads source versions to reconcile concurrent updates. Delayed deletion events therefore preserve a recreated document; full indexing uses the same path as live indexing. Each write replaces the complete selected/transformed record, removing attributes deleted from Firestore. Alternate object ID changes remove the previous record.
 
 Run `npm test` in this directory. Tests cover serialization, selected fields, transforms, source reordering, deletion/recreation, alternate ID changes, indexing failures, overlapping execution and full-index pagination. Actual Firestore transactions and deployed Eventarc delivery additionally require staging verification; do not remove the old extension before validating kit-specific logs.
+
+## Replacement staging search policy
+
+The replacement application is fixed to project `urm-app-staging`, Algolia app
+`2VZFOFLFHE`. Production configuration retains its existing application and record
+behavior pending a separate migration. The five checked-in staging environments
+use `DO_FULL_INDEXING=false` and `STAGING_TEMPORAL_SEARCH_ONLY=true`: compatibility
+deployment cannot perform legacy live writes or lifecycle backfills. Event delivery
+retries remain held until reviewed Temporal ingress/ownership is ready. Lifecycle
+jobs are not the staging bootstrap mechanism.
+
+`packages/contracts/staging-search.json` defines the five instance identities and
+explicit leaf field whitelists. `src/staging-search.json` is its checked-in deployment
+mirror, emitted beside `lib/records.js` so isolated kit deployment needs no workspace
+files. After editing the canonical schema run
+`node scripts/sync-algolia-staging-schema.mjs --write` from the workspace root; check
+it with `--check` and `node --test scripts/algolia-staging-search.test.mjs`.
+
+Staging extraction enforces the exact reviewed whitelist, reconstructs nested arrays
+and objects, drops unlisted nested fields and rejects custom transforms/alternate
+IDs. It omits uploader email, account data, processing internals, error messages and
+media source credentials. Browser hit defaults or a subsequent authorized Firestore
+read supply fields outside this discovery record. Production extraction remains
+compatible with its prior configuration. `users-index` is `empty-private`: it has no
+search consumer, and account directory access remains callable-backed. Workers must
+skip users records, including later user creations; extraction independently rejects
+such records. An existing nonempty users index requires separate reviewed remediation.
+
+Settings use one guarded initializer for the complete five-index target:
+
+```sh
+node scripts/configure-algolia-staging-search.mjs \
+  --project urm-app-staging --app 2VZFOFLFHE \
+  --indices users,speakers,sermons,images,lists --dry-run
+```
+
+`--apply` replaces `--dry-run` only during the approved operational rollout, with
+`ALGOLIA_ADMIN_API_KEY` supplied privately in the process environment. The script
+never stores or prints this credential. It refuses any other project, application,
+missing/extra/duplicate index, nonempty users index (count-only preflight), and unexpected preexisting replicas. It waits for each
+settings task and emits only target/settings/task metadata. Applied receipts add
+`verifiedAt` only after every task completes; dry-run and failed operations provide
+no completion timestamp. The release controller requires a fresh successful receipt
+before accepting bootstrap/readiness evidence. A failed task can leave
+preceding settings applied; retry the same plan after checking private provider task
+state. It never adds/removes/replaces records and never deletes detached replicas.
+The old list/speaker settings entrypoints now delegate to this guarded initializer;
+production settings changes require a separate reviewed migration.
+
+The plan initializes five primaries (including empty/private users), four speaker
+standard sort replicas and two list name sort replicas matching the UI. Obsolete list
+count replicas are not provisioned or silently detached. At the observed staging
+counts (users 0, speakers 615, sermons 15, images 8, lists 1,422), this is 7,364 records
+including replicas against the reviewed 50,000-record budget. This calculation is
+not a live convergence or billing receipt. Validate actual counts, object IDs,
+record sizes and task completion during the separately approved bootstrap. Field
+facets include uploader ownership, sermon publish states/speakers, image type and
+list type/overflow filtering. Algolia index access still requires the separately
+reviewed scoped browser/worker keys; field projection is not authorization.

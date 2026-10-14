@@ -4,10 +4,12 @@ import { resolve, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
-export function selectKitDeployConfig(config, { withoutSearch = false } = {}) {
+export function selectKitDeployConfig(config, { withoutSearch = false, onlySearch = false } = {}) {
+  if (withoutSearch && onlySearch) throw new Error('Search selection flags are mutually exclusive');
   const functions = Array.isArray(config.functions) ? config.functions : [config.functions].filter(Boolean);
   const kits = functions.filter(entry => typeof entry.kit === 'string' && entry.kit.length > 0
-    && (!withoutSearch || entry.kit !== 'firestore-algolia-search'));
+    && (!withoutSearch || entry.kit !== 'firestore-algolia-search')
+    && (!onlySearch || entry.kit === 'firestore-algolia-search'));
   if (kits.length === 0) throw new Error('firebase.json does not register any function kits.');
   return { ...config, functions: kits };
 }
@@ -19,10 +21,10 @@ export function selectLegacyDeployConfig(config) {
   return { ...config, functions: legacyFunctions };
 }
 
-export function createKitDeployConfig({ root = process.cwd(), install = false, legacy = false, withoutSearch = false } = {}) {
-  if (legacy && (install || withoutSearch)) throw new Error('--install and --without-search only apply to function kits.');
+export function createKitDeployConfig({ root = process.cwd(), install = false, legacy = false, withoutSearch = false, onlySearch = false } = {}) {
+  if (legacy && (install || withoutSearch || onlySearch)) throw new Error('--install and --without-search only apply to function kits.');
   const input = JSON.parse(readFileSync(resolve(root, 'firebase.json'), 'utf8'));
-  const config = legacy ? selectLegacyDeployConfig(input) : selectKitDeployConfig(input, { withoutSearch });
+  const config = legacy ? selectLegacyDeployConfig(input) : selectKitDeployConfig(input, { withoutSearch, onlySearch });
   if (install) {
     for (const entry of config.functions) {
       const source = resolve(root, entry.source);
@@ -44,8 +46,8 @@ export function createKitDeployConfig({ root = process.cwd(), install = false, l
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2);
-  if (args.some(arg => !['--install', '--legacy', '--without-search'].includes(arg))) {
+  if (args.some(arg => !['--install', '--legacy', '--without-search', '--only-search'].includes(arg))) {
     throw new Error('Usage: node scripts/create-kit-deploy-config.mjs [--install] [--without-search] | --legacy');
   }
-  console.log(`Created ${createKitDeployConfig({ install: args.includes('--install'), legacy: args.includes('--legacy'), withoutSearch: args.includes('--without-search') })}`);
+  console.log(`Created ${createKitDeployConfig({ install: args.includes('--install'), legacy: args.includes('--legacy'), withoutSearch: args.includes('--without-search'), onlySearch: args.includes('--only-search') })}`);
 }

@@ -1,3 +1,4 @@
+import SearchAttribution from './algoliaComponents/SearchAttribution';
 import { ChangeEvent, MouseEvent } from 'react';
 import { useRouter } from 'next/router';
 import Image from 'next/image';
@@ -32,10 +33,7 @@ import SearchIcon from '@mui/icons-material/Search';
 import { visuallyHidden } from '@mui/utils';
 import { Order } from '../context/types';
 import { List, ListType } from '../types/List';
-import {
-  getDefaultListSortOrder,
-  type ListSortableProperty,
-} from '../utils/algolia/listSorting';
+import { getDefaultListSortOrder, type ListSortableProperty } from '../utils/algolia/listSorting';
 import { getListDiscoveryCount, getListOverflowIndicator } from '../utils/algolia/searchRecords';
 
 interface HeadCell {
@@ -150,11 +148,7 @@ const ListTable = ({
 
   const handleRequestSort = async (_: MouseEvent<HTMLElement>, property: ListSortableProperty) => {
     const nextOrder =
-      sortProperty === property
-        ? sortOrder === 'asc'
-          ? 'desc'
-          : 'asc'
-        : getDefaultListSortOrder(property);
+      sortProperty === property ? (sortOrder === 'asc' ? 'desc' : 'asc') : getDefaultListSortOrder(property);
     await handleSort(property, nextOrder);
   };
 
@@ -186,6 +180,7 @@ const ListTable = ({
               ),
             }}
           />
+          <SearchAttribution />
           <FormControl size="small" sx={{ minWidth: 180 }}>
             <InputLabel id="list-type-filter-label">Type</InputLabel>
             <Select
@@ -346,7 +341,11 @@ const ListTable = ({
                             </IconButton>
                           </span>
                         </Tooltip>
-                        <Tooltip title={getListOverflowIndicator(list) ? 'Delete blocked while overflow pages exist' : 'Delete List'}>
+                        <Tooltip
+                          title={
+                            getListOverflowIndicator(list) ? 'Delete blocked while overflow pages exist' : 'Delete List'
+                          }
+                        >
                           <span>
                             <IconButton
                               disabled={disableButtons}

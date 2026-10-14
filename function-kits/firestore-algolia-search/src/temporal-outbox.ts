@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import stagingSearch from './staging-search.json';
 import type { Firestore } from 'firebase-admin/firestore';
 
 export const temporalSearchEnabled = () => process.env.TASK_ORCHESTRATOR_SEARCH === 'temporal';
@@ -27,6 +28,9 @@ export async function enqueueSearchIntent(
     requestId: string;
     documentPath?: string;
     previousObjectId?: string;
+    /** Authored only by the Firestore document event handler, never task/HTTP input. */
+    documentEventContinuation?: boolean;
+    appId?: string;
   }
 ): Promise<void> {
   if (!input.projectId || !input.instanceId)
@@ -60,7 +64,16 @@ export async function enqueueSearchIntent(
       domain?.owner !== 'temporal'
     )
       throw new Error('Search Temporal release ownership is unavailable');
-    if (control.admission !== 'open' || domain.admission !== 'open')
+    const instance = stagingSearch.instances.find(row => row.instanceId === input.instanceId);
+    const documentSegments = input.documentPath?.split('/');
+    const pausedDocumentContinuation = input.documentEventContinuation === true &&
+      input.projectId === stagingSearch.projectId && input.appId === stagingSearch.appId &&
+      (control.projectId === undefined || control.projectId === stagingSearch.projectId) &&
+      instance !== undefined && documentSegments?.length === 2 &&
+      documentSegments[0] === instance.collectionPath && !!documentSegments[1] &&
+      !['.', '..'].includes(documentSegments[1]) &&
+      ['open', 'paused'].includes(control.admission) && ['open', 'paused'].includes(domain.admission);
+    if ((control.admission !== 'open' || domain.admission !== 'open') && !pausedDocumentContinuation)
       throw new Error('New search admissions are paused');
     const generation = Number(entitySnapshot.data()?.generation ?? 0) + 1;
     const createdAt = Date.now();

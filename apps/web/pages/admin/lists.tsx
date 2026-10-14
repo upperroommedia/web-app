@@ -27,7 +27,12 @@ import type { ListSortableProperty } from '../../utils/algolia/listSorting';
 import { List, ListType } from '../../types/List';
 
 const AdminList = () => {
-  const { searchClient, loading: searchClientLoading, error: searchClientError, clearCache } = useAlgoliaSearch();
+  const {
+    sharedSearchClient: searchClient,
+    loading: searchClientLoading,
+    error: searchClientError,
+    clearCache,
+  } = useAlgoliaSearch();
   const [searchValue, setSearchValue] = useState<string>('');
   const [debouncedSearchValue, setDebouncedSearchValue] = useState<string>('');
   const [listTypeFilter, setListTypeFilter] = useState<ListType | ''>('');

@@ -1,5 +1,6 @@
 import { PROVIDER_USAGE_SCAN_GROUPS } from './temporal-backfill-provider-usage.mjs';
 import { createRequire } from 'node:module';
+import { createReleaseFirebaseResources } from './temporal-release-resources.mjs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 export const RELEASE_DOMAINS = ['media', 'publishing', 'images', 'emails', 'accounts', 'bundles', 'search'];
@@ -138,6 +139,21 @@ export function validateReleaseConfig(config) {
     config.domains.some((d) => !RELEASE_DOMAINS.includes(d))
   )
     throw new Error('Explicit nonduplicate release domains are required');
+  if (
+    config.projectId === 'urm-app-staging' &&
+    config.mode === 'initial-cutover' &&
+    config.domains.includes('search')
+  ) {
+    if (
+      config.domains.length !== 1 ||
+      typeof config.searchSettingsEvidence !== 'string' ||
+      !config.searchSettingsEvidence ||
+      /REQUIRED|PLACEHOLDER|[\r\n\0]/.test(config.searchSettingsEvidence)
+    )
+      throw new Error(
+        'Staging search onboarding requires a separate initial-cutover and concrete applied settings evidence'
+      );
+  }
   for (const key of [
     'platformConfig',
     'platformPeerConfig',
@@ -210,15 +226,15 @@ export function upsertFunctionFlags(contents, flags) {
   return [...lines, marker, ...Object.entries(flags).map(([key, value]) => `${key}=${value}`), ''].join('\n');
 }
 
-export function firebaseEnvironmentSources(firebaseConfig, project) {
+export function firebaseEnvironmentSources(firebaseConfig, project, { includeStagingSearch = false } = {}) {
   const entries = Array.isArray(firebaseConfig.functions)
     ? firebaseConfig.functions
     : [firebaseConfig.functions].filter(Boolean);
   const sources = new Set();
   for (const entry of entries) {
     if (entry.kit) {
-      // The abandoned staging Algolia app is intentionally not enabled or redeployed.
-      if (project === 'urm-app-staging' && entry.kit === 'firestore-algolia-search') continue;
+      // Staging search is a separately reviewed candidate; broad deploys keep it excluded.
+      if (project === 'urm-app-staging' && entry.kit === 'firestore-algolia-search' && !includeStagingSearch) continue;
       for (const path of Object.values(entry.instances ?? {})) sources.add(path);
     } else if (entry.source) sources.add(entry.source);
   }
@@ -269,16 +285,18 @@ export function firebaseAdmin(projectId, databaseURL) {
     throw new Error('Release tooling refuses emulator environment overrides');
   const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
   const require = createRequire(resolve(root, 'functions/package.json'));
-  const { initializeApp, getApps, applicationDefault } = require('firebase-admin/app');
-  const app =
-    getApps().find((app) => app.name === `temporal-release-${projectId}`) ||
-    initializeApp({ projectId, databaseURL, credential: applicationDefault() }, `temporal-release-${projectId}`);
-  return {
-    credential: app.options.credential,
-    firestore: require('firebase-admin/firestore').getFirestore(app),
-    serverTimestamp: () => require('firebase-admin/firestore').FieldValue.serverTimestamp(),
-    database: databaseURL ? require('firebase-admin/database').getDatabase(app) : undefined,
-  };
+  const { initializeApp, getApps, applicationDefault, deleteApp } = require('firebase-admin/app');
+  const { getFirestore, FieldValue } = require('firebase-admin/firestore');
+  const { getDatabase } = require('firebase-admin/database');
+  return createReleaseFirebaseResources(projectId, databaseURL, {
+    initializeApp,
+    getApps,
+    applicationDefault,
+    deleteApp,
+    getFirestore,
+    getDatabase,
+    serverTimestamp: () => FieldValue.serverTimestamp(),
+  });
 }
 
 export function validateWorkerCoverage(release, platform) {
@@ -372,18 +390,27 @@ export function validatePreopenSmoke(report) {
   return report;
 }
 
-export function validateProviderUsageMarker(config, marker, expectedEpoch) {
+export function validateReadyProviderUsageIndex(projectId, marker, expectedEpoch) {
   if (
     marker?.schemaVersion !== 1 ||
-    marker.projectId !== config.projectId ||
+    marker.projectId !== projectId ||
     marker.status !== 'ready' ||
     !Array.isArray(marker.groups) ||
     !PROVIDER_USAGE_SCAN_GROUPS.every((group) => marker.groups.includes(group)) ||
     typeof marker.epoch !== 'string' ||
     !marker.epoch ||
-    (expectedEpoch !== undefined && marker.epoch !== expectedEpoch) ||
-    (config.mode === 'initial-cutover' && marker.releaseId !== config.releaseId)
+    (expectedEpoch !== undefined && marker.epoch !== expectedEpoch)
   )
+    throw new Error(
+      'Provider reference index lacks the verified ready project/release/epoch and complete source groups'
+    );
+  return marker;
+}
+
+/** Initial provider-owning cutovers still require their own actual backfill origin. */
+export function validateProviderUsageMarker(config, marker, expectedEpoch) {
+  validateReadyProviderUsageIndex(config.projectId, marker, expectedEpoch);
+  if (config.mode === 'initial-cutover' && marker.releaseId !== config.releaseId)
     throw new Error(
       'Provider reference index lacks the verified ready project/release/epoch and complete source groups'
     );

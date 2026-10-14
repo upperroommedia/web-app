@@ -11,7 +11,7 @@ import { afterFirstDeploy, afterRedeploy } from 'firebase-functions/lifecycle';
 import { defineSecret, defineString, expr } from 'firebase-functions/params';
 import { onDocumentWritten } from 'firebase-functions/v2/firestore';
 import { onTaskDispatched } from 'firebase-functions/v2/tasks';
-import { extract, objectId } from './records';
+import { extract, objectId, stagingRecordPolicy } from './records';
 import { converge } from './sync';
 import { migratedRuntimeOptions } from './runtime-options';
 import { enqueueSearchIntent, temporalSearchEnabled, assertLegacySearchOwnership } from './temporal-outbox';
@@ -27,6 +27,7 @@ const indexName = defineString('ALGOLIA_INDEX_NAME');
 const indexedFields = defineString('FIELDS', {default: ''});
 const alternateId = defineString('ALT_OBJECT_ID', {default: ''});
 const transformFunction = defineString('TRANSFORM_FUNCTION', {default: ''});
+const stagingTemporalOnly = defineString('STAGING_TEMPORAL_SEARCH_ONLY', {default: 'false'});
 const fullIndexing = defineString('DO_FULL_INDEXING', {default: 'true'});
 // Retain the existing extension parameter for configuration export compatibility.
 // All writes now read current state; FORCE_DATA_SYNC=no also gains ordering protection.
@@ -38,6 +39,14 @@ requiresRole("roles/eventarc.eventReceiver");
 requiresRole('roles/cloudtasks.enqueuer');
 requiresRole('roles/run.invoker');
 
+function assertSearchIngressPolicy(): void {
+  const projectId = process.env.GCLOUD_PROJECT ?? process.env.GOOGLE_CLOUD_PROJECT ?? '';
+  // The replacement staging application must never be written by legacy ingress,
+  // including compatibility deployment while durable ownership is still paused.
+  if ((stagingTemporalOnly.value() === 'true' || (projectId === 'urm-app-staging' && appId.value() === '2VZFOFLFHE')) && !temporalSearchEnabled()) {
+    throw new Error('Staging search is held until Temporal ingress is enabled');
+  }
+}
 function runtime() {
   const app = getApps()[0] ?? initializeApp();
   return {db: getFirestore(app, databaseId.value()), client: algoliasearch(appId.value(), apiKey.value(), {timeouts: {connect: 5_000, read: 15_000, write: 15_000}})};
@@ -58,6 +67,8 @@ async function safeBoundary(operation: string, handler: () => Promise<void>): Pr
 }
 
 async function syncDocument(path: string, previous?: DocumentSnapshot): Promise<void> {
+  assertSearchIngressPolicy();
+  if (stagingRecordPolicy(process.env.GCLOUD_PROJECT ?? process.env.GOOGLE_CLOUD_PROJECT ?? '', collectionPath.value()) === 'empty-private') return;
   const {db, client} = runtime();
   const instanceId = process.env.FIREBASE_KIT_INSTANCE_ID;
   if (!instanceId) throw new Error('FIREBASE_KIT_INSTANCE_ID must be set by the Firebase kit CLI');
@@ -112,10 +123,12 @@ export const executeIndexOperation = onDocumentWritten({
   secrets: [apiKey], retry: true,
 }, async event => {
   if (!event.data) return;
+  assertSearchIngressPolicy();
   if (temporalSearchEnabled()) {
     const {db} = runtime();
     await enqueueSearchIntent(db, {projectId: process.env.GCLOUD_PROJECT ?? process.env.GOOGLE_CLOUD_PROJECT ?? '',
       instanceId: process.env.FIREBASE_KIT_INSTANCE_ID ?? '', requestId: event.id, documentPath: event.data.after.ref.path,
+      documentEventContinuation: true, appId: appId.value(),
       ...(event.data.before.exists ? {previousObjectId: objectId(event.data.before, alternateId.value())} : {})});
     return;
   }
@@ -129,6 +142,7 @@ export const executeFullIndexOperation = onTaskDispatched<FullIndexData>({
   retryConfig: {maxAttempts: 10, minBackoffSeconds: 30},
   rateLimits: {maxConcurrentDispatches: 1},
 }, async request => safeBoundary('full-index', async () => {
+  assertSearchIngressPolicy();
   if (fullIndexing.value() !== 'true') {logger.info('Full Algolia indexing disabled'); return;}
   const {db} = runtime();
   if (temporalSearchEnabled()) {

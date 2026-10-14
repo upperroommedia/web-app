@@ -11,7 +11,14 @@
   "workerBuildId": "REQUIRED_GIT_COMMIT",
   "workerDeploymentName": "urm-worker-staging",
   "workerReplicas": 2,
-  "workerRoles": ["orchestration", "controls", "media", "email", "images"],
+  "workerRoles": [
+    "orchestration",
+    "controls",
+    "media",
+    "email",
+    "images",
+    "search"
+  ],
   "workerPort": 8080,
   "media": {
     "concurrency": 2,
@@ -34,16 +41,24 @@
       "port": 443
     }
   ],
-  "workerIdentityNodeNames": ["REQUIRED_NODE_1", "REQUIRED_NODE_2", "REQUIRED_NODE_3"],
+  "workerIdentityNodeNames": [
+    "REQUIRED_NODE_1",
+    "REQUIRED_NODE_2",
+    "REQUIRED_NODE_3"
+  ],
   "emailEgress": {
     "schemaVersion": 1,
     "provider": "smtp",
     "hostname": "REQUIRED_SMTP_HOSTNAME",
     "port": 465,
     "tls": "implicit",
-    "addresses": ["REQUIRED_REVIEWED_SMTP_IP"]
+    "addresses": [
+      "REQUIRED_REVIEWED_SMTP_IP"
+    ]
   },
-  "imagePullSecrets": ["REQUIRED_REGISTRY_PULL_SECRET"],
+  "imagePullSecrets": [
+    "REQUIRED_REGISTRY_PULL_SECRET"
+  ],
   "connectionMode": "temporal-cloud",
   "cloudAccountId": "qwejt",
   "cloudProvider": "gcp",
@@ -64,18 +79,35 @@
     "secretManagerRotationInterval": "120s",
     "minNodes": 3,
     "maxNodes": 6,
-    "nodeLocations": ["us-central1-a", "us-central1-b", "us-central1-c"],
+    "nodeLocations": [
+      "us-central1-a",
+      "us-central1-b",
+      "us-central1-c"
+    ],
     "workerServiceAccounts": {
       "orchestration": "temporal-orchestration@urm-app-staging.iam.gserviceaccount.com",
       "controls": "temporal-controls@urm-app-staging.iam.gserviceaccount.com",
       "media": "temporal-media@urm-app-staging.iam.gserviceaccount.com",
       "email": "temporal-email@urm-app-staging.iam.gserviceaccount.com",
-      "images": "temporal-images@urm-app-staging.iam.gserviceaccount.com"
+      "images": "temporal-images@urm-app-staging.iam.gserviceaccount.com",
+      "search": "temporal-search@urm-app-staging.iam.gserviceaccount.com"
     }
   },
   "firebaseResources": {
     "storageBucket": "urm-app-staging.firebasestorage.app",
     "imagesBucket": "urm-app-staging-images",
     "databaseUrl": "https://urm-app-staging-default-rtdb.firebaseio.com/"
+  },
+  "search": {
+    "appId": "2VZFOFLFHE",
+    "configSecret": "temporal-search-config",
+    "replicas": 1,
+    "instanceIds": [
+      "users-index",
+      "speakers-index",
+      "sermons-index",
+      "images-index",
+      "lists-index"
+    ]
   }
 }

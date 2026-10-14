@@ -1,40 +1,36 @@
-const mockAlgolia = jest.fn(() => ({ search: jest.fn() }));
-jest.mock('algoliasearch', () => ({ algoliasearch: (...args: unknown[]) => mockAlgolia(...args) }));
+import { readFileSync } from 'fs';
+import { join } from 'path';
 
-describe('browser search availability', () => {
+describe('browser search configuration', () => {
   const original = { ...process.env };
-  beforeEach(() => {
-    jest.resetModules();
-    mockAlgolia.mockClear();
-  });
+  beforeEach(() => jest.resetModules());
   afterEach(() => {
     process.env = { ...original };
   });
-  test('staging disabled at build time cannot construct a vendor client even with inherited credentials', async () => {
+  test('disabling search hides even an inherited application ID', async () => {
     process.env.NEXT_PUBLIC_ALGOLIA_SEARCH_ENABLED = 'false';
-    process.env.NEXT_PUBLIC_ALGOLIA_APP_ID = 'dead-staging-app';
-    process.env.NEXT_PUBLIC_ALGOLIA_API_KEY = 'staging-search-only-key';
+    process.env.NEXT_PUBLIC_ALGOLIA_APP_ID = 'disabled-app';
     const policy = await import('./browserSearch');
     expect(policy.browserAlgoliaAppId).toBeNull();
-    expect(policy.browserAlgoliaApiKey).toBeNull();
-    expect(policy.createBrowserSearchClient()).toBeUndefined();
     expect(policy.browserSearchUnavailableMessage).toContain('staging');
-    expect(mockAlgolia).not.toHaveBeenCalled();
   });
-  test('production keeps its own configured search application', async () => {
+  test('enabled search publishes only the application ID', async () => {
     delete process.env.NEXT_PUBLIC_ALGOLIA_SEARCH_ENABLED;
-    process.env.NEXT_PUBLIC_ALGOLIA_APP_ID = 'production-app';
-    process.env.NEXT_PUBLIC_ALGOLIA_API_KEY = 'production-search-only-key';
-    expect((await import('./browserSearch')).createBrowserSearchClient()).toBeDefined();
-    expect(mockAlgolia).toHaveBeenCalledWith('production-app', 'production-search-only-key');
+    process.env.NEXT_PUBLIC_ALGOLIA_APP_ID = 'staging-app';
+    expect((await import('./browserSearch')).browserAlgoliaAppId).toBe('staging-app');
   });
-  test('missing credentials do not initialize a client or imply search is loading', async () => {
-    delete process.env.NEXT_PUBLIC_ALGOLIA_SEARCH_ENABLED;
-    delete process.env.NEXT_PUBLIC_ALGOLIA_APP_ID;
-    delete process.env.NEXT_PUBLIC_ALGOLIA_API_KEY;
-    const policy = await import('./browserSearch');
-    expect(policy.createBrowserSearchClient()).toBeUndefined();
-    expect(policy.browserSearchUnavailableMessage).toContain('not configured');
-    expect(mockAlgolia).not.toHaveBeenCalled();
+  test('browser modules never read parent credentials or construct selector clients', () => {
+    const web = join(__dirname, '../..');
+    for (const path of [
+      'utils/algolia/browserSearch.ts',
+      'context/search/AlgoliaSearchContext.tsx',
+      'components/ListSelector.tsx',
+      'components/ImageSelector.tsx',
+      'components/uploaderComponents/SpeakerSelector.tsx',
+    ]) {
+      const source = readFileSync(join(web, path), 'utf8');
+      expect(source).not.toMatch(/process\.env\.(?:NEXT_PUBLIC_)?ALGOLIA_(?:API_KEY|SEARCH_API_KEY|ADMIN_API_KEY)/);
+      expect(source).not.toContain('createBrowserSearchClient');
+    }
   });
 });

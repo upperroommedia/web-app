@@ -1,3 +1,4 @@
+import SearchAttribution from './SearchAttribution';
 import { ReactElement, useEffect, useState } from 'react';
 import Stack from '@mui/material/Stack';
 import TextField from '@mui/material/TextField';
@@ -15,10 +16,8 @@ const CustomSearchBox = (props: UseSearchBoxProps & { TextFieldEndAdornment?: Re
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const [localQuery, setLocalQuery] = useState(query);
   const isLoadingState = status === 'stalled';
-  
-  const placeholder = isMobile 
-    ? 'Search sermons...' 
-    : 'Search for a sermon by name, subtitle, speaker, or description';
+
+  const placeholder = isMobile ? 'Search sermons...' : 'Search for a sermon by name, subtitle, speaker, or description';
 
   useEffect(() => {
     setLocalQuery(query);
@@ -54,10 +53,11 @@ const CustomSearchBox = (props: UseSearchBoxProps & { TextFieldEndAdornment?: Re
         }}
         InputProps={TextFieldEndAdornment ? { endAdornment: TextFieldEndAdornment } : {}}
       />
-      <Typography 
-        variant="subtitle1" 
-        sx={{ 
-          px: { xs: 0.5, sm: 1 }, 
+      <SearchAttribution />
+      <Typography
+        variant="subtitle1"
+        sx={{
+          px: { xs: 0.5, sm: 1 },
           fontSize: { xs: '0.65rem', sm: '0.75rem', md: '0.8rem' },
           color: status === 'error' ? 'error.dark' : 'text.secondary',
         }}
@@ -65,8 +65,8 @@ const CustomSearchBox = (props: UseSearchBoxProps & { TextFieldEndAdornment?: Re
         {status === 'error'
           ? 'Error'
           : isLoadingState
-            ? 'Loading...'
-            : `${nbHits} ${nbHits === 1 ? 'result' : 'results'} found`}
+          ? 'Loading...'
+          : `${nbHits} ${nbHits === 1 ? 'result' : 'results'} found`}
       </Typography>
     </Stack>
   );
