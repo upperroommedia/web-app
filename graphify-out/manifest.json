@@ -7005,8 +7005,8 @@
     "semantic_hash": ""
   },
   "docs/temporal/BUNDLE_BOOTSTRAP.md": {
-    "mtime": 1791954762.52623,
-    "ast_hash": "a084c37bac437329a0686fc11e8a1299",
+    "mtime": 1791966282.6780708,
+    "ast_hash": "534c1d4d5e37d16d9bb0cbbb959bba89",
     "semantic_hash": ""
   },
   "docs/temporal/EMAIL.md": {
@@ -7567,6 +7567,26 @@
   "scripts/tests/fixtures/temporal-search-sequential-release.mjs": {
     "mtime": 1791959392.1590667,
     "ast_hash": "add7961f6152060016c51d86036bbc79",
+    "semantic_hash": ""
+  },
+  "scripts/temporal-bundle-bootstrap-recovery.mjs": {
+    "mtime": 1791966291.4090726,
+    "ast_hash": "3682a962724fcc4fb7b686005e67e0b9",
+    "semantic_hash": ""
+  },
+  "scripts/temporal-bundle-bootstrap-recovery.test.mjs": {
+    "mtime": 1791966527.5610557,
+    "ast_hash": "1e86f68f24af81c62e566f06986a7390",
+    "semantic_hash": ""
+  },
+  "scripts/temporal-recover-bundle-bootstrap.mjs": {
+    "mtime": 1791966423.9943566,
+    "ast_hash": "bd329b67c228bd2fa7b7109c8cad82f9",
+    "semantic_hash": ""
+  },
+  "scripts/tests/temporal-bundle-bootstrap-recovery.firestore.test.mjs": {
+    "mtime": 1791966291.5535145,
+    "ast_hash": "93e9382cf8fb55a143b8f7202ae1842e",
     "semantic_hash": ""
   }
 }
