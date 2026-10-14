@@ -33,7 +33,6 @@ import {
   loadValidatedPublishingCriticalRepairCertificate,
   preparePublishingCriticalRepair,
 } from '../../../../functions/src/temporal/publishing/criticalRepair';
-import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { Context } from '@temporalio/activity';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
@@ -58,7 +57,8 @@ import {
 } from '../../../../functions/src/temporal/images/activities';
 import { createEmailActivities } from '../activities/email';
 import { createEmailControlActivities } from '../activities/email/controls';
-import { createSearchActivities, createSearchControlActivities, type SearchConfig } from '../activities/search';
+import { createSearchActivities, createSearchControlActivities } from '../activities/search';
+import { loadSearchConfigurations } from './search-config';
 import { createLifecycleActivities } from '../activities/lifecycle';
 import { createMediaProjection } from './media-projection';
 import { createActorAuthorization } from './authorization';
@@ -440,13 +440,7 @@ export function createRuntimeActivities(
     assertCurrentInTransaction,
   });
 
-  const configurations: Record<string, SearchConfig & { writeKey: string }> = process.env.TEMPORAL_SEARCH_CONFIG_FILE
-    ? JSON.parse(readFileSync(process.env.TEMPORAL_SEARCH_CONFIG_FILE, 'utf8'))
-    : {};
-  for (const config of Object.values(configurations)) {
-    if (config.projectId !== projectId || !config.writeKey)
-      throw new Error('Invalid project-scoped search configuration');
-  }
+  const configurations = loadSearchConfigurations(projectId, selectedQueues);
   const search = createSearchActivities({
     firestore: db,
     configurations,

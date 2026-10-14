@@ -13,13 +13,12 @@ import { SearchClient, SearchResponse } from 'algoliasearch';
 import { Sermon } from '../../types/SermonTypes';
 import { ImageType } from '../../types/Image';
 import { getErrorMessage, showError } from './utils';
-import { isDevelopment } from '../../firebase/firebase';
-import { createMockAlgoliaSearchClient } from '../../utils/mockAlgoliaSearchClient';
 import { isDiscoverableRootList } from '../../utils/algolia/searchRecords';
 import Button from '@mui/material/Button';
 import Typography from '@mui/material/Typography';
 import Box from '@mui/material/Box';
-import { createBrowserSearchClient } from '../../utils/algolia/browserSearch';
+import { useAlgoliaSearch } from '../../context/search/AlgoliaSearchContext';
+import SearchAttribution from '../algoliaComponents/SearchAttribution';
 import { browseSpeakers, type BrowsePage } from '../../utils/algolia/browseRecords';
 
 interface AlgoliaSpeaker extends ISpeaker {
@@ -46,17 +45,11 @@ interface SpeakerSelectorProps {
   onOpenSpeakerRequest?: () => void;
 }
 
-const client: SearchClient | undefined = isDevelopment
-  ? createMockAlgoliaSearchClient({
-      userId: '',
-      canSearchAllSermons: true,
-    })
-  : createBrowserSearchClient();
-
 export const fetchSpeakerResults = async (
   query: string,
   hitsPerPage: number,
-  page: number
+  page: number,
+  client: SearchClient | null
 ): Promise<AlgoliaSpeaker[]> => {
   if (client) {
     try {
@@ -97,6 +90,7 @@ function SpeakerSelector({
   showSpeakerRequestAction = false,
   onOpenSpeakerRequest,
 }: SpeakerSelectorProps) {
+  const { sharedSearchClient: client } = useAlgoliaSearch();
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latestSearchRequestRef = useRef(0);
   const [speakersArray, setSpeakersArray] = useState<AlgoliaSpeaker[]>([]);
@@ -129,6 +123,9 @@ function SpeakerSelector({
   };
 
   useEffect(() => {
+    setSpeakersArray([]);
+    setSearchInput('');
+    browseInFlight.current = false;
     const fetchData = async () => {
       if (!client) {
         await loadMoreSpeakers(true);
@@ -136,7 +133,7 @@ function SpeakerSelector({
       }
       setSearchLoading(true);
       const requestId = ++latestSearchRequestRef.current;
-      const speakerResults = await fetchSpeakerResults('', 20, 0);
+      const speakerResults = await fetchSpeakerResults('', 20, 0, client);
       if (requestId !== latestSearchRequestRef.current) {
         return;
       }
@@ -149,9 +146,10 @@ function SpeakerSelector({
       // This generation invalidates pending reads, rather than referencing a DOM node.
       // eslint-disable-next-line react-hooks/exhaustive-deps
       latestSearchRequestRef.current++;
+      if (timerRef.current) clearTimeout(timerRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [client]);
 
   useEffect(() => {
     return () => {
@@ -163,6 +161,7 @@ function SpeakerSelector({
 
   return (
     <>
+      {client && <SearchAttribution />}
       <Autocomplete
         fullWidth
         value={sermonSpeakers}
@@ -244,7 +243,7 @@ function SpeakerSelector({
           timerRef.current = setTimeout(async () => {
             setSearchLoading(true);
             const requestId = ++latestSearchRequestRef.current;
-            const speakerResults = await fetchSpeakerResults(value, 25, 0);
+            const speakerResults = await fetchSpeakerResults(value, 25, 0, client);
             if (requestId !== latestSearchRequestRef.current) {
               return;
             }

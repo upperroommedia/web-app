@@ -27,11 +27,6 @@ env:
     availability:
       - BUILD
       - RUNTIME
-  - variable: NEXT_PUBLIC_ALGOLIA_API_KEY
-    secret: ALGOLIA_SEARCH_API_KEY
-    availability:
-      - BUILD
-      - RUNTIME
 
   - variable: NEXT_PUBLIC_SENTRY_DSN
     secret: WEB_APP_SENTRY_DSN

@@ -12,7 +12,8 @@ import AddIcon from '@mui/icons-material/Add';
 import { List, ListType, ListWithHighlight } from '../types/List';
 import Button from '@mui/material/Button';
 import Typography from '@mui/material/Typography';
-import { createBrowserSearchClient } from '../utils/algolia/browserSearch';
+import { useAlgoliaSearch } from '../context/search/AlgoliaSearchContext';
+import SearchAttribution from './algoliaComponents/SearchAttribution';
 import { browseLists, type BrowsePage } from '../utils/algolia/browseRecords';
 import { normalizeAlgoliaListHit, searchListsIndex } from '../utils/algolia/searchRecords';
 
@@ -23,9 +24,8 @@ interface ListSelectorProps {
   subtitle?: List;
 }
 
-const client = createBrowserSearchClient();
-
 const ListSelector: FunctionComponent<ListSelectorProps> = (props: ListSelectorProps) => {
+  const { sharedSearchClient: client } = useAlgoliaSearch();
   const [newListPopup, setNewListPopup] = useState<boolean>(false);
   const [allListArray, setAllListArray] = useState<ListWithHighlight[]>([]);
   const [browsePage, setBrowsePage] = useState<BrowsePage<List>>();
@@ -102,7 +102,7 @@ const ListSelector: FunctionComponent<ListSelectorProps> = (props: ListSelectorP
       searchRevision.current++;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.listType]);
+  }, [props.listType, client]);
 
   const queryAlgolia = async (query: string): Promise<ListWithHighlight[]> => {
     if (client) {
@@ -248,6 +248,7 @@ const ListSelector: FunctionComponent<ListSelectorProps> = (props: ListSelectorP
           </IconButton>
         )}
       </Box>
+      {client && <SearchAttribution />}
       {!client && (
         <Typography variant="caption">Search is unavailable. Filter the lists loaded below, or load more.</Typography>
       )}

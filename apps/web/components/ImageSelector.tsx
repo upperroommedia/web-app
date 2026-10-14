@@ -23,7 +23,8 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import styles from '../styles/ImageSelector.module.css';
 import CircularProgress from '@mui/material/CircularProgress';
 import { SearchResponse } from 'algoliasearch';
-import { createBrowserSearchClient } from '../utils/algolia/browserSearch';
+import { useAlgoliaSearch } from '../context/search/AlgoliaSearchContext';
+import SearchAttribution from './algoliaComponents/SearchAttribution';
 import TextField from '@mui/material/TextField';
 import Tooltip from '@mui/material/Tooltip';
 import InputAdornment from '@mui/material/InputAdornment';
@@ -34,8 +35,6 @@ import { useDurableJob } from '../hooks/useDurableJobs';
 import JobStatusPanel from './jobs/JobStatusPanel';
 import { doc, getDoc } from '../firebase/firestore';
 import { reportHandledError } from '../utils/reportHandledError';
-
-const client = createBrowserSearchClient();
 
 const InfinitScrollMessage = ({ message }: { message: string }) => (
   <p style={{ flexBasis: '100%', textAlign: 'center' }}>
@@ -51,12 +50,18 @@ const ImageSelector = (props: {
   confirmSelecedImage: (image: ImageType) => void;
   setPopupTitle: (title: string) => void;
 }) => {
+  const { sharedSearchClient: client } = useAlgoliaSearch();
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const searchRevision = useRef(0);
   const pageInFlight = useRef(false);
   const [images, setImages] = useState<ImageType[]>([]);
   const [imageSearchResults, setImageSearchResults] = useState<AlgoliaImage[]>();
   const [imageSearchQuery, setImageQuery] = useState<string>('');
+  useEffect(() => {
+    searchRevision.current++;
+    setImageSearchResults(undefined);
+    setImageQuery('');
+  }, [client]);
 
   const [title, setTitle] = useState(
     (props.selectedSpeaker && `${props.selectedSpeaker?.name.replaceAll(' ', '-')}`) || ''
@@ -235,6 +240,7 @@ const ImageSelector = (props: {
               ),
             }}
           />
+          {client && <SearchAttribution />}
           {imageSearchQuery !== '' && imageSearchResults ? (
             <InfiniteScroll
               next={() => {}}

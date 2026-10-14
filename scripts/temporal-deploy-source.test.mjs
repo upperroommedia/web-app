@@ -140,6 +140,11 @@ test('Clean pinned source accepts exact catalog/Sentry generation and determinis
       JSON.stringify(selectKitDeployConfig(manifest, { withoutSearch: true }), null, 2) + '\n'
     );
     assert.equal(assertCheckoutSource(root, commit), commit);
+    await writeFile(
+      join(root, 'firebase.kits.json'),
+      JSON.stringify(selectKitDeployConfig(manifest, { onlySearch: true }), null, 2) + '\n'
+    );
+    assert.equal(assertCheckoutSource(root, commit), commit);
     const changed = JSON.parse(await readFile(join(root, 'functions-core/package.json'), 'utf8'));
     changed.scripts.build = 'run-arbitrary-source';
     await writeFile(join(root, 'functions-core/package.json'), JSON.stringify(changed, null, 2) + '\n');
@@ -315,4 +320,116 @@ test('kit deployment locks are immutable even when source/config metadata is oth
       assert.throws(() => assertCheckoutSource(root, commit), /package-lock.json/);
     });
   }
+});
+
+test('staging search env generation needs an explicit matching reviewed release and cannot silently join broad deploys', async () => {
+  const file = 'function-kits/search/config-sermons/.env.urm-app-staging';
+  const firebase = {
+    functions: [
+      { source: 'functions-core', codebase: 'core' },
+      { kit: 'firestore-send-email', source: 'function-kits/email' },
+      {
+        kit: 'firestore-algolia-search',
+        source: 'function-kits/search',
+        instances: { 'sermons-index': 'function-kits/search/config-sermons' },
+      },
+    ],
+  };
+  await fixture(
+    async (root, commit) => {
+      const control = {
+        schemaVersion: 1,
+        revision: 4,
+        releaseId: 'reviewed',
+        admission: 'paused',
+        domains: Object.fromEntries(
+          RELEASE_DOMAINS.map((domain) => [domain, { owner: 'temporal', admission: 'paused' }])
+        ),
+      };
+      const release = {
+        projectId: 'urm-app-staging',
+        environment: 'staging',
+        mode: 'initial-cutover',
+        domains: ['search'],
+        compatibilityCommit: commit,
+        releaseId: control.releaseId,
+      };
+      await writeFile(
+        join(root, file),
+        upsertFunctionFlags('# Provider settings\n', { ...flagsForControl(control), TEMPORAL_RELEASE_COMMIT: commit })
+      );
+      const options = { project: 'urm-app-staging', control, release, includeStagingSearch: true };
+      assert.equal(assertCheckoutSource(root, commit, options), commit);
+      assert.throws(
+        () => assertCheckoutSource(root, commit, { project: 'urm-app-staging', control }),
+        /source differs/
+      );
+      assert.throws(
+        () => assertCheckoutSource(root, commit, { ...options, release: { ...release, releaseId: 'other' } }),
+        /exact active reviewed/
+      );
+    },
+    { firebase, sourceFiles: { [file]: '# Provider settings\n' } }
+  );
+});
+
+test('staging generated kit configs cannot include search without the exact explicit release opt-in', async () => {
+  await fixture(async (root, commit) => {
+    const control = {
+      schemaVersion: 1,
+      revision: 4,
+      releaseId: 'reviewed',
+      admission: 'paused',
+      domains: Object.fromEntries(
+        RELEASE_DOMAINS.map((domain) => [domain, { owner: 'temporal', admission: 'paused' }])
+      ),
+    };
+    const release = {
+      projectId: 'urm-app-staging',
+      environment: 'staging',
+      mode: 'initial-cutover',
+      domains: ['search'],
+      compatibilityCommit: commit,
+      releaseId: control.releaseId,
+    };
+    for (const selection of [{ onlySearch: true }, {}]) {
+      await writeFile(
+        join(root, 'firebase.kits.json'),
+        JSON.stringify(selectKitDeployConfig(manifest, selection), null, 2) + '\n'
+      );
+      assert.throws(
+        () => assertCheckoutSource(root, commit, { project: 'urm-app-staging', control }),
+        /Generated deployment config/
+      );
+      assert.throws(
+        () => assertCheckoutSource(root, commit, { project: 'urm-app-staging', control, includeStagingSearch: true }),
+        /exact active reviewed/
+      );
+      assert.throws(
+        () =>
+          assertCheckoutSource(root, commit, {
+            project: 'urm-app-staging',
+            control,
+            includeStagingSearch: true,
+            release: { ...release, releaseId: 'other' },
+          }),
+        /exact active reviewed/
+      );
+      assert.equal(
+        assertCheckoutSource(root, commit, {
+          project: 'urm-app-staging',
+          control,
+          includeStagingSearch: true,
+          release,
+        }),
+        commit
+      );
+      assert.equal(assertCheckoutSource(root, commit, { project: 'urm-app', control }), commit);
+    }
+    await writeFile(
+      join(root, 'firebase.kits.json'),
+      JSON.stringify(selectKitDeployConfig(manifest, { withoutSearch: true }), null, 2) + '\n'
+    );
+    assert.equal(assertCheckoutSource(root, commit, { project: 'urm-app-staging', control }), commit);
+  });
 });

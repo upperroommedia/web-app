@@ -11,7 +11,14 @@
   "workerBuildId": "REQUIRED_GIT_COMMIT",
   "workerDeploymentName": "urm-worker-staging",
   "workerReplicas": 1,
-  "workerRoles": ["orchestration", "controls", "media", "email", "images"],
+  "workerRoles": [
+    "orchestration",
+    "controls",
+    "media",
+    "email",
+    "images",
+    "search"
+  ],
   "workerPort": 8080,
   "media": {
     "concurrency": 1,
@@ -34,7 +41,9 @@
       "port": 6443
     }
   ],
-  "workerIdentityNodeNames": ["REQUIRED_ACTUAL_K3S_NODE_NAME"],
+  "workerIdentityNodeNames": [
+    "REQUIRED_ACTUAL_K3S_NODE_NAME"
+  ],
   "emailEgress": {
     "schemaVersion": 1,
     "provider": "smtp",
@@ -43,7 +52,9 @@
     "tls": "implicit",
     "dnsMode": "public-ipv4"
   },
-  "imagePullSecrets": ["REQUIRED_REGISTRY_PULL_SECRET"],
+  "imagePullSecrets": [
+    "REQUIRED_REGISTRY_PULL_SECRET"
+  ],
   "connectionMode": "temporal-cloud",
   "cloudAccountId": "qwejt",
   "cloudProvider": "gcp",
@@ -68,5 +79,17 @@
     "storageBucket": "urm-app-staging.firebasestorage.app",
     "imagesBucket": "urm-app-staging-images",
     "databaseUrl": "https://urm-app-staging-default-rtdb.firebaseio.com/"
+  },
+  "search": {
+    "appId": "2VZFOFLFHE",
+    "configSecret": "temporal-search-config",
+    "replicas": 1,
+    "instanceIds": [
+      "users-index",
+      "speakers-index",
+      "sermons-index",
+      "images-index",
+      "lists-index"
+    ]
   }
 }

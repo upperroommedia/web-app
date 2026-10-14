@@ -41,7 +41,7 @@ async function main(): Promise<void> {
             : queue === 'urm-controls'
             ? config.controlsConcurrency
             : queue === 'urm-search'
-            ? 8
+            ? config.projectId === 'urm-app-staging' ? 2 : 8
             : 10,
         maxHeartbeatThrottleInterval: '1 second',
         defaultHeartbeatThrottleInterval: '1 second',

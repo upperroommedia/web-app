@@ -1,16 +1,16 @@
 # Graph Report - web-app  (2026-10-13)
 
 ## Corpus Check
-- 1456 files · ~2,525,546 words
+- 1484 files · ~2,547,797 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 11070 nodes · 26898 edges · 642 communities (465 shown, 177 thin omitted)
-- Extraction: 97% EXTRACTED · 3% INFERRED · 0% AMBIGUOUS · INFERRED: 755 edges (avg confidence: 0.77)
+- 11261 nodes · 27334 edges · 635 communities (461 shown, 174 thin omitted)
+- Extraction: 97% EXTRACTED · 3% INFERRED · 0% AMBIGUOUS · INFERRED: 766 edges (avg confidence: 0.77)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `2e68fb43`
+- Built from commit: `218c4242`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -323,13 +323,8 @@
 - prepare-process-audio-hetzner-context.sh
 - MemoryReference
 - sermons.tsx
-- MemorySnapshot
 - axios
 - algoliasearch
-- axios
-- @google-cloud/storage
-- lodash
-- @temporalio/activity
 - form-data
 - @mui/system
 - Subsplash.ts
@@ -372,7 +367,6 @@
 - export-ytdlp-cookies.js
 - verify-youtube-routing.js
 - seedPlayableSermon.ts
-- dependencies
 - createSpeakerTypes.ts
 - compilerOptions
 - compilerOptions
@@ -408,7 +402,6 @@
 - Phase 06 Plan 03: Discovery Root-Only Admin Model Summary
 - firebase-admin
 - check-function-startup-loads.mjs
-- configure-algolia-list-sorting.mjs
 - devDependencies
 - firebase.js
 - Phase 06 Plan 06: Dry-Run Overflow Metadata Backfill Summary
@@ -420,7 +413,6 @@
 - with
 - test.ts
 - firebase
-- handleError.test.js
 - processYouTubeUrl.js
 - taggedListOnWrite.js
 - Tests
@@ -597,12 +589,12 @@
 
 ## God Nodes (most connected - your core abstractions)
 1. `transaction` - 252 edges
-2. `firebaseAdmin` - 181 edges
+2. `firebaseAdmin` - 182 edges
 3. `DurableJobRef` - 166 edges
 4. `providerMutationFingerprint()` - 155 edges
 5. `acknowledgedProjectionDigest()` - 147 edges
 6. `createAxiosConfig()` - 115 edges
-7. `key()` - 109 edges
+7. `key()` - 115 edges
 8. `authenticateSubsplash()` - 108 edges
 9. `handleError()` - 106 edges
 10. `providerPayloadFingerprint()` - 102 edges
@@ -610,47 +602,48 @@
 ## Surprising Connections (you probably didn't know these)
 - `recoveryHarness()` --indirect_call--> `path()`  [INFERRED]
   scripts/temporal-apphosting-rollout.test.mjs → functions/src/temporal/publishing/desiredDeletionCancellation.test.ts
-- `database()` --indirect_call--> `path()`  [INFERRED]
-  scripts/temporal-deploy-guard.test.mjs → functions/src/temporal/publishing/desiredDeletionCancellation.test.ts
 - `legacyRetentionFixture()` --indirect_call--> `key()`  [INFERRED]
   scripts/temporal-backfill-provider-usage.test.mjs → functions/src/temporal/publishing/firebaseDependencies.ts
 - `main()` --indirect_call--> `bad()`  [INFERRED]
   apps/process-audio/scripts/test-legacy-media-ingress.ts → functions/src/temporal/accounts/admission.ts
 - `main()` --indirect_call--> `token()`  [INFERRED]
   apps/process-audio/scripts/test-legacy-media-ingress.ts → scripts/temporal-release.mjs
+- `main()` --indirect_call--> `key()`  [INFERRED]
+  apps/process-audio/scripts/test-process-audio-request-context.ts → functions/src/temporal/publishing/firebaseDependencies.ts
 
 ## Import Cycles
+- 1-file cycle: `scripts/temporal-release.mjs -> scripts/temporal-release.mjs`
 - 3-file cycle: `functions/src/temporal/publishing/cancellation.ts -> functions/src/temporal/publishing/entityMutations.ts -> functions/src/temporal/publishing/firebaseDependencies.ts -> functions/src/temporal/publishing/cancellation.ts`
 - 3-file cycle: `functions/src/temporal/publishing/entityMutations.ts -> functions/src/temporal/publishing/firebaseDependencies.ts -> functions/src/temporal/publishing/mutationResourcePlan.ts -> functions/src/temporal/publishing/entityMutations.ts`
-- 3-file cycle: `functions/src/helpers/sermonDeletionMirrors.ts -> functions/src/temporal/publishing/legacySoundCloudRetention.ts -> functions/src/temporal/publishing/localSermonDeletionRepair.ts -> functions/src/helpers/sermonDeletionMirrors.ts`
 - 3-file cycle: `functions/src/temporal/publishing/certifiedDeletionDisposition.ts -> functions/src/temporal/publishing/criticalDeletionGuard.ts -> functions/src/temporal/publishing/criticalRepair.ts -> functions/src/temporal/publishing/certifiedDeletionDisposition.ts`
+- 3-file cycle: `functions/src/helpers/sermonDeletionMirrors.ts -> functions/src/temporal/publishing/legacySoundCloudRetention.ts -> functions/src/temporal/publishing/localSermonDeletionRepair.ts -> functions/src/helpers/sermonDeletionMirrors.ts`
 - 4-file cycle: `functions/src/helpers/sermonDeletionMirrors.ts -> functions/src/temporal/publishing/certifiedDeletionDisposition.ts -> functions/src/temporal/publishing/criticalDeletionGuard.ts -> functions/src/temporal/publishing/criticalRepair.ts -> functions/src/helpers/sermonDeletionMirrors.ts`
 - 5-file cycle: `functions/src/helpers/sermonDeletionMirrors.ts -> functions/src/temporal/publishing/certifiedDeletionDisposition.ts -> functions/src/temporal/publishing/criticalDeletionGuard.ts -> functions/src/temporal/publishing/criticalRepair.ts -> functions/src/helpers/sermonDeletionPartialStop.ts -> functions/src/helpers/sermonDeletionMirrors.ts`
 - 5-file cycle: `functions/src/helpers/sermonDeletionMirrors.ts -> functions/src/temporal/publishing/certifiedDeletionDisposition.ts -> functions/src/temporal/publishing/criticalDeletionGuard.ts -> functions/src/temporal/publishing/criticalRepair.ts -> functions/src/temporal/publishing/localSermonDeletionRepair.ts -> functions/src/helpers/sermonDeletionMirrors.ts`
 - 5-file cycle: `functions/src/helpers/sermonDeletionMirrors.ts -> functions/src/temporal/publishing/certifiedDeletionDisposition.ts -> functions/src/temporal/publishing/criticalDeletionGuard.ts -> functions/src/temporal/publishing/criticalRepair.ts -> functions/src/temporal/publishing/publishingZeroEffectsStop.ts -> functions/src/helpers/sermonDeletionMirrors.ts`
 - 5-file cycle: `functions/src/helpers/sermonDeletionMirrors.ts -> functions/src/temporal/publishing/certifiedDeletionDisposition.ts -> functions/src/temporal/publishing/criticalDeletionGuard.ts -> functions/src/temporal/publishing/criticalRepair.ts -> functions/src/temporal/publishing/retainedSoundCloudSermonDeletion.ts -> functions/src/helpers/sermonDeletionMirrors.ts`
 
-## Communities (642 total, 177 thin omitted)
+## Communities (635 total, 174 thin omitted)
 
 ### Community 0 - "createAxiosConfig"
-Cohesion: 0.06
-Nodes (57): EditSermonForm(), EditSermonFormInfo, SermonURL, storage, Uploader(), UploaderProps, Uploader, VerifiedUserUploaderComponent() (+49 more)
+Cohesion: 0.08
+Nodes (43): EditSermonForm(), SermonURL, storage, AudioTrimmerComponent, emptySermon, _fieldsToValidate, FormErrors, TODO: REFACTOR THESE INTO SERMON DATA (+35 more)
 
 ### Community 1 - "addToList.ts"
 Cohesion: 0.06
-Nodes (53): adminBaseUrlSecretsWithRuntimeAlerts, acceptrolerequest, acceptRoleRequestHandler(), acceptRoleRequestHandlerSource(), isAdmin(), denyrolerequest, denyRoleRequestHandler(), denyRoleRequestHandlerSource() (+45 more)
+Nodes (53): queueEmail(), acceptrolerequest, acceptRoleRequestHandler(), acceptRoleRequestHandlerSource(), isAdmin(), denyrolerequest, denyRoleRequestHandler(), denyRoleRequestHandlerSource() (+45 more)
 
 ### Community 2 - "firestoreDataConverter.ts"
 Cohesion: 0.04
-Nodes (73): CreateNewSubsplashListInputType, EditSubsplashListInputType, firestoreAdminSeriesItemConverter, firestoreAdminSermonConverter, firestoreAdminSermonListConverter, firestoreAdminTopicConverter, fromFirebaseSermonData(), compareRemoteItems() (+65 more)
+Nodes (73): CreateNewSubsplashListInputType, EditSubsplashListInputType, firestoreAdminSeriesItemConverter, firestoreAdminSermonListConverter, fromFirebaseSermonData(), compareRemoteItems(), createMediaItemMembershipHash(), createRemoteMembershipHash() (+65 more)
 
 ### Community 3 - "firebaseAdmin.ts"
-Cohesion: 0.07
-Nodes (54): addToList, PreparedListMutation, removeFromListCallable, RemoveFromListInputType, addToListHandler, firestoreDB, addToListHandler, axiosMock (+46 more)
+Cohesion: 0.03
+Nodes (91): addToList, firestoreAdminListConverter, removeFromListCallable, RemoveFromListInputType, RemoveFromListOutputType, reorderListItems, addToListHandler, firestoreDB (+83 more)
 
 ### Community 4 - "handleError"
-Cohesion: 0.06
-Nodes (61): ListSelector(), HeadCell, headCells, ListTable(), ListTableProps, listTypeOptions, HeadCell, headCells (+53 more)
+Cohesion: 0.04
+Nodes (71): CustomPagination(), CustomSearchBox(), SearchAttribution(), ImageSelector(), ListSelector(), ListSelectorProps, HeadCell, headCells (+63 more)
 
 ### Community 5 - "SermonPublishPanel.tsx"
 Cohesion: 0.43
@@ -661,96 +654,96 @@ Cohesion: 0.17
 Nodes (16): compareValues(), formatMetadataDate(), formatProviderLabel(), getDisplayName(), getPrimaryProviderId(), getSortValue(), getUsername(), HeadCell (+8 more)
 
 ### Community 7 - "useAuth"
-Cohesion: 0.03
-Nodes (84): AdminSermonsListProps, AdminSermonsListWithUserProps, Login(), formatStatus(), REQUESTABLE_ROLES, RequestRoleChange(), SermonListSkeloten(), SermonsListSkelotenProps (+76 more)
+Cohesion: 0.06
+Nodes (43): AdminSermonsListProps, AdminSermonsListWithUserProps, formatStatus(), REQUESTABLE_ROLES, RequestRoleChange(), SermonListSkeloten(), SermonsListSkelotenProps, Breakpoint (+35 more)
 
 ### Community 8 - "processYouTubeUrl.ts"
 Cohesion: 0.03
-Nodes (182): error(), main(), originalEnv, executeYouTubeMediaByteCanary(), startYouTubeMediaByteCanaryScheduler(), acquisitionCancellation, applyPreferredIpFamilyArgs(), applyYouTubeExtractorArgs() (+174 more)
+Nodes (170): main(), originalEnv, YouTubeSuccessfulAcquisitionAuthority, acquisitionCancellation, applyPreferredIpFamilyArgs(), applyYouTubeExtractorArgs(), applyYtDlpExternalDownloaderArgs(), applyYtDlpRequestPacingArgs() (+162 more)
 
 ### Community 9 - "ImageType"
-Cohesion: 0.10
-Nodes (61): assertInventory(), assertListProviderFacts(), assertPrivateIntent(), authority(), canonicalOwned(), cleanupActivities, deleteListDeletionCanonicalPage(), digestString() (+53 more)
+Cohesion: 0.09
+Nodes (63): assertInventory(), assertListProviderFacts(), assertPrivateIntent(), authority(), canonicalOwned(), cleanupActivities, deleteListDeletionCanonicalPage(), digestString() (+55 more)
 
 ### Community 10 - "[sermonId].tsx"
-Cohesion: 0.04
-Nodes (56): BottomAudioBar(), MediaButtonProps, SeekButtonProps, ManagePublishingPopupProps, DynamicBottomAudioBar, MediaPlayerComponent(), storage, PlayButtonProps (+48 more)
+Cohesion: 0.06
+Nodes (39): BottomAudioBar(), MediaButtonProps, SeekButtonProps, DynamicBottomAudioBar, MediaPlayerComponent(), storage, Props, SermonsList() (+31 more)
 
 ### Community 11 - "react"
 Cohesion: 0.11
-Nodes (18): getAlgoliaClient(), isNotFoundError(), SermonAlgoliaRecord, sleep(), waitForSermonToReachAlgolia(), canonicalMirrorPatch(), reconcileCurrentCanonicalMirrors(), acknowledgeAlgoliaSync() (+10 more)
+Nodes (19): getAlgoliaClient(), isNotFoundError(), SermonAlgoliaRecord, sleep(), waitForSermonToReachAlgolia(), canonicalMirrorPatch(), reconcileCurrentCanonicalMirrors(), listOnUpdate (+11 more)
 
 ### Community 12 - "index.ts"
-Cohesion: 0.06
-Nodes (52): main(), MockSnapshot, payload, CancelToken, createChildContext(), LogContext, YouTubeSuccessfulAcquisitionAuthority, mergeFiles() (+44 more)
+Cohesion: 0.05
+Nodes (73): payload, CancelToken, createChildContext(), createContext(), LogContext, firestoreAdminSermonConverter, mergeFiles(), parseFFmpegProgress() (+65 more)
 
 ### Community 13 - "speakerMutations.ts"
-Cohesion: 0.05
-Nodes (101): createNewSubsplashList(), createNewSubsplashListDomain(), CreateNewSubsplashListOutputType, getCreateLockKey(), getOperationKey(), deleteFromSoundCloudDomain(), DeleteFromSoundCloudReturnType, deleteFromSubsplashDomain() (+93 more)
+Cohesion: 0.04
+Nodes (122): createNewSubsplashList(), createNewSubsplashListDomain(), CreateNewSubsplashListOutputType, getCreateLockKey(), getOperationKey(), deleteFromSubsplashDomain(), DeleteFromSubsplashReturnType, DELETE_IMAGE_INPUT_TYPE (+114 more)
 
 ### Community 14 - "subsplashLockStore.js"
-Cohesion: 0.06
-Nodes (47): UploadableFile, NewSeriesPopup(), UploadButton(), UploadButtonProps, UploadProgressComponent(), UploadProgressComponentProps, UploadProgress, useOwnedAudioSource() (+39 more)
+Cohesion: 0.07
+Nodes (28): UploadableFile, UploadButton(), UploadButtonProps, UploadProgressComponent(), UploadProgressComponentProps, UploadProgress, AudioSourceOwnership, receipt (+20 more)
 
 ### Community 15 - "inviteTypes.ts"
-Cohesion: 0.04
-Nodes (79): claimInvite, claimInviteHandler(), claimInviteHandlerSource(), ClaimInviteOutputType, InviteClaimError, isKnownClaimStatus(), parseClaimableInvite(), PendingClaimState (+71 more)
+Cohesion: 0.08
+Nodes (33): CreateInviteResultData, getInviteEmailStatus(), getInviteLifecycleStatus(), INVITE_EMAIL_ENQUEUE_FAILED, INVITE_ROLES, InviteClaimStatus, InviteEmailState, InviteEmailStatusType (+25 more)
 
 ### Community 16 - "withIdempotency.js"
 Cohesion: 0.14
 Nodes (25): AudioTrimmer(), AudioTrimmerProps, TrimmerControls(), TrimmerControlsProps, formatTimeDisplay(), TrimmerTimeline(), TrimmerTimelineProps, TrimSlider() (+17 more)
 
 ### Community 17 - "withSubsplashLocks.js"
-Cohesion: 0.04
-Nodes (148): DeleteFromSubsplashInputType, commitListMutationProjection(), createNewList(), deleteListRow(), freezeListMutationProjection(), FrozenListMutationProgram, getAxiosData(), getAxiosStatus() (+140 more)
+Cohesion: 0.06
+Nodes (95): commitListMutationProjection(), deleteListRow(), freezeListMutationProjection(), plainRecord(), setField(), deleteDurableDescendants(), deleteDurableSubtree(), deleteLogicalListChain() (+87 more)
 
 ### Community 18 - "firestoreHelpers.js"
-Cohesion: 0.08
-Nodes (44): createFirebasePublishingCancellationDependencies(), setup(), isUploadedSubsplashAudioOutput(), probeSubsplashAudioOutput(), SubsplashAudioOutput, output, verifyPublishingProviderFetchSettled(), canonicalize() (+36 more)
+Cohesion: 0.05
+Nodes (84): completeConfirmedSeriesCreate(), createSeriesDomain(), CreateSeriesInputType, firestoreDB, SeriesCreateTailCheckpoint, seriesTailIdentity(), seriesTailResult(), toSubsplashSeriesImageRefs() (+76 more)
 
 ### Community 19 - "soundcloudSecrets.ts"
-Cohesion: 0.06
-Nodes (65): createSoundCloudAuthSession, CreateSoundCloudAuthSessionInput, CreateSoundCloudAuthSessionReturnType, exchangeSoundCloudAuthCode, ExchangeSoundCloudAuthCodeInput, ExchangeSoundCloudAuthCodeReturnType, getSoundCloudAuthStatusCall, GetSoundCloudAuthStatusInput (+57 more)
+Cohesion: 0.13
+Nodes (40): createSoundCloudReconnectRequiredError(), acquireRefreshLease(), clearRefreshLease(), createOAuthState(), createPkcePair(), createSoundCloudAuthorizationSession(), CreateSoundCloudAuthorizationSessionInput, createTokenPayload() (+32 more)
 
 ### Community 20 - "createSeries.js"
-Cohesion: 0.14
-Nodes (19): assertImageMutationTransportAllowed(), authorizeImageDeletionContinuation(), configuredImageProviderAccount(), ensureImageAcknowledgementReview(), ImageAllocationReview, ImageControlActivities, imageDeletionIntentHash(), ImageDeletionReview (+11 more)
+Cohesion: 0.06
+Nodes (33): computeMetadataForImage(), ImageMetadata, loadImageBuffer(), vibrantHexFromRgba(), modifyImage(), imageAcknowledgementCreated, assertImageMutationTransportAllowed(), authorizeImageDeletionContinuation() (+25 more)
 
 ### Community 21 - "subsplashUtils.ts"
 Cohesion: 0.05
-Nodes (55): createBibleChapterBundle, createHolyWeekBundle, createLatestListBundle, createSubtitleBundle, createSundayHomilyBundle, createTopicBundle, subtitleListOnWrite, bibleChapterListOnWrite (+47 more)
+Nodes (66): addToSeries, backfillSermonSubsplashStatus, createBibleChapterBundle, createHolyWeekBundle, createLatestListBundle, createSeries, createSubtitleBundle, createSundayHomilyBundle (+58 more)
 
 ### Community 22 - "User.ts"
 Cohesion: 0.04
 Nodes (48): scripts, analyze, backfill:series-item-subtitles, build, build:all, build:ci, build-functions, build-functions-codebases (+40 more)
 
 ### Community 23 - "[seriesId].tsx"
-Cohesion: 0.06
-Nodes (44): status(), sermonListOnDelete, deriveMembershipCounts(), syncMembershipInvariants(), firestore, getContentRows(), getLocalSermonsBySubsplashId(), getRowsBySubsplashMediaId() (+36 more)
+Cohesion: 0.04
+Nodes (63): status(), getProcessAudioBaseUrl(), getProcessAudioTargetUri(), normalizeBaseUrl(), PROCESS_AUDIO_BASE_URLS, createProductionDependencies(), enqueueInitialSermonAudio(), getBumperPath() (+55 more)
 
 ### Community 24 - "firestoreDataConverter.js"
-Cohesion: 0.10
-Nodes (32): AdvancedAdminPage(), formatCallableError(), formatTimestamp(), isObjectRecord(), NoticeState, AdminUsers(), fetchUsersWithDedupe(), formatInviteStatus() (+24 more)
+Cohesion: 0.04
+Nodes (80): AddStatus, bulkAddToSeries, bulkAddToSeriesDomain(), BulkAddToSeriesInputType, BulkAddToSeriesOutputType, BulkAddToSeriesResultItem, fetchRemoteSeriesMembership(), getErrorMessage() (+72 more)
 
 ### Community 25 - "firestoreDataConverter.js"
-Cohesion: 0.07
-Nodes (4): createPublishingActivities(), intent, PublishingDomainDependencies, PublishingStep
+Cohesion: 0.06
+Nodes (35): CustomRefinementList(), normalizeLabel(), AudioTrimmerComponentProps, DynamicAudioTrimmer, CircularProgressWithLabelProps, CountOfUploadsCircularProgressProps, DeleteEntityPopup(), DeleteEntityPopupProps (+27 more)
 
 ### Community 26 - "[listId].tsx"
-Cohesion: 0.05
-Nodes (53): ListBoundaryMarkerProps, OverflowChainPanelProps, ListRowContent, ListRowContentProps, SortableListRow, SortableListRowProps, SortableListRowViewModel, applyReorderAssignmentsToItems() (+45 more)
+Cohesion: 0.06
+Nodes (49): ListBoundaryMarkerProps, OverflowChainPanelProps, applyReorderAssignmentsToItems(), AUTO_RESOLUTION_BLOCKING_CODES, buildPendingLocalListItems(), buildRemoteListPageItems(), buildSortableListRowViewModel(), canAutoResolvePublishedDrift() (+41 more)
 
 ### Community 27 - "index.js"
-Cohesion: 0.04
-Nodes (54): AudioTrimmerComponentProps, DynamicAudioTrimmer, AvatarWithDefaultImageProps, CircularProgressWithLabelProps, CountOfUploadsCircularProgressProps, DeleteEntityPopup(), DeleteEntityPopupProps, NewSeriesPopupProps (+46 more)
+Cohesion: 0.03
+Nodes (128): EntityJobHistory(), areImageArraysEqual(), NewListPopup(), NewSeriesPopup(), NewSeriesPopupProps, SeriesSelector(), SeriesSelectorProps, VerifiedUserUploaderComponent() (+120 more)
 
 ### Community 28 - "index.js"
-Cohesion: 0.04
-Nodes (58): authCanaryInvalidSnapshot, authHealthUncheckedSnapshot, authNotConfiguredSnapshot, authQueueStaleSnapshot, futureGuestCanarySnapshot, guestCanaryFailedSnapshot, guestCanaryInvalidSnapshot, guestCanaryMissingSnapshot (+50 more)
+Cohesion: 0.03
+Nodes (93): bucket, pinned, replacementSource, source, sourceAccess, run(), authCanaryInvalidSnapshot, authHealthUncheckedSnapshot (+85 more)
 
 ### Community 29 - "index.js"
-Cohesion: 0.06
-Nodes (53): AppEnv, getAdminBaseUrlEnv(), getAdminRequestRecipientsEnv(), getEnv(), getRuntimeAlertRecipientsEnv(), parseRecipientList(), readRequiredEnvVar(), RequiredEnvVar (+45 more)
+Cohesion: 0.16
+Nodes (13): isExpectedOperationalError(), isRecord(), AlertMarkedError, buildAlertMessageHtml(), buildAlertMessageText(), buildAlertPayload(), EmitOperationalAlertInput, getSoundCloudReconnectActionUrl() (+5 more)
 
 ### Community 30 - "index.js"
 Cohesion: 0.11
@@ -758,11 +751,11 @@ Nodes (50): assertFailedDeploymentAfterGuard(), assertRecoveryAncestryUnchanged(
 
 ### Community 31 - "index.js"
 Cohesion: 0.07
-Nodes (34): createRequestWithEmails(), NotificationSource, OperationalAlertPayload, QueueEmailInput, QueueEmailMessage, RoleRequestNotificationPayload, SpeakerRequestImageAsset, SpeakerRequestNotificationPayload (+26 more)
+Nodes (33): createRequestWithEmails(), NotificationSource, OperationalAlertPayload, QueueEmailInput, QueueEmailMessage, RoleRequestNotificationPayload, SpeakerRequestImageAsset, SpeakerRequestNotificationPayload (+25 more)
 
 ### Community 32 - "User.js"
-Cohesion: 0.08
-Nodes (27): CustomPagination(), CustomRefinementList(), normalizeLabel(), CustomSearchBox(), SearchableAdminSermonList(), useAlgoliaSearch(), AdminSermons(), DeleteToastState (+19 more)
+Cohesion: 0.14
+Nodes (21): AdminSermons(), DeleteToastState, getDeleteFailureMessage(), getDeleteIntentPayloadFromRoute(), getQueryString(), createOperationKey(), createPublishedMembershipHash(), createRetryIntentKey() (+13 more)
 
 ### Community 33 - "emitOperationalAlert.js"
 Cohesion: 0.23
@@ -774,79 +767,79 @@ Nodes (23): assertKnownOriginalDelete(), authority(), fail(), freezeAcknowledged
 
 ### Community 35 - "subsplashSecrets.js"
 Cohesion: 0.06
-Nodes (91): createPublishingEvidenceWakeup(), Fact, setup(), Plan, fixture(), storeFixture(), acquireCertifiedPublishingDeletionSession(), assertHandle() (+83 more)
+Nodes (98): createPublishingEvidenceWakeup(), Fact, setup(), createProviderMutationRegistry(), fail(), Plan, setup(), ListDeletionMirrorPlan (+90 more)
 
 ### Community 36 - "claimInvite.js"
-Cohesion: 0.06
-Nodes (45): algoliaAppIdSecret, algoliaSearchApiKeySecret, algoliaSecretsWithRuntimeAlerts, createNewSubsplashListCallable, editSubpslashList, generateSecuredApiKey, GenerateSecuredApiKeyInputType, GenerateSecuredApiKeyOutputType (+37 more)
+Cohesion: 0.12
+Nodes (23): addintrooutrotaskgenerator, processaudiofiletask, processaudioyoutubetask, algoliaAppIdSecret, algoliaSearchApiKeySecret, algoliaSecretsWithRuntimeAlerts, handleImageUpload, adminBaseUrlSecret (+15 more)
 
 ### Community 37 - "inviteTypes.js"
-Cohesion: 0.08
-Nodes (28): main(), assertRuntimeNamespace(), CLOUD_NAMESPACES, loadRuntimeConfig(), RuntimeConfig, runtimeCredentialFingerprint(), TASK_QUEUES, cloudEnv (+20 more)
+Cohesion: 0.06
+Nodes (45): main(), assertRuntimeNamespace(), CLOUD_NAMESPACES, loadRuntimeConfig(), RuntimeConfig, runtimeCredentialFingerprint(), TASK_QUEUES, cloudEnv (+37 more)
 
 ### Community 38 - "firebase.ts"
 Cohesion: 0.09
-Nodes (22): database, apps, FirebaseDefaultsConfig, projectId, functions, InviteClaimPage(), FirebaseConfigEnv, getFirebaseAuthDomain() (+14 more)
+Nodes (22): database, apps, FirebaseDefaultsConfig, projectId, projectId, InviteClaimPage(), FirebaseConfigEnv, getFirebaseAuthDomain() (+14 more)
 
 ### Community 39 - "roleRequestTypes.ts"
 Cohesion: 0.04
-Nodes (97): completeConfirmedSeriesCreate(), createSeriesDomain(), firestoreDB, SeriesCreateTailCheckpoint, seriesTailIdentity(), seriesTailResult(), toSubsplashSeriesImageRefs(), validateSeriesCreateTailCheckpoint() (+89 more)
+Nodes (77): runWithListProjectionProgram(), run(), removeFromListDomain(), write(), createPublishingActivities(), beginProviderMutationPlan(), bindingKey(), DurableCriticalPreparation (+69 more)
 
 ### Community 40 - "speakerRequestTypes.ts"
-Cohesion: 0.05
-Nodes (68): RFC-3339, assertActiveProviderListenerLease(), assertProviderListenerEventInTransaction(), barrier, control, db, deletedMembershipEvent(), effect (+60 more)
+Cohesion: 0.08
+Nodes (35): RFC-3339, assertActiveProviderListenerLease(), assertProviderListenerEventInTransaction(), barrier, control, db, deletedMembershipEvent(), effect (+27 more)
 
 ### Community 41 - "devDependencies"
 Cohesion: 0.03
-Nodes (59): @babel/core, eslint-plugin-import, jest, ts-jest, @types/jest, @types/node, typescript, @typescript-eslint/eslint-plugin (+51 more)
+Nodes (59): @babel/core, eslint, eslint-plugin-import, jest, ts-jest, @types/jest, @types/node, typescript (+51 more)
 
 ### Community 42 - "updateSeriesMetadata.js"
-Cohesion: 0.16
-Nodes (19): createProviderOrphanReviewActivities(), ensureProviderOrphanReview(), identity(), loadValidatedProviderOrphanReview(), ProviderOrphanReviewIntent, providerOrphanReviewJobId(), acknowledgementId, fact (+11 more)
+Cohesion: 0.09
+Nodes (28): createActorAuthorization(), intent, setup(), controls, ProviderOrphanReview(), providerOrphanReviewResume, ref, createProviderOrphanReviewActivities() (+20 more)
 
 ### Community 43 - "List.js"
-Cohesion: 0.18
-Nodes (24): control, db, payload, queueEnqueue, state, acceptedTaskPending(), assertLegacyMediaWindow(), assertMediaWindow() (+16 more)
+Cohesion: 0.30
+Nodes (19): acceptedTaskPending(), assertLegacyMediaWindow(), assertMediaWindow(), assertProof(), beforeOrEqual(), fingerprint(), legacyMediaAdmissionId(), LegacyMediaExecutionInput (+11 more)
 
 ### Community 44 - "sentry.js"
-Cohesion: 0.37
-Nodes (11): Binding, CancellationBindingStore, db(), object(), release(), releaseCancelledProviderBindings(), remoteId(), same() (+3 more)
+Cohesion: 0.06
+Nodes (30): backfillHolyWeekLists, createNewSubsplashListCallable, createSoundCloudAuthSession, CreateSoundCloudAuthSessionInput, CreateSoundCloudAuthSessionReturnType, editSubpslashList, exchangeSoundCloudAuthCode, ExchangeSoundCloudAuthCodeInput (+22 more)
 
 ### Community 45 - "withSubsplashLocks"
-Cohesion: 0.02
-Nodes (104): addToSeries, AddToSeriesInputType, AddToSeriesOutputType, AddStatus, bulkAddToSeries, bulkAddToSeriesDomain(), BulkAddToSeriesInputType, BulkAddToSeriesOutputType (+96 more)
+Cohesion: 0.04
+Nodes (45): AddToSeriesInputType, AddToSeriesOutputType, CreateSeriesOutputType, deleteSeries, DeleteSeriesInputType, DeleteSeriesOutputType, UnlinkMediaItemFromSeriesResult, ReorderSeriesItemsInputType (+37 more)
 
 ### Community 46 - "reorderListItems.js"
-Cohesion: 0.13
-Nodes (22): authHeaders(), createBucketStreamSource(), createImageSourceStream(), deleteTrack(), encodeTrackIdentifier(), formatTagList(), getAuthenticatedSoundCloudAccountId(), inferFilenameFromUrl() (+14 more)
+Cohesion: 0.10
+Nodes (40): deleteFromSoundCloudDomain(), DeleteFromSoundCloudReturnType, editSoundCloudSermonDomain(), emitOperationalAlert(), startFunctionsSpan(), emitSoundCloudReconnectAlertIfNeeded(), ErrorDetailsRecord, isSoundCloudReconnectRequiredError() (+32 more)
 
 ### Community 47 - "firestoreDataConverter.js"
-Cohesion: 0.19
-Nodes (17): canonical(), createDurableDomainResolver(), DomainResolutionDependencies, ExistingResourceRetention, fail(), fingerprint(), identifier(), ImageCleanupReview (+9 more)
+Cohesion: 0.12
+Nodes (28): canonical(), createDurableDomainResolver(), DomainResolutionDependencies, DurableDomainResolutionInput, DurableDomainResolutionResult, DurableResolutionCommitHooks, ExistingResourceRetention, fail() (+20 more)
 
 ### Community 48 - "bundleHelpers.ts"
 Cohesion: 0.07
-Nodes (49): HeadCell, headCells, TopicTableProps, ProtectedAdminTopics(), BIBLE_CHAPTER_BUNDLE_CONFIG, BundleConfig, BundleCountProps, BundleMetadata (+41 more)
+Nodes (46): HeadCell, headCells, TopicTableProps, ProtectedAdminTopics(), BIBLE_CHAPTER_BUNDLE_CONFIG, BundleConfig, BundleCountProps, BundleMetadata (+38 more)
 
 ### Community 49 - "index.ts"
 Cohesion: 0.08
 Nodes (51): firebaseAdmin, app, applyCookieExtractorArgs(), applyYtDlpRequestPacingArgs(), AudioFormat, buildErrorResponse(), buildResolutionMetadata(), checkpointContext() (+43 more)
 
 ### Community 50 - "firestoreHelpers.js"
-Cohesion: 0.07
-Nodes (39): EntityJobHistory(), SermonPublishPanel(), useEntityJobs(), submit, input, lists, emptySermonList, listUploadStatus (+31 more)
+Cohesion: 0.04
+Nodes (71): EditSermonFormInfo, ManagePublishingPopupProps, PlayButtonProps, TODO: Fix Playablity of SermonListCard, SearchResultSermonListCardProps, chunkIds(), SearchResultSermonList(), SearchResultSermonListProps (+63 more)
 
 ### Community 51 - "subsplashUtils.js"
 Cohesion: 0.11
 Nodes (16): Automatic session recovery, Decision, Failure scopes and queue behavior, Follow-up migration, Honest limitations, Incident acceptance gate, Readiness and observability, Rejected alternatives (+8 more)
 
 ### Community 52 - "User.js"
-Cohesion: 0.03
-Nodes (206): addToListDomain(), AddtoListInputType, AddToListOutputType, applyRemoveOldestMutation(), assertSubsplashMediaItemExists(), buildFlexibleWordPattern(), canReuseExistingOverflowDoc(), collectListResolutionDiagnostics() (+198 more)
+Cohesion: 0.02
+Nodes (223): addToListDomain(), AddtoListInputType, AddToListOutputType, applyRemoveOldestMutation(), assertSubsplashMediaItemExists(), buildFlexibleWordPattern(), canReuseExistingOverflowDoc(), collectListResolutionDiagnostics() (+215 more)
 
 ### Community 53 - "withIdempotency.js"
-Cohesion: 0.43
-Nodes (7): buildEntityMutationResourcePlan(), buildPublishingMutationResourcePlan(), Graph, identifier(), invalid(), object(), strings()
+Cohesion: 0.07
+Nodes (40): actions, apiEvents, apps, bootstrapTransport(), childTransport(), clock, clone(), commands (+32 more)
 
 ### Community 54 - "withSubsplashLocks.js"
 Cohesion: 0.12
@@ -861,36 +854,36 @@ Cohesion: 0.18
 Nodes (13): logWaveformPreviewFailure(), MediaPlayFailureHandler, PlayableMediaElement, safePlayMediaElement(), UseTrimmerSyncOptions, useVidstackTrimmerSync(), isDebugEnabled(), isServerLoggingEnabled() (+5 more)
 
 ### Community 57 - "processAudioQueueStore.ts"
-Cohesion: 0.10
-Nodes (70): createMockDatabase(), main(), moduleLoader, reconcileFromFreshAuthenticatedCanary(), asRecord(), buildCloudTasksCreateTaskRequest(), buildInitialYouTubeQueueState(), buildProcessAudioRequestState() (+62 more)
+Cohesion: 0.09
+Nodes (71): createMockDatabase(), main(), moduleLoader, main(), asRecord(), buildCloudTasksCreateTaskRequest(), buildInitialYouTubeQueueState(), buildProcessAudioRequestState() (+63 more)
 
 ### Community 58 - "dependencies"
 Cohesion: 0.04
 Nodes (51): algoliasearch, firebase-admin, sharp, @upperroom/contracts, uuid, @dnd-kit/modifiers, @emotion/react, @emotion/styled (+43 more)
 
 ### Community 59 - "subsplashUtils.js"
-Cohesion: 0.07
-Nodes (33): createEmailControlActivities(), EmailControlActivities, createEmailActivities(), createSearchActivities(), createSearchControlActivities(), createRuntimeActivities(), beginClaimedPublishingStep(), Store (+25 more)
+Cohesion: 0.05
+Nodes (45): createEmailControlActivities(), EmailControlActivities, createEmailActivities(), createSearchActivities(), createSearchControlActivities(), SearchConfig, SearchIntent, createRuntimeActivities() (+37 more)
 
 ### Community 60 - "seriesHelpers.js"
 Cohesion: 0.12
 Nodes (16): scripts, analyze, app-dev, build, build:ci, dev, lint:ci, make-pretty (+8 more)
 
 ### Community 61 - "createSeries.js"
-Cohesion: 0.06
-Nodes (21): harness(), harness(), fixture(), listRow(), Memory, Query, Snapshot, fixture() (+13 more)
+Cohesion: 0.13
+Nodes (27): createInviteHandler(), createInviteHandlerSource(), CreateInviteOutputType, buildInviteClaimUrl(), buildInviteEmailMessageText(), queueInviteEmail(), createInviteToken(), createInviteTokenArtifact() (+19 more)
 
 ### Community 62 - "withSubsplashLocks.js"
 Cohesion: 0.06
-Nodes (101): readFrozenPages(), Store, createProviderMutationRegistry(), fail(), setup(), fakeFirestore(), fakeFirestore(), fakeFirestore() (+93 more)
+Nodes (101): readFrozenPages(), fakeFirestore(), fakeFirestore(), fakeFirestore(), fixture(), acknowledgedProjectionDigest(), fail(), normalizeAcknowledgedProjectionValue() (+93 more)
 
 ### Community 63 - "listOverflowChain.js"
-Cohesion: 0.19
-Nodes (26): asRecord(), beginYouTubeQueueProbeUnderAdmission(), buildProcessAudioRequestState(), countChildren(), deleteExistingTask(), getNowIsoString(), getProbeBlockerReason(), getQueueStateAndDeferredCount() (+18 more)
+Cohesion: 0.21
+Nodes (24): asRecord(), beginYouTubeQueueProbeUnderAdmission(), buildProcessAudioRequestState(), countChildren(), deleteExistingTask(), getNowIsoString(), getProbeBlockerReason(), getQueueStateAndDeferredCount() (+16 more)
 
 ### Community 64 - "addToList.js"
-Cohesion: 0.20
-Nodes (12): main(), createProviderRelayRouter(), FORWARDED_REQUEST_HEADERS, FORWARDED_RESPONSE_HEADERS, getResponseBodyLimit(), getUpstreamUrl(), isAuthorized(), readBoundedResponseBody() (+4 more)
+Cohesion: 0.10
+Nodes (20): main(), createProviderRelayRouter(), FORWARDED_REQUEST_HEADERS, FORWARDED_RESPONSE_HEADERS, getResponseBodyLimit(), getUpstreamUrl(), isAuthorized(), readBoundedResponseBody() (+12 more)
 
 ### Community 65 - "User.js"
 Cohesion: 0.10
@@ -898,7 +891,7 @@ Nodes (12): OperationClahe, struct, OperationSharpen, struct, OperationThreshold
 
 ### Community 66 - "withSubsplashLocks.js"
 Cohesion: 0.05
-Nodes (63): acceptspeakerrequest, acceptSpeakerRequestHandler(), acceptSpeakerRequestHandlerSource(), isAdmin(), denyspeakerrequest, denySpeakerRequestHandler(), denySpeakerRequestHandlerSource(), isAdmin() (+55 more)
+Nodes (80): buildInviteEmailMessageHtml(), buildProfessionalEmailHtml(), EmailDetailItem, escapeHtml(), formatEmailDateTime(), ProfessionalEmailTemplateInput, getAdminBaseUrl(), acceptspeakerrequest (+72 more)
 
 ### Community 67 - "editSoundCloudSermon.js"
 Cohesion: 0.16
@@ -906,7 +899,7 @@ Nodes (33): validateSermonDeletionPartialStopEvidence(), Data, explicitSteps(), 
 
 ### Community 68 - "addToList.js"
 Cohesion: 0.05
-Nodes (63): CreateSpeakerFormValues, CreateSpeakerPopup(), CreateSpeakerPopupProps, emptyCreateSpeakerForm, DetailImageGallery(), DetailImageGalleryProps, client, ImageSelector() (+55 more)
+Nodes (66): ListRowContent, ListRowContentProps, SortableListRow, SortableListRowProps, SortableListRowViewModel, AvatarWithDefaultImageProps, CreateSpeakerFormValues, CreateSpeakerPopup() (+58 more)
 
 ### Community 69 - "addToList.js"
 Cohesion: 0.31
@@ -925,8 +918,8 @@ Cohesion: 0.08
 Nodes (24): Accessing the Browser, Admin panel login recovery, Cookie Refresh Retry Flow, Cookie Source, Deploying Cloud Run process-audio, Deploying Hetzner Workers, DNS, Failure Handling (+16 more)
 
 ### Community 74 - "soundcloudSecrets.js"
-Cohesion: 0.05
-Nodes (32): 1. Upgrade staging project billing (required), 2. Create App Hosting backend in staging project, 2b. Leave automatic App Hosting rollouts enabled, 3. Configure App Hosting secrets for staging, 3b. Configure Cloud Functions secrets/env (staging), 3c. Enable Google Sign-In in staging Auth (one-time), 4. Provision staging databases (one-time), 5. Configure GitHub OIDC for staging deploy workflow (+24 more)
+Cohesion: 0.06
+Nodes (28): 1. Upgrade staging project billing (required), 2. Create App Hosting backend in staging project, 2b. Leave automatic App Hosting rollouts enabled, 3. Configure App Hosting secrets for staging, 3b. Configure Cloud Functions secrets/env (staging), 3c. Enable Google Sign-In in staging Auth (one-time), 4. Provision staging databases (one-time), 5. Configure GitHub OIDC for staging deploy workflow (+20 more)
 
 ### Community 75 - "speakerMutations.js"
 Cohesion: 0.11
@@ -937,28 +930,28 @@ Cohesion: 0.13
 Nodes (30): createReviewedCreateActivities(), ref, setup(), activityProof(), allowedStages(), Checkpoint, currentPrivate(), deriveStages() (+22 more)
 
 ### Community 77 - "speakerMutations.js"
-Cohesion: 0.17
-Nodes (12): DeleteFromSoundCloudInputType, EDIT_SOUNDCLOUD_SERMON_INCOMING_DATA, EditSoundCloudSermonReturnType, handler, handler, mockDeleteTrack, mockDisposePreparedUpload, mockIsSoundCloudTrackNotFoundError (+4 more)
+Cohesion: 0.05
+Nodes (41): deleteFromSoundCloud, DeleteFromSoundCloudInputType, EDIT_SOUNDCLOUD_SERMON_INCOMING_DATA, editOnSoundCloud, EditSoundCloudSermonReturnType, addIntroOutroTaskGeneratorHandler, adminAuth, audioRuntimeAlertTargets (+33 more)
 
 ### Community 78 - "utils.js"
-Cohesion: 0.07
-Nodes (71): authority(), fail(), localRef(), object(), pages(), prepareSeriesDeletionMirrors(), Projection, projectSeriesDeletionDocument() (+63 more)
+Cohesion: 0.06
+Nodes (84): bucketPath(), createMediaAdmission(), MediaOutboxAdmission, MediaReference, fixture(), RecordData, validatePayload(), createPublishingMediaDependency() (+76 more)
 
 ### Community 79 - "seriesHelpers.js"
-Cohesion: 0.18
-Nodes (16): checkMicrosoftServer(), compileUrl(), parseTlsOptions(), setSmtpCredentials(), setupOAuth2(), invalidURI(), AuthenticatonType, Config (+8 more)
+Cohesion: 0.16
+Nodes (19): checkMicrosoftServer(), compileUrl(), isSendGrid(), parseTlsOptions(), setSmtpCredentials(), setupOAuth2(), initialize(), transportLayer() (+11 more)
 
 ### Community 80 - "seriesHelpers.js"
-Cohesion: 0.05
-Nodes (52): assertAuthorizedScriptRunner(), backfillHolyWeekLists, buildFirestoreList(), fetchSubsplashList(), getRequesterEmail(), HOLY_WEEK_DAY_CONFIG, toImageType(), SubsplashCategoriesResponse (+44 more)
+Cohesion: 0.04
+Nodes (68): DetailImageGallery(), assertAuthorizedScriptRunner(), buildFirestoreList(), fetchSubsplashList(), getRequesterEmail(), HOLY_WEEK_DAY_CONFIG, toImageType(), firestoreAdminSpeakerConverter (+60 more)
 
 ### Community 81 - "seriesHelpers.js"
 Cohesion: 0.20
 Nodes (9): Agent skills, Domain docs, Firebase Test Harness, graphify, Issue tracker, Post-Build Dev Workflow (Conditional), Sentry, Triage labels (+1 more)
 
 ### Community 82 - "utils.js"
-Cohesion: 0.03
-Nodes (73): bucket, pinned, replacementSource, source, sourceAccess, run(), firebaseAdmin, FirebaseConfigEnv (+65 more)
+Cohesion: 0.09
+Nodes (29): firebaseAdmin, FirebaseConfigEnv, getFirebaseConfigFromEnv(), parseFirebaseConfigEnv(), parseServiceAccountFromEnv(), resolveDatabaseUrl(), resolveStorageBucket(), ServiceAccountEnv (+21 more)
 
 ### Community 83 - "soundcloudSecrets.js"
 Cohesion: 0.09
@@ -969,12 +962,12 @@ Cohesion: 0.10
 Nodes (18): Dependency security maintenance, Remaining development-only advisories, 1. Confirm production project billing, 2. Create App Hosting backend in production, 2b. Keep automatic App Hosting rollouts enabled, 3. Configure App Hosting secrets for production, 3b. Configure Cloud Functions secrets/env (production), 4. Configure GitHub OIDC for production backend deploys (+10 more)
 
 ### Community 85 - "sentry.js"
-Cohesion: 0.12
-Nodes (16): absent(), CancellationAllocation, cancelPublishingEffects(), db(), hasCanonicalReference(), Intent, order, paths (+8 more)
+Cohesion: 0.07
+Nodes (28): absent(), CancellationAllocation, cancelPublishingEffects(), db(), hasCanonicalReference(), Intent, order, paths (+20 more)
 
 ### Community 86 - "runtimeAlerts.test.js"
-Cohesion: 0.16
-Nodes (24): boundedString(), compareExecution(), DurableEntityState, DurableExecutionHead, DurableJobStore, DurableJobStoreError, DurableOutboxRecord, DurableStepExecutionHead (+16 more)
+Cohesion: 0.09
+Nodes (39): AccountAdmissionPlan, PublishingEntityAdmission, PublishingEntityIntent, DurableEntityRef, DurableJobKind, boundedString(), compareExecution(), CreateDurableJobInput (+31 more)
 
 ### Community 87 - "roleRequestTypes.ts"
 Cohesion: 0.06
@@ -985,32 +978,32 @@ Cohesion: 0.11
 Nodes (22): [action], root, defaultTargets, depSections, flatWorkspaceSection(), materializedPackageContents(), npmWorkspaceOverrides(), packageAtPath() (+14 more)
 
 ### Community 89 - "addToList.js"
-Cohesion: 0.60
-Nodes (4): chunkSeriesItemPositionUpdates(), compactSeriesItemPositions(), LocalSeriesItemPosition, planCompactedSeriesItemPositions()
+Cohesion: 0.05
+Nodes (36): CI operations, Compatibility grace uses the Firestore server clock, Continuous backups and isolated point-in-time recovery, Dedicated private host recipe, Deterministic application cutover, Frozen split Functions dependency uploads, Immutable worker releases, ramping and rollback, Kit native startup and npm locks (+28 more)
 
 ### Community 90 - "dependencies"
-Cohesion: 0.07
-Nodes (24): Cutover and rollback, Decision, Documentation basis, Durable operations architecture, Ownership and concurrency, Runtime and deployment, User-visible state, Controlled ownership and provider egress (+16 more)
+Cohesion: 0.25
+Nodes (7): Cutover and rollback, Decision, Documentation basis, Durable operations architecture, Ownership and concurrency, Runtime and deployment, User-visible state
 
 ### Community 91 - "manageInvites.test.js"
-Cohesion: 0.10
-Nodes (19): CI operations, Compatibility grace uses the Firestore server clock, Continuous backups and isolated point-in-time recovery, Dedicated private host recipe, Deterministic application cutover, Frozen split Functions dependency uploads, Immutable worker releases, ramping and rollback, Kit native startup and npm locks (+11 more)
+Cohesion: 0.11
+Nodes (25): setUserRole, setUserRoleHandler(), SetUserRoleInputType, SetUserRoleOutputType, setUserRoleSource(), assertLegacyAccountSourceAllowed(), LegacyAccountResultError, withLegacyAccountSource() (+17 more)
 
 ### Community 92 - "sentry.js"
 Cohesion: 0.32
 Nodes (4): darkTheme, getModeColors(), getThemeOptions(), lightTheme
 
 ### Community 93 - "acceptSpeakerRequest.js"
-Cohesion: 0.07
-Nodes (25): RemoveFromListOutputType, reorderListItems, NetworkFailureInjector, addToListHandler, assertChainMatches(), buildExpectedPages(), ChainPageSummary, firestore (+17 more)
+Cohesion: 0.13
+Nodes (20): auth, database, apps, FirebaseDefaultsConfig, projectId, functions, imageStorage, storage (+12 more)
 
 ### Community 94 - "acceptSpeakerRequest.js"
 Cohesion: 0.22
 Nodes (8): App Hosting and source maps, `firebase-functions`, GitHub Actions release tracking, GitHub code mappings, `process-audio-hetzner`, Release naming, Sentry Setup, `web-app`
 
 ### Community 95 - "index.js"
-Cohesion: 0.42
-Nodes (7): main(), assertBoundNativeMediaTask(), authenticateNativeMediaCaller(), NativeCallerClaims, nativeCallerConfiguration(), computeProcessAudioRequestVersion(), normalizeProcessAudioRequest()
+Cohesion: 0.11
+Nodes (17): claimInvite, claimInviteHandler(), claimInviteHandlerSource(), ClaimInviteOutputType, InviteClaimError, isKnownClaimStatus(), parseClaimableInvite(), PendingClaimState (+9 more)
 
 ### Community 96 - "listOverflowChain.js"
 Cohesion: 0.22
@@ -1029,56 +1022,60 @@ Cohesion: 0.15
 Nodes (10): AudioWaveformProps, buildPcmWaveform(), tag(), unavailable(), WAVEFORM_BUDGET, WaveformPreview, Observer, PreviewWorker (+2 more)
 
 ### Community 100 - "withIdempotency.js"
-Cohesion: 0.07
-Nodes (41): ref, accountResume, accountStatus, accountsWorkflow(), Activities, controls, runAccountWorkflow(), speaker (+33 more)
+Cohesion: 0.09
+Nodes (32): extractRoleClaim(), resolveHighestRole(), accountRef(), createAccountActivities(), db(), desiredStatus(), ref, ACCOUNT_CLAIMS_TRANSPORT (+24 more)
 
 ### Community 101 - "soundcloudSecrets.js"
-Cohesion: 0.09
-Nodes (24): getAudioSource(), validateAddIntroOutroData(), processaudiofiletask, processaudioyoutubetask, AddIntroOutroInputType, AudioSource, BaseAddIntroOutroInputType, CustomMetadata (+16 more)
+Cohesion: 0.08
+Nodes (30): main(), assertBoundNativeMediaTask(), authenticateNativeMediaCaller(), NativeCallerClaims, nativeCallerConfiguration(), getAudioSource(), validateAddIntroOutroData(), AddIntroOutroInputType (+22 more)
 
 ### Community 102 - "index.js"
-Cohesion: 0.15
-Nodes (20): DurableDomainResolutionInput, DurableResolutionCommitHooks, accountFixture(), criticalFixture(), fixture(), orphanFixture(), sessionFixture(), setup() (+12 more)
+Cohesion: 0.12
+Nodes (15): createReleaseFirebaseResources(), runWithCleanup(), fixture(), apps, bindings, config, context, events (+7 more)
 
 ### Community 103 - "emitOperationalAlert.js"
-Cohesion: 0.13
-Nodes (16): getProcessAudioBaseUrl(), getProcessAudioTargetUri(), normalizeBaseUrl(), PROCESS_AUDIO_BASE_URLS, createProductionDependencies(), enqueueInitialSermonAudio(), getBumperPath(), InitialAudioEnqueueDependencies (+8 more)
+Cohesion: 0.21
+Nodes (13): root, acquireDeploymentLock(), authorizeDeployment(), main(), releaseDeploymentLock(), runGuardedCommand(), control, release (+5 more)
 
 ### Community 104 - "listOverflowChain.js"
 Cohesion: 0.38
 Nodes (4): ErrorDetailsRecord, getErrorDetailsCode(), getErrorMessage(), isSoundCloudReconnectRequiredClientError()
 
 ### Community 105 - "processAudioQueueCleanup.js"
-Cohesion: 0.26
-Nodes (20): assertOriginalDelete(), CertifiedDeletionDisposition, certifiedDeletionDispositionDigest(), certifiedDeletionDispositionId(), CertifiedDeletionFixedAbsence, CertifiedDeletionFixedAbsenceRecord, CertifiedDeletionSourceHeader, certifiedProof() (+12 more)
+Cohesion: 0.28
+Nodes (19): assertOriginalDelete(), CertifiedDeletionDisposition, certifiedDeletionDispositionDigest(), certifiedDeletionDispositionId(), CertifiedDeletionFixedAbsence, CertifiedDeletionFixedAbsenceRecord, CertifiedDeletionSourceHeader, certifiedProof() (+11 more)
 
 ### Community 106 - "listOverflowChain.js"
 Cohesion: 0.29
 Nodes (6): description, engines, node, name, private, version
 
 ### Community 107 - "soundcloudSecrets.js"
-Cohesion: 0.20
-Nodes (5): ImageDependencies, DurableJobAttention, DurableJobState, DurableJobStep, DurableSafeError
+Cohesion: 0.23
+Nodes (11): isIOS(), YouTubeTrimmer(), YouTubeTrimmerProps, formatClock(), YouTubeTrimmerControls(), YouTubeTrimmerControlsProps, useDebounce(), extractYouTubeVideoId() (+3 more)
 
 ### Community 108 - "dependencies"
 Cohesion: 0.05
-Nodes (37): dependencies, algoliasearch, firebase-admin, firebase-functions, form-data, @google-cloud/storage, image-size, imagemagick (+29 more)
+Nodes (37): dependencies, algoliasearch, dotenv, firebase-admin, firebase-functions, form-data, @google-cloud/storage, image-size (+29 more)
 
 ### Community 109 - "tasks"
 Cohesion: 0.07
-Nodes (32): applyRepairPlan(), Args, BackfillChainResult, BackfillListOverflowMetadataResult, formatIssue(), getCandidateListIds(), parseArgs(), printHelp() (+24 more)
+Nodes (33): applyRepairPlan(), Args, BackfillChainResult, BackfillListOverflowMetadataResult, formatIssue(), getCandidateListIds(), parseArgs(), printHelp() (+25 more)
+
+### Community 110 - "addintrooutrotaskhandler.js"
+Cohesion: 0.18
+Nodes (12): decodeCursor(), encodeCursor(), listspeakerrequests, listSpeakerRequestsHandler(), resolveLimit(), resolveTargetRequesterUid(), SpeakerRequestCursor, ListSpeakerRequestsInputType (+4 more)
 
 ### Community 111 - "roleRequestTypes.js"
-Cohesion: 0.07
-Nodes (34): DELETE_IMAGE_INPUT_TYPE, deleteImage, deleteSubsplashList, acquireAuthRefreshLock(), clearInMemoryAuthCache(), clearSubsplashInMemoryAuthCacheForTests(), EdgeRetryRequestConfig, fetchFreshAccessToken() (+26 more)
+Cohesion: 0.16
+Nodes (11): deleteSubsplashList, CallableAuthType, defaultAuth, deleteSubsplashListHandler, firestore, mockAuthenticateSubsplash, mockAxios, TestRequestType (+3 more)
 
 ### Community 112 - "addintrooutrotaskhandler.js"
-Cohesion: 0.09
-Nodes (39): PROVIDER_USAGE_SCAN_GROUPS, vectors, main(), validateLeaseReview(), [action, ...args], api(), appApi(), config (+31 more)
+Cohesion: 0.10
+Nodes (43): PROVIDER_USAGE_SCAN_GROUPS, vectors, captureProviderUsageContinuity(), completedMarker(), completedPredecessor(), digest(), fail(), firstSix (+35 more)
 
 ### Community 113 - "addintrooutrotaskhandler.js"
 Cohesion: 0.15
-Nodes (13): dependencies, firebase-functions, https-proxy-agent, node-fetch, sharp, uuid, @vibrant/generator-default, firebase-functions (+5 more)
+Nodes (13): dependencies, fast-average-color-node, firebase-functions, https-proxy-agent, sharp, uuid, @vibrant/generator-default, fast-average-color-node (+5 more)
 
 ### Community 114 - "dependencies"
 Cohesion: 0.04
@@ -1089,16 +1086,16 @@ Cohesion: 0.29
 Nodes (6): Domain coverage and update dependencies, Durable publishing, Operational control, Playability, edited audio and deletion, Provider creation and ambiguity, Resource ownership and coexistence
 
 ### Community 116 - "searchRecords.ts"
-Cohesion: 0.13
-Nodes (11): BundleIntent, BundleStore, createBundleActivities(), getDurableBundleConfig(), admitBundleRegeneration(), normalizeBundleAdmission(), { createBundleDocumentListener }, event (+3 more)
+Cohesion: 0.18
+Nodes (12): awaitJob(), capturePrivateBindings(), mockCompletedCompilerResults, mockPrivateBindingSnapshots, mockPrivateCompilerResults, mockPrivateSourceFailures, mockTracePrivateSource(), pause() (+4 more)
 
 ### Community 117 - "devDependencies"
 Cohesion: 0.05
 Nodes (43): @eslint/compat, eslint-config-google, @eslint/eslintrc, @eslint/js, firebase-functions-test, devDependencies, @babel/core, babel-jest (+35 more)
 
 ### Community 118 - "devExternalServiceMocks.js"
-Cohesion: 0.15
-Nodes (60): readSermonDeletionDestinationProgramInTransaction(), validateSermonDeletionDestinationCompletion(), assertCertifiedEmptySermonDestination(), assertSermonDeletionCountReadInTransaction(), authority(), CanonicalCompletion, canonicalPage(), canonicalPageId() (+52 more)
+Cohesion: 0.11
+Nodes (75): readSermonDeletionDestinationProgramInTransaction(), SermonDeletionDestinationProgram, SermonDeletionDestinationRef, validateSermonDeletionDestinationCompletion(), assertCertifiedEmptySermonDestination(), assertSermonDeletionCountReadInTransaction(), authority(), CanonicalCompletion (+67 more)
 
 ### Community 119 - "publishedListDrift.js"
 Cohesion: 0.22
@@ -1111,10 +1108,6 @@ Nodes (16): scripts, build, build:ci, build-watch, deploy, lint, lint:ci, logs (
 ### Community 121 - "devExternalServiceMocks.js"
 Cohesion: 0.27
 Nodes (14): activate_remote_release(), begin_remote_transaction(), deploy_remote_worker(), ensure_browser_auth_stack(), finalize_remote_deployment(), mark_staging_candidate_validated(), require_command(), rollback_remote_workers() (+6 more)
-
-### Community 122 - "publishedListDrift.js"
-Cohesion: 0.15
-Nodes (13): assertMutationResourcePlanCurrent(), canonical(), Data, fingerprint(), ImmutableMutationResourcePlan, MutationCanonicalDocument, MutationCanonicalReader, PublishingMutationLogicalStep (+5 more)
 
 ### Community 123 - "devExternalServiceMocks.js"
 Cohesion: 0.40
@@ -1137,16 +1130,16 @@ Cohesion: 0.18
 Nodes (10): mockDb, mockEnqueue, mockLegacy, mockLifetimeLease, mockPatch, mockRows, mockSnapshot(), mockUpdate (+2 more)
 
 ### Community 128 - "devExternalServiceMocks.js"
-Cohesion: 0.14
-Nodes (41): authority(), Data, http, input, captureSermonDeletionDestinations(), checked(), Data, deletionLogicalContentCount() (+33 more)
+Cohesion: 0.05
+Nodes (59): harness(), harness(), authority(), Data, Document, fixture(), http, input (+51 more)
 
 ### Community 129 - "publishedListDrift.js"
-Cohesion: 0.17
-Nodes (7): { createBundleHandler }, db, exists, file, metadataRef, metadataUpdate, save
+Cohesion: 0.10
+Nodes (13): buildCodeChallenge(), CreateSoundCloudAuthSessionRequest, firestore, handler, soundCloudAuthStateRef, toBase64Url(), { createBundleHandler }, db (+5 more)
 
 ### Community 131 - "deleteFromSubsplash.js"
-Cohesion: 0.12
-Nodes (24): FrozenTargetAuthority, assertPublishingMutationTargetProofCurrent(), Data, defaultReader(), InternalProof, issued, object(), PublishingMutationTargetProof (+16 more)
+Cohesion: 0.11
+Nodes (28): PreparedListMutation, Header, SermonDeletionPartialDestinationObservation, FrozenTargetAuthority, assertPublishingMutationTargetProofCurrent(), assertPublishingMutationTargetProofForSession(), Data, defaultReader() (+20 more)
 
 ### Community 132 - "createSpeakerRequest.js"
 Cohesion: 0.50
@@ -1157,16 +1150,16 @@ Cohesion: 0.50
 Nodes (3): Collection and logging, Sentry JavaScript 11 migration, Verification
 
 ### Community 134 - "SermonTypes.js"
-Cohesion: 0.16
-Nodes (15): AwaitSermonAudio(), DrainSermonAudio(), Activities, attention, createReview, criticalRepair, deletion, executePublishingWorkflow() (+7 more)
+Cohesion: 0.13
+Nodes (20): AwaitSermonAudio(), DrainSermonAudio(), Activities, attention, createReview, criticalRepair, deletion, executePublishingWorkflow() (+12 more)
 
 ### Community 135 - "createSpeakerRequest.js"
 Cohesion: 0.50
 Nodes (3): Controlled release and automatic backend deployments, Explicit pinned deployment, Reconcile a retained failed operation
 
 ### Community 136 - "utils.js"
-Cohesion: 0.04
-Nodes (56): SearchActivities, SearchDependencies, SermonDeletionDestinationProgram, SermonDeletionDestinationRef, run(), Header, SermonDeletionMirrorInput, DurableDomainResolutionResult (+48 more)
+Cohesion: 0.05
+Nodes (19): SearchActivities, SearchDependencies, Dependencies, Store, BundleStore, ImageActivities, CriticalRepairCompilationStore, catalog (+11 more)
 
 ### Community 137 - "updateSeriesMetadata.js"
 Cohesion: 0.83
@@ -1174,7 +1167,7 @@ Nodes (3): extract_rollback_program(), prepare_runtime_rollback(), test-process-
 
 ### Community 141 - "speakerRequestTypes.ts"
 Cohesion: 0.06
-Nodes (36): AcceptSpeakerRequestInputType, AcceptSpeakerRequestOutputType, AcceptSpeakerRequestResultData, CreateSpeakerRequestInputType, CreateSpeakerRequestOutputType, CreateSpeakerRequestSuccessData, CreateSpeakerRequestValidationResult, DenySpeakerRequestInputType (+28 more)
+Nodes (31): AcceptSpeakerRequestInputType, AcceptSpeakerRequestOutputType, AcceptSpeakerRequestResultData, CreateSpeakerRequestInputType, CreateSpeakerRequestOutputType, CreateSpeakerRequestSuccessData, CreateSpeakerRequestValidationResult, DenySpeakerRequestInputType (+23 more)
 
 ### Community 142 - "deleteSeries.js"
 Cohesion: 0.29
@@ -1185,12 +1178,12 @@ Cohesion: 0.18
 Nodes (10): author, description, engines, node, license, main, name, private (+2 more)
 
 ### Community 144 - "roleRequestTypes.d.ts"
-Cohesion: 0.14
-Nodes (49): FixedRepairOperation, appendDeleteDigest(), assertCriticalRepairCatalogClaimAllowed(), assertV1PublishingSourceProducerBarrier(), Binding, bounded(), CandidatePage, catalog() (+41 more)
+Cohesion: 0.12
+Nodes (52): Store, FixedRepairOperation, appendDeleteDigest(), assertCriticalRepairCatalogClaimAllowed(), assertV1PublishingSourceProducerBarrier(), Binding, bounded(), CandidatePage (+44 more)
 
 ### Community 149 - "scripts"
-Cohesion: 0.13
-Nodes (12): intent, mockActor, mockAuth, mockCheckpointGet, mockDb, mockHttp, mockQuery, mockUsageClaim (+4 more)
+Cohesion: 0.33
+Nodes (11): AppEnv, getAdminBaseUrlEnv(), getAdminRequestRecipientsEnv(), getEnv(), getRuntimeAlertRecipientsEnv(), parseRecipientList(), readRequiredEnvVar(), RequiredEnvVar (+3 more)
 
 ### Community 150 - "rules"
 Cohesion: 0.06
@@ -1201,16 +1194,16 @@ Cohesion: 0.05
 Nodes (37): next-env.d.ts, .next/types/**/*.ts, node, node_modules, **/*.test.ts, **/*.ts, **/*.tsx, ./* (+29 more)
 
 ### Community 152 - "createNewSubsplashList.js"
-Cohesion: 0.19
-Nodes (7): ActivityExecutionContext, crossWorkflowControls, Store, mockInfo, ref, setup(), WorkerWitness
+Cohesion: 0.27
+Nodes (7): firebaseAdmin, youtubeAuth(), generateGoogleTotp(), getUser, invoke(), verifyIdToken, RFC-6238
 
 ### Community 153 - "createNewSubsplashList.js"
-Cohesion: 0.27
-Nodes (14): assertPublishingContentUpdateAllocationsSettled(), assertPublishingDeletionAllocationsSettled(), claimPublishingAllocation(), equalSource(), field(), marker(), pending(), preparePublishingAllocationCommit() (+6 more)
+Cohesion: 0.04
+Nodes (100): DeleteFromSubsplashInputType, normalizeSoundCloudAccountId(), intent, assertPublishingContentUpdateAllocationsSettled(), assertPublishingDeletionAllocationsSettled(), capturePublishingAllocationSource(), claimPublishingAllocation(), equalSource() (+92 more)
 
 ### Community 154 - "createNewSubsplashList.js"
-Cohesion: 0.13
-Nodes (16): identifier(), invalid(), methods, normalizeSubsplashListPatchAck(), SubsplashListPatchAck, types, SubsplashEmbedResource, SubsplashImageLinks (+8 more)
+Cohesion: 0.27
+Nodes (8): identifier(), invalid(), methods, normalizeSubsplashListPatchAck(), SubsplashListPatchAck, types, SubsplashListRowEmbedded, SubsplashListRowMethod
 
 ### Community 159 - "reorderSeriesItems.js"
 Cohesion: 0.20
@@ -1222,11 +1215,11 @@ Nodes (9): engines, node, main, name, private, scripts, build, build:ci (+1 more
 
 ### Community 161 - "dependencies"
 Cohesion: 0.18
-Nodes (11): dependencies, @google-cloud/functions-framework, image-size, p-limit, sharp, @temporalio/common, @google-cloud/functions-framework, image-size (+3 more)
+Nodes (11): dependencies, axios, @google-cloud/storage, lodash, sharp, @temporalio/activity, axios, @google-cloud/storage (+3 more)
 
 ### Community 162 - "soundcloudClient.js"
-Cohesion: 0.32
-Nodes (10): getImageDimensions(), populateImages(), streamDataToStorage(), buildEmulatorDownloadUrl(), buildStorageDownloadUrl(), ensureFirebaseDownloadUrl(), getExistingDownloadToken(), StorageObjectMetadata (+2 more)
+Cohesion: 0.20
+Nodes (8): args, canonical, destination, digest, previous, protocol, source, updated
 
 ### Community 165 - "roleRequestTypes.js"
 Cohesion: 0.20
@@ -1234,11 +1227,11 @@ Nodes (9): engines, node, main, name, private, scripts, build, build:ci (+1 more
 
 ### Community 166 - "reorderSeriesItems.js"
 Cohesion: 0.09
-Nodes (46): commandDurableJob, commandServerDurableJob(), getDurableJobReceipt, collections, db, fingerprint, payload, options (+38 more)
+Nodes (50): commandServerDurableJob(), collections, db, fingerprint, payload, options, admissionKey(), admitMedia() (+42 more)
 
 ### Community 168 - "roleRequestTypes.js"
-Cohesion: 0.03
-Nodes (76): addintrooutrotaskgenerator, deleteFromSoundCloud, deleteFromSubsplash, editOnSoundCloud, editSubsplashSermon, buildSubsplashLockBusyError(), BuildSubsplashLockBusyErrorInput, claimOperation() (+68 more)
+Cohesion: 0.08
+Nodes (35): deleteFromSubsplash, buildSubsplashLockBusyError(), BuildSubsplashLockBusyErrorInput, claimOperation(), ClaimOperationResult, completeOperation(), getIdempotencyRef(), getOperationResult() (+27 more)
 
 ### Community 169 - "youtubeCookieStore.ts"
 Cohesion: 0.25
@@ -1249,24 +1242,24 @@ Cohesion: 0.06
 Nodes (34): express, firebase-admin, @google-cloud/storage, @types/express, @types/node, typescript, @upperroom/contracts, uuid (+26 more)
 
 ### Community 172 - "index.ts"
-Cohesion: 0.15
-Nodes (10): checkpoint, intent, missing, mockAuth, mockCheckpoint, mockHttp, mockSubsplashDelete, mockTrackDelete (+2 more)
+Cohesion: 0.22
+Nodes (5): control, db, payload, queueEnqueue, state
 
 ### Community 174 - "addToListHelpers.js"
 Cohesion: 0.33
 Nodes (3): enqueueSystemImage(), normalizeImageAdmission(), valid
 
 ### Community 175 - "addToListHelpers.js"
-Cohesion: 0.23
-Nodes (13): invalid(), OriginalProof, pending(), PublishingDeletionSettlementPendingError, readIntent(), readOriginal(), Receipt, settlePublishingDeletionReceipts() (+5 more)
+Cohesion: 0.29
+Nodes (11): invalid(), OriginalProof, pending(), PublishingDeletionSettlementPendingError, readIntent(), readOriginal(), Receipt, settlePublishingDeletionReceipts() (+3 more)
 
 ### Community 176 - "deleteFromSoundCloud.js"
-Cohesion: 0.06
-Nodes (74): BundleListSelector(), BundleListSelectorProps, DropZone(), DropZoneProps, fileTypeValidator(), client, ListSelectorProps, areImageArraysEqual() (+66 more)
+Cohesion: 0.07
+Nodes (52): BundleListSelector(), BundleListSelectorProps, DropZone(), DropZoneProps, fileTypeValidator(), NewListPopupProps, SubtitleSelector(), SubtitleSelectorProps (+44 more)
 
 ### Community 178 - "manageInvites.test.js"
-Cohesion: 0.17
-Nodes (13): ^build:ci, dist/**, @upperroom/browser-fallback#build:ci, @upperroom/process-audio#build, @upperroom/process-audio#build:ci, @upperroom/shared#build:ci, dependsOn, outputs (+5 more)
+Cohesion: 0.15
+Nodes (14): ^build, dist/**, dependsOn, @upperroom/browser-fallback#build, @upperroom/browser-fallback#build:ci, @upperroom/process-audio#build, @upperroom/shared#build, dependsOn (+6 more)
 
 ### Community 179 - "removeFromList.js"
 Cohesion: 0.15
@@ -1289,64 +1282,60 @@ Cohesion: 0.07
 Nodes (41): OperationAffine, struct, OperationBlur, struct, OperationColorspace, struct, OperationConvolve, struct (+33 more)
 
 ### Community 199 - "removeFromList.ts"
-Cohesion: 0.20
-Nodes (10): createWorker(), runWorker(), createTestWorkers(), publishingCriticalRepair, publishingStatus, activityMocks(), complete(), ref (+2 more)
+Cohesion: 0.33
+Nodes (4): guardLegacyPublishingHttpMutation(), mockRelease, mockUser, mockVerify
 
 ### Community 201 - "criticalRepairCompilation.ts"
-Cohesion: 0.40
-Nodes (9): capturePublishingAllocationSource(), assertPublishingMetadataCheckpoint(), changed(), checkpoint(), identity(), preparePublishingMetadataCheckpoint(), intent, ref (+1 more)
+Cohesion: 0.33
+Nodes (5): Configuration, Firestore → Algolia function kit, IAM, lifecycle, and billing, Replacement staging search policy, Robustness changes
 
 ### Community 205 - "updateAllSpeakerTags.ts"
-Cohesion: 0.14
-Nodes (13): mockAxios, mockCheckpoint, mockData, mockDb, mockProof, mockReceipt, mockRelease, query (+5 more)
+Cohesion: 0.13
+Nodes (24): Binding, CancellationBindingStore, db(), object(), release(), releaseCancelledProviderBindings(), remoteId(), same() (+16 more)
 
 ### Community 206 - "publishing-stack.test.ts"
-Cohesion: 0.27
-Nodes (6): activities, controls, SearchBackfill(), SearchDocument(), searchResume, ref
+Cohesion: 0.24
+Nodes (7): SearchControlActivities, activities, controls, SearchBackfill(), SearchDocument(), searchResume, ref
 
 ### Community 207 - "TrimmerPlayerAdapter"
-Cohesion: 0.10
-Nodes (20): SeekOptions, TrimmerPlayerErrorListener, TrimmerPlayerSnapshot, TrimmerPlayerSnapshotListener, clamp(), CueVideoByIdOptions, hasMeaningfulSnapshotDiff(), loadYouTubeIframeApi() (+12 more)
+Cohesion: 0.09
+Nodes (15): SeekOptions, TrimmerPlayerAdapter, TrimmerPlayerErrorListener, TrimmerPlayerSnapshot, TrimmerPlayerSnapshotListener, clamp(), CueVideoByIdOptions, hasMeaningfulSnapshotDiff() (+7 more)
 
 ### Community 208 - "setup.mjs"
 Cohesion: 0.09
 Nodes (27): accessAppHostingSecret(), bootstrapValues, buildBootstrapValues(), chooseDefaultProjectId(), cliArgs, cwd, envContent, envKeys (+19 more)
 
 ### Community 209 - "queue.test.ts"
-Cohesion: 0.11
-Nodes (16): deliver(), initialize(), processQueue, processWrite(), SendMailInfoLike, systemOptions, transportLayer(), migratedOptions() (+8 more)
+Cohesion: 0.10
+Nodes (16): deliver(), processQueue, processWrite(), SendMailInfoLike, systemOptions, migratedOptions(), getEmailExpireAt(), getEmailExpiryPolicy() (+8 more)
 
 ### Community 211 - "types.d.ts"
-Cohesion: 0.25
-Nodes (7): modifyImage(), ResizedImageResult, resizeFormat, supportedExtensions, supportedImageContentTypeMap, resizeType, supportedContentTypes
+Cohesion: 0.40
+Nodes (5): isSpeakerRequestImageAsset(), normalizeSpeakerRequestNameForDuplicateCheck(), sanitizeSpeakerRequestDescription(), sanitizeSpeakerRequestName(), validateCreateSpeakerRequestInput()
 
 ### Community 212 - "processAudioQueue.ts"
-Cohesion: 0.04
-Nodes (64): assertAdmin(), getyoutubecookiestatus, listItemOnCreate, listItemOnDelete, listOnUpdate, db, membership, sermonListOnCreate (+56 more)
+Cohesion: 0.10
+Nodes (20): createspeaker, CreateSpeakerCallableOutputType, DeleteSpeakerCallableInputType, DeleteSpeakerCallableOutputType, UpdateSpeakerCallableInputType, UpdateSpeakerCallableOutputType, deletespeaker, updatespeaker (+12 more)
 
 ### Community 213 - "listItemMirrorSync.test.ts"
-Cohesion: 0.31
-Nodes (9): ids(), normalizeCanonicalPublishingPatch(), normalizePublishingIntent(), PUBLISHING_SERMON_KINDS, PublishingAdmissionActor, publishingAuthorization, record(), selections() (+1 more)
-
-### Community 216 - "transactionRetryInconsistency.test.js"
-Cohesion: 0.28
-Nodes (5): controls, ProviderOrphanReview(), providerOrphanReviewResume, ref, ProviderOrphanReviewActivities
+Cohesion: 0.40
+Nodes (4): Controlled ownership and provider egress, Delivery safety, Durable email delivery, Rollout and verification
 
 ### Community 218 - "templates.js"
-Cohesion: 0.16
-Nodes (18): bucketPath(), createMediaAdmission(), Dependencies, MediaOutboxAdmission, MediaReference, fixture(), RecordData, TransactionDatabase (+10 more)
+Cohesion: 0.27
+Nodes (8): createMediaArtifactCleanupActivities(), mediaArtifactProtection(), Options, policy, record, MediaCleanupInput, normalizeMediaCleanupInput(), MediaArtifactRecord
 
 ### Community 221 - "input.js"
-Cohesion: 0.10
-Nodes (14): ProtectedRoute(), firebaseAdmin, projectId, youtubeAuth(), handler(), logDir, logFile, generateGoogleTotp() (+6 more)
+Cohesion: 0.12
+Nodes (7): ProtectedRoute(), handler(), logDir, logFile, adminProtected(), Props, .next/**
 
 ### Community 222 - "seriesRemoteState.ts"
 Cohesion: 0.25
 Nodes (9): Args, authenticateSubsplash(), BackfillCounters, getSubsplashSeriesMembership(), parseArgs(), printHelp(), run(), SeriesItemData (+1 more)
 
 ### Community 223 - "List.js"
-Cohesion: 0.08
-Nodes (39): SermonDeletionMirrorPlan, preparePublishingAllocationRetirement(), LegacySoundCloudRetentionCertificate, LegacySoundCloudRetentionOperation, ProviderMutationClaimSummary, authorityDigest(), compileRetainedDeletionReady(), Data (+31 more)
+Cohesion: 0.17
+Nodes (18): ProviderMutationClaimSummary, authorityDigest(), compileRetainedDeletionReady(), Data, fail(), object(), readyProjection(), refreshRetainedDeletionReadyCanonicalCompletion() (+10 more)
 
 ### Community 224 - "compilerOptions"
 Cohesion: 0.07
@@ -1360,13 +1349,17 @@ Nodes (27): ES2022, src/**/*, *.test.ts, compileOnSave, compilerOptions, baseUrl
 Cohesion: 0.17
 Nodes (13): DEFAULT_STAGING_ADMIN_EMAILS, getAlwaysAdminEmails(), getProjectId(), isAllowlistedStagingEmail(), isStagingProject(), normalizeEmail(), resolveRoleForUser(), setUserRoleOnCreate (+5 more)
 
+### Community 230 - "createSpeakerTypes.ts"
+Cohesion: 0.50
+Nodes (3): Hosting comparison, checked 2026-10-12, Self-hosted fallback, Temporal platform
+
 ### Community 231 - "^build:ci"
-Cohesion: 0.10
-Nodes (21): ^build, ^lint:ci, cache, persistent, dependsOn, outputs, $schema, tasks (+13 more)
+Cohesion: 0.09
+Nodes (22): ^build:ci, ^lint:ci, dependsOn, cache, persistent, dependsOn, outputs, $schema (+14 more)
 
 ### Community 232 - "index.ts"
-Cohesion: 0.16
-Nodes (12): createLifecycleActivities(), LifecycleActivities, harness(), ref, lifecycle, MediaArtifactCleanupInput, createMediaArtifactCleanupActivities(), mediaArtifactProtection() (+4 more)
+Cohesion: 0.25
+Nodes (7): createLifecycleActivities(), LifecycleActivities, harness(), ref, lifecycle, MediaArtifactCleanup(), MediaArtifactCleanupInput
 
 ### Community 233 - "compilerOptions"
 Cohesion: 0.06
@@ -1384,17 +1377,9 @@ Nodes (4): fixture(), program(), shared, source
 Cohesion: 0.06
 Nodes (31): ../functions/src/test/**, ../functions/src/**/*.test.ts, ../functions/src/**/*.ts, ../packages/contracts/*, ../packages/contracts/**/*.ts, ../packages/orchestration/src/*, ../packages/shared/*, ../packages/shared/**/*.ts (+23 more)
 
-### Community 246 - "retainedSoundCloudSermonDeletion.test.ts"
-Cohesion: 0.33
-Nodes (6): assertAuthorizedScriptRunner(), backfillSermonSubsplashStatus, getRequesterEmail(), BackfillSermonSubsplashStatusInputType, BackfillSermonSubsplashStatusOutputType, BackfillSermonSubsplashStatusResultType
-
 ### Community 247 - "compilerOptions"
 Cohesion: 0.06
 Nodes (31): ../functions/src/test/**, ../functions/src/**/*.test.ts, ../functions/src/**/*.ts, ../packages/contracts/*, ../packages/contracts/**/*.ts, ../packages/orchestration/src/*, ../packages/shared/*, ../packages/shared/**/*.ts (+23 more)
-
-### Community 253 - "installYouTubeAdminDesktop"
-Cohesion: 0.39
-Nodes (4): computeMetadataForImage(), ImageMetadata, loadImageBuffer(), vibrantHexFromRgba()
 
 ### Community 255 - "dependencies"
 Cohesion: 0.09
@@ -1421,40 +1406,28 @@ Cohesion: 0.11
 Nodes (21): args, buildAudioJson(), buildAudioJsonWithUrl(), ensureLocalM4aFixture(), fail(), fs, hasExtractorArgs, hasFormatSelector (+13 more)
 
 ### Community 274 - "sermonWriteTrigger.js"
-Cohesion: 0.16
-Nodes (21): buildYouTubeCookieStatus(), getYouTubeQueueSnapshot(), getAdminActor(), setyoutubecookies, decodeBase64(), getYouTubeCookieStatus(), normalizeBase64(), validateCookiesText() (+13 more)
+Cohesion: 0.14
+Nodes (24): assertAdmin(), getyoutubecookiestatus, buildYouTubeCookieStatus(), getYouTubeQueueSnapshot(), getAdminActor(), setyoutubecookies, decodeBase64(), getYouTubeCookieStatus() (+16 more)
 
 ### Community 276 - "firebaseProjectConfig.js"
 Cohesion: 0.14
 Nodes (24): firestoreAdminListItemConverter, addItemsToList(), addToList, AddtoListInputType, addToSingleList(), convertSubsplashListRowToMediaItem(), createMoreList(), existingSubsplashListRow (+16 more)
-
-### Community 282 - "@google-cloud/functions-framework"
-Cohesion: 0.22
-Nodes (8): mockBeginPlan, mockDb, mockPrepareSettlement, mockRef, mockSet, mockSettlementCommit, mutationContext, request
 
 ### Community 283 - "image-size"
 Cohesion: 0.25
 Nodes (7): CustomClaims, Order, ROLES, SignupForm, UploaderFieldError, UploadProgress, userCredentials
 
 ### Community 285 - "p-limit"
-Cohesion: 0.43
-Nodes (5): activities, bundlesWorkflow(), controls, requestBundleRegeneration, withDurableLifecycle()
-
-### Community 287 - "@temporalio/common"
-Cohesion: 0.29
-Nodes (4): getUserMock, getUsersMock, listUsersMock, TestRequest
-
-### Community 302 - "fuse.js"
-Cohesion: 0.70
-Nodes (3): WorkerRestartProbe(), workerRestartProbeRelease, workerRestartProbeStatus
+Cohesion: 0.16
+Nodes (13): ref, accountResume, accountStatus, accountsWorkflow(), Activities, controls, runAccountWorkflow(), speaker (+5 more)
 
 ### Community 334 - "Subsplash.ts"
 Cohesion: 0.10
 Nodes (20): AddtoListInputType, AddToListOutputItem, AddToListOutputType, SUBSPLASH_MEDIA_ITEM_NOT_FOUND_CODE, SubsplashEmbedResource, SubsplashImage, SubsplashImageLinks, SubsplashList (+12 more)
 
 ### Community 335 - "Holy Week Flow"
-Cohesion: 0.12
-Nodes (38): after(), appendWrites(), assertSermonDeletionPartialStopUnclaimedTarget(), authorized(), classify(), compileSermonDeletionPartialStopPage(), Data, documents() (+30 more)
+Cohesion: 0.13
+Nodes (35): SermonDeletionDestinationCountWrite, after(), appendWrites(), assertSermonDeletionPartialStopUnclaimedTarget(), authorized(), classify(), compileSermonDeletionPartialStopPage(), Data (+27 more)
 
 ### Community 336 - "shouldDropClientSentryEvent"
 Cohesion: 0.18
@@ -1493,24 +1466,24 @@ Cohesion: 0.09
 Nodes (23): dependencies, axios, express, firebase-admin, google-auth-library, @google-cloud/logging-winston, @google-cloud/storage, @sentry/node (+15 more)
 
 ### Community 407 - "SermonListCard.tsx"
-Cohesion: 0.14
-Nodes (26): ACTION_LABELS, JobStatusPanel(), Props, fetchSeriesWithCache(), flushUploaderBatch(), ManagePublishingPopup, pendingSeriesRequests, pendingUploaderIds (+18 more)
+Cohesion: 0.12
+Nodes (29): ACTION_LABELS, JobStatusPanel(), Props, fetchSeriesWithCache(), flushUploaderBatch(), ManagePublishingPopup, pendingSeriesRequests, pendingUploaderIds (+21 more)
 
 ### Community 410 - "updateAllSpeakerTags.js"
-Cohesion: 0.26
-Nodes (7): activities, controls, ImageDelete(), ImageIngest(), ImageReceiptReconciliation(), imageResume, ref
+Cohesion: 0.19
+Nodes (10): activities, controls, ImageDelete(), ImageIngest(), ImageReceiptReconciliation(), imageResume, ref, WorkerRestartProbe() (+2 more)
 
 ### Community 418 - "defaults.d.ts"
 Cohesion: 0.29
 Nodes (16): assertProviderBackfillControl(), assertProviderBackfillReleaseState(), backfillProviderUsage(), fail(), firebaseDependencies(), imageAcknowledgementUsageSource(), orphanProviderAcknowledgementUsageSource(), parseProviderBackfillArgs() (+8 more)
 
 ### Community 419 - "backfillListOverflowMetadata.js"
-Cohesion: 0.06
-Nodes (68): awaitJob(), capturePrivateBindings(), mockCompletedCompilerResults, mockPrivateBindingSnapshots, mockPrivateCompilerResults, mockPrivateSourceFailures, mockTracePrivateSource(), pause() (+60 more)
+Cohesion: 0.07
+Nodes (57): AcknowledgedProjectionOperation, CertifiedPublishingDeletionAuthorizationPhase, absent(), checkCertificate(), criticalDeletionAbsenceProofPath(), CriticalRepairCertificate, CriticalRepairDependencies, criticalRepairDigest (+49 more)
 
 ### Community 423 - "processAudioQueue.d.ts"
 Cohesion: 0.08
-Nodes (32): SearchConfig, SearchControlActivities, SearchIntent, alternateId, apiKey, appId, collectionPath, databaseId (+24 more)
+Nodes (33): alternateId, apiKey, appId, assertSearchIngressPolicy(), collectionPath, databaseId, executeFullIndexOperation, executeIndexOperation (+25 more)
 
 ### Community 434 - "verify-youtube-local-loop.js"
 Cohesion: 0.16
@@ -1525,8 +1498,8 @@ Cohesion: 0.05
 Nodes (36): cors, axios, express, firebase-functions, sharp, @types/express, @types/node, typescript (+28 more)
 
 ### Community 444 - "firestore.js"
-Cohesion: 0.11
-Nodes (25): assertFirebaseRuntimeSecretResources(), certificateManifests(), cpuMillis(), emailEndpointPeers(), emailExcluded, emailGlobalV6, [emailGlobalV6Address, emailGlobalV6Prefix], emailPublicAddressRanges (+17 more)
+Cohesion: 0.10
+Nodes (28): assertFirebaseRuntimeSecretResources(), certificateManifests(), cpuMillis(), databaseCluster(), databaseNetworkPolicy(), emailEndpointPeers(), emailExcluded, emailGlobalV6 (+20 more)
 
 ### Community 449 - "reorderListItems.test.js"
 Cohesion: 0.08
@@ -1554,15 +1527,15 @@ Nodes (13): jest, next-env.d.ts, .next/types/**/*.ts, node, node_modules, **/*.t
 
 ### Community 478 - "kits-isolated-startup.test.mjs"
 Cohesion: 0.11
-Nodes (18): dependencyLocation(), stable(), root, validateKitNpmLock(), validateSharpPlatformClosure(), [action], root, sources (+10 more)
+Nodes (19): dependencyLocation(), deployedKitSources(), stable(), root, validateKitNpmLock(), validateSharpPlatformClosure(), [action], root (+11 more)
 
 ### Community 483 - "bundleConfigs.js"
 Cohesion: 0.13
 Nodes (14): checkpointRecords, mockCreateList, mockDb, mockEditList, mockGet, mockGetAll, mockGetRemote, mockGetUser (+6 more)
 
 ### Community 495 - "bundleConfigs.js"
-Cohesion: 0.11
-Nodes (21): getUser, GetUserInputType, GetUserOutputType, getUsersByIds, GetUsersByIdsInputType, GetUsersByIdsOutputType, listUsers, ListUsersInputType (+13 more)
+Cohesion: 0.06
+Nodes (34): getUser, GetUserInputType, GetUserOutputType, getUsersByIds, GetUsersByIdsInputType, GetUsersByIdsOutputType, listUsers, ListUsersInputType (+26 more)
 
 ### Community 501 - "bootstrap-browser-profile.js"
 Cohesion: 0.17
@@ -1578,7 +1551,7 @@ Nodes (31): Admin Speakers Top-Button Integration Pattern, Alternatives Consider
 
 ### Community 554 - "editSubsplashList.js"
 Cohesion: 0.13
-Nodes (27): main(), RESTORE_SCHEMAS, restoreNetworkPolicy(), schemaProofSql(), backup, config, identity(), objectStore (+19 more)
+Nodes (25): main(), RESTORE_SCHEMAS, restoreNetworkPolicy(), schemaProofSql(), backup, config, identity(), objectStore (+17 more)
 
 ### Community 564 - "sermonListOnDelete.js"
 Cohesion: 0.26
@@ -1630,7 +1603,7 @@ Nodes (23): firebase-admin, lib/*, @types/node, typescript, @upperroom/contracts
 
 ### Community 651 - "getSeriesRemoteState.test.js"
 Cohesion: 0.09
-Nodes (23): dependencies, firebase-functions, google-auth-library, headers, mkdirp, sharp, @temporalio/client, @temporalio/common (+15 more)
+Nodes (23): dependencies, algoliasearch, firebase-functions, headers, mkdirp, sharp, @temporalio/client, @temporalio/common (+15 more)
 
 ### Community 654 - "ListItem.d.ts"
 Cohesion: 0.09
@@ -1638,23 +1611,23 @@ Nodes (22): authenticationType, clientId, config, database, databaseRegion, defa
 
 ### Community 656 - "imageOnDelete.js"
 Cohesion: 0.10
-Nodes (30): isSendGrid(), configuredDescriptor(), createEmailProviderRuntime(), describeEmailProvider(), EmailEgressDescriptor, EmailProviderDescription, refreshReviewedOAuthToken(), resolveReviewedEmailEndpoint() (+22 more)
+Nodes (29): configuredDescriptor(), createEmailProviderRuntime(), describeEmailProvider(), EmailEgressDescriptor, EmailProviderDescription, refreshReviewedOAuthToken(), resolveReviewedEmailEndpoint(), ReviewedEndpoint (+21 more)
 
 ### Community 659 - "getSeriesRemoteState.test.js"
 Cohesion: 0.19
 Nodes (14): SendGridTransport, RFC-2822, Address, AttachmentEntry, IcalEvent, MailSource, NormalizedHeaders, SendGridAttachment (+6 more)
 
 ### Community 660 - "populateListsHelper.js"
-Cohesion: 0.16
-Nodes (15): setDependencies(), deliverDurableEmail(), EmailDeliveryIntent, emailMessageId(), EmailOutcome, createEmailRuntime(), EmailProviderReceipt, EmailRuntime (+7 more)
+Cohesion: 0.19
+Nodes (13): setDependencies(), deliverDurableEmail(), EmailDeliveryIntent, emailMessageId(), EmailOutcome, createEmailRuntime(), EmailProviderReceipt, EmailRuntime (+5 more)
 
 ### Community 669 - "check-temporal-history-runtime.mjs"
 Cohesion: 0.33
 Nodes (5): commonRequire, history, { historyFromJSON, historyToJSON }, protoRequire, workerRequire
 
 ### Community 684 - "publishEverywhereFlow.ts"
-Cohesion: 0.19
-Nodes (16): activities, cleanup, createReview, criticalRepair, maintenanceWorkflow(), PublishingEntityContinuation, publishingEntityWorkflow(), recovery (+8 more)
+Cohesion: 0.18
+Nodes (17): activities, cleanup, createReview, criticalRepair, maintenanceWorkflow(), PublishingEntityContinuation, publishingEntityWorkflow(), recovery (+9 more)
 
 ### Community 691 - "createSpeakerTypes.d.ts"
 Cohesion: 0.24
@@ -1693,16 +1666,16 @@ Cohesion: 0.25
 Nodes (12): EmailExpiryPolicy, expiryForPolicy(), buildEmailAdmission(), emailAdmissionJobId(), enqueueTemporalEmail(), EmailResolution, EmailResolutionDecision, frozenPayload() (+4 more)
 
 ### Community 741 - "configure-algolia-speaker-sorting.mjs"
-Cohesion: 0.22
-Nodes (6): adminApiKey, allReplicaIndexNames, appId, client, replicaSettings, speakerReplicaIndices
+Cohesion: 0.07
+Nodes (63): facets, ranking, replicas, schema, search, STAGING_SEARCH_TARGET, stagingSearchSettingsPlan(), validateStagingSearchTarget() (+55 more)
 
 ### Community 742 - "passThroughEnv"
 Cohesion: 0.22
 Nodes (9): EMULATE_APPHOSTING, EMULATE_EXTENSIONS, FIREBASE_PROJECT_ID, NEXT_PUBLIC_FIREBASE_PROJECT_ID, SKIP_FUNCTIONS_BUILD, cache, passThroughEnv, persistent (+1 more)
 
 ### Community 744 - "processAudioService.js"
-Cohesion: 0.29
-Nodes (8): !.next/cache/**, lib/**, dependsOn, outputs, dependsOn, outputs, build, build:ci
+Cohesion: 0.40
+Nodes (6): !.next/cache/**, lib/**, outputs, outputs, build, build:ci
 
 ### Community 746 - "SermonTypes.d.ts"
 Cohesion: 0.11
@@ -1727,10 +1700,6 @@ Nodes (16): Accomplishments, Auto-fixed Issues, Decisions Made, Deviations from 
 ### Community 770 - "check-function-startup-loads.mjs"
 Cohesion: 0.29
 Nodes (5): __dirname, __filename, repoRoot, require, targets
-
-### Community 771 - "configure-algolia-list-sorting.mjs"
-Cohesion: 0.25
-Nodes (6): adminApiKey, allReplicaIndexNames, appId, client, listReplicaIndices, replicaSettings
 
 ### Community 773 - "devDependencies"
 Cohesion: 0.18
@@ -1861,8 +1830,8 @@ Cohesion: 0.50
 Nodes (4): globals, _import, tsParser, typescriptEslint
 
 ### Community 919 - "exchangeSoundCloudAuthCode.js"
-Cohesion: 0.09
-Nodes (35): createKitDeployConfig(), selectKitDeployConfig(), selectLegacyDeployConfig(), deployedKitSources(), root, acquireDeploymentLock(), authorizeDeployment(), main() (+27 more)
+Cohesion: 0.12
+Nodes (26): createKitDeployConfig(), selectKitDeployConfig(), selectLegacyDeployConfig(), assertCheckoutCommit(), assertCheckoutSource(), manifest, actualCheckout, args (+18 more)
 
 ### Community 922 - "eslint.config.js"
 Cohesion: 0.50
@@ -1977,12 +1946,12 @@ Cohesion: 0.15
 Nodes (12): Accomplishments, Auto-fixed Issues, Decisions Made, Deviations from Plan, Files Created/Modified, Issues Encountered, Next Phase Readiness, Performance (+4 more)
 
 ### Community 968 - "createLatestListBundle.js"
-Cohesion: 0.05
-Nodes (40): createContext(), YouTubeAcquisitionError, Artifact, createMediaActivities(), matches(), MediaActivityDependencies, PrivateRequest, createMediaAuthenticationProbe() (+32 more)
+Cohesion: 0.10
+Nodes (21): MediaJobRef, MediaOutcome, MediaStage, createWorker(), runningWorkers, runWorker(), workers, workflowPath (+13 more)
 
 ### Community 972 - "soundcloudClient.d.ts"
-Cohesion: 0.17
-Nodes (11): src/**/*.ts, compilerOptions, declaration, esModuleInterop, module, moduleResolution, outDir, skipLibCheck (+3 more)
+Cohesion: 0.15
+Nodes (12): compilerOptions, declaration, esModuleInterop, module, moduleResolution, outDir, resolveJsonModule, skipLibCheck (+4 more)
 
 ### Community 976 - "firebaseAdmin.js"
 Cohesion: 0.15
@@ -2026,7 +1995,7 @@ Nodes (14): assertLegacyEmailClaimWindow(), assertLegacyEmailRelease(), assertNe
 
 ### Community 1008 - "removeFromList.ts"
 Cohesion: 0.18
-Nodes (11): algoliasearch, @google-cloud/functions-framework, @google-cloud/storage, headers, image-size, dependencies, algoliasearch, @google-cloud/functions-framework (+3 more)
+Nodes (11): algoliasearch, axios, @google-cloud/functions-framework, headers, image-size, dependencies, algoliasearch, axios (+3 more)
 
 ### Community 1013 - "updateAllSpeakerTags.d.ts"
 Cohesion: 0.18
@@ -2077,8 +2046,8 @@ Cohesion: 0.20
 Nodes (9): Accumulated Context, Blockers, Decisions, Position, Project Reference, Quick Tasks Completed, Roadmap Evolution, Session Log (+1 more)
 
 ### Community 1047 - "populateDatabaseFromSubsplash.d.ts"
-Cohesion: 0.25
-Nodes (5): admin, assert, { emitOperationalAlertEmail }, messages, run()
+Cohesion: 0.12
+Nodes (22): admin, assert, { emitOperationalAlertEmail }, error(), messages, run(), executeYouTubeMediaByteCanary(), reconcileFromFreshAuthenticatedCanary() (+14 more)
 
 ### Community 1056 - "CancelToken"
 Cohesion: 0.39
@@ -2106,7 +2075,7 @@ Nodes (5): download_and_write(), download_and_write_all(), write_to_file(), auth
 
 ### Community 1075 - "getUser.ts"
 Cohesion: 0.38
-Nodes (7): **/*.d.ts, **/*.js, !node_modules/**, @upperroom/contracts#build:ci, dependsOn, outputs, outputs
+Nodes (7): **/*.d.ts, **/*.js, !node_modules/**, @upperroom/contracts#build, outputs, dependsOn, outputs
 
 ### Community 1076 - "getUsersByIds.d.ts"
 Cohesion: 0.25
@@ -2123,6 +2092,10 @@ Nodes (7): Codebase Concerns (Focused Map), P0 Concerns, P1 Concerns, P2 Concern
 ### Community 1079 - "listUsers.ts"
 Cohesion: 0.25
 Nodes (7): Claude's Discretion, Deferred Ideas, Implementation Decisions, Locked Decisions, Phase 01: Series Subtitle Automation - Context, Phase Boundary, Specific Ideas
+
+### Community 1091 - "generateAlgoliaSecureApiKey.ts"
+Cohesion: 0.13
+Nodes (13): generateSecuredApiKey, SHARED_SEARCH_INDICES, account(), generate, mockApp, mockGetUser, mockReadDocuments, mockRunTransaction (+5 more)
 
 ### Community 1096 - "populateListsHelper.js"
 Cohesion: 0.29
@@ -2257,24 +2230,24 @@ Cohesion: 0.83
 Nodes (3): require_command(), deploy-browser-fallback-home.sh script, write_env_file()
 
 ## Knowledge Gaps
-- **3995 isolated node(s):** `printWidth`, `semi`, `singleQuote`, `tabWidth`, `trailingComma` (+3990 more)
+- **4067 isolated node(s):** `printWidth`, `semi`, `singleQuote`, `tabWidth`, `trailingComma` (+4062 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **177 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **174 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `key()` connect `withSubsplashLocks.js` to `createAxiosConfig`, `handleError`, `useAuth`, `processYouTubeUrl.ts`, `ImageType`, `utils.js`, `react`, `index.ts`, `subsplashLockStore.js`, `deleteSeries.js`, `roleRequestTypes.d.ts`, `withSubsplashLocks.js`, `firestoreHelpers.js`, `getSeriesRemoteState.test.js`, `soundcloudSecrets.ts`, `index.js`, `sentry.js`, `subsplashSecrets.js`, `claimInvite.js`, `inviteTypes.js`, `backfillListOverflowMetadata.js`, `roleRequestTypes.ts`, `roleRequestTypes.js`, `defaults.d.ts`, `editSubsplashList.js`, `withSubsplashLocks`, `firestoreDataConverter.js`, `createSpeakerTypes.d.ts`, `User.js`, `firestore.js`, `createSeries.js`, `editSoundCloudSermon.js`, `criticalRepairCompilation.ts`, `speakerMutations.js`, `utils.js`, `Holy Week Flow`, `setup.mjs`, `runtimeAlerts.test.js`, `subsplashSecrets.js`, `List.js`, `withIdempotency.js`, `processAudioQueueCleanup.js`, `tasks`, `devExternalServiceMocks.js`, `publishedListDrift.js`, `temporal-legacy-upload-drain.firestore.test.mjs`, `publishedListDrift.js`?**
-  _High betweenness centrality (0.072) - this node is a cross-community bridge._
-- **Why does `token()` connect `speakerMutations.ts` to `backfillListOverflowMetadata.js`, `inviteTypes.js`, `useAuth`, `createLatestListBundle.js`, `roleRequestTypes.ts`, `sentry.js`, `withSubsplashLocks`, `firestoreDataConverter.js`, `addintrooutrotaskhandler.js`, `withSubsplashLocks.js`, `utils.js`, `User.js`, `index.js`?**
-  _High betweenness centrality (0.040) - this node is a cross-community bridge._
-- **Why does `run()` connect `utils.js` to `speakerMutations.ts`?**
-  _High betweenness centrality (0.037) - this node is a cross-community bridge._
+- **Why does `key()` connect `withSubsplashLocks.js` to `createAxiosConfig`, `devExternalServiceMocks.js`, `handleError`, `useAuth`, `processYouTubeUrl.ts`, `ImageType`, `[sermonId].tsx`, `react`, `deleteSeries.js`, `roleRequestTypes.d.ts`, `withSubsplashLocks.js`, `firestoreHelpers.js`, `getSeriesRemoteState.test.js`, `soundcloudSecrets.ts`, `firestoreDataConverter.js`, `createNewSubsplashList.js`, `index.js`, `index.js`, `sentry.js`, `subsplashSecrets.js`, `claimInvite.js`, `inviteTypes.js`, `backfillListOverflowMetadata.js`, `roleRequestTypes.ts`, `roleRequestTypes.js`, `defaults.d.ts`, `editSubsplashList.js`, `firestoreDataConverter.js`, `createSpeakerTypes.d.ts`, `User.js`, `withIdempotency.js`, `processAudioQueueStore.ts`, `subsplashUtils.js`, `firestore.js`, `editSoundCloudSermon.js`, `speakerMutations.js`, `utils.js`, `Holy Week Flow`, `setup.mjs`, `runtimeAlerts.test.js`, `subsplashSecrets.js`, `List.js`, `withIdempotency.js`, `configure-algolia-speaker-sorting.mjs`, `processAudioQueueCleanup.js`, `tasks`, `devExternalServiceMocks.js`, `publishedListDrift.js`, `temporal-legacy-upload-drain.firestore.test.mjs`?**
+  _High betweenness centrality (0.070) - this node is a cross-community bridge._
+- **Why does `token()` connect `speakerMutations.ts` to `createNewSubsplashList.js`, `backfillListOverflowMetadata.js`, `inviteTypes.js`, `soundcloudSecrets.js`, `index.ts`, `updateAllSpeakerTags.ts`, `reorderListItems.js`, `firestoreDataConverter.js`, `addintrooutrotaskhandler.js`, `firestoreHelpers.js`, `User.js`, `firestoreDataConverter.js`, `firestoreDataConverter.js`, `index.js`?**
+  _High betweenness centrality (0.062) - this node is a cross-community bridge._
+- **Why does `run()` connect `index.js` to `speakerMutations.ts`?**
+  _High betweenness centrality (0.044) - this node is a cross-community bridge._
 - **What connects `printWidth`, `semi`, `singleQuote` to the rest of the system?**
-  _3995 weakly-connected nodes found - possible documentation gaps or missing edges._
+  _4067 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `createAxiosConfig` be split into smaller, more focused modules?**
-  _Cohesion score 0.05837837837837838 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.07597895967270601 - nodes in this community are weakly interconnected._
 - **Should `addToList.ts` be split into smaller, more focused modules?**
-  _Cohesion score 0.057859703020993344 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.058699101004759384 - nodes in this community are weakly interconnected._
 - **Should `firestoreDataConverter.ts` be split into smaller, more focused modules?**
-  _Cohesion score 0.039733676975945015 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.038445017182130586 - nodes in this community are weakly interconnected._

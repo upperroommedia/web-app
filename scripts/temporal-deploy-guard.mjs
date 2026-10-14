@@ -128,14 +128,14 @@ async function main() {
   const { firestore } = firebaseAdmin(project),
     operationId = randomUUID();
   let sourceControl = (await firestore.doc(CONTROL_PATH).get()).data();
-  assertCheckoutSource(root, commit, { project, control: sourceControl });
+  assertCheckoutSource(root, commit, { project, control: sourceControl, release, includeStagingSearch: options.includes('--include-staging-search') });
   const deadline = Date.now() + 55 * 60 * 1000;
   while (!(await acquireDeploymentLock(firestore, { operationId, commit, release, phase: value('--phase') }))) {
     if (Date.now() >= deadline) throw new Error('Automatic deployment lock remains busy; no expired lock is stolen');
     await new Promise((accept) => setTimeout(accept, 5000));
   }
   sourceControl = (await firestore.doc(CONTROL_PATH).get()).data();
-  assertCheckoutSource(root, commit, { project, control: sourceControl });
+  assertCheckoutSource(root, commit, { project, control: sourceControl, release, includeStagingSearch: options.includes('--include-staging-search') });
   console.log(`Acquired deployment operation ${operationId} for ${project} at ${commit}.`);
   // Release only after every submitted command exits successfully. Process crashes, failed
   // commands and signals leave nonexpiring authority behind for explicit reconciliation.
@@ -151,11 +151,14 @@ async function main() {
         '--commit',
         commit,
         '--apply',
+        ...(options.includes('--include-staging-search')
+          ? ['--include-staging-search', '--release', value('--release') ?? '']
+          : []),
       ],
       { environment: commandEnvironment }
     );
   await runGuardedCommand(child[0], child.slice(1), { environment: commandEnvironment });
-  assertCheckoutSource(root, commit, { project, control: sourceControl });
+  assertCheckoutSource(root, commit, { project, control: sourceControl, release, includeStagingSearch: options.includes('--include-staging-search') });
   await releaseDeploymentLock(firestore, operationId);
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href)

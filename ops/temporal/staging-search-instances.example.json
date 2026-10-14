@@ -1,0 +1,62 @@
+{
+  "users-index": {
+    "projectId": "urm-app-staging",
+    "appId": "2VZFOFLFHE",
+    "location": "us-central1",
+    "indexName": "users",
+    "collectionPath": "users",
+    "altObjectId": "",
+    "transformFunction": "",
+    "recordPolicy": "empty-private",
+    "fields": "__empty_private_index__",
+    "writeKey": "REQUIRED_INSTANCE_SCOPED_PRIVATE_WRITE_KEY"
+  },
+  "speakers-index": {
+    "projectId": "urm-app-staging",
+    "appId": "2VZFOFLFHE",
+    "location": "us-central1",
+    "indexName": "speakers",
+    "collectionPath": "speakers",
+    "altObjectId": "",
+    "transformFunction": "",
+    "recordPolicy": "allowlist",
+    "fields": "id,name,shortDescription,description,sermonCount,listId,tagId,images.id,images.size,images.type,images.height,images.width,images.downloadLink,images.name,images.dateAddedMillis,images.subsplashId,images.averageColorHex,images.vibrantColorHex",
+    "writeKey": "REQUIRED_INSTANCE_SCOPED_PRIVATE_WRITE_KEY"
+  },
+  "sermons-index": {
+    "projectId": "urm-app-staging",
+    "appId": "2VZFOFLFHE",
+    "location": "us-central1",
+    "indexName": "sermons",
+    "collectionPath": "sermons",
+    "altObjectId": "",
+    "transformFunction": "",
+    "recordPolicy": "allowlist",
+    "fields": "id,title,subtitle,description,dateMillis,dateString,createdAtMillis,editedAtMillis,sourceStartTime,durationSeconds,topics,uploaderId,uploaderDisplayName,numberOfLists,numberOfListsUploadedTo,subsplashId,soundCloudTrackId,soundCloudTrackUrl,youtubeUrl,seriesId,seriesName,seriesPublishedToSubsplash,status.subsplash,status.soundCloud,status.audioStatus,speakers.id,speakers.name,images.id,images.size,images.type,images.height,images.width,images.downloadLink,images.name,images.dateAddedMillis,images.subsplashId,images.averageColorHex,images.vibrantColorHex,seriesImage.id,seriesImage.size,seriesImage.type,seriesImage.height,seriesImage.width,seriesImage.downloadLink,seriesImage.name,seriesImage.dateAddedMillis,seriesImage.subsplashId,seriesImage.averageColorHex,seriesImage.vibrantColorHex,publishActivity.listOperation,publishActivity.seriesOperation,publishActivity.soundCloudOperation,publishActivity.updatedAtMillis",
+    "writeKey": "REQUIRED_INSTANCE_SCOPED_PRIVATE_WRITE_KEY"
+  },
+  "images-index": {
+    "projectId": "urm-app-staging",
+    "appId": "2VZFOFLFHE",
+    "location": "us-central1",
+    "indexName": "images",
+    "collectionPath": "images",
+    "altObjectId": "",
+    "transformFunction": "",
+    "recordPolicy": "allowlist",
+    "fields": "id,size,type,height,width,downloadLink,name,dateAddedMillis,subsplashId,averageColorHex,vibrantColorHex",
+    "writeKey": "REQUIRED_INSTANCE_SCOPED_PRIVATE_WRITE_KEY"
+  },
+  "lists-index": {
+    "projectId": "urm-app-staging",
+    "appId": "2VZFOFLFHE",
+    "location": "us-central1",
+    "indexName": "lists",
+    "collectionPath": "lists",
+    "altObjectId": "",
+    "transformFunction": "",
+    "recordPolicy": "allowlist",
+    "fields": "id,name,count,logicalCount,hasOverflowPages,maxListSize,type,createdAtMillis,updatedAtMillis,overflowBehavior,subsplashId,moreSermonsRef,isMoreSermonsList,isRootList,rootListId,overflowDepth,images.id,images.size,images.type,images.height,images.width,images.downloadLink,images.name,images.dateAddedMillis,images.subsplashId,images.averageColorHex,images.vibrantColorHex,listTagAndPosition.listTag,listTagAndPosition.position,listTagAndPosition.year,listTagAndPosition.holyWeekKind,listTagAndPosition.day",
+    "writeKey": "REQUIRED_INSTANCE_SCOPED_PRIVATE_WRITE_KEY"
+  }
+}

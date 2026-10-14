@@ -1,6 +1,7 @@
 /* Copyright 2021 Algolia. Adapted from firestore-algolia-search 1.3.0.
  * Licensed under the Apache License, Version 2.0; see ../LICENSE.
  */
+import stagingSchema from './staging-search.json';
 import { DocumentReference, DocumentSnapshot, GeoPoint, Timestamp } from 'firebase-admin/firestore';
 
 export interface RecordConfig { fields: string; altObjectId: string; transformFunction: string; location: string; projectId: string }
@@ -26,9 +27,44 @@ export function processData(data: Record<string, unknown>): Record<string, unkno
   }
   return output;
 }
+function scalarLeaf(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(scalarLeaf).filter(item => item !== undefined);
+  return ['string', 'number', 'boolean'].includes(typeof value) ? value : undefined;
+}
+/** Stage records are a leaf whitelist, including nested objects and arrays. */
+function projectFields(value: unknown, paths: string[][]): unknown {
+  if (Array.isArray(value)) return value.map(item => projectFields(item, paths));
+  if (!value || typeof value !== 'object') return undefined;
+  const output: Record<string, unknown> = {};
+  const groups = new Map<string, string[][]>();
+  for (const [head, ...tail] of paths) {
+    if (['__proto__', 'prototype', 'constructor'].includes(head)) throw new Error('Unsafe search field');
+    groups.set(head, [...(groups.get(head) ?? []), tail]);
+  }
+  for (const [name, tails] of groups) {
+    const input = (value as Record<string, unknown>)[name];
+    const selected = tails.some(tail => !tail.length) ? scalarLeaf(input) : projectFields(input, tails);
+    if (selected !== undefined && selected !== null) output[name] = selected;
+  }
+  return output;
+}
+export function stagingRecordPolicy(projectId: string, collectionPath: string): 'allowlist' | 'empty-private' | undefined {
+  if (projectId !== stagingSchema.projectId) return undefined;
+  const instance = stagingSchema.instances.find(row => row.collectionPath === collectionPath);
+  if (!instance) throw new Error('Unapproved staging search collection');
+  return instance.recordPolicy as 'allowlist' | 'empty-private';
+}
 export async function extract(snapshot: DocumentSnapshot, config: RecordConfig): Promise<Record<string, unknown> & {objectID: string}> {
   const selected = fields(config.fields);
-  const data = selected.length ? Object.fromEntries(selected.map(field => [field, snapshot.get(field)])) : snapshot.data() ?? {};
+  const collection = snapshot.ref.path.split('/').slice(0, -1).join('/');
+  const policy = stagingRecordPolicy(config.projectId, collection);
+  if (policy === 'empty-private') throw new Error('The staging users index must remain empty/private');
+  const schema = policy && stagingSchema.instances.find(row => row.collectionPath === collection)!;
+  if (schema && (config.transformFunction || config.altObjectId || JSON.stringify([...selected].sort()) !== JSON.stringify([...schema.fields].sort()))) {
+    throw new Error('Staging search requires the exact reviewed field whitelist and identity policy');
+  }
+  const data = schema ? projectFields(snapshot.data() ?? {}, selected.map(field => field.split('.'))) as Record<string, unknown>
+    : selected.length ? Object.fromEntries(selected.map(field => [field, snapshot.get(field)])) : snapshot.data() ?? {};
   let payload = {...processData(data), objectID: objectId(snapshot, config.altObjectId), path: snapshot.ref.path};
   if (config.transformFunction) {
     const response = await fetch(`https://${config.location}-${config.projectId}.cloudfunctions.net/${config.transformFunction}`, {

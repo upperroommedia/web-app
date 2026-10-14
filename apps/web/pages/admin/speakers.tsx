@@ -46,7 +46,7 @@ const listSpeakerRequestsCallable = createFunctionV2<ListSpeakerRequestsInputTyp
   'listspeakerrequests'
 );
 const AdminSpeakers = () => {
-  const { searchClient, loading: searchClientLoading, clearCache } = useAlgoliaSearch();
+  const { sharedSearchClient: searchClient, loading: searchClientLoading, clearCache } = useAlgoliaSearch();
   const [trackedSpeakerId, setTrackedSpeakerId] = useState('');
   const { jobs } = useEntityJobs({ type: 'speaker', id: trackedSpeakerId });
   const settledJobRevision = jobs

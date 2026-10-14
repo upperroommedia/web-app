@@ -144,7 +144,13 @@ test('Both push/dispatch workflows guard every backend mutation and materialize 
       );
       if (/firebase-deploy-with-quota-retry\.sh deploy/.test(step)) assert.match(step, /--materialize-function-env --/);
     }
-    assert.equal(count, 10);
+    assert.equal(count, environment === 'staging' ? 11 : 10);
+    if (environment === 'staging') {
+      assert.match(source, /staging_search_release:/);
+      assert.match(source, /--install --only-search/);
+      assert.match(source, /--phase ownership-changed --include-staging-search --materialize-function-env/);
+      assert.match(source, /--install --without-search/);
+    }
     for (const job of source.split(/\n  (?=[a-z][\w-]*:\n)/)) {
       const mutation = job.indexOf('run: node scripts/temporal-deploy-guard.mjs');
       if (mutation >= 0)

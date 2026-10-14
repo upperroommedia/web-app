@@ -8,6 +8,7 @@ import {
 } from './materialize-catalog-for-firebase.mjs';
 import { selectKitDeployConfig, selectLegacyDeployConfig } from './create-kit-deploy-config.mjs';
 import { deployedKitSources, validateKitNpmLock } from './kit-npm-lock-contract.mjs';
+import { assertStagingSearchEnvironmentRelease } from './temporal-staging-search-env.mjs';
 import { firebaseEnvironmentSources, flagsForControl, upsertFunctionFlags } from './temporal-release-lib.mjs';
 
 export function assertCheckoutCommit(actual, claimed) {
@@ -15,7 +16,7 @@ export function assertCheckoutCommit(actual, claimed) {
     throw new Error('Deployment commit must equal the actual immutable checkout SHA');
   return actual;
 }
-export function assertCheckoutSource(root, commit, { project, control } = {}) {
+export function assertCheckoutSource(root, commit, { project, control, includeStagingSearch = false, release } = {}) {
   const git = (args) => execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
   assertCheckoutCommit(git(['rev-parse', 'HEAD']).trim(), commit);
   const original = (file) => git(['show', `${commit}:${file}`]);
@@ -62,8 +63,9 @@ export function assertCheckoutSource(root, commit, { project, control } = {}) {
       throw new Error(`Deployment source differs from pinned commit: ${file}`);
     validateKitNpmLock(JSON.parse(original(`${source}/package.json`)), JSON.parse(pinned));
   }
+  if (includeStagingSearch) assertStagingSearchEnvironmentRelease({ project, release, control, commit });
   const environmentFiles = project
-    ? firebaseEnvironmentSources(input, project).map((source) => `${source}/.env.${project}`)
+    ? firebaseEnvironmentSources(input, project, { includeStagingSearch }).map((source) => `${source}/.env.${project}`)
     : [];
   for (const file of changed) {
     const path = resolve(root, file);
@@ -80,9 +82,17 @@ export function assertCheckoutSource(root, commit, { project, control } = {}) {
     if (expected === undefined || actual !== expected)
       throw new Error(`Deployment source differs from pinned commit: ${file}`);
   }
+  const hasSearch = (Array.isArray(input.functions) ? input.functions : [input.functions]).some(
+    (entry) => entry?.kit === 'firestore-algolia-search'
+  );
+  const searchAllowed = project !== 'urm-app-staging' || includeStagingSearch;
   const generated = {
     'firebase.legacy.json': [selectLegacyDeployConfig(input)],
-    'firebase.kits.json': [selectKitDeployConfig(input), selectKitDeployConfig(input, { withoutSearch: true })],
+    'firebase.kits.json': [
+      ...(!hasSearch || searchAllowed ? [selectKitDeployConfig(input)] : []),
+      selectKitDeployConfig(input, { withoutSearch: true }),
+      ...(hasSearch && searchAllowed ? [selectKitDeployConfig(input, { onlySearch: true })] : []),
+    ],
   };
   for (const [file, allowed] of Object.entries(generated)) {
     const path = resolve(root, file);

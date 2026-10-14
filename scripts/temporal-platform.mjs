@@ -6,6 +6,8 @@ import { fileURLToPath } from 'node:url';
 import { BlockList, isIP } from 'node:net';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const stagingSearch = JSON.parse(await readFile(resolve(root, 'packages/contracts/staging-search.json'), 'utf8'));
+
 export const versions = JSON.parse(await readFile(resolve(root, 'ops/temporal/versions.json'), 'utf8'));
 export const emailPublicAddressRanges = JSON.parse(
   await readFile(resolve(root, 'function-kits/firestore-send-email/src/temporal/public-address-ranges.json'), 'utf8')
@@ -562,6 +564,12 @@ export function validateConfig(config, peer) {
     )
   )
     throw new Error('workerRoles must explicitly include orchestration and known domain roles without duplicates');
+  if (config.firebaseProjectId === stagingSearch.projectId && config.workerRoles.includes('search')) {
+    const search = config.search;
+    if (!search || search.appId !== stagingSearch.appId || search.configSecret !== 'temporal-search-config' ||
+        search.replicas !== 1 || JSON.stringify(search.instanceIds) !== JSON.stringify(stagingSearch.instances.map(i => i.instanceId)))
+      throw new Error('Staging search requires the reviewed app, exact five-instance private Secret and one bounded worker');
+  }
   if (config.workerRoles.includes('email')) {
     const e = config.emailEgress;
     if (
@@ -1088,6 +1096,10 @@ export function renderPlatform(c) {
       };
     }
     if (role === 'search') {
+      if (c.firebaseProjectId === stagingSearch.projectId) {
+        deployment.spec.replicas = 1;
+        container.resources = { requests: { cpu: '100m', memory: '256Mi' }, limits: { cpu: '1', memory: '512Mi' } };
+      }
       container.env.push({ name: 'TEMPORAL_SEARCH_CONFIG_FILE', value: '/run/search/instances.json' });
       container.volumeMounts.push({ name: 'search', mountPath: '/run/search', readOnly: true });
       deployment.spec.template.spec.volumes.push({
