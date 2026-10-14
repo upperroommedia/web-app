@@ -289,3 +289,7 @@ cutover after the existing six-domain release is complete. Follow the
 target deployment, real pause/grace, settings, controller `bootstrap-search`, UI
 convergence gates and post-open validation. Automatic broad kit deploys continue
 to exclude search; a compiled search UI must not roll out before this gate.
+
+### Release operator ADC prerequisite
+
+The corrected `scripts/temporal-release.mjs` and bundle verifier require a local ADC JSON file of type `authorized_user` or `service_account`, provisioned on the protected `temporal-release` self-hosted runner as well as operator machines. Compute metadata, external-account/WIF and impersonated ADC are currently unsupported and fail before SDK/network acquisition. The repository's selective/audio WIF workflows do not invoke this release controller; do not assume their authentication config applies to the self-hosted runner. See [BUNDLE_BOOTSTRAP.md](./BUNDLE_BOOTSTRAP.md#corrected-operator-with-a-frozen-application-runtime) for the bounded official SDK transport, separate operator/runtime commits, explicit resource binding, and unknown-acknowledgement reconciliation. Keep the original release descriptor and frozen runtime checkout; the corrected operator owns its SDK cleanup and runs directly without the historical private launcher.

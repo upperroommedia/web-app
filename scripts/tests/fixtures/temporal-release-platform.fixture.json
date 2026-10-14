@@ -1,0 +1,78 @@
+{
+  "environment": "staging",
+  "context": "single-vm-staging",
+  "clusterUid": "single-vm-staging-uid",
+  "namespace": "temporal-staging",
+  "temporalNamespace": "urm-app-staging.qwejt",
+  "firebaseProjectId": "urm-app-staging",
+  "applicationEgressCidrs": ["0.0.0.0/0"],
+  "retention": "7d",
+  "imagePullSecrets": [],
+  "workerImage": "ghcr.io/upperroommedia/temporal-worker@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "workerBuildId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "workerDeploymentName": "urm-worker-staging",
+  "workerReplicas": 1,
+  "workerRoles": ["orchestration", "controls", "media", "email", "images", "search"],
+  "workerPort": 8080,
+  "search": {
+    "appId": "2VZFOFLFHE",
+    "configSecret": "temporal-search-config",
+    "replicas": 1,
+    "instanceIds": ["users-index", "speakers-index", "sermons-index", "images-index", "lists-index"]
+  },
+  "emailEgress": {
+    "schemaVersion": 1,
+    "provider": "smtp",
+    "hostname": "smtp.example.org",
+    "port": 465,
+    "tls": "implicit",
+    "addresses": ["64.233.179.109"]
+  },
+  "kubernetesApiEndpoints": [
+    {
+      "cidr": "10.43.0.1/32",
+      "port": 443
+    },
+    {
+      "cidr": "10.0.0.1/32",
+      "port": 6443
+    }
+  ],
+  "workerIdentityNodeNames": ["urm-temporal-staging"],
+  "media": {
+    "concurrency": 1,
+    "sourceLimitGiB": 20,
+    "outputLimitGiB": 20,
+    "workspaceGiB": 64,
+    "headroomGiB": 16,
+    "scratchStorage": "100Gi",
+    "retainedVersions": 2,
+    "storageBudget": "400Gi",
+    "storageClass": "temporal-media-local"
+  },
+  "firebaseResources": {
+    "storageBucket": "urm-app-staging.firebasestorage.app",
+    "imagesBucket": "urm-app-staging-images",
+    "databaseUrl": "https://urm-app-staging-default-rtdb.firebaseio.com/"
+  },
+  "workerHosting": "gce-k3s",
+  "connectionMode": "temporal-cloud",
+  "cloudAccountId": "qwejt",
+  "cloudProvider": "gcp",
+  "cloudRegion": "us-central1",
+  "cloudAddress": "urm-app-staging.qwejt.tmprl.cloud:7233",
+  "cloudReplicaRegions": [],
+  "cloudEvidence": "/secure/cloud-proof.json",
+  "gce": {
+    "instanceName": "urm-temporal-staging",
+    "instanceId": "12345",
+    "zone": "us-central1-a",
+    "machineType": "e2-standard-4",
+    "serviceAccount": "temporal-worker@urm-app-staging.iam.gserviceaccount.com",
+    "privateIp": "10.10.0.2",
+    "mediaMount": "/var/lib/urm-temporal/media",
+    "mediaDiskGiB": 470,
+    "mediaRequiredCapacityGiB": 400,
+    "mediaFilesystemEvidence": "/private/actual-mount.json"
+  }
+}

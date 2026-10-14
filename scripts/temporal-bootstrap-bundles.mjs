@@ -3,6 +3,19 @@ import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { readFileSync } from 'node:fs';
+import {
+  pinReleaseCheckouts,
+  loadReleaseResourceBinding,
+  loadVerifiedRuntimeApplication,
+  artifactProof,
+  assertSameArtifact,
+  hash,
+  proofDigest,
+  verifyReleaseResourceIdentity,
+  prepareLocalReleaseADC,
+} from './temporal-release-runtime.mjs';
+import { runWithCleanup } from './temporal-release-resources.mjs';
 
 export const BUNDLE_TYPES = Object.freeze([
   'topics',
@@ -128,6 +141,9 @@ export async function runBundleBootstrap(options, deps) {
         bundleTypes: [...BUNDLE_TYPES],
         jobIds: proofs.map((p) => p.entity.activeJobId),
         bootstrapJobIds,
+        ...(deps.artifactProofs
+          ? { artifactProofs: deps.artifactProofs(), operatorRuntime: deps.operatorRuntime }
+          : {}),
       };
     }
     await sleep(options.pollMs ?? 2000);
@@ -157,71 +173,169 @@ export function isolateFirebaseEnvironment(projectId, env = process.env) {
   env.NODE_ENV = 'production';
   env.TASK_ORCHESTRATOR_BUNDLES = 'temporal';
 }
-async function firebaseDependencies(options) {
+export async function firebaseDependencies(options) {
   isolateFirebaseEnvironment(options.projectId);
-  const require = createRequire(resolve(root, 'package.json'));
-  require('ts-node').register({ project: resolve(root, 'functions/tsconfig.json'), transpileOnly: true });
-  require('tsconfig-paths').register({
-    baseUrl: resolve(root, 'functions'),
-    paths: {
-      '@upperroom/contracts/*': ['../packages/contracts/*'],
-      '@upperroom/shared/*': ['../packages/shared/*'],
-      '@upperroom/orchestration/*': ['../packages/orchestration/src/*'],
-    },
-  });
-  const admin = require(resolve(root, 'packages/shared/firebase/firebaseAdmin.ts')).default;
-  if (admin.app().options.projectId !== options.projectId) throw fail('BOOTSTRAP_PROJECT_MISMATCH');
-  const { submitServerDurableJob } = require(resolve(root, 'functions/src/temporal/bridge.ts'));
-  const { durableEntityKey } = require(resolve(root, 'packages/orchestration/src/job-store.ts'));
-  const db = admin.firestore();
-  const controlRef = db.doc('_control/temporalRelease');
-  async function readProofs(types, tx) {
-    const get = (ref) => (tx ? tx.get(ref) : ref.get());
-    const proofs = [];
-    for (const type of types) {
-      const entity = (
-        await get(
-          db
-            .collection('durableJobEntities')
-            .doc(durableEntityKey(options.projectId, { type: 'bundle', id: type }, 'bundle.regenerate'))
-        )
-      ).data();
-      const job = entity?.activeJobId
-        ? (await get(db.collection('durableJobs').doc(entity.activeJobId))).data()
-        : undefined;
-      const pointer = (await get(db.collection('_durableBundlePointers').doc(type))).data();
-      proofs.push({ entity, job, pointer });
-    }
-    return proofs;
-  }
-  return {
-    readControl: async () => (await controlRef.get()).data(),
-    submit: submitServerDurableJob,
-    readProofs,
-    async readArtifact(path) {
-      const file = admin.storage().bucket().file(path);
-      try {
-        const [m] = await file.getMetadata();
-        return { exists: true, contentType: m.contentType, metadata: m.metadata, size: m.size };
-      } catch (error) {
-        if (error.code === 404) return { exists: false };
-        throw error;
-      }
-    },
-    confirmProofs: (expected, opts) =>
-      db.runTransaction(async (tx) => {
-        assertBootstrapControl((await tx.get(controlRef)).data(), opts);
-        const latest = await readProofs(BUNDLE_TYPES, tx);
-        return latest.every(
-          (p, i) =>
-            validateBundleProof(p, opts.projectId, BUNDLE_TYPES[i]) &&
-            p.entity.activeJobId === expected[i].entity.activeJobId &&
-            p.entity.generation === expected[i].entity.generation &&
-            p.pointer.storagePath === expected[i].pointer.storagePath &&
-            p.pointer.count === expected[i].pointer.count
-        );
-      }),
+  if (!options.releasePath) throw fail('BOOTSTRAP_REVIEWED_RESOURCES_REQUIRED');
+  const descriptorBytes = readFileSync(options.releasePath);
+  const config = JSON.parse(descriptorBytes);
+  if (config.projectId !== options.projectId || config.releaseId !== options.releaseId)
+    throw fail('BOOTSTRAP_CONTROL_MISMATCH');
+  const binding = pinReleaseCheckouts(root, options.runtimeRoot ?? root, config);
+  const resourceBinding = loadReleaseResourceBinding(config);
+  const runtimeRoot = binding.runtimeRoot;
+  const identity = {
+    descriptorSHA256: hash(descriptorBytes),
+    operatorRoot: binding.operatorRoot,
+    runtimeRoot: binding.runtimeRoot,
+    operatorCommit: binding.operatorCommit,
+    runtimeCommit: binding.runtimeCommit,
+    operatorClosureDigest: binding.operatorClosureDigest,
+    runtimePins: binding.runtimePins,
+    resourceBinding,
   };
+  if (options.operatorBindingDigest && options.operatorBindingDigest !== proofDigest(identity))
+    throw fail('BOOTSTRAP_OPERATOR_BINDING_CHANGED');
+  const require = createRequire(resolve(runtimeRoot, 'package.json'));
+  const { initializeApp, getApps, deleteApp } = require('firebase-admin/app');
+  const { getFirestore } = require('firebase-admin/firestore');
+  const { getDatabase } = require('firebase-admin/database');
+  if (getApps().length) throw fail('BOOTSTRAP_STANDALONE_SDK_REQUIRED');
+  const adc = prepareLocalReleaseADC(runtimeRoot, config.projectId);
+  let app;
+  try {
+    app = initializeApp({
+      projectId: config.projectId,
+      databaseURL: resourceBinding.resources.databaseUrl,
+      storageBucket: resourceBinding.resources.storageBucket,
+      credential: adc.credential,
+    });
+  } catch (error) {
+    adc.close();
+    throw error;
+  }
+  let admin, db, database;
+  const close = async () => {
+    const failures = [];
+    for (const step of [() => database?.goOffline(), () => db?.terminate(), () => deleteApp(app), () => adc.close()])
+      try {
+        await step();
+      } catch {
+        failures.push(true);
+      }
+    if (failures.length) throw fail('BOOTSTRAP_SDK_CLEANUP_FAILED');
+  };
+  try {
+    db = getFirestore(app);
+    database = getDatabase(app);
+    await loadVerifiedRuntimeApplication(binding, config, db, async () => {
+      require('ts-node').register({ project: resolve(runtimeRoot, 'functions/tsconfig.json'), transpileOnly: true });
+      require('tsconfig-paths').register({
+        baseUrl: resolve(runtimeRoot, 'functions'),
+        paths: {
+          '@upperroom/contracts/*': ['../packages/contracts/*'],
+          '@upperroom/shared/*': ['../packages/shared/*'],
+          '@upperroom/orchestration/*': ['../packages/orchestration/src/*'],
+        },
+      });
+      admin = require(resolve(runtimeRoot, 'packages/shared/firebase/firebaseAdmin.ts')).default;
+      if (admin.app().options.projectId !== options.projectId || admin.app() !== app)
+        throw fail('BOOTSTRAP_PROJECT_MISMATCH');
+    });
+    const resourceIdentity = await verifyReleaseResourceIdentity(resourceBinding, async (url) => {
+      try {
+        const access = await adc.credential.getAccessToken();
+        const response = await fetch(url, {
+          headers: { Authorization: `Bearer ${access.access_token}` },
+          signal: AbortSignal.timeout(60_000),
+        });
+        if (!response.ok) throw fail('BOOTSTRAP_RESOURCE_IDENTITY_FAILED');
+        return await response.json();
+      } catch {
+        throw fail('BOOTSTRAP_RESOURCE_IDENTITY_FAILED');
+      }
+    });
+    const { submitServerDurableJob } = require(resolve(runtimeRoot, 'functions/src/temporal/bridge.ts'));
+    const { durableEntityKey } = require(resolve(runtimeRoot, 'packages/orchestration/src/job-store.ts'));
+    const controlRef = db.doc('_control/temporalRelease');
+    const artifacts = new Map();
+    async function readProofs(types, tx) {
+      const get = (ref) => (tx ? tx.get(ref) : ref.get());
+      const proofs = [];
+      for (const type of types) {
+        const entity = (
+          await get(
+            db
+              .collection('durableJobEntities')
+              .doc(durableEntityKey(options.projectId, { type: 'bundle', id: type }, 'bundle.regenerate'))
+          )
+        ).data();
+        const job = entity?.activeJobId
+          ? (await get(db.collection('durableJobs').doc(entity.activeJobId))).data()
+          : undefined;
+        const pointer = (await get(db.collection('_durableBundlePointers').doc(type))).data();
+        proofs.push({ entity, job, pointer });
+      }
+      return proofs;
+    }
+    return {
+      close,
+      operatorRuntime: {
+        operatorCommit: binding.operatorCommit,
+        runtimeCommit: binding.runtimeCommit,
+        operatorClosureDigest: binding.operatorClosureDigest,
+        resourceBinding,
+        resourceIdentity,
+      },
+      artifactProofs: () => BUNDLE_TYPES.map((type) => artifacts.get(type)),
+      readControl: async () => (await controlRef.get()).data(),
+      submit: submitServerDurableJob,
+      readProofs,
+      async readArtifact(path) {
+        const file = admin.storage().bucket().file(path);
+        try {
+          const [head] = await file.getMetadata();
+          const [m] = await admin
+            .storage()
+            .bucket(resourceBinding.resources.storageBucket)
+            .file(path, { generation: head.generation })
+            .getMetadata();
+          if (
+            String(m.generation) !== String(head.generation) ||
+            String(m.metageneration) !== String(head.metageneration)
+          )
+            throw fail('BOOTSTRAP_ARTIFACT_CHANGED');
+          const type = path.split('/')[2];
+          const pointer = (await db.collection('_durableBundlePointers').doc(type).get()).data();
+          if (pointer?.storagePath !== path) throw fail('BOOTSTRAP_PROOF_INVALID');
+          const proof = artifactProof(type, pointer, m, resourceBinding.resources.storageBucket);
+          const [currentHead] = await file.getMetadata();
+          assertSameArtifact(proof, artifactProof(type, pointer, currentHead, resourceBinding.resources.storageBucket));
+          artifacts.set(type, proof);
+          return { exists: true, contentType: m.contentType, metadata: m.metadata, size: m.size };
+        } catch (error) {
+          if (error.code === 404) return { exists: false };
+          throw error;
+        }
+      },
+      confirmProofs: (expected, opts) =>
+        db.runTransaction(async (tx) => {
+          assertBootstrapControl((await tx.get(controlRef)).data(), opts);
+          const latest = await readProofs(BUNDLE_TYPES, tx);
+          return latest.every(
+            (p, i) =>
+              validateBundleProof(p, opts.projectId, BUNDLE_TYPES[i]) &&
+              p.entity.activeJobId === expected[i].entity.activeJobId &&
+              p.entity.generation === expected[i].entity.generation &&
+              p.pointer.storagePath === expected[i].pointer.storagePath &&
+              p.pointer.count === expected[i].pointer.count
+          );
+        }),
+    };
+  } catch (error) {
+    await runWithCleanup(async () => {
+      throw error;
+    }, close);
+  }
 }
 export function parseBootstrapArgs(args) {
   if (!args.includes('--apply') || args.filter((v) => v === '--apply').length !== 1)
@@ -230,7 +344,15 @@ export function parseBootstrapArgs(args) {
   const values = {};
   for (let i = 0; i < args.length; i += 2) {
     if (
-      !['--project', '--release-id', '--control-revision', '--timeout-ms'].includes(args[i]) ||
+      ![
+        '--project',
+        '--release-id',
+        '--control-revision',
+        '--timeout-ms',
+        '--runtime-root',
+        '--release',
+        '--operator-binding-digest',
+      ].includes(args[i]) ||
       !args[i + 1] ||
       values[args[i]]
     )
@@ -241,6 +363,9 @@ export function parseBootstrapArgs(args) {
     projectId: values['--project'],
     releaseId: values['--release-id'],
     controlRevision: Number(values['--control-revision']),
+    ...(values['--operator-binding-digest'] ? { operatorBindingDigest: values['--operator-binding-digest'] } : {}),
+    ...(values['--runtime-root'] ? { runtimeRoot: resolve(values['--runtime-root']) } : {}),
+    ...(values['--release'] ? { releasePath: resolve(values['--release']) } : {}),
   };
   if (values['--timeout-ms'] !== undefined) {
     options.timeoutMs = Number(values['--timeout-ms']);
@@ -258,7 +383,8 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   else {
     try {
       const options = parseBootstrapArgs(process.argv.slice(2));
-      const result = await runBundleBootstrap(options, await firebaseDependencies(options));
+      const deps = await firebaseDependencies(options);
+      const result = await runWithCleanup(() => runBundleBootstrap(options, deps), deps.close);
       console.log(JSON.stringify(result));
     } catch (error) {
       console.error(/^BOOTSTRAP_|^INVALID_BOOTSTRAP_/.test(error.code ?? '') ? error.code : 'BOOTSTRAP_FAILED');

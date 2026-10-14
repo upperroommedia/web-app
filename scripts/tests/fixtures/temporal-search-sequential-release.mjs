@@ -11,6 +11,8 @@ import * as os from 'node:os';
 import * as crypto from 'node:crypto';
 import * as net from 'node:net';
 import * as urlApi from 'node:url';
+import * as httpsApi from 'node:https';
+import { execFileSync as realExecFileSync } from 'node:child_process';
 import { PROVIDER_USAGE_SCAN_GROUPS } from '../../temporal-backfill-provider-usage.mjs';
 const root = urlApi.fileURLToPath(new URL('../../../', import.meta.url));
 const require = moduleApi.createRequire(new URL('../../../package.json', import.meta.url));
@@ -24,6 +26,31 @@ require('tsconfig-paths').register({
   },
 });
 const { Timestamp } = require('firebase-admin/firestore');
+const { OAuth2Client } = moduleApi.createRequire(require.resolve('firebase-admin/app'))('google-auth-library');
+class FixtureOAuth2Client extends OAuth2Client {
+  constructor() {
+    super();
+    this.transporter = {
+      request: async (options) => {
+        assert.equal(options.method, 'POST');
+        assert.equal(new URL(options.url).search, '');
+        assert.equal(
+          options.headers.get?.('authorization') ?? options.headers.authorization,
+          'Bearer emulator-only-offline-token'
+        );
+        return {
+          data: {
+            email: 'fixture@example.test',
+            email_verified: true,
+            sub: 'fixture',
+            scope: 'openid email',
+            expires_in: 3600,
+          },
+        };
+      },
+    };
+  }
+}
 const { createDurableJobStore } = require(path.join(root, 'packages/orchestration/src/job-store.ts'));
 const projectId = 'urm-app-staging',
   oldReleaseId = 'a801c079-a832-4bfa-a526-ec385e49d27f';
@@ -75,7 +102,11 @@ const config = {
   smokeEvidence: '/fixture/smoke.json',
   searchSettingsEvidence: '/fixture/settings.json',
 };
+const platformFixture = JSON.parse(
+  fs.readFileSync(new URL('./temporal-release-platform.fixture.json', import.meta.url), 'utf8')
+);
 const platform = {
+  ...platformFixture,
   firebaseProjectId: projectId,
   workerBuildId: config.compatibilityCommit,
   workerRoles: ['orchestration', 'controls', 'media', 'email', 'images', 'search'],
@@ -90,6 +121,7 @@ const platform = {
     databaseUrl: `https://${projectId}-default-rtdb.firebaseio.com/`,
   },
   gce: {
+    ...platformFixture.gce,
     instanceName: 'urm-temporal-staging',
     serviceAccount: `temporal-worker@${projectId}.iam.gserviceaccount.com`,
   },
@@ -150,13 +182,38 @@ const records = new Map([
 const versions = new Map([['_control/temporalProviderUsage', { createTime: markerTime, updateTime: markerTime }]]);
 const files = new Map([
   ['/fixture/release.json', JSON.stringify(config)],
+  ['/fixture/home/.config/gcloud/application_default_credentials.json', JSON.stringify({ type: 'authorized_user' })],
+  [
+    '/fixture/peer.json',
+    JSON.stringify({
+      environment: 'production',
+      deploymentState: 'planned',
+      connectionMode: 'temporal-cloud',
+      workerHosting: 'gce-k3s',
+      firebaseProjectId: 'urm-app',
+      temporalNamespace: 'urm-app.qwejt',
+      cloudAccountId: 'qwejt',
+      cloudProvider: 'gcp',
+      cloudRegion: 'us-central1',
+    }),
+  ],
   ['/fixture/platform.json', JSON.stringify(platform)],
 ]);
 const actions = [],
   commands = [],
   apps = [],
   apiEvents = [];
-let currentModules, readinessProof, beforeTransaction, currentAction, rtdbFailure;
+let currentModules,
+  readinessProof,
+  beforeTransaction,
+  currentAction,
+  rtdbFailure,
+  runtimeFault,
+  runtimeGitReads = 0,
+  resumeOperation;
+const bundleMetadata = new Map();
+let bundleProof,
+  bootstrapInvocations = 0;
 const rtdbCanaryCalls = [],
   rejectedRtdbBoundaries = [];
 const rejectedBoundaries = [];
@@ -256,6 +313,13 @@ const firestore = {
       },
     };
     const result = await callback(tx);
+    const isBundleTransition =
+      writes.some(([, key]) => key.startsWith('_control/temporalReleaseOperatorAudit-')) &&
+      currentAction === 'bootstrap-bundles';
+    if (isBundleTransition && runtimeFault === 'unknown-not-applied') {
+      runtimeFault = 'retained';
+      throw new Error('UNKNOWN_ACK_NOT_APPLIED');
+    }
     for (const [operation, key, value] of writes) {
       if (operation === 'delete') {
         records.delete(key);
@@ -265,13 +329,22 @@ const firestore = {
         versions.set(key, { createTime: versions.get(key)?.createTime ?? native(clock), updateTime: native(clock) });
       }
     }
+    if (isBundleTransition && runtimeFault === 'unknown-applied') {
+      runtimeFault = 'retained';
+      throw new Error('UNKNOWN_ACK_APPLIED');
+    }
     return result;
   },
   terminate: async () => {},
 };
+let defaultCredential;
 const sdk = {
   getApps: () => apps,
-  applicationDefault: () => ({}),
+  applicationDefault: (agent) =>
+    (defaultCredential ??= {
+      googleAuth: { clientOptions: { transporterOptions: { agent } } },
+      getAccessToken: async () => ({ access_token: 'emulator-only-offline-token' }),
+    }),
   initializeApp: (options, name) => {
     const app = { options, name };
     apps.push(app);
@@ -343,7 +416,21 @@ async function fetchTransport(raw, options = {}) {
     };
   } else if (parsed.hostname === 'cloudtasks.googleapis.com')
     result = parsed.pathname.endsWith('/tasks') ? { tasks: [] } : { queues: [] };
-  else throw new Error('UNEXPECTED_NETWORK_' + raw);
+  else if (parsed.hostname === 'cloudresourcemanager.googleapis.com')
+    result = { projectId, projectNumber: '123456789', lifecycleState: 'ACTIVE' };
+  else if (parsed.hostname === 'storage.googleapis.com') {
+    if (parsed.pathname.includes('/o/')) {
+      const object = decodeURIComponent(parsed.pathname.split('/o/')[1]);
+      result = clone(bundleMetadata.get(object));
+      if (runtimeFault === 'retained-version' && !parsed.searchParams.has('generation'))
+        result.generation = String(Number(result.generation) + 1);
+    } else
+      result = {
+        name: platform.firebaseResources.storageBucket,
+        projectNumber: runtimeFault === 'resource' ? '999999' : '123456789',
+        metageneration: '1',
+      };
+  } else throw new Error('UNEXPECTED_NETWORK_' + raw);
   return { ok: status === 200, status, json: async () => clone(result) };
 }
 function bootstrapTransport(args) {
@@ -427,9 +514,38 @@ function bootstrapTransport(args) {
   };
   return JSON.stringify(readinessProof);
 }
-function childTransport(command, args) {
+function childTransport(command, args, options = {}) {
   commands.push({ command, args: [...args] });
+  if (command === 'git') {
+    if (args[0] === 'rev-parse') {
+      runtimeGitReads++;
+      return runtimeFault === 'runtime' && runtimeGitReads === 2 ? 'd'.repeat(40) : config.compatibilityCommit;
+    }
+    if (args[0] === 'ls-files')
+      return args.includes('--others')
+        ? ''
+        : realExecFileSync('git', ['ls-files', '-z'], { cwd: root, encoding: 'utf8' }) +
+            [
+              'scripts/temporal-release-runtime.mjs',
+              'scripts/temporal-release-runtime.test.mjs',
+              'scripts/tests/temporal-release-runtime.firestore.test.mjs',
+              'scripts/tests/fixtures/temporal-release-platform.fixture.json',
+            ].join('\0') +
+            '\0';
+    if (args[0] === 'diff') return '';
+    if (args[0] === 'show') {
+      const name = args[1].slice(args[1].indexOf(':') + 1);
+      const value = fs.readFileSync(path.join(root, name));
+      const bytes =
+        runtimeFault === 'operator' && name === 'scripts/temporal-release.mjs'
+          ? Buffer.concat([value, Buffer.from('//uncommitted')])
+          : value;
+      return options.encoding ? bytes.toString(options.encoding) : bytes;
+    }
+    throw new Error('UNEXPECTED_GIT');
+  }
   if (command === 'gcloud') {
+    if (args[1] === 'list') return 'fixture@example.test';
     assert.deepEqual([...args], ['auth', 'print-access-token']);
     return 'fixture-token';
   }
@@ -447,6 +563,35 @@ function childTransport(command, args) {
   const script = path.basename(args[0] ?? '');
   if (script === 'temporal-backfill-provider-usage.mjs') throw new Error('UNEXPECTED_LEGACY_PROVIDER_BACKFILL');
   if (script === 'temporal-bootstrap-search.mjs') return bootstrapTransport(args);
+  if (script === 'temporal-bootstrap-bundles.mjs') {
+    bootstrapInvocations++;
+    assert.equal(args[args.indexOf('--runtime-root') + 1], root.replace(/\/$/, ''));
+    assert.equal(options.cwd, root.replace(/\/$/, ''));
+    const boundary = currentModules.get(new URL('../../temporal-release-runtime.mjs', import.meta.url).href).namespace;
+    const binding = boundary.pinReleaseCheckouts(root, root, config);
+    const resourceBinding = boundary.loadReleaseResourceBinding(config);
+    const resourceIdentity = {
+      projectId,
+      projectNumber: '123456789',
+      bucket: platform.firebaseResources.storageBucket,
+      metageneration: '1',
+      resourceDigest: resourceBinding.resourceDigest,
+    };
+    return JSON.stringify({
+      ...bundleProof,
+      projectId,
+      releaseId,
+      controlRevision: records.get('_control/temporalRelease').revision,
+      result: 'passed',
+      operatorRuntime: {
+        operatorCommit: binding.operatorCommit,
+        runtimeCommit: binding.runtimeCommit,
+        operatorClosureDigest: binding.operatorClosureDigest,
+        resourceBinding,
+        resourceIdentity,
+      },
+    });
+  }
   if (script === 'deploy-temporal-platform.mjs') {
     assert(['preflight', 'worker-status', 'firebase-rtdb-canary'].includes(args[1]));
     if (args[1] === 'firebase-rtdb-canary') {
@@ -491,6 +636,8 @@ function childTransport(command, args) {
   throw new Error('UNEXPECTED_COMMAND_' + command + '_' + script);
 }
 async function run(action) {
+  defaultCredential = undefined;
+  runtimeGitReads = 0;
   currentAction = action;
   const context = createContext({
     process: {
@@ -501,9 +648,11 @@ async function run(action) {
         '--release',
         '/fixture/release.json',
         '--apply',
+        ...(resumeOperation ? ['--resume-operation', resumeOperation] : []),
       ],
-      env: {},
+      env: { HOME: '/fixture/home' },
       execPath: process.execPath,
+      cwd: () => root,
     },
     console: { log: () => {}, error: () => {} },
     URL,
@@ -550,19 +699,35 @@ async function run(action) {
       mkdtemp: async (prefix) => prefix + 'fixture',
       rm: async () => {},
     },
-    'node:fs': fs,
+    'node:fs': {
+      ...fs,
+      realpathSync: (p) => (files.has(String(p)) ? String(p) : fs.realpathSync(p)),
+      readFileSync: (file, encoding) => {
+        const p = String(file);
+        if (files.has(p)) return encoding ? files.get(p) : Buffer.from(files.get(p));
+        return fs.readFileSync(file, encoding);
+      },
+    },
     'node:path': path,
     'node:os': os,
     'node:crypto': crypto,
     'node:net': net,
+    'node:https': httpsApi,
     'node:url': urlApi,
-    'node:child_process': { execFileSync: childTransport },
+    'node:child_process': {
+      execFileSync: childTransport,
+      spawnSync: () => {
+        throw new Error('UNEXPECTED_SPAWN');
+      },
+    },
     'node:module': {
       ...moduleApi,
       createRequire: (location) => {
         const real = moduleApi.createRequire(location);
         const shim = (id) =>
-          id === 'firebase-admin/app'
+          id === 'google-auth-library'
+            ? { OAuth2Client: FixtureOAuth2Client }
+            : id === 'firebase-admin/app'
             ? sdk
             : id === 'firebase-admin/firestore'
             ? { Timestamp, FieldValue: sdk.FieldValue, getFirestore: sdk.getFirestore }
@@ -587,7 +752,15 @@ async function run(action) {
       context,
       identifier,
       initializeImportMeta: (meta) => (meta.url = identifier),
-      importModuleDynamically: (specifier) => load(new URL(specifier, identifier).href),
+      importModuleDynamically: async (specifier) => {
+        const dynamic = await load(new URL(specifier, identifier).href);
+        if (dynamic.status === 'unlinked')
+          await dynamic.link((name, parent) =>
+            load(name.startsWith('node:') ? name : new URL(name, parent.identifier).href)
+          );
+        if (dynamic.status === 'linked') await dynamic.evaluate();
+        return dynamic;
+      },
     });
     cache.set(identifier, mod);
     return mod;
@@ -604,7 +777,9 @@ async function run(action) {
       revision: records.get('_control/temporalRelease').revision,
     });
   } finally {
-    assert(!records.has('_control/temporalReleaseOperation'), 'operation lock must be cleaned');
+    if (runtimeFault === 'retained' || runtimeFault === 'op-replaced')
+      assert(records.has('_control/temporalReleaseOperation'), 'uncertain or changed operation must remain held');
+    else assert(!records.has('_control/temporalReleaseOperation'), 'operation lock must be cleaned');
     assert.equal(apps.length, 0, 'owned SDK app must be closed');
   }
 }
@@ -700,158 +875,330 @@ async function rejectsRtdbCanary(action, failure) {
   assert.equal(apps.length, 0, 'failed capability proof closes owned SDK apps');
   rejectedRtdbBoundaries.push(`${action}:${failure}`);
 }
-await run('freeze-ui');
-checkDomains();
-assert.equal(
-  records.get('_control/temporalRelease').legacyAdmissionCutoff,
-  undefined,
-  'old native cutoff must not be reused'
-);
-assert.deepEqual(
-  records.get('_control/temporalReleaseHistory-' + oldReleaseId),
-  priorState,
-  'predecessor state is preserved exactly'
-);
-evidence(config.compatibilityEvidence, {
-  commit: config.compatibilityCommit,
-  legacyAdmissionPauseVerified: true,
-  legacyAdmissionLeaseFencingVerified: true,
-  oldBrowserWritePauseVerified: true,
-  allSourcesDeployed: true,
-});
-await run('compatibility-ready');
-checkDomains();
-const cutoff = records.get('_control/temporalRelease').legacyAdmissionCutoff;
-assert(cutoff instanceof Timestamp);
-assert.notEqual(cutoff.seconds, oldCutoff.seconds);
-assert.equal(cutoff.toMillis(), clock);
-await assert.rejects(run('drain'), /full maximum legacy execution duration/);
-checkDomains();
-clock += 3600000;
-await run('drain');
-checkDomains();
-await rejectsMutation('marker body changed', 'provider-usage-ready', () =>
-  records.set('_control/temporalProviderUsage', { ...clone(marker), edgeCount: marker.edgeCount + 1 })
-);
-await rejectsMutation('marker missing', 'provider-usage-ready', () => records.delete('_control/temporalProviderUsage'));
-await rejectsMutation(
-  'archived predecessor changed',
-  'provider-usage-ready',
-  () => (records.get('_control/temporalReleaseHistory-' + oldReleaseId).providerUsageEpoch = 'foreign-epoch')
-);
-await rejectsMutation(
-  'first six owner drift',
-  'provider-usage-ready',
-  () => (records.get('_control/temporalRelease').domains.media.owner = 'legacy')
-);
-await rejectsMutation('unfinished non-search job', 'provider-usage-ready', () =>
-  records.set('durableJobs/unrelated', { projectId, jobId: 'unrelated', kind: 'sermon.publish', state: 'running' })
-);
-await run('provider-usage-ready');
-checkDomains();
-assert.deepEqual(
-  records.get('_control/temporalProviderUsage'),
-  marker,
-  'provider body and origin release stay unchanged'
-);
-assert.deepEqual(
-  versions.get('_control/temporalProviderUsage'),
-  { createTime: markerTime, updateTime: markerTime },
-  'provider native snapshot identity stays unchanged'
-);
-assert.equal(records.get('_control/temporalReleaseState').providerUsageEpoch, marker.epoch);
-await run('pause');
-checkDomains();
-assert.equal(records.get('_control/temporalReleaseState').pausedFrom, 'provider-usage-ready');
-await run('resume');
-checkDomains();
-assert.equal(records.get('_control/temporalReleaseState').phase, 'provider-usage-ready');
-for (const failure of ['cli', 'auth', 'cleanup']) await rejectsRtdbCanary('workers-ready', failure);
-await run('workers-ready');
-checkDomains();
-await run('take-ownership');
-checkDomains();
-assert.equal(records.get('_control/temporalRelease').domains.search.owner, 'temporal');
-evidence(config.backendEvidence, {
-  commit: config.compatibilityCommit,
-  allSourcesDeployed: true,
-  runtimeServicesDeployed: true,
-  facadeOwnershipVerified: true,
-});
-await run('backend-ready');
-checkDomains();
-await run('bootstrap-search');
-checkDomains();
-await run('rollout-ui');
-checkDomains();
-evidence(config.smokeEvidence, {
-  uiCommit: config.uiCommit,
-  backendOwnershipVerified: true,
-  workerReady: true,
-  oldBrowserWritesDenied: true,
-  scope: 'preopen-readonly-and-existing-jobs',
-  readonlySmokePassed: true,
-  claimsFreshWriteE2E: false,
-});
-await rejectsMutation(
-  'epoch changed at open transaction',
-  'open',
-  () => (records.get('_control/temporalProviderUsage').epoch = 'foreign-epoch'),
-  true
-);
-await rejectsMutation(
-  'status changed at open transaction',
-  'open',
-  () => (records.get('_control/temporalProviderUsage').status = 'building'),
-  true
-);
-for (const failure of ['cli', 'auth', 'cleanup']) await rejectsRtdbCanary('open', failure);
-await run('open');
-checkDomains(true);
-await run('restore-auto');
-checkDomains(true);
-assert.equal(traffic.rolloutPolicy.disabled, false);
-assert.deepEqual(records.get('_control/temporalProviderUsage'), marker);
-assert.deepEqual(versions.get('_control/temporalProviderUsage'), { createTime: markerTime, updateTime: markerTime });
-assert(!commands.some(({ args }) => args.some((arg) => arg.includes('temporal-backfill-provider-usage.mjs'))));
-for (const name of [
-  'temporal-release-lib.mjs',
-  'temporal-compatibility-cutoff.mjs',
-  'temporal-bootstrap-search.mjs',
-  'temporal-apphosting-rollout.mjs',
-  'temporal-provider-usage-continuity.mjs',
-  'temporal-platform.mjs',
-])
-  assert(currentModules.has(new URL('../../' + name, import.meta.url).href), 'actual source module loaded: ' + name);
-assert.equal(
-  [...records.values()].filter(
-    (value) => value.dispatch?.workflowType === 'SearchBackfill' && value.state === 'dispatched'
-  ).length,
-  5
-);
-assert.deepEqual(
-  rtdbCanaryCalls.filter((call) => call.failure === null).map((call) => call.action),
-  ['workers-ready', 'take-ownership', 'open', 'open', 'open'],
-  'workers-ready, ownership, and every open attempt must run the actual readiness helper'
-);
-console.log(
-  JSON.stringify({
-    rejectedBoundaries,
-    rejectedRtdbBoundaries,
-    rtdbCanaryCalls,
-    providerTamperingRejected: true,
-    actualValidators: true,
-    phase: records.get('_control/temporalReleaseState').phase,
-    actions,
-    providerEpoch: marker.epoch,
-    providerOriginRelease: marker.releaseId,
-    providerBodyUnchanged: true,
-    providerNativeIdentityUnchanged: true,
-    freshCutoff: true,
-    earlyDrainRejected: true,
-    otherSixPreserved: true,
-    legacyBackfillInvoked: false,
-    jobCount: [...records.keys()].filter((p) => p.startsWith('durableJobs/')).length,
-    apiCalls: apiEvents.length,
-  })
-);
+if (process.argv[2] === 'runtime-bundle') {
+  await runBundleRuntimeCases();
+} else {
+  await run('freeze-ui');
+  checkDomains();
+  assert.equal(
+    records.get('_control/temporalRelease').legacyAdmissionCutoff,
+    undefined,
+    'old native cutoff must not be reused'
+  );
+  assert.deepEqual(
+    records.get('_control/temporalReleaseHistory-' + oldReleaseId),
+    priorState,
+    'predecessor state is preserved exactly'
+  );
+  evidence(config.compatibilityEvidence, {
+    commit: config.compatibilityCommit,
+    legacyAdmissionPauseVerified: true,
+    legacyAdmissionLeaseFencingVerified: true,
+    oldBrowserWritePauseVerified: true,
+    allSourcesDeployed: true,
+  });
+  await run('compatibility-ready');
+  checkDomains();
+  const cutoff = records.get('_control/temporalRelease').legacyAdmissionCutoff;
+  assert(cutoff instanceof Timestamp);
+  assert.notEqual(cutoff.seconds, oldCutoff.seconds);
+  assert.equal(cutoff.toMillis(), clock);
+  await assert.rejects(run('drain'), /full maximum legacy execution duration/);
+  checkDomains();
+  clock += 3600000;
+  await run('drain');
+  checkDomains();
+  await rejectsMutation('marker body changed', 'provider-usage-ready', () =>
+    records.set('_control/temporalProviderUsage', { ...clone(marker), edgeCount: marker.edgeCount + 1 })
+  );
+  await rejectsMutation('marker missing', 'provider-usage-ready', () =>
+    records.delete('_control/temporalProviderUsage')
+  );
+  await rejectsMutation(
+    'archived predecessor changed',
+    'provider-usage-ready',
+    () => (records.get('_control/temporalReleaseHistory-' + oldReleaseId).providerUsageEpoch = 'foreign-epoch')
+  );
+  await rejectsMutation(
+    'first six owner drift',
+    'provider-usage-ready',
+    () => (records.get('_control/temporalRelease').domains.media.owner = 'legacy')
+  );
+  await rejectsMutation('unfinished non-search job', 'provider-usage-ready', () =>
+    records.set('durableJobs/unrelated', { projectId, jobId: 'unrelated', kind: 'sermon.publish', state: 'running' })
+  );
+  await run('provider-usage-ready');
+  checkDomains();
+  assert.deepEqual(
+    records.get('_control/temporalProviderUsage'),
+    marker,
+    'provider body and origin release stay unchanged'
+  );
+  assert.deepEqual(
+    versions.get('_control/temporalProviderUsage'),
+    { createTime: markerTime, updateTime: markerTime },
+    'provider native snapshot identity stays unchanged'
+  );
+  assert.equal(records.get('_control/temporalReleaseState').providerUsageEpoch, marker.epoch);
+  await run('pause');
+  checkDomains();
+  assert.equal(records.get('_control/temporalReleaseState').pausedFrom, 'provider-usage-ready');
+  await run('resume');
+  checkDomains();
+  assert.equal(records.get('_control/temporalReleaseState').phase, 'provider-usage-ready');
+  for (const failure of ['cli', 'auth', 'cleanup']) await rejectsRtdbCanary('workers-ready', failure);
+  await run('workers-ready');
+  checkDomains();
+  await run('take-ownership');
+  checkDomains();
+  assert.equal(records.get('_control/temporalRelease').domains.search.owner, 'temporal');
+  evidence(config.backendEvidence, {
+    commit: config.compatibilityCommit,
+    allSourcesDeployed: true,
+    runtimeServicesDeployed: true,
+    facadeOwnershipVerified: true,
+  });
+  await run('backend-ready');
+  checkDomains();
+  await run('bootstrap-search');
+  checkDomains();
+  await run('rollout-ui');
+  checkDomains();
+  evidence(config.smokeEvidence, {
+    uiCommit: config.uiCommit,
+    backendOwnershipVerified: true,
+    workerReady: true,
+    oldBrowserWritesDenied: true,
+    scope: 'preopen-readonly-and-existing-jobs',
+    readonlySmokePassed: true,
+    claimsFreshWriteE2E: false,
+  });
+  await rejectsMutation(
+    'epoch changed at open transaction',
+    'open',
+    () => (records.get('_control/temporalProviderUsage').epoch = 'foreign-epoch'),
+    true
+  );
+  await rejectsMutation(
+    'status changed at open transaction',
+    'open',
+    () => (records.get('_control/temporalProviderUsage').status = 'building'),
+    true
+  );
+  for (const failure of ['cli', 'auth', 'cleanup']) await rejectsRtdbCanary('open', failure);
+  await run('open');
+  checkDomains(true);
+  await run('restore-auto');
+  checkDomains(true);
+  assert.equal(traffic.rolloutPolicy.disabled, false);
+  assert.deepEqual(records.get('_control/temporalProviderUsage'), marker);
+  assert.deepEqual(versions.get('_control/temporalProviderUsage'), { createTime: markerTime, updateTime: markerTime });
+  assert(
+    !commands.some(
+      ({ command, args }) =>
+        command !== 'git' && args.some((arg) => arg.includes('temporal-backfill-provider-usage.mjs'))
+    )
+  );
+  for (const name of [
+    'temporal-release-lib.mjs',
+    'temporal-compatibility-cutoff.mjs',
+    'temporal-bootstrap-search.mjs',
+    'temporal-apphosting-rollout.mjs',
+    'temporal-provider-usage-continuity.mjs',
+    'temporal-platform.mjs',
+  ])
+    assert(currentModules.has(new URL('../../' + name, import.meta.url).href), 'actual source module loaded: ' + name);
+  assert.equal(
+    [...records.values()].filter(
+      (value) => value.dispatch?.workflowType === 'SearchBackfill' && value.state === 'dispatched'
+    ).length,
+    5
+  );
+  assert.deepEqual(
+    rtdbCanaryCalls.filter((call) => call.failure === null).map((call) => call.action),
+    ['workers-ready', 'take-ownership', 'open', 'open', 'open'],
+    'workers-ready, ownership, and every open attempt must run the actual readiness helper'
+  );
+  console.log(
+    JSON.stringify({
+      rejectedBoundaries,
+      rejectedRtdbBoundaries,
+      rtdbCanaryCalls,
+      providerTamperingRejected: true,
+      actualValidators: true,
+      phase: records.get('_control/temporalReleaseState').phase,
+      actions,
+      providerEpoch: marker.epoch,
+      providerOriginRelease: marker.releaseId,
+      providerBodyUnchanged: true,
+      providerNativeIdentityUnchanged: true,
+      freshCutoff: true,
+      earlyDrainRejected: true,
+      otherSixPreserved: true,
+      legacyBackfillInvoked: false,
+      jobCount: [...records.keys()].filter((p) => p.startsWith('durableJobs/')).length,
+      apiCalls: apiEvents.length,
+    })
+  );
+}
+
+async function runBundleRuntimeCases() {
+  const boundary = await import('../../temporal-release-runtime.mjs');
+  config.domains = domains.slice(0, 6);
+  files.set('/fixture/release.json', JSON.stringify(config));
+  const seed = () => {
+    records.clear();
+    versions.clear();
+    bundleMetadata.clear();
+    records.set('_control/temporalRelease', {
+      ...clone(priorControl),
+      releaseId,
+      revision: 11,
+      admission: 'paused',
+      domains: Object.fromEntries(
+        domains.map((d) => [d, { owner: d === 'search' ? 'legacy' : 'temporal', admission: 'paused' }])
+      ),
+    });
+    records.set('_control/temporalReleaseState', {
+      ...clone(priorState),
+      releaseId,
+      mode: config.mode,
+      domains: config.domains,
+      compatibilityCommit: config.compatibilityCommit,
+      uiCommit: config.uiCommit,
+      phase: 'backend-ready',
+      controlRevision: 11,
+    });
+    bundleProof = {
+      bundleTypes: ['topics', 'subtitles', 'bible-chapters', 'sunday-homilies', 'holy-week', 'latest-list'],
+      jobIds: [],
+      bootstrapJobIds: [],
+      artifactProofs: [],
+    };
+    for (const [i, type] of bundleProof.bundleTypes.entries()) {
+      const jobId = 'job-' + crypto.createHash('sha256').update(type).digest('hex').slice(0, 48),
+        oldId =
+          'job-' +
+          crypto
+            .createHash('sha256')
+            .update('old-' + type)
+            .digest('hex')
+            .slice(0, 48);
+      const pointer = {
+        projectId,
+        jobId,
+        generation: 2,
+        count: i,
+        storagePath: `bundles/durable/${type}/${jobId}/abc.bin`,
+      };
+      const key = crypto
+        .createHash('sha256')
+        .update(JSON.stringify([projectId, 'bundle', type, 'bundle']))
+        .digest('hex');
+      records.set('durableJobEntities/' + key, {
+        projectId,
+        entity: { type: 'bundle', id: type },
+        generation: 2,
+        activeJobId: jobId,
+      });
+      records.set('durableJobs/' + jobId, {
+        projectId,
+        jobId,
+        kind: 'bundle.regenerate',
+        entity: { type: 'bundle', id: type },
+        generation: 2,
+        state: 'succeeded',
+      });
+      records.set('durableJobs/' + oldId, {
+        projectId,
+        jobId: oldId,
+        kind: 'bundle.regenerate',
+        entity: { type: 'bundle', id: type },
+        generation: 1,
+        state: 'failed',
+      });
+      records.set('_durableBundlePointers/' + type, pointer);
+      const metadata = {
+        bucket: platform.firebaseResources.storageBucket,
+        name: pointer.storagePath,
+        contentType: 'application/octet-stream',
+        metadata: { [`${type}-count`]: String(i) },
+        generation: String(1000 + i),
+        metageneration: '1',
+        size: '100',
+      };
+      bundleMetadata.set(pointer.storagePath, metadata);
+      bundleProof.jobIds.push(jobId);
+      bundleProof.bootstrapJobIds.push(oldId);
+      bundleProof.artifactProofs.push(boundary.artifactProof(type, pointer, metadata, metadata.bucket));
+    }
+    runtimeFault = undefined;
+    resumeOperation = undefined;
+    beforeTransaction = undefined;
+    bootstrapInvocations = 0;
+  };
+  const passed = [];
+  for (const fault of ['runtime', 'operator', 'resource', 'retained-version', 'pointer', 'authority', 'op-replaced']) {
+    seed();
+    const before = clone(records.get('_control/temporalRelease'));
+    const state = clone(records.get('_control/temporalReleaseState'));
+    runtimeFault = fault;
+    if (['pointer', 'authority', 'op-replaced'].includes(fault)) {
+      beforeTransaction = () => {
+        if (!bootstrapInvocations) return;
+        beforeTransaction = undefined;
+        if (fault === 'pointer')
+          records.set('_durableBundlePointers/topics', {
+            ...records.get('_durableBundlePointers/topics'),
+            generation: 3,
+          });
+        else if (fault === 'authority')
+          records.set('_control/temporalReleaseState', { ...state, changedWithoutRevision: true });
+        else
+          records.set('_control/temporalReleaseOperation', {
+            ...records.get('_control/temporalReleaseOperation'),
+            action: 'foreign-action',
+          });
+      };
+    }
+    await assert.rejects(
+      run('bootstrap-bundles'),
+      /RELEASE_|BOOTSTRAP_|operation changed|revision changed|authority|retained|proof/i
+    );
+    assert.deepEqual(records.get('_control/temporalRelease'), before);
+    assert.equal(records.get('_control/temporalReleaseState').phase, 'backend-ready');
+    assert.equal([...records.keys()].filter((k) => k.startsWith('_control/temporalReleaseOperatorAudit-')).length, 0);
+    if (fault !== 'op-replaced') assert(!records.has('_control/temporalReleaseOperation'));
+    passed.push(fault);
+  }
+  for (const fault of ['unknown-applied', 'unknown-not-applied']) {
+    seed();
+    const originals = JSON.stringify(bundleProof.bootstrapJobIds.map((id) => records.get('durableJobs/' + id)));
+    runtimeFault = fault;
+    await assert.rejects(run('bootstrap-bundles'), /UNKNOWN_ACK/);
+    const held = records.get('_control/temporalReleaseOperation');
+    assert(held);
+    resumeOperation = held.operationId;
+    runtimeFault = undefined;
+    await run('bootstrap-bundles');
+    assert.equal(records.get('_control/temporalRelease').revision, 12);
+    assert.equal(records.get('_control/temporalReleaseState').phase, 'bundles-ready');
+    assert.equal(bootstrapInvocations, fault === 'unknown-applied' ? 1 : 2);
+    assert.equal(JSON.stringify(bundleProof.bootstrapJobIds.map((id) => records.get('durableJobs/' + id))), originals);
+    assert.equal([...records.values()].filter((v) => v.kind === 'bundle.regenerate' && v.generation === 2).length, 6);
+    assert(!records.has('_control/temporalReleaseOperation'));
+    passed.push(fault + '-explicit-reconcile');
+    resumeOperation = undefined;
+    await run('bootstrap-bundles');
+    assert.equal(records.get('_control/temporalRelease').revision, 12);
+  }
+  console.log(
+    JSON.stringify({
+      result: 'passed',
+      actualController: true,
+      cases: passed,
+      originalFailedJobsPreserved: true,
+      newGenerationCreatedByController: false,
+    })
+  );
+}

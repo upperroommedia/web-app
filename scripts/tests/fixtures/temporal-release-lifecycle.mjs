@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import * as crypto from 'node:crypto';
 import * as path from 'node:path';
 import * as os from 'node:os';
+import * as url from 'node:url';
 import * as continuity from '../../temporal-provider-usage-continuity.mjs';
 import { createReleaseFirebaseResources, runWithCleanup } from '../../temporal-release-resources.mjs';
 const scenario = process.argv[2];
@@ -77,11 +78,12 @@ const firestore = {
     events.push('firestore-terminate');
   },
 };
+const fixtureCredential = {};
 const sdk = {
   getApps: () => apps,
   applicationDefault: () => {
     events.push('credential');
-    return {};
+    return fixtureCredential;
   },
   initializeApp: (options, name) => {
     const app = { options, name };
@@ -158,6 +160,7 @@ const imports = {
   },
   'node:os': os,
   'node:path': path,
+  'node:url': url,
   'node:crypto': crypto,
   'node:child_process': {
     execFileSync: () => {
@@ -165,6 +168,30 @@ const imports = {
     },
   },
   './temporal-release-resources.mjs': { runWithCleanup },
+  './temporal-release-runtime.mjs': {
+    pinReleaseCheckouts: () => ({
+      operatorRoot: '/fixture',
+      runtimeRoot: '/fixture',
+      operatorCommit: config.compatibilityCommit,
+      runtimeCommit: config.compatibilityCommit,
+      operatorClosureDigest: 'fixture',
+      runtimePins: {},
+    }),
+    loadReleaseResourceBinding: () => ({ resources: { databaseUrl: databaseURL } }),
+    verifyReleaseResourceIdentity: async () => ({ projectId }),
+    verifyReleaseOperator: async () => ({ email: 'fixture@example.test' }),
+    prepareLocalReleaseADC: () => ({
+      credential: fixtureCredential,
+      close: () => {},
+      adcType: 'authorized_user',
+      sdkCredentialImplementationSHA256: 'fixture',
+    }),
+    assertReleaseRuntimeSource: async () => {},
+    hash: () => 'fixture-hash',
+    proofDigest: (value) => JSON.stringify(value),
+    nativeSnapshotProof: (snapshot) => ({ data: snapshot.data() }),
+    assertNativeSnapshot: () => {},
+  },
   './temporal-release-lib.mjs': {
     validateReleaseConfig: (value) => value,
     validateControl: (value) => value,
