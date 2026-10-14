@@ -26,6 +26,8 @@ import {
 } from './temporal-release-runtime.mjs';
 import {
   reconcileAppHostingRollout,
+  prepareLegacyRolloutIdentityMigration,
+  rolloutIdentity,
   restoreReviewedUiRecovery,
   ensureFrozenRecoveryPolicy,
 } from './temporal-apphosting-rollout.mjs';
@@ -87,6 +89,7 @@ if (
     'bootstrap-bundles',
     'bootstrap-search',
     'rollout-ui',
+    'migrate-ui-identity',
     'open',
     'restore-auto',
     'pause',
@@ -521,6 +524,19 @@ await runWithCleanup(
               controlUpdate = { ...controlUpdate, ...cutoff.controlUpdate };
               update = { ...update, ...cutoff.stateUpdate };
             }
+            if (update.uiRolloutIdentityMigration) {
+              const migration = update.uiRolloutIdentityMigration;
+              if (
+                action !== 'migrate-ui-identity' ||
+                currentState.data().phase !== 'ui-rollout-started' ||
+                current.data().admission !== 'paused' ||
+                RELEASE_DOMAINS.some((domain) => current.data().domains[domain]?.admission !== 'paused') ||
+                proofDigest(currentState.data().uiRolloutIdentity) !== proofDigest(migration.previousIdentity) ||
+                Date.now() < migration.observedAt ||
+                Date.now() - migration.inspectionStartedAt >= 60000
+              )
+                throw new Error('UI identity migration authority or fresh absence proof changed');
+            }
             if (phase === 'bundles-ready') {
               if (currentState.data().phase !== 'backend-ready' || !update.bundleBootstrapProof)
                 throw new Error('Bundle checkpoint requires current backend-ready and complete artifact proof');
@@ -543,6 +559,7 @@ await runWithCleanup(
               runtimeSourceVerified: true,
               authority: expectedAuthority ?? null,
               bundleBootstrapProof: update.bundleBootstrapProof ?? null,
+              uiRolloutIdentityMigration: update.uiRolloutIdentityMigration ?? null,
               createdAt: serverTimestamp(),
             });
             tx.update(controlRef, { ...controlUpdate, revision: revision + 1, updatedAt: Date.now() });
@@ -1063,6 +1080,59 @@ await runWithCleanup(
             if (proof.settingsReceiptCanonicalSha256 !== createHash('sha256').update(stable(settings)).digest('hex'))
               throw new Error('Applied search settings evidence changed during bootstrap');
             await transition(control.revision, 'search-ready', { searchConverged: true, searchBootstrapProof: proof });
+          } else if (action === 'migrate-ui-identity') {
+            requirePhase(state, ['ui-rollout-started']);
+            if (
+              control.admission !== 'paused' ||
+              RELEASE_DOMAINS.some((domain) => control.domains[domain]?.admission !== 'paused')
+            )
+              throw new Error('Identity migration requires all release admissions paused');
+            const uiConfig = { parent, releaseId: config.releaseId, uiCommit: config.uiCommit };
+            if (state.uiRolloutIdentity?.schemaVersion === 2) {
+              const migration = state.uiRolloutIdentityMigration;
+              const audit = (
+                await firestore
+                  .doc(state.uiRolloutIdentityMigrationAuditPath ?? '_control/absent-identity-migration')
+                  .get()
+              ).data();
+              if (
+                !migration ||
+                proofDigest(state.uiRolloutIdentity) !== proofDigest(rolloutIdentity(uiConfig)) ||
+                proofDigest(migration.previousIdentity) !== proofDigest(rolloutIdentity(uiConfig, 1)) ||
+                audit?.action !== 'migrate-ui-identity' ||
+                audit?.releaseId !== config.releaseId ||
+                audit?.toRevision !== control.revision ||
+                proofDigest(audit.uiRolloutIdentityMigration) !== proofDigest(migration)
+              )
+                throw new Error('Completed identity migration lacks its immutable audit');
+              // Explicit unknown-ACK recovery verifies the same history; no second revision or POST.
+              await prepareLegacyRolloutIdentityMigration({
+                config: uiConfig,
+                checkpoint: migration.previousIdentity,
+                api: appApi,
+              });
+              await firestore.runTransaction(async (tx) => {
+                const [current, checkpoint, operation] = await Promise.all([
+                  tx.get(controlRef),
+                  tx.get(stateRef),
+                  tx.get(lockRef),
+                ]);
+                assertNativeSnapshot(expectedAuthority.control, current);
+                assertNativeSnapshot(expectedAuthority.state, checkpoint);
+                assertNativeSnapshot(ownedOperation, operation);
+              });
+            } else {
+              const migration = await prepareLegacyRolloutIdentityMigration({
+                config: uiConfig,
+                checkpoint: state.uiRolloutIdentity,
+                api: appApi,
+              });
+              await transition(control.revision, 'ui-rollout-started', {
+                uiRolloutIdentity: migration.identity,
+                uiRolloutIdentityMigration: migration,
+                uiRolloutIdentityMigrationAuditPath: auditPath(control.revision + 1),
+              });
+            }
           } else if (action === 'rollout-ui') {
             requirePhase(state, [requiredPreUiPhase(config), 'ui-rollout-started']);
             if (state.phase === 'ui-rollout-started' && !state.uiRolloutIdentity)

@@ -315,7 +315,7 @@ const firestore = {
     const result = await callback(tx);
     const isBundleTransition =
       writes.some(([, key]) => key.startsWith('_control/temporalReleaseOperatorAudit-')) &&
-      currentAction === 'bootstrap-bundles';
+      ['bootstrap-bundles', 'migrate-ui-identity'].includes(currentAction);
     if (isBundleTransition && runtimeFault === 'unknown-not-applied') {
       runtimeFault = 'retained';
       throw new Error('UNKNOWN_ACK_NOT_APPLIED');
@@ -364,6 +364,7 @@ let traffic = {
   reconciling: false,
 };
 const remote = new Map();
+let migrationTrafficReads = 0;
 async function fetchTransport(raw, options = {}) {
   const parsed = new URL(raw),
     method = options.method ?? 'GET',
@@ -374,6 +375,7 @@ async function fetchTransport(raw, options = {}) {
   if (parsed.hostname === 'firebaseapphosting.googleapis.com') {
     const resource = parsed.pathname.replace(/^\/v1beta\//, '');
     if (resource === parent + '/traffic') {
+      if (currentAction === 'migrate-ui-identity' && method === 'GET') migrationTrafficReads++;
       if (method === 'PATCH') {
         traffic = { ...traffic, rolloutPolicy: { ...traffic.rolloutPolicy, ...body.rolloutPolicy } };
         result = { done: true };
@@ -875,7 +877,9 @@ async function rejectsRtdbCanary(action, failure) {
   assert.equal(apps.length, 0, 'failed capability proof closes owned SDK apps');
   rejectedRtdbBoundaries.push(`${action}:${failure}`);
 }
-if (process.argv[2] === 'runtime-bundle') {
+if (process.argv[2] === 'ui-identity-migration') {
+  await runMigrationCases();
+} else if (process.argv[2] === 'runtime-bundle') {
   await runBundleRuntimeCases();
 } else {
   await run('freeze-ui');
@@ -1201,4 +1205,87 @@ async function runBundleRuntimeCases() {
       newGenerationCreatedByController: false,
     })
   );
+}
+
+async function runMigrationCases() {
+  const { rolloutIdentity } = await import('../../temporal-apphosting-rollout.mjs');
+  config.domains = domains.slice(0, 6);
+  files.set('/fixture/release.json', JSON.stringify(config));
+  const uiConfig = { parent, releaseId, uiCommit: config.uiCommit };
+  const original = rolloutIdentity(uiConfig, 1),
+    next = rolloutIdentity(uiConfig);
+  const passed = [];
+  for (const fault of ['none', 'authority', 'op-replaced', 'unknown-applied', 'unknown-not-applied']) {
+    records.clear();
+    versions.clear();
+    remote.clear();
+    migrationTrafficReads = 0;
+    apiEvents.length = 0;
+    records.set('_control/temporalRelease', {
+      ...clone(priorControl),
+      releaseId,
+      revision: 13,
+      admission: 'paused',
+      domains: Object.fromEntries(
+        domains.map((d) => [d, { owner: d === 'search' ? 'legacy' : 'temporal', admission: 'paused' }])
+      ),
+    });
+    records.set('_control/temporalReleaseState', {
+      ...clone(priorState),
+      releaseId,
+      mode: config.mode,
+      domains: config.domains,
+      compatibilityCommit: config.compatibilityCommit,
+      uiCommit: config.uiCommit,
+      phase: 'ui-rollout-started',
+      controlRevision: 13,
+      uiRolloutIdentity: clone(original),
+      uiRolloutStartedAt: 12345,
+    });
+    traffic.rolloutPolicy.disabled = true;
+    traffic.reconciling = false;
+    const before = clone(records.get('_control/temporalRelease'));
+    runtimeFault = fault === 'none' ? undefined : fault;
+    resumeOperation = undefined;
+    beforeTransaction = undefined;
+    if (['authority', 'op-replaced'].includes(fault))
+      beforeTransaction = () => {
+        if (migrationTrafficReads < 2) return;
+        beforeTransaction = undefined;
+        const key = fault === 'authority' ? '_control/temporalReleaseState' : '_control/temporalReleaseOperation';
+        records.set(key, {
+          ...records.get(key),
+          ...(fault === 'authority' ? { changedWithoutRevision: true } : { action: 'foreign-action' }),
+        });
+      };
+    if (fault === 'none') await run('migrate-ui-identity');
+    else await assert.rejects(run('migrate-ui-identity'), /UNKNOWN_ACK|authority|operation|revision/i);
+    if (fault.startsWith('unknown-')) {
+      const held = records.get('_control/temporalReleaseOperation');
+      assert(held);
+      resumeOperation = held.operationId;
+      runtimeFault = undefined;
+      await run('migrate-ui-identity');
+    }
+    if (['authority', 'op-replaced'].includes(fault)) {
+      assert.deepEqual(records.get('_control/temporalRelease'), before);
+      assert.deepEqual(records.get('_control/temporalReleaseState').uiRolloutIdentity, original);
+    } else {
+      assert.equal(records.get('_control/temporalRelease').revision, 14);
+      const state = records.get('_control/temporalReleaseState');
+      assert.equal(state.phase, 'ui-rollout-started');
+      assert.equal(state.uiRolloutStartedAt, 12345);
+      assert.deepEqual(state.uiRolloutIdentity, next);
+      assert.deepEqual(state.uiRolloutIdentityMigration.previousIdentity, original);
+      const audit = records.get(state.uiRolloutIdentityMigrationAuditPath);
+      assert.equal(audit.action, 'migrate-ui-identity');
+      assert.deepEqual(audit.uiRolloutIdentityMigration, state.uiRolloutIdentityMigration);
+      assert.equal([...records.keys()].filter((k) => k.startsWith('_control/temporalReleaseOperatorAudit-')).length, 1);
+      assert(!records.has('_control/temporalReleaseOperation'));
+    }
+    assert(!apiEvents.some((row) => row.method !== 'GET'), 'identity migration must never write App Hosting');
+    assert.equal(remote.size, 0);
+    passed.push(fault);
+  }
+  console.log(JSON.stringify({ result: 'passed', cases: passed, noAppHostingWrites: true }));
 }

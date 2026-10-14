@@ -83,3 +83,19 @@ test('actual bundle controller rejects source/resource/current-head/native races
   assert.equal(proof.originalFailedJobsPreserved, true);
   assert.equal(proof.newGenerationCreatedByController, false);
 });
+
+test('actual controller migrates only absent legacy identity under native CAS and explicitly reconciles both unknown ACK outcomes', async () => {
+  const { stdout } = await exec(
+    process.execPath,
+    [
+      '--experimental-vm-modules',
+      new URL('./tests/fixtures/temporal-search-sequential-release.mjs', import.meta.url).pathname,
+      'ui-identity-migration',
+    ],
+    { timeout: 60000, maxBuffer: 2 * 1024 * 1024 }
+  );
+  const proof = JSON.parse(stdout.trim());
+  assert.equal(proof.result, 'passed');
+  assert.equal(proof.cases.length, 5);
+  assert.equal(proof.noAppHostingWrites, true);
+});

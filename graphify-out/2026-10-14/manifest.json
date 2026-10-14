@@ -6810,8 +6810,8 @@
     "semantic_hash": ""
   },
   "scripts/temporal-bootstrap-bundles.mjs": {
-    "mtime": 1791961999.625963,
-    "ast_hash": "9994badc52803c209ef4dae529bade9b",
+    "mtime": 1791971961.1236956,
+    "ast_hash": "f2b7092ea6b379980e9597c5194636f1",
     "semantic_hash": ""
   },
   "scripts/temporal-bootstrap-bundles.test.mjs": {
@@ -6860,8 +6860,8 @@
     "semantic_hash": ""
   },
   "scripts/temporal-release.mjs": {
-    "mtime": 1791968258.9786773,
-    "ast_hash": "f92c324cffd153cb3376ad0b8834c535",
+    "mtime": 1791971972.6171412,
+    "ast_hash": "6a1223012bd03ec67cc27e76bb3c5769",
     "semantic_hash": ""
   },
   "scripts/temporal-release.test.mjs": {
@@ -7005,8 +7005,8 @@
     "semantic_hash": ""
   },
   "docs/temporal/BUNDLE_BOOTSTRAP.md": {
-    "mtime": 1791961998.8086717,
-    "ast_hash": "a084c37bac437329a0686fc11e8a1299",
+    "mtime": 1791971961.0860894,
+    "ast_hash": "cb424a53d4a51ae6762a8e4f1af612aa",
     "semantic_hash": ""
   },
   "docs/temporal/EMAIL.md": {
@@ -7030,8 +7030,8 @@
     "semantic_hash": ""
   },
   "docs/temporal/OPERATIONS.md": {
-    "mtime": 1791961998.8136244,
-    "ast_hash": "77d0986778419affc67cce153d5700fb",
+    "mtime": 1791971961.0868578,
+    "ast_hash": "1f40f596f49cb208777ece8a19f31efd",
     "semantic_hash": ""
   },
   "docs/temporal/OPERATOR_REVIEW.md": {
@@ -7585,8 +7585,8 @@
     "semantic_hash": ""
   },
   "scripts/temporal-search-sequential-release.test.mjs": {
-    "mtime": 1791968414.9304497,
-    "ast_hash": "513a0279e6e12d55e3e75bf1fa2341b8",
+    "mtime": 1791971972.63043,
+    "ast_hash": "c43e594e6b103e9bcfe4f31acbeff06b",
     "semantic_hash": ""
   },
   "scripts/temporal-staging-search-env.mjs": {
@@ -7600,13 +7600,13 @@
     "semantic_hash": ""
   },
   "scripts/tests/fixtures/temporal-release-lifecycle.mjs": {
-    "mtime": 1791961999.6497586,
-    "ast_hash": "4f69c290720de9b7d3ce3a7c81367e0c",
+    "mtime": 1791971961.1267383,
+    "ast_hash": "2726d1e6e6a74ef3caab7e47483a6e11",
     "semantic_hash": ""
   },
   "scripts/tests/fixtures/temporal-search-sequential-release.mjs": {
-    "mtime": 1791968414.911439,
-    "ast_hash": "fd2ed7d7ba7084bcedd59529fe37eaa7",
+    "mtime": 1791971972.623987,
+    "ast_hash": "8d602925da5945d4385fdc62d1d20de2",
     "semantic_hash": ""
   },
   "docs/temporal/STAGING_SEARCH_ONBOARDING.md": {
@@ -7697,6 +7697,46 @@
   "scripts/tests/pnpm-release-age-policy.test.mjs": {
     "mtime": 1791969432.8149636,
     "ast_hash": "32f938b717617f04dd1598392adb7187",
+    "semantic_hash": ""
+  },
+  "scripts/temporal-bundle-bootstrap-recovery.mjs": {
+    "mtime": 1791971961.1241357,
+    "ast_hash": "3682a962724fcc4fb7b686005e67e0b9",
+    "semantic_hash": ""
+  },
+  "scripts/temporal-bundle-bootstrap-recovery.test.mjs": {
+    "mtime": 1791971961.1244512,
+    "ast_hash": "1e86f68f24af81c62e566f06986a7390",
+    "semantic_hash": ""
+  },
+  "scripts/temporal-recover-bundle-bootstrap.mjs": {
+    "mtime": 1791971961.1246567,
+    "ast_hash": "bd329b67c228bd2fa7b7109c8cad82f9",
+    "semantic_hash": ""
+  },
+  "scripts/temporal-release-runtime.mjs": {
+    "mtime": 1791971961.1250668,
+    "ast_hash": "26b8e91af31b80bb133f1790b392333d",
+    "semantic_hash": ""
+  },
+  "scripts/temporal-release-runtime.test.mjs": {
+    "mtime": 1791971961.1255693,
+    "ast_hash": "2abbe24fc670fe27796d6d7c253b7f31",
+    "semantic_hash": ""
+  },
+  "scripts/tests/fixtures/temporal-release-platform.fixture.json": {
+    "mtime": 1791971961.127176,
+    "ast_hash": "6a43a721e69df38b51f536e5b1e36546",
+    "semantic_hash": ""
+  },
+  "scripts/tests/temporal-bundle-bootstrap-recovery.firestore.test.mjs": {
+    "mtime": 1791971961.1278462,
+    "ast_hash": "93e9382cf8fb55a143b8f7202ae1842e",
+    "semantic_hash": ""
+  },
+  "scripts/tests/temporal-release-runtime.firestore.test.mjs": {
+    "mtime": 1791971961.1281757,
+    "ast_hash": "d4d3d151e446d5bd734a1ad6a49c77cb",
     "semantic_hash": ""
   }
 }

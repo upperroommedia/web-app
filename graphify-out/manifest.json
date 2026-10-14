@@ -6780,13 +6780,13 @@
     "semantic_hash": ""
   },
   "scripts/temporal-apphosting-rollout.mjs": {
-    "mtime": 1791961999.6229858,
-    "ast_hash": "b2855cf7e7b372e11963bd279a89b4ce",
+    "mtime": 1791972353.12036,
+    "ast_hash": "e63e074c2e42bfc19326ba06f57b7f8a",
     "semantic_hash": ""
   },
   "scripts/temporal-apphosting-rollout.test.mjs": {
-    "mtime": 1791961999.6232371,
-    "ast_hash": "a337f671ef502705b66f1db5f0e1ba48",
+    "mtime": 1791972353.121034,
+    "ast_hash": "42b324835952c40154d3540101fe9587",
     "semantic_hash": ""
   },
   "scripts/temporal-backfill-provider-usage.mjs": {
@@ -6860,8 +6860,8 @@
     "semantic_hash": ""
   },
   "scripts/temporal-release.mjs": {
-    "mtime": 1791971972.6171412,
-    "ast_hash": "6a1223012bd03ec67cc27e76bb3c5769",
+    "mtime": 1791972353.1219075,
+    "ast_hash": "26ba728874ca0ffa2c58415c68702f33",
     "semantic_hash": ""
   },
   "scripts/temporal-release.test.mjs": {
@@ -7030,8 +7030,8 @@
     "semantic_hash": ""
   },
   "docs/temporal/OPERATIONS.md": {
-    "mtime": 1791971961.0868578,
-    "ast_hash": "1f40f596f49cb208777ece8a19f31efd",
+    "mtime": 1791972353.0734825,
+    "ast_hash": "a73aad71c9ca52ab463eac3672b389dd",
     "semantic_hash": ""
   },
   "docs/temporal/OPERATOR_REVIEW.md": {
@@ -7585,8 +7585,8 @@
     "semantic_hash": ""
   },
   "scripts/temporal-search-sequential-release.test.mjs": {
-    "mtime": 1791971972.63043,
-    "ast_hash": "c43e594e6b103e9bcfe4f31acbeff06b",
+    "mtime": 1791972353.1224694,
+    "ast_hash": "01ec002788df9312efadc48324b83896",
     "semantic_hash": ""
   },
   "scripts/temporal-staging-search-env.mjs": {
@@ -7605,8 +7605,8 @@
     "semantic_hash": ""
   },
   "scripts/tests/fixtures/temporal-search-sequential-release.mjs": {
-    "mtime": 1791971972.623987,
-    "ast_hash": "8d602925da5945d4385fdc62d1d20de2",
+    "mtime": 1791972353.1232307,
+    "ast_hash": "e5d777015bf3647bc69fdc993f5008bd",
     "semantic_hash": ""
   },
   "docs/temporal/STAGING_SEARCH_ONBOARDING.md": {
