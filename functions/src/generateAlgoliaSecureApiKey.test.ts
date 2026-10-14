@@ -52,10 +52,19 @@ const account = (role?: string) => ({
 });
 const decode = (key: string) => {
   const decoded = Buffer.from(key, 'base64').toString();
-  const query = decoded.slice(64);
-  expect(decoded.slice(0, 64)).toBe(createHmac('sha256', 'secret-parent-test').update(query).digest('hex'));
-  return new URLSearchParams(query);
+  return new URLSearchParams(decoded.slice(64));
 };
+
+// Independent protocol vectors: sign only these known restrictions, never a
+// decoded credential returned by the implementation under test. Compare the
+// complete token so changes to either its signature or restrictions fail.
+const expectedSecuredKey = (expectedQuery: string) => {
+  const signature = createHmac('sha256', 'secret-parent-test').update(expectedQuery).digest('hex');
+  return Buffer.from(signature + expectedQuery).toString('base64');
+};
+const expectedSermonQuery = 'restrictIndices=sermons&userToken=real-user&validUntil=1791849900';
+const expectedSharedQuery =
+  'restrictIndices=speakers%2Cspeakers_sort_name_asc%2Cspeakers_sort_name_desc%2Cspeakers_sort_sermonCount_asc%2Cspeakers_sort_sermonCount_desc%2Clists%2Clists_sort_name_asc%2Clists_sort_name_desc%2Cimages&userToken=real-user&validUntil=1791849900';
 
 describe('authenticated search key scopes', () => {
   const original = { ...process.env };
@@ -84,6 +93,12 @@ describe('authenticated search key scopes', () => {
     mockGetUser.mockResolvedValue(account(role));
     const result = await generate({ auth: auth(role), data: { userId: 'victim' } });
     expect(mockGetUser).toHaveBeenCalledWith('real-user');
+    expect(result.apiKey).toBe(
+      expectedSecuredKey(
+        role === 'admin' ? expectedSermonQuery : `filters=uploaderId%3A%22real-user%22&${expectedSermonQuery}`
+      )
+    );
+    expect(result.sharedApiKey).toBe(expectedSecuredKey(expectedSharedQuery));
     const sermon = decode(result.apiKey);
     const shared = decode(result.sharedApiKey);
     expect(sermon.get('restrictIndices')).toBe('sermons');

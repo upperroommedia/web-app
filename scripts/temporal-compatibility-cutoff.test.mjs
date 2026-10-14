@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 import { createRequire } from 'node:module';
+import { requiresSearchBootstrap } from './temporal-bootstrap-search.mjs';
+import { isSearchProviderUsageContinuity } from './temporal-provider-usage-continuity.mjs';
 import {
   compatibilityCutoffUpdates,
   compatibilitySettlingDeadline,
@@ -180,7 +182,20 @@ test('a new durable upgrade ignores the origin initial cutoff until its own nati
   );
 });
 const cli = await readFile(new URL('./temporal-release.mjs', import.meta.url), 'utf8');
-const transitionSource = cli.slice(cli.indexOf('async function transition('), cli.indexOf('\nfunction requirePhase('));
+// Exercise the actual controller function independent of indentation or nearby
+// helpers. A missing or ambiguous declaration must fail instead of truncating
+// the source and silently weakening these atomic transaction proofs.
+const ts = createRequire(import.meta.url)('typescript');
+const cliSyntax = ts.createSourceFile('temporal-release.mjs', cli, ts.ScriptTarget.ESNext, true, ts.ScriptKind.JS);
+assert.equal(cliSyntax.parseDiagnostics.length, 0);
+const transitionDeclarations = [];
+function findTransition(node) {
+  if (ts.isFunctionDeclaration(node) && node.name?.text === 'transition') transitionDeclarations.push(node);
+  ts.forEachChild(node, findTransition);
+}
+findTransition(cliSyntax);
+assert.equal(transitionDeclarations.length, 1, 'Expected exactly one actual release transition declaration');
+const transitionSource = transitionDeclarations[0].getText(cliSyntax);
 function transactionFixture({ race, crash, mode = 'initial-cutover' } = {}) {
   const controlRef = { path: 'control' },
     stateRef = { path: 'state' },
@@ -240,6 +255,8 @@ function transactionFixture({ race, crash, mode = 'initial-cutover' } = {}) {
     hasCompatibilitySettlingCheckpoint,
     assertCompatibilitySettlingCheckpoint,
     assertCompatibilityGraceElapsed,
+    requiresSearchBootstrap,
+    isSearchProviderUsageContinuity,
     serverTimestamp: () => sentinel,
     Date: { now: () => 0 },
   };
