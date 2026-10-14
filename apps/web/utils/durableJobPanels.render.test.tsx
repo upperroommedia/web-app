@@ -1,6 +1,7 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { DurableJob, DurableJobRef, DurableEntityRef } from '@upperroom/contracts/temporal';
+import type { ProviderSandboxStatus } from '@upperroom/contracts/providerSandbox';
 import type { Sermon } from '../types/SermonTypes';
 import { sermonStatusType, uploadStatus } from '../types/SermonTypes';
 
@@ -8,6 +9,12 @@ const useDurableJobMock = jest.fn();
 const useEntityJobsMock = jest.fn();
 const collectionDataMock = jest.fn();
 const documentDataMock = jest.fn();
+const providerEnvironmentMock = jest.fn();
+// This render suite consumes verified provider status; callable initialization and status loading
+// belong to the provider context's integration boundary, not the panel's Firebase fixtures.
+jest.mock('../context/provider/ProviderEnvironmentContext', () => ({
+  useProviderEnvironment: () => providerEnvironmentMock(),
+}));
 jest.mock('../hooks/useDurableJobs', () => ({
   useDurableJob: (id?: string) => useDurableJobMock(id),
   useEntityJobs: (entity: DurableEntityRef, refs?: Record<string, DurableJobRef | undefined>) =>
@@ -47,6 +54,7 @@ jest.mock('@mui/material/Dialog', () => ({
 import UploadProgressComponent from '../components/uploaderComponents/UploadProgressComponent';
 import JobStatusPanel from '../components/jobs/JobStatusPanel';
 import SermonPublishPanel from '../components/SermonPublishPanel';
+import ProviderSimulationBanner from '../components/ProviderSimulationBanner';
 import { emptySermonList } from '../types/SermonList';
 
 const job = (overrides: Partial<DurableJob> = {}): DurableJob => ({
@@ -102,6 +110,17 @@ const buttonMarkup = (html: string, label: string) =>
 
 beforeEach(() => {
   jest.clearAllMocks();
+  providerEnvironmentMock.mockReturnValue({
+    status: {
+      mode: 'live',
+      ready: true,
+      catalogReady: false,
+      scenarioSelectionAllowed: false,
+    } satisfies ProviderSandboxStatus,
+    loading: false,
+    error: false,
+    refresh: jest.fn(),
+  });
   useDurableJobMock.mockImplementation(() => status());
   useEntityJobsMock.mockReturnValue({ jobs: [], loading: false, stale: false, error: null });
   collectionDataMock.mockReturnValue([
@@ -120,6 +139,71 @@ beforeEach(() => {
 });
 
 describe('rendered durable job tracking', () => {
+  it.each([
+    { name: 'loading', status: undefined, loading: true, error: false },
+    { name: 'unavailable', status: undefined, loading: false, error: true },
+    { name: 'unverified', status: undefined, loading: false, error: false },
+    {
+      name: 'catalog not ready',
+      status: {
+        mode: 'blocked',
+        ready: false,
+        catalogReady: false,
+        scenarioSelectionAllowed: false,
+        reason: 'catalog-not-ready',
+      } satisfies ProviderSandboxStatus,
+      loading: false,
+      error: false,
+    },
+  ])('keeps publishing paused when provider authority is $name', ({ name: _name, ...environment }) => {
+    providerEnvironmentMock.mockReturnValue({ ...environment, refresh: jest.fn() });
+    const html = renderToStaticMarkup(<SermonPublishPanel sermon={sermon} />);
+    expect(html).toContain('Publishing is paused until the server confirms the publishing mode.');
+    expect(buttonMarkup(html, 'Unpublish everywhere')).toHaveLength(1);
+    expect(buttonMarkup(html, 'Unpublish everywhere')[0]).toContain('disabled=""');
+    expect(html).not.toContain('Scenario for the next simulated request');
+    const notice = renderToStaticMarkup(<ProviderSimulationBanner />);
+    expect(notice).toContain(
+      environment.loading ? 'Checking publishing mode' : 'Publishing mode could not be verified. Publishing is paused.'
+    );
+    expect(notice).not.toContain('changes are simulated');
+  });
+
+  it('keeps verified live publishing available without a simulation notice or scenario selector', () => {
+    expect(renderToStaticMarkup(<ProviderSimulationBanner />)).toBe('');
+    const html = renderToStaticMarkup(<SermonPublishPanel sermon={sermon} />);
+    expect(html).not.toContain('Scenario for the next simulated request');
+    expect(buttonMarkup(html, 'Unpublish everywhere')[0]).not.toContain('disabled=""');
+  });
+
+  it('renders the verified simulation notice and per-request scenario control only when authorized', () => {
+    const status: ProviderSandboxStatus = {
+      mode: 'sandbox',
+      ready: true,
+      catalogReady: true,
+      profileId: 'urm-app-staging-publishing-v1',
+      version: 1,
+      scenarioSelectionAllowed: true,
+    };
+    providerEnvironmentMock.mockReturnValue({ status, loading: false, error: false, refresh: jest.fn() });
+    const notice = renderToStaticMarkup(<ProviderSimulationBanner />);
+    expect(notice).toContain('Subsplash and SoundCloud changes are simulated');
+    expect(notice).toContain('audio processing still use staging');
+    const panel = renderToStaticMarkup(<SermonPublishPanel sermon={sermon} />);
+    expect(panel).toContain('Scenario for the next simulated request');
+    expect(panel).toContain('Retries keep the task’s original scenario.');
+    expect(buttonMarkup(panel, 'Unpublish everywhere')[0]).not.toContain('disabled=""');
+    providerEnvironmentMock.mockReturnValue({
+      status: { ...status, scenarioSelectionAllowed: false },
+      loading: false,
+      error: false,
+      refresh: jest.fn(),
+    });
+    expect(renderToStaticMarkup(<SermonPublishPanel sermon={sermon} />)).not.toContain(
+      'Scenario for the next simulated request'
+    );
+  });
+
   it.each(['not_started', 'partial'] as const)(
     'shows certified %s stops without success or replay controls',
     (providerEffects) => {
