@@ -107,3 +107,4 @@ patchedDependencies:
 peerDependencyRules:
   allowedVersions:
     "firebase-functions-test@3.5.0>firebase-admin": ^14.5.0
+minimumReleaseAgeStrict: true

@@ -16,6 +16,12 @@ The scoped policies are translated into npm overrides for standalone Functions u
 
 `pnpm run test:temporal:contracts` builds the real audio application and its workspace dependencies on Node 22 before running these runtime dependency contracts. The prerequisite uses the declared Turbo dependency graph and output caches; clean-output restoration is verified against the actual emitted files. The tests never contact cloud or publishing providers. The loopback FTP fixture is synthetic and owns both endpoints.
 
+## Release-age policy
+
+The pinned pnpm version uses a one-day release-age delay. `minimumReleaseAgeStrict: true` makes fresh, unapproved dependency versions fail in CI instead of automatically adding exceptions. Keep exceptions version-specific and review the CLI-generated workspace and lockfile diff before committing a dependency upgrade; do not lower the delay or disable strict mode to make an install pass. Existing reviewed Sentry and Video.js exceptions remain pinned to their approved versions.
+
+`pnpm run test:temporal:contracts` exercises the actual pinned pnpm against a loopback registry: unapproved fresh versions fail, the seven approved Video.js versions resolve, and strict resolution leaves policy unchanged. The fixture requests metadata only and installs no application dependencies.
+
 ## Remaining development-only advisories
 
 The full workspace audit still reports five advisory IDs in tooling. They are not production runtime dependencies in the audited lockfile. Do not suppress them or describe the full audit as clean.

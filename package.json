@@ -48,7 +48,7 @@
     "test:e2e:headed": "pnpm --dir apps/web run test:e2e:headed",
     "build:temporal": "./scripts/with-node22.sh pnpm exec turbo run build --filter=@upperroom/temporal-worker...",
     "test:temporal": "./scripts/with-node22.sh bash -c 'pnpm --dir functions run test:temporal && pnpm --dir apps/temporal-worker run test:ci && pnpm run test:temporal:integration && pnpm run test:temporal:media && pnpm --dir apps/web run test:frontend:unit && pnpm run test:temporal:contracts'",
-    "test:temporal:contracts": "./scripts/with-node22.sh bash -c 'pnpm exec turbo run build --filter=@upperroom/process-audio... && node --test scripts/temporal-*.test.mjs scripts/tests/legacy-image-source.test.mjs scripts/tests/stable-dependency-security.test.cjs'",
+    "test:temporal:contracts": "./scripts/with-node22.sh bash -c 'pnpm exec turbo run build --filter=@upperroom/process-audio... && node --test scripts/temporal-*.test.mjs scripts/tests/legacy-image-source.test.mjs scripts/tests/stable-dependency-security.test.cjs scripts/tests/pnpm-release-age-policy.test.mjs'",
     "test:temporal:media": "./scripts/with-node22.sh pnpm --dir apps/temporal-worker exec jest --config ../../functions-media/src/temporal/jest.config.cjs --runInBand --watchman=false",
     "test:temporal:integration": "./scripts/with-node22.sh pnpm --dir functions exec firebase emulators:exec --only auth,firestore,database,storage --config ../firebase.test.json \"NODE_OPTIONS=--experimental-vm-modules pnpm --dir ../apps/temporal-worker exec jest --config src/integration/jest.config.cjs --runInBand --watchman=false --forceExit\""
   },
