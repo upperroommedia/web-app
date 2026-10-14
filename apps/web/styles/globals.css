@@ -86,144 +86,17 @@ html {
   transition: background-color 0.2s ease-in-out, color 0.2s ease-in-out;
 }
 
-/*************************************************************************************************
- * Floating Audio Player - Vidstack Overrides
- *************************************************************************************************/
-
-/* Time display styling */
+/* Floating player controls use MUI keyboard/focus semantics and Video.js state. */
 .floating-player-time {
   display: flex;
   align-items: center;
   gap: 4px;
   font-size: 0.8125rem;
-  color: rgba(255, 255, 255, 0.85);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-
-.floating-player-time .vds-time {
+.floating-time-current,
+.floating-time-duration {
   min-width: 36px;
   text-align: center;
-}
-
-.floating-player-time .vds-time-divider {
-  opacity: 0.6;
-}
-
-/* Volume slider specific styling */
-.floating-player-volume {
-  --media-slider-width: 80px;
-}
-
-/* Slider styling for floating player */
-.vds-time-slider.vds-slider {
-  --media-slider-height: 20px;
-  --media-slider-track-height: 4px;
-  --media-slider-thumb-size: 14px;
-  display: flex;
-  align-items: center;
-  width: 100%;
-}
-
-.vds-time-slider .vds-slider-track {
-  border-radius: 2px;
-  position: relative;
-  top: 0;
-}
-
-.vds-time-slider .vds-slider-track-fill {
-  border-radius: 2px;
-}
-
-.vds-time-slider .vds-slider-thumb {
-  border-radius: 50%;
-  opacity: 0;
-  transition: opacity 0.15s ease;
-  transform: translateY(0);
-}
-
-.vds-time-slider:hover .vds-slider-thumb,
-.vds-time-slider[data-dragging] .vds-slider-thumb {
-  opacity: 1;
-}
-
-/* Ensure slider chapters are centered */
-.vds-slider-chapters {
-  display: flex;
-  align-items: center;
-  width: 100%;
-}
-
-.vds-slider-chapter {
-  display: flex;
-  align-items: center;
-  flex: 1;
-}
-
-/* Tooltip styling */
-.vds-tooltip-content {
-  background: rgba(0, 0, 0, 0.9);
-  color: white;
-  padding: 6px 10px;
-  border-radius: 6px;
-  font-size: 0.75rem;
-  font-weight: 500;
-  backdrop-filter: blur(8px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-}
-
-/* Preview styling */
-.vds-slider-preview {
-  background: rgba(0, 0, 0, 0.85);
-  padding: 6px 10px;
-  border-radius: 6px;
-  font-size: 0.75rem;
-  backdrop-filter: blur(8px);
-}
-
-.vds-slider-value {
-  font-variant-numeric: tabular-nums;
-}
-
-/* Button base styling */
-.vds-button {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  border: none;
-  background: transparent;
-  outline: none;
-  transition: all 0.15s ease;
-}
-
-.vds-button:focus-visible {
-  outline: 2px solid var(--accent-primary);
-  outline-offset: 2px;
-  border-radius: 8px;
-}
-
-/* Volume slider */
-.vds-volume-slider.vds-slider {
-  --media-slider-track-height: 4px;
-  --media-slider-thumb-size: 10px;
-}
-
-.vds-volume-slider .vds-slider-track {
-  border-radius: 2px;
-}
-
-.vds-volume-slider .vds-slider-track-fill {
-  border-radius: 2px;
-}
-
-.vds-volume-slider .vds-slider-thumb {
-  border-radius: 50%;
-  opacity: 0;
-  transition: opacity 0.15s ease;
-}
-
-.vds-volume-slider:hover .vds-slider-thumb,
-.vds-volume-slider[data-dragging] .vds-slider-thumb {
-  opacity: 1;
 }

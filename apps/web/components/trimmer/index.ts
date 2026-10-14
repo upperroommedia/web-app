@@ -6,7 +6,7 @@ export { default as TrimSlider } from './TrimSlider';
 export { default as AudioWaveform } from './AudioWaveform';
 
 // Hooks
-export { useAudioTrimmerSync, useVidstackTrimmerSync } from './useTrimmerSync';
+export { useAudioTrimmerSync } from './useTrimmerSync';
 export { useTrimmerDrag } from './useTrimmerDrag';
 export type { DragTarget } from './useTrimmerDrag';
 

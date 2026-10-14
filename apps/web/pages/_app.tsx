@@ -4,7 +4,6 @@ import { UserProvider } from '../context/user/UserContext';
 import { ThemeProvider as MuiThemeProvider } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
 import Head from 'next/head';
-import '@vidstack/react/player/styles/default/theme.css';
 import Box from '@mui/material/Box';
 import React, { useEffect, useMemo } from 'react';
 import { AudioPlayerProvider } from '../context/audio/audioPlayerContext';

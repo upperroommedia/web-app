@@ -36,7 +36,7 @@
     "@sentry/nextjs": "^11.7.0",
     "@upperroom/contracts": "workspace:*",
     "@upperroom/shared": "workspace:*",
-    "@vidstack/react": "^1.12.13",
+    "@videojs/react": "10.1.0",
     "algoliasearch": "catalog:",
     "classnames": "^2.5.1",
     "date-fns": "^4.1.0",

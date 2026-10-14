@@ -1,7 +1,7 @@
 import Typography from '@mui/material/Typography';
 import React, { useEffect } from 'react';
 import { convertToHMS, formatRemainingTime } from '../utils/audioUtils';
-import { useMediaPlayer } from '@vidstack/react';
+import { usePlayer } from '@videojs/react/audio';
 import { useStateRef } from '../hooks/useStateRef';
 
 interface RemainingTimeComponentProps {
@@ -12,12 +12,13 @@ interface RemainingTimeComponentProps {
 export default function RemainingTimeComponent({ playing, duration }: RemainingTimeComponentProps) {
   const [currentSecond, setCurrentSecond, currentSecondRef] = useStateRef(0);
 
-  const player = useMediaPlayer();
+  const player = usePlayer();
 
   useEffect(() => {
     if (!player) return;
     if (!playing) return;
-    return player.subscribe(({ currentTime }) => {
+    return player.subscribe(() => {
+      const currentTime = player.state.currentTime;
       const currentTimeSeconds = Math.floor(currentTime);
       const currentRemainingTime = Math.floor(duration) - currentTimeSeconds;
       const {

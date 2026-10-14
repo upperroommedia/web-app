@@ -4,28 +4,18 @@ import List from '@mui/material/List';
 import Box from '@mui/material/Box';
 import { BoxProps } from '@mui/system/Box';
 import useAudioPlayer from '../context/audio/audioPlayerContext';
-import { useMediaState } from '@vidstack/react';
+import { usePlaybackPlaying } from '../context/audio/audioPlayback';
 import SermonListCardSkeloten from './skeletons/SermonListCardSkeloten';
 import Typography from '@mui/material/Typography';
 import SermonListCard from './SermonListCard';
 import RemainingTimeComponent from './RemainingTimeComponent';
 import TrackProgressComponent from './TrackProgressComponent';
-import firestore, {
-  collection,
-  documentId,
-  limit,
-  onSnapshot,
-  orderBy,
-  query,
-  where,
-} from '../firebase/firestore';
+import firestore, { collection, documentId, limit, onSnapshot, orderBy, query, where } from '../firebase/firestore';
 import { sermonConverter } from '../types/Sermon';
 import { Sermon } from '../types/SermonTypes';
 import { useCollection } from 'react-firebase-hooks/firestore';
 import { normalizeAlgoliaSermonHit, type AlgoliaSermonHit } from '../utils/algolia/searchRecords';
-import {
-  reconcileAdminSermonSearchResults,
-} from '../utils/sermonSearchResults';
+import { reconcileAdminSermonSearchResults } from '../utils/sermonSearchResults';
 import useAuth from '../context/user/UserContext';
 
 const FIRESTORE_IN_QUERY_LIMIT = 10;
@@ -46,9 +36,12 @@ const useDelayedTrue = (value: boolean, delayMs: number): boolean => {
   const [delayedValue, setDelayedValue] = useState(false);
 
   useEffect(() => {
-    const timeoutId = window.setTimeout(() => {
-      setDelayedValue(value);
-    }, value ? delayMs : 0);
+    const timeoutId = window.setTimeout(
+      () => {
+        setDelayedValue(value);
+      },
+      value ? delayMs : 0
+    );
 
     return () => {
       window.clearTimeout(timeoutId);
@@ -108,10 +101,7 @@ const useLiveVisibleSermons = (sermonIds: string[], viewer: { uid?: string; isAd
         where(documentId(), 'in', idChunk),
         ...(viewer.isAdmin ? [] : [where('uploaderId', '==', viewer.uid ?? UNAUTHENTICATED_UPLOADER_SENTINEL)]),
       ];
-      const sermonsQuery = query(
-        collection(firestore, 'sermons').withConverter(sermonConverter),
-        ...queryConstraints
-      );
+      const sermonsQuery = query(collection(firestore, 'sermons').withConverter(sermonConverter), ...queryConstraints);
 
       return onSnapshot(
         sermonsQuery,
@@ -169,26 +159,20 @@ const SearchResultSermonList = ({ hiddenSermonIds = [], ...props }: SearchResult
   const { status, results, indexUiState } = useInstantSearch();
   const { currentSermonId, setCurrentSermon } = useAudioPlayer();
   const { user } = useAuth();
-  const playing = useMediaState('playing');
+  const playing = usePlaybackPlaying();
   const userUid = user?.uid;
   const isAdmin = user?.isAdmin() ?? false;
   const hasSettledResults = !results.__isArtificial && status === 'idle';
-  const pendingSermonsQuery = useMemo(
-    () => {
-      const queryConstraints = [
-        where('searchPending', '==', true),
-        ...(isAdmin ? [] : [where('uploaderId', '==', userUid ?? UNAUTHENTICATED_UPLOADER_SENTINEL)]),
-        orderBy('editedAtMillis', 'desc'),
-        limit(20),
-      ];
+  const pendingSermonsQuery = useMemo(() => {
+    const queryConstraints = [
+      where('searchPending', '==', true),
+      ...(isAdmin ? [] : [where('uploaderId', '==', userUid ?? UNAUTHENTICATED_UPLOADER_SENTINEL)]),
+      orderBy('editedAtMillis', 'desc'),
+      limit(20),
+    ];
 
-      return query(
-        collection(firestore, 'sermons').withConverter(sermonConverter),
-        ...queryConstraints
-      );
-    },
-    [isAdmin, userUid]
-  );
+    return query(collection(firestore, 'sermons').withConverter(sermonConverter), ...queryConstraints);
+  }, [isAdmin, userUid]);
   const [pendingSermonsSnapshot, , pendingSermonsError] = useCollection(pendingSermonsQuery, {
     snapshotListenOptions: { includeMetadataChanges: true },
   });
@@ -214,13 +198,16 @@ const SearchResultSermonList = ({ hiddenSermonIds = [], ...props }: SearchResult
   const hasActiveRefinements = Object.values(refinementList).some((values) => values.length > 0);
   const currentPage = typeof indexUiState.page === 'number' ? indexUiState.page : 0;
   const showPendingOverlay = !indexUiState.query && !hasActiveRefinements && currentPage === 0;
-  const { liveSermonsById, resolvedIds: resolvedLiveSermonIds, verificationFailed } = useLiveVisibleSermons(visibleHitIds, {
+  const {
+    liveSermonsById,
+    resolvedIds: resolvedLiveSermonIds,
+    verificationFailed,
+  } = useLiveVisibleSermons(visibleHitIds, {
     uid: userUid,
     isAdmin,
   });
   const unresolvedVisibleHitIds = useMemo(
-    () =>
-      visibleHitIds.filter((sermonId) => !resolvedLiveSermonIds.has(sermonId)),
+    () => visibleHitIds.filter((sermonId) => !resolvedLiveSermonIds.has(sermonId)),
     [resolvedLiveSermonIds, visibleHitIds]
   );
   const unresolvedVisibleHitCount = unresolvedVisibleHitIds.length;
@@ -250,7 +237,8 @@ const SearchResultSermonList = ({ hiddenSermonIds = [], ...props }: SearchResult
   const hasVisibleHits = visibleAlgoliaHits.length > 0;
   const hasVisiblePending = showPendingOverlay && visiblePendingSermons.length > 0;
   const isHydratingVisibleHits = hasSettledResults && visibleHitIds.length > 0 && hasUnresolvedVisibleHits;
-  const isLoadingState = status === 'stalled' && !hasVisibleHits && !hasVisiblePending && unresolvedVisibleHitCount === 0;
+  const isLoadingState =
+    status === 'stalled' && !hasVisibleHits && !hasVisiblePending && unresolvedVisibleHitCount === 0;
   const shouldRenderHits = hasVisibleHits || hasSettledResults || hasVisiblePending;
   const shouldShowHydrationSkeletons = useDelayedTrue(
     shouldRenderHits && unresolvedVisibleHitCount > 0 && !verificationFailed,
@@ -290,8 +278,7 @@ const SearchResultSermonList = ({ hiddenSermonIds = [], ...props }: SearchResult
             Sermon upload status could not be verified. Reload this page to retry.
           </Typography>
         )}
-        {isLoadingState &&
-          [...Array(20)].map((_, i) => <SermonListCardSkeloten key={`sermonListCardSkeloten_${i}`} />)}
+        {isLoadingState && [...Array(20)].map((_, i) => <SermonListCardSkeloten key={`sermonListCardSkeloten_${i}`} />)}
         {shouldRenderHits &&
           displayRows.map(({ sermon, enableProcessingProgress }) => (
             <SermonListCard

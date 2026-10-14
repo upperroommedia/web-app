@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { Sermon, sermonStatusType } from '../types/SermonTypes';
-import { useMediaRemote, useMediaState } from '@vidstack/react';
+import { usePlayer } from '@videojs/react/audio';
+import { usePlaybackActions, usePlaybackPlaying, usePlaybackFeedback } from '../context/audio/audioPlayback';
 import IconButton from '@mui/material/IconButton';
 import PlayCircleIcon from '@mui/icons-material/PlayCircle';
 import PauseCircleIcon from '@mui/icons-material/PauseCircle';
@@ -19,13 +20,13 @@ export default function PlayButton({
   audioPlayerCurrentSermonId,
   audioPlayerSetCurrentSermon,
 }: PlayButtonProps) {
-  const [srcLoading, setSrcLoading] = useState(false);
+  const { ready, error } = usePlaybackFeedback();
 
-  const remote = useMediaRemote();
-  const waiting = useMediaState('waiting');
-  const playing = useMediaState('playing');
+  const remote = usePlaybackActions();
+  const waiting = usePlayer((state) => state.waiting);
+  const playing = usePlaybackPlaying();
 
-  const isLoadingPlayback = waiting || (srcLoading && !playing && sermon.id === audioPlayerCurrentSermonId);
+  const isLoadingPlayback = sermon.id === audioPlayerCurrentSermonId && !error && (waiting || !ready);
 
   return (
     <>
@@ -37,7 +38,6 @@ export default function PlayButton({
             e.preventDefault();
             if (audioPlayerCurrentSermonId !== sermon.id) {
               audioPlayerSetCurrentSermon(sermon);
-              setSrcLoading(true);
             } else {
               remote.togglePaused();
             }

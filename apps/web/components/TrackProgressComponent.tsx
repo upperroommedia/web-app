@@ -1,6 +1,6 @@
 import Box from '@mui/material/Box';
 import LinearProgress from '@mui/material/LinearProgress';
-import { useMediaPlayer } from '@vidstack/react';
+import { usePlayer } from '@videojs/react/audio';
 import React, { useEffect } from 'react';
 import { useStateRef } from '../hooks/useStateRef';
 
@@ -12,12 +12,13 @@ interface TrackProgressComponentProps {
 export default function TrackProgressComponent({ playing, duration }: TrackProgressComponentProps) {
   const [currentSecond, setCurrentSecond, currentSecondRef] = useStateRef(0);
 
-  const player = useMediaPlayer();
+  const player = usePlayer();
 
   useEffect(() => {
     if (!player) return;
     if (!playing) return;
-    return player.subscribe(({ currentTime }) => {
+    return player.subscribe(() => {
+      const currentTime = player.state.currentTime;
       if (Math.floor(currentTime) !== Math.floor(currentSecondRef.current)) {
         setCurrentSecond(currentTime);
       }

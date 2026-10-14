@@ -2,33 +2,24 @@
  * BottomAudioBar - A floating audio player with glassmorphism effect
  * Inspired by modern music players like Spotify
  */
-import { FunctionComponent, useEffect, useRef } from 'react';
-import { MediaProvider } from '@vidstack/react';
-import {
-  VolumeSlider,
-  TimeSlider,
-  Time,
-  MuteButton,
-  Controls,
-  PlayButton,
-  SeekButton,
-  Tooltip,
-  useMediaRemote,
-  useMediaState,
-  type TooltipPlacement,
-} from '@vidstack/react';
-import {
-  MuteIcon,
-  PauseIcon,
-  PlayIcon,
-  SeekBackward10Icon,
-  SeekForward10Icon,
-  VolumeHighIcon,
-  VolumeLowIcon,
-} from '@vidstack/react/icons';
+import { useEffect, useRef, useState } from 'react';
+import { Audio, usePlayer } from '@videojs/react/audio';
+import { Container } from '@videojs/react';
+import { connectAudioMediaSession } from '../utils/audioMediaSession';
+import MuiSlider from '@mui/material/Slider';
+import Tooltip from '@mui/material/Tooltip';
+import VolumeOffIcon from '@mui/icons-material/VolumeOff';
+import VolumeUpIcon from '@mui/icons-material/VolumeUp';
+import VolumeDownIcon from '@mui/icons-material/VolumeDown';
+import PlayArrowIcon from '@mui/icons-material/PlayArrow';
+import PauseIcon from '@mui/icons-material/Pause';
+import Replay10Icon from '@mui/icons-material/Replay10';
+import Forward10Icon from '@mui/icons-material/Forward10';
+import { usePlaybackActions, usePlaybackFeedback } from '../context/audio/audioPlayback';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import IconButton from '@mui/material/IconButton';
+import Button from '@mui/material/Button';
 import CircularProgress from '@mui/material/CircularProgress';
 import CloseIcon from '@mui/icons-material/Close';
 import { useTheme, alpha } from '@mui/material/styles';
@@ -40,128 +31,231 @@ const ROOT_PLAYER_OFFSET_CSS_VAR = '--floating-player-offset';
 const PLAYER_BOTTOM_GAP_PX = 20;
 
 interface MediaButtonProps {
-  tooltipPlacement: TooltipPlacement;
+  tooltipPlacement: 'top' | 'bottom';
 }
 
-interface SeekButtonProps extends MediaButtonProps {
-  seconds: number;
+function formatTime(value: number) {
+  const seconds = Math.max(0, Math.floor(Number.isFinite(value) ? value : 0));
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}:${String(seconds % 60).padStart(2, '0')}`;
 }
 
-// Time Slider Component
 function Slider() {
-  const theme = useTheme();
+  const { currentTime, duration } = usePlayer((state) => ({
+    currentTime: state.currentTime,
+    duration: state.duration,
+  }));
+  const { seek } = usePlaybackActions();
+  const { getSource } = usePlaybackFeedback();
+  const interactionSource = useRef<string | null>(null);
+  const [draft, setDraft] = useState<number | null>(null);
+  const max = Number.isFinite(duration) && duration > 0 ? duration : 0;
   return (
-    <TimeSlider.Root className="vds-time-slider vds-slider">
-      <TimeSlider.Chapters className="vds-slider-chapters">
-        {(cues, forwardRef) =>
-          cues.map((cue) => (
-            <div className="vds-slider-chapter" key={cue.startTime} ref={forwardRef}>
-              <TimeSlider.Track className="vds-slider-track" />
-              <TimeSlider.TrackFill className="vds-slider-track-fill vds-slider-track" />
-              <TimeSlider.Progress className="vds-slider-progress vds-slider-track" />
-            </div>
-          ))
-        }
-      </TimeSlider.Chapters>
-      <TimeSlider.Thumb className="vds-slider-thumb" />
-      <TimeSlider.Preview className="vds-slider-preview" noClamp style={{ backgroundColor: 'transparent' }}>
-        <TimeSlider.Value style={{ color: theme.palette.text.primary, fontSize: '12px', backgroundColor: 'transparent' }} />
-      </TimeSlider.Preview>
-    </TimeSlider.Root>
+    <MuiSlider
+      aria-label="Playback position"
+      getAriaValueText={formatTime}
+      min={0}
+      max={max || 1}
+      step={0.1}
+      value={Math.min(max, draft ?? currentTime)}
+      disabled={!max}
+      onChange={(_event, value) => {
+        interactionSource.current ??= getSource();
+        setDraft(Number(value));
+      }}
+      onChangeCommitted={(_event, value) => {
+        const originalSource = interactionSource.current;
+        interactionSource.current = null;
+        setDraft(null);
+        if (originalSource === getSource()) void seek(Number(value));
+      }}
+      valueLabelDisplay="auto"
+      valueLabelFormat={formatTime}
+      size="small"
+      sx={{ width: '100%', py: 1.5, color: 'text.primary' }}
+    />
   );
 }
 
-// Seek Button Component
-export function Seek({ seconds, tooltipPlacement }: SeekButtonProps) {
-  const isBackward = seconds < 0;
+export function Seek({ seconds, tooltipPlacement }: MediaButtonProps & { seconds: number }) {
+  const player = usePlayer();
+  const duration = usePlayer((state) => state.duration);
+  const { seek } = usePlaybackActions();
+  const label = seconds < 0 ? 'Seek backward 10 seconds' : 'Seek forward 10 seconds';
   return (
-    <Tooltip.Root>
-      <Tooltip.Trigger asChild>
-        <SeekButton className="vds-button floating-player-btn" seconds={seconds}>
-          {isBackward ? <SeekBackward10Icon /> : <SeekForward10Icon />}
-        </SeekButton>
-      </Tooltip.Trigger>
-      <Tooltip.Content className="vds-tooltip-content" placement={tooltipPlacement}>
-        {isBackward ? 'Seek Backward' : 'Seek Forward'}
-      </Tooltip.Content>
-    </Tooltip.Root>
+    <Tooltip title={label} placement={tooltipPlacement}>
+      <span>
+        <IconButton
+          className="floating-player-btn"
+          aria-label={label}
+          disabled={!(duration > 0)}
+          onClick={() => void seek(player.state.currentTime + seconds)}
+        >
+          {seconds < 0 ? <Replay10Icon /> : <Forward10Icon />}
+        </IconButton>
+      </span>
+    </Tooltip>
   );
 }
 
-// Mute Button Component
 function Mute({ tooltipPlacement }: MediaButtonProps) {
-  const volume = useMediaState('volume');
-  const isMuted = useMediaState('muted');
+  const player = usePlayer();
+  const { volume, muted, availability } = usePlayer((state) => ({
+    volume: state.volume,
+    muted: state.muted,
+    availability: state.mutedAvailability,
+  }));
+  if (availability !== 'available') return null;
+  const label = muted || volume === 0 ? 'Unmute' : 'Mute';
   return (
-    <Tooltip.Root>
-      <Tooltip.Trigger asChild>
-        <MuteButton className="vds-button floating-player-btn">
-          {isMuted || volume === 0 ? <MuteIcon /> : volume < 0.5 ? <VolumeLowIcon /> : <VolumeHighIcon />}
-        </MuteButton>
-      </Tooltip.Trigger>
-      <Tooltip.Content className="vds-tooltip-content" placement={tooltipPlacement}>
-        {isMuted ? 'Unmute' : 'Mute'}
-      </Tooltip.Content>
-    </Tooltip.Root>
+    <Tooltip title={label} placement={tooltipPlacement}>
+      <IconButton
+        className="floating-player-btn"
+        aria-label={label}
+        onClick={() => player.setMuted(!(muted || volume === 0))}
+      >
+        {muted || volume === 0 ? <VolumeOffIcon /> : volume < 0.5 ? <VolumeDownIcon /> : <VolumeUpIcon />}
+      </IconButton>
+    </Tooltip>
   );
 }
 
-// Play/Pause Button Component
 function Play({ tooltipPlacement }: MediaButtonProps) {
-  const isPaused = useMediaState('paused');
-  const waiting = useMediaState('waiting');
-  const canPlay = useMediaState('canPlay');
-  const isLoadingPlayback = waiting || !canPlay;
-
+  const { paused, waiting } = usePlayer((state) => ({ paused: state.paused, waiting: state.waiting }));
+  const { ready, error } = usePlaybackFeedback();
+  const { togglePaused } = usePlaybackActions();
+  const loading = !error && (waiting || !ready);
+  const label = paused ? 'Play' : 'Pause';
   return (
-    <Tooltip.Root>
-      <Tooltip.Trigger asChild>
-        <PlayButton className="vds-button floating-player-play-btn" disabled={isLoadingPlayback}>
-          {isLoadingPlayback ? <CircularProgress color="inherit" size={20} thickness={5} /> : isPaused ? <PlayIcon /> : <PauseIcon />}
-        </PlayButton>
-      </Tooltip.Trigger>
-      <Tooltip.Content className="vds-tooltip-content" placement={tooltipPlacement}>
-        {isLoadingPlayback ? 'Loading audio' : isPaused ? 'Play' : 'Pause'}
-      </Tooltip.Content>
-    </Tooltip.Root>
+    <Tooltip title={loading ? 'Loading audio' : label} placement={tooltipPlacement}>
+      <span>
+        <IconButton
+          className="floating-player-play-btn"
+          aria-label={label}
+          aria-busy={loading}
+          disabled={loading && paused}
+          onClick={togglePaused}
+        >
+          {loading ? (
+            <CircularProgress color="inherit" size={20} thickness={5} />
+          ) : paused ? (
+            <PlayArrowIcon />
+          ) : (
+            <PauseIcon />
+          )}
+        </IconButton>
+      </span>
+    </Tooltip>
   );
 }
 
-// Current Time Display
 function CurrentTime() {
-  return <Time className="vds-time floating-time-current" type="current" />;
+  const time = usePlayer((state) => Math.floor(state.currentTime));
+  return <span className="floating-time-current">{formatTime(time)}</span>;
 }
 
-// Duration Time Display  
 function DurationTime() {
-  return <Time className="vds-time floating-time-duration" type="duration" />;
+  const duration = usePlayer((state) => state.duration);
+  return <span className="floating-time-duration">{formatTime(duration)}</span>;
 }
 
-// Volume Slider Component
 function Volume() {
-  const theme = useTheme();
+  const player = usePlayer();
+  const volume = usePlayer((state) => (state.muted ? 0 : state.volume));
+  const availability = usePlayer((state) => state.volumeAvailability);
+  if (availability !== 'available') return null;
   return (
-    <VolumeSlider.Root className="vds-volume-slider vds-slider floating-player-volume">
-      <VolumeSlider.Track className="vds-slider-track" />
-      <VolumeSlider.TrackFill className="vds-slider-track-fill vds-slider-track" />
-      <VolumeSlider.Preview className="vds-slider-preview" noClamp style={{ backgroundColor: 'transparent' }}>
-        <VolumeSlider.Value style={{ color: theme.palette.text.primary, fontSize: '12px', backgroundColor: 'transparent' }} />
-      </VolumeSlider.Preview>
-      <VolumeSlider.Thumb className="vds-slider-thumb" />
-    </VolumeSlider.Root>
+    <MuiSlider
+      aria-label="Volume"
+      getAriaValueText={(value) => `${Math.round(value * 100)} percent`}
+      min={0}
+      max={1}
+      step={0.01}
+      value={volume}
+      onChange={(_event, value) => player.setVolume(Number(value))}
+      size="small"
+      sx={{ width: 80, color: 'text.primary' }}
+    />
   );
 }
 
-const BottomAudioBar: FunctionComponent = () => {
+function PlaybackMedia({ source, sourceError }: { source: string; sourceError?: string }) {
+  const { setReady, setError, getSource } = usePlaybackFeedback();
+  const attemptedSource = useRef('');
+  const generation = useRef(0);
+  useEffect(() => {
+    setReady(false);
+    setError(sourceError);
+    attemptedSource.current = '';
+    const current = ++generation.current;
+    return () => {
+      if (generation.current === current) generation.current++;
+    };
+  }, [source, sourceError, setReady, setError]);
+  return (
+    <Audio
+      src={source || undefined}
+      preload="auto"
+      onLoadStart={() => setReady(false)}
+      onEmptied={() => setReady(false)}
+      onCanPlay={(event) => {
+        setReady(true);
+        if (!source || attemptedSource.current === source) return;
+        attemptedSource.current = source;
+        // Capture blocked autoplay rather than leaving the player spinning forever.
+        const current = generation.current;
+        const sourceKey = getSource();
+        const media = event.currentTarget;
+        void Promise.resolve()
+          .then(() => media.play())
+          .catch((error: unknown) => {
+            if (generation.current !== current || getSource() !== sourceKey) return;
+            if (error instanceof Error && error.name === 'AbortError') return;
+            setError('Select Play to start audio.');
+          });
+      }}
+      onError={(event) => {
+        if (event.currentTarget.currentSrc && event.currentTarget.currentSrc !== source) return;
+        setReady(false);
+        setError('Audio could not load. Please try another sermon or reopen this one.');
+      }}
+    />
+  );
+}
+
+const BottomAudioBar = ({
+  source,
+  sermonId,
+  sourceError,
+  onRetrySource,
+}: {
+  source: string;
+  sermonId?: string;
+  sourceError?: string;
+  onRetrySource: () => void;
+}) => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const downLG = useMediaQuery(theme.breakpoints.down('lg'));
   const sidebarHidden = useMediaQuery(theme.breakpoints.down('lg'));
   const { currentSermon, setCurrentSermon } = useAudioPlayer();
-  const remote = useMediaRemote();
+  const remote = usePlaybackActions();
+  const player = usePlayer();
+  const { error: playbackError, getSource } = usePlaybackFeedback();
+  const error = sourceError || playbackError;
+  const [retry, setRetry] = useState(0);
   const rootRef = useRef<HTMLDivElement>(null);
   const artworkBorderRadius = downLG ? 2 : '50%';
   const artworkImageBorderRadius = downLG ? 8 : 9999;
+
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !navigator.mediaSession) return;
+    const metadata =
+      typeof MediaMetadata === 'undefined'
+        ? null
+        : new MediaMetadata({ title: currentSermon?.title || 'Sermon audio' });
+    return connectAudioMediaSession(navigator.mediaSession, metadata, player, remote, getSource);
+  }, [currentSermon?.title, source, sermonId, player, remote, getSource]);
 
   useEffect(() => {
     const docEl = document.documentElement;
@@ -197,9 +291,44 @@ const BottomAudioBar: FunctionComponent = () => {
   return (
     <Box
       ref={rootRef}
+      component={Container}
+      tabIndex={0}
+      onKeyDown={(event) => {
+        if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
+        const target = event.target as HTMLElement;
+        if (target.closest('button, input, textarea, select, [role="slider"], [contenteditable="true"]')) return;
+        switch (event.key.toLowerCase()) {
+          case ' ':
+          case 'k':
+            remote.togglePaused();
+            break;
+          case 'j':
+            void remote.seek(player.state.currentTime - 10);
+            break;
+          case 'l':
+            void remote.seek(player.state.currentTime + 10);
+            break;
+          case 'arrowleft':
+            void remote.seek(player.state.currentTime - 5);
+            break;
+          case 'arrowright':
+            void remote.seek(player.state.currentTime + 5);
+            break;
+          case 'm':
+            if (player.state.mutedAvailability !== 'available') return;
+            player.setMuted(!player.state.muted);
+            break;
+          default:
+            return;
+        }
+        event.preventDefault();
+      }}
+      role="region"
+      aria-label="Sermon audio player"
       className="media-player"
       data-testid="floating-audio-bar"
       sx={{
+        '&:focus-visible': { outline: '2px solid', outlineColor: 'primary.main', outlineOffset: 3 },
         position: 'fixed',
         bottom: `${PLAYER_BOTTOM_GAP_PX}px`,
         // Center in the main content area (account for sidebar on desktop)
@@ -231,10 +360,26 @@ const BottomAudioBar: FunctionComponent = () => {
         },
       }}
     >
-      <MediaProvider />
-      <Controls.Root className="vds-controls">
+      {error && (
+        <Box sx={{ px: 2, pt: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Typography role="status" aria-live="polite" sx={{ fontSize: '0.8rem' }}>
+            {error}
+          </Typography>
+          <Button
+            size="small"
+            onClick={() => {
+              if (sourceError) onRetrySource();
+              else setRetry((attempt) => attempt + 1);
+            }}
+          >
+            Retry audio
+          </Button>
+        </Box>
+      )}
+      <PlaybackMedia key={`${sermonId}:${retry}`} source={source} sourceError={sourceError} />
+      <div>
         {/* Main Player Content */}
-        <Controls.Group>
+        <div>
           <Box
             sx={{
               display: 'flex',
@@ -301,9 +446,8 @@ const BottomAudioBar: FunctionComponent = () => {
               <Typography
                 variant="caption"
                 sx={{
-                  color: theme.palette.mode === 'dark'
-                    ? alpha(theme.palette.common.white, 0.75)
-                    : theme.palette.grey[700],
+                  color:
+                    theme.palette.mode === 'dark' ? alpha(theme.palette.common.white, 0.75) : theme.palette.grey[700],
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap',
@@ -329,18 +473,16 @@ const BottomAudioBar: FunctionComponent = () => {
                     letterSpacing: '0.02em',
                     minWidth: 48,
                     lineHeight: 1,
-                    color: theme.palette.mode === 'dark'
-                      ? alpha(theme.palette.common.white, 0.85)
-                      : theme.palette.grey[700],
+                    color:
+                      theme.palette.mode === 'dark' ? alpha(theme.palette.common.white, 0.85) : theme.palette.grey[700],
                   },
                   '& .floating-time-current': {
                     textAlign: 'right',
                   },
                   '& .floating-time-duration': {
                     textAlign: 'left',
-                    color: theme.palette.mode === 'dark'
-                      ? alpha(theme.palette.common.white, 0.5)
-                      : theme.palette.grey[500],
+                    color:
+                      theme.palette.mode === 'dark' ? alpha(theme.palette.common.white, 0.5) : theme.palette.grey[500],
                   },
                 }}
               >
@@ -354,28 +496,7 @@ const BottomAudioBar: FunctionComponent = () => {
                     '--media-slider-height': '20px',
                     '--media-slider-track-height': '4px',
                     '--media-slider-thumb-size': '14px',
-                    '& .vds-time-slider': {
-                      display: 'flex',
-                      alignItems: 'center',
-                      width: '100%',
-                      height: 'var(--media-slider-height)',
-                      position: 'relative',
-                    },
-                    '& .vds-slider-chapters': {
-                      display: 'flex',
-                      alignItems: 'center',
-                      width: '100%',
-                      height: '100%',
-                      position: 'relative',
-                    },
-                    '& .vds-slider-chapter': {
-                      display: 'flex',
-                      alignItems: 'center',
-                      flex: 1,
-                      height: '100%',
-                      position: 'relative',
-                    },
-                    '& .vds-slider-track': {
+                    '& .MuiSlider-rail': {
                       position: 'absolute',
                       top: '50%',
                       left: 0,
@@ -383,36 +504,35 @@ const BottomAudioBar: FunctionComponent = () => {
                       transform: 'translateY(-50%)',
                       height: 'var(--media-slider-track-height)',
                       borderRadius: 'var(--media-slider-track-height)',
-                      backgroundColor: theme.palette.mode === 'dark'
-                        ? alpha(theme.palette.common.white, 0.2)
-                        : alpha(theme.palette.grey[900], 0.12),
+                      backgroundColor:
+                        theme.palette.mode === 'dark'
+                          ? alpha(theme.palette.common.white, 0.2)
+                          : alpha(theme.palette.grey[900], 0.12),
                     },
-                    '& .vds-slider-track-fill': {
+                    '& .MuiSlider-track': {
                       position: 'absolute',
                       top: '50%',
                       left: 0,
                       transform: 'translateY(-50%)',
                       height: 'var(--media-slider-track-height)',
                       borderRadius: 'var(--media-slider-track-height)',
-                      backgroundColor: theme.palette.mode === 'dark'
-                        ? theme.palette.common.white
-                        : theme.palette.grey[800],
+                      backgroundColor:
+                        theme.palette.mode === 'dark' ? theme.palette.common.white : theme.palette.grey[800],
                     },
-                    '& .vds-slider-thumb': {
+                    '& .MuiSlider-thumb': {
                       position: 'absolute',
                       top: '50%',
                       transform: 'translate(-50%, -50%)',
                       width: 'var(--media-slider-thumb-size)',
                       height: 'var(--media-slider-thumb-size)',
                       borderRadius: '50%',
-                      backgroundColor: theme.palette.mode === 'dark'
-                        ? theme.palette.common.white
-                        : theme.palette.grey[900],
+                      backgroundColor:
+                        theme.palette.mode === 'dark' ? theme.palette.common.white : theme.palette.grey[900],
                       // boxShadow: `0 0 10px ${alpha(theme.palette.primary.main, 0.4)}`,
                     },
                   }}
                 >
-                  <Slider />
+                  <Slider key={`${sermonId}:${source}`} />
                 </Box>
                 <DurationTime />
               </Box>
@@ -430,14 +550,11 @@ const BottomAudioBar: FunctionComponent = () => {
                   display: 'inline-flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  color: theme.palette.mode === 'dark'
-                    ? alpha(theme.palette.common.white, 0.9)
-                    : theme.palette.grey[700],
+                  color:
+                    theme.palette.mode === 'dark' ? alpha(theme.palette.common.white, 0.9) : theme.palette.grey[700],
                   transition: 'all 0.2s ease',
                   '&:hover': {
-                    color: theme.palette.mode === 'dark'
-                      ? theme.palette.common.white
-                      : theme.palette.grey[900],
+                    color: theme.palette.mode === 'dark' ? theme.palette.common.white : theme.palette.grey[900],
                     transform: 'scale(1.1)',
                   },
                   '& > svg': {
@@ -451,12 +568,8 @@ const BottomAudioBar: FunctionComponent = () => {
                   display: 'inline-flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  backgroundColor: theme.palette.mode === 'dark'
-                    ? theme.palette.common.white
-                    : theme.palette.grey[900],
-                  color: theme.palette.mode === 'dark'
-                    ? theme.palette.primary.main
-                    : theme.palette.common.white,
+                  backgroundColor: theme.palette.mode === 'dark' ? theme.palette.common.white : theme.palette.grey[900],
+                  color: theme.palette.mode === 'dark' ? theme.palette.primary.main : theme.palette.common.white,
                   borderRadius: '50%',
                   transition: 'all 0.2s ease',
                   boxShadow: `0 4px 12px ${alpha(theme.palette.common.black, 0.3)}`,
@@ -495,33 +608,29 @@ const BottomAudioBar: FunctionComponent = () => {
                   '& .floating-player-btn': {
                     width: 36,
                     height: 36,
-                    color: theme.palette.mode === 'dark'
-                      ? alpha(theme.palette.common.white, 0.8)
-                      : theme.palette.grey[600],
+                    color:
+                      theme.palette.mode === 'dark' ? alpha(theme.palette.common.white, 0.8) : theme.palette.grey[600],
                     '&:hover': {
-                      color: theme.palette.mode === 'dark'
-                        ? theme.palette.common.white
-                        : theme.palette.grey[900],
+                      color: theme.palette.mode === 'dark' ? theme.palette.common.white : theme.palette.grey[900],
                     },
                     '& svg': {
                       width: 20,
                       height: 20,
                     },
                   },
-                  '& .vds-slider-track': {
-                    backgroundColor: theme.palette.mode === 'dark'
-                      ? alpha(theme.palette.common.white, 0.2)
-                      : alpha(theme.palette.grey[900], 0.15),
+                  '& .MuiSlider-rail': {
+                    backgroundColor:
+                      theme.palette.mode === 'dark'
+                        ? alpha(theme.palette.common.white, 0.2)
+                        : alpha(theme.palette.grey[900], 0.15),
                   },
-                  '& .vds-slider-track-fill': {
-                    backgroundColor: theme.palette.mode === 'dark'
-                      ? alpha(theme.palette.common.white, 0.8)
-                      : theme.palette.grey[700],
+                  '& .MuiSlider-track': {
+                    backgroundColor:
+                      theme.palette.mode === 'dark' ? alpha(theme.palette.common.white, 0.8) : theme.palette.grey[700],
                   },
-                  '& .vds-slider-thumb': {
-                    backgroundColor: theme.palette.mode === 'dark'
-                      ? theme.palette.common.white
-                      : theme.palette.grey[800],
+                  '& .MuiSlider-thumb': {
+                    backgroundColor:
+                      theme.palette.mode === 'dark' ? theme.palette.common.white : theme.palette.grey[800],
                   },
                 }}
               >
@@ -534,32 +643,29 @@ const BottomAudioBar: FunctionComponent = () => {
             <IconButton
               onClick={() => {
                 remote.pause();
-                remote.seek(0);
                 setCurrentSermon(undefined);
               }}
+              aria-label="Close audio player"
               size="small"
               sx={{
-                color: theme.palette.mode === 'dark'
-                  ? alpha(theme.palette.common.white, 0.7)
-                  : theme.palette.grey[600],
+                color: theme.palette.mode === 'dark' ? alpha(theme.palette.common.white, 0.7) : theme.palette.grey[600],
                 '&:hover': {
-                  color: theme.palette.mode === 'dark'
-                    ? theme.palette.common.white
-                    : theme.palette.grey[900],
-                  backgroundColor: theme.palette.mode === 'dark'
-                    ? alpha(theme.palette.common.white, 0.1)
-                    : alpha(theme.palette.grey[900], 0.1),
+                  color: theme.palette.mode === 'dark' ? theme.palette.common.white : theme.palette.grey[900],
+                  backgroundColor:
+                    theme.palette.mode === 'dark'
+                      ? alpha(theme.palette.common.white, 0.1)
+                      : alpha(theme.palette.grey[900], 0.1),
                 },
               }}
             >
               <CloseIcon fontSize="small" />
             </IconButton>
           </Box>
-        </Controls.Group>
+        </div>
 
         {/* Mobile/Tablet: Progress slider at bottom */}
         {downLG && (
-          <Controls.Group>
+          <div>
             <Box
               sx={{
                 width: '100%',
@@ -576,18 +682,16 @@ const BottomAudioBar: FunctionComponent = () => {
                   fontSize: '0.75rem',
                   fontWeight: 500,
                   minWidth: 40,
-                  color: theme.palette.mode === 'dark'
-                    ? alpha(theme.palette.common.white, 0.8)
-                    : theme.palette.grey[600],
+                  color:
+                    theme.palette.mode === 'dark' ? alpha(theme.palette.common.white, 0.8) : theme.palette.grey[600],
                 },
                 '& .floating-time-current': {
                   textAlign: 'right',
                 },
                 '& .floating-time-duration': {
                   textAlign: 'left',
-                  color: theme.palette.mode === 'dark'
-                    ? alpha(theme.palette.common.white, 0.5)
-                    : theme.palette.grey[500],
+                  color:
+                    theme.palette.mode === 'dark' ? alpha(theme.palette.common.white, 0.5) : theme.palette.grey[500],
                 },
               }}
             >
@@ -595,28 +699,7 @@ const BottomAudioBar: FunctionComponent = () => {
               <Box
                 sx={{
                   flex: 1,
-                  '& .vds-time-slider': {
-                    display: 'flex',
-                    alignItems: 'center',
-                    width: '100%',
-                    height: 'var(--media-slider-height)',
-                    position: 'relative',
-                  },
-                  '& .vds-slider-chapters': {
-                    display: 'flex',
-                    alignItems: 'center',
-                    width: '100%',
-                    height: '100%',
-                    position: 'relative',
-                  },
-                  '& .vds-slider-chapter': {
-                    display: 'flex',
-                    alignItems: 'center',
-                    flex: 1,
-                    height: '100%',
-                    position: 'relative',
-                  },
-                  '& .vds-slider-track': {
+                  '& .MuiSlider-rail': {
                     position: 'absolute',
                     top: '50%',
                     left: 0,
@@ -624,41 +707,40 @@ const BottomAudioBar: FunctionComponent = () => {
                     transform: 'translateY(-50%)',
                     height: 'var(--media-slider-track-height)',
                     borderRadius: 'var(--media-slider-track-height)',
-                    backgroundColor: theme.palette.mode === 'dark'
-                      ? alpha(theme.palette.common.white, 0.2)
-                      : alpha(theme.palette.grey[900], 0.12),
+                    backgroundColor:
+                      theme.palette.mode === 'dark'
+                        ? alpha(theme.palette.common.white, 0.2)
+                        : alpha(theme.palette.grey[900], 0.12),
                   },
-                  '& .vds-slider-track-fill': {
+                  '& .MuiSlider-track': {
                     position: 'absolute',
                     top: '50%',
                     left: 0,
                     transform: 'translateY(-50%)',
                     height: 'var(--media-slider-track-height)',
                     borderRadius: 'var(--media-slider-track-height)',
-                    backgroundColor: theme.palette.mode === 'dark'
-                      ? theme.palette.common.white
-                      : theme.palette.grey[800],
+                    backgroundColor:
+                      theme.palette.mode === 'dark' ? theme.palette.common.white : theme.palette.grey[800],
                   },
-                  '& .vds-slider-thumb': {
+                  '& .MuiSlider-thumb': {
                     position: 'absolute',
                     top: '50%',
                     transform: 'translate(-50%, -50%)',
                     width: 'var(--media-slider-thumb-size)',
                     height: 'var(--media-slider-thumb-size)',
                     borderRadius: '50%',
-                    backgroundColor: theme.palette.mode === 'dark'
-                      ? theme.palette.common.white
-                      : theme.palette.grey[900],
+                    backgroundColor:
+                      theme.palette.mode === 'dark' ? theme.palette.common.white : theme.palette.grey[900],
                   },
                 }}
               >
-                <Slider />
+                <Slider key={`${sermonId}:${source}`} />
               </Box>
               <DurationTime />
             </Box>
-          </Controls.Group>
+          </div>
         )}
-      </Controls.Root>
+      </div>
     </Box>
   );
 };

@@ -52,7 +52,7 @@ import { sermonConverter } from '../../../types/Sermon';
 import { Series, seriesConverter } from '../../../types/Series';
 import useAuth from '../../../context/user/UserContext';
 import useAudioPlayer from '../../../context/audio/audioPlayerContext';
-import { useMediaState, useMediaRemote } from '@vidstack/react';
+import { usePlaybackActions, usePlaybackPlaying } from '@/context/audio/audioPlayback';
 import { createFunctionV2 } from '../../../utils/createFunction';
 import UserAvatar from '../../../components/UserAvatar';
 import { DirectoryUser, User } from '../../../types/User';
@@ -91,8 +91,8 @@ const SermonDetailsPage = () => {
   const theme = useTheme();
   const sermonId = router.query.sermonId as string;
   const { currentSermon, setCurrentSermon } = useAudioPlayer();
-  const remote = useMediaRemote();
-  const playing = useMediaState('playing');
+  const remote = usePlaybackActions();
+  const playing = usePlaybackPlaying();
   const pageContainerSx = { maxWidth: 1400, mx: 'auto', width: '100%', px: { xs: 0.5, sm: 2, md: 3 } };
 
   const [series, setSeries] = useState<Series | null>(null);
