@@ -1,6 +1,6 @@
 /** Real Firestore transactions and Storage streams; no provider network requests or fake datastore. */
 import { randomUUID, createHash } from 'node:crypto';
-import { Readable } from 'node:stream';
+import { Readable, Writable } from 'node:stream';
 import { getApps, deleteApp } from 'firebase-admin/app';
 jest.mock('@upperroom/shared/firebase/firebaseAdmin', () => {
   const { getApps, initializeApp } = require('firebase-admin/app');
@@ -28,7 +28,7 @@ import {
   updateSandboxSoundCloudTrack,
   inspectSandboxJob,
 } from './service';
-import { sandboxResourceKey, beginSandboxAssetPreparation } from './store';
+import { sandboxResourceKey, beginSandboxAssetPreparation, completeSandboxAssetPreparation } from './store';
 import { resolveStageAsset, inspectStageAsset, inspectReviewedSandboxWav, copyStageAssetToSandbox } from './assets';
 import { createListRow, getFullListRowsWithTotal, getListDetails } from '../helpers/addToListHelpers';
 import { authenticateSubsplash } from '../subsplashUtils';
@@ -381,21 +381,175 @@ it('bounds private storage across repeated permanent rejection while retaining t
   expect((await inspectSandboxJob(profile, id)).resources).toEqual([]);
   await fixture.file.delete();
 });
-it('shares one actual CAS-protected private copy under concurrency and rejects stale retries before more writes', async () => {
+it('measures the unadapted Storage emulator create-only capability using exact owned bytes', async () => {
+  const bucket = admin.storage().bucket('urm-app-staging.firebasestorage.app'),
+    file = bucket.file(`_providerSandbox/${profile.profileId}/tests/cas-capability-${randomUUID()}`),
+    first = Buffer.from('owned first create-only capability payload'),
+    second = Buffer.from('owned second create-only capability payload');
+  try {
+    await file.save(first, { resumable: false, preconditionOpts: { ifGenerationMatch: 0 } });
+    const firstGeneration = String((await file.getMetadata())[0].generation);
+    // Current Firebase Storage emulator ignores this precondition. A future implementation may enforce it.
+    let rejected = false;
+    try {
+      await file.save(second, { resumable: false, preconditionOpts: { ifGenerationMatch: 0 } });
+    } catch (error) {
+      expect(error).toMatchObject({ code: 412 });
+      rejected = true;
+    }
+    expect((await file.download())[0]).toEqual(rejected ? first : second);
+    if (rejected) expect(String((await file.getMetadata())[0].generation)).toBe(firstGeneration);
+    else
+      console.info('Storage emulator lacks atomic ifGenerationMatch:0; concurrency test supplies only that contract');
+  } finally {
+    await file.delete({ ignoreNotFound: true });
+  }
+});
+it('shares one private copy with an explicit GCS create-only test boundary and rejects stale retries', async () => {
   const id = await job('success'),
-    fixture = await ownedCopyFixture(id);
-  const copies = await Promise.all(
-    Array.from({ length: 3 }, () => copyStageAssetToSandbox(profile, fixture.evidence, fixture.context))
-  );
-  expect(new Set(copies.map((row) => row.path + ':' + row.generation)).size).toBe(1);
-  expect((await root().collection('preparedAssets').where('jobId', '==', id).get()).size).toBe(1);
-  await db().collection(DURABLE_COLLECTIONS.jobs).doc(id).update({ generation: 2 });
-  for (let attempt = 0; attempt < 3; attempt++)
-    await expect(copyStageAssetToSandbox(profile, fixture.evidence, fixture.context)).rejects.toThrow('generation');
-  const [objects] = await fixture.bucket.getFiles({ prefix: copies[0].path, maxResults: 2, autoPaginate: false });
-  expect(objects).toHaveLength(1);
-  expect(String((await objects[0].getMetadata())[0].generation)).toBe(copies[0].generation);
-  await fixture.file.delete();
+    fixture = await ownedCopyFixture(id),
+    key = createHash('sha256')
+      .update(
+        JSON.stringify([
+          profile.profileId,
+          id,
+          fixture.evidence.bucket,
+          fixture.evidence.path,
+          fixture.evidence.generation,
+          fixture.evidence.sha256,
+        ])
+      )
+      .digest('hex'),
+    targetPath = `_providerSandbox/${profile.profileId}/media/${key}/asset`,
+    prototype: typeof fixture.file = Object.getPrototypeOf(fixture.file),
+    nativeCreateWriteStream = prototype.createWriteStream;
+  let arrivals = 0,
+    releaseContenders!: () => void,
+    failContenders!: (error: Error) => void,
+    finishWinner!: () => void,
+    failWinner!: (error: Error) => void,
+    failure: Error | undefined;
+  const streams = new Set<Writable>(),
+    allContenders = new Promise<void>((resolve, reject) => {
+      releaseContenders = resolve;
+      failContenders = reject;
+    }),
+    winnerFinished = new Promise<void>((resolve, reject) => {
+      finishWinner = resolve;
+      failWinner = reject;
+    });
+  // Install rejection handlers immediately, including when a source fails before any stream is allocated.
+  void allContenders.catch(() => undefined);
+  void winnerFinished.catch(() => undefined);
+  const abort = (cause: unknown) => {
+    if (failure) return;
+    failure = cause instanceof Error ? cause : new Error(String(cause));
+    failContenders(failure);
+    failWinner(failure);
+    for (const stream of streams) stream.destroy(failure);
+  };
+  const barrierTimer = setTimeout(() => abort(new Error('Concurrent copy test barrier exceeded 10 seconds')), 10000);
+  barrierTimer.unref();
+  // Supply ONLY the atomic create-only condition absent from Firebase's emulator. The first writer still
+  // streams real source bytes into actual Storage; all callers use actual Firestore and recovery reads.
+  const adapter = jest
+    .spyOn(prototype, 'createWriteStream')
+    .mockImplementation(function (
+      this: typeof fixture.file,
+      options?: Parameters<typeof fixture.file.createWriteStream>[0]
+    ) {
+      if (this.name !== targetPath || this.bucket.name !== fixture.bucket.name)
+        return nativeCreateWriteStream.call(this, options);
+      expect(options?.preconditionOpts).toEqual({ ifGenerationMatch: 0 });
+      const winner = ++arrivals === 1;
+      if (arrivals === 3) {
+        clearTimeout(barrierTimer);
+        releaseContenders();
+      }
+      const output = winner ? nativeCreateWriteStream.call(this, options) : undefined;
+      if (output) {
+        streams.add(output);
+        output.once('finish', finishWinner);
+        output.once('error', abort);
+      }
+      const boundary = new Writable({
+        write(chunk, encoding, done) {
+          if (output) output.write(chunk, encoding, done);
+          else done();
+        },
+        final(done) {
+          if (output) {
+            void allContenders.then(() => {
+              output.end();
+              void winnerFinished.then(() => done(), done);
+            }, done);
+          } else {
+            void winnerFinished.then(
+              () => done(Object.assign(new Error('GCS create-only precondition'), { code: 412 })),
+              done
+            );
+          }
+        },
+        destroy(error, done) {
+          if (output && !output.destroyed) output.destroy(error ?? undefined);
+          done(error);
+        },
+      });
+      streams.add(boundary);
+      if (failure) queueMicrotask(() => boundary.destroy(failure));
+      return boundary;
+    });
+  try {
+    // Every failure aborts peers; settle all of them before restoring the native boundary.
+    const results = await Promise.allSettled(
+      Array.from({ length: 3 }, () =>
+        copyStageAssetToSandbox(profile, fixture.evidence, fixture.context).catch((error: unknown) => {
+          abort(error);
+          throw error;
+        })
+      )
+    );
+    const copies = results.map((result) => {
+      if (result.status === 'rejected') throw result.reason;
+      return result.value;
+    });
+    expect(arrivals).toBe(3);
+    expect(new Set(copies.map((row) => row.path + ':' + row.generation)).size).toBe(1);
+    const preparations = await root().collection('preparedAssets').where('jobId', '==', id).get();
+    expect(preparations.size).toBe(1);
+    const stored = preparations.docs[0].data().target;
+    expect(stored).toMatchObject({
+      sha256: createHash('sha256').update(fixture.bytes).digest('hex'),
+      size: fixture.bytes.length,
+    });
+    expect((await fixture.bucket.file(copies[0].path).download())[0]).toEqual(fixture.bytes);
+    // A changed target remains a hard conflict; emulator adaptation never weakens the durable identity gate.
+    for (const changed of [
+      { generation: copies[0].generation + '1' },
+      { sha256: '0'.repeat(64) },
+      { size: copies[0].size + 1 },
+    ])
+      await expect(
+        completeSandboxAssetPreparation(profile, preparations.docs[0].id, { ...copies[0], ...changed })
+      ).rejects.toThrow('Private asset target identity changed');
+    expect((await preparations.docs[0].ref.get()).get('target')).toEqual(stored);
+    await db().collection(DURABLE_COLLECTIONS.jobs).doc(id).update({ generation: 2 });
+    for (let attempt = 0; attempt < 3; attempt++)
+      await expect(copyStageAssetToSandbox(profile, fixture.evidence, fixture.context)).rejects.toThrow('generation');
+    expect(arrivals).toBe(3);
+    const [objects] = await fixture.bucket.getFiles({ prefix: copies[0].path, maxResults: 2, autoPaginate: false });
+    expect(objects).toHaveLength(1);
+    expect(String((await objects[0].getMetadata())[0].generation)).toBe(copies[0].generation);
+  } finally {
+    clearTimeout(barrierTimer);
+    for (const stream of streams) {
+      if (!stream.destroyed) stream.destroy();
+      stream.removeListener('finish', finishWinner);
+      stream.removeListener('error', abort);
+    }
+    adapter.mockRestore();
+    await fixture.file.delete();
+  }
 });
 it('recovers a real uploaded but unacknowledged private preparation while preserving nonidempotent provider POSTs', async () => {
   const id = await job('commit-then-lost-response'),

@@ -26,6 +26,10 @@ Functions test commands run `typecheck:tests` before starting emulators. This ch
 
 Before a direct, focused Jest invocation, run `pnpm --dir functions run typecheck:tests` to retain the complete type check. Firebase Functions compile to ES2022 for the configured Node 22 runtime.
 
+The Storage emulator does not currently enforce Cloud Storage's atomic `ifGenerationMatch: 0` create-only condition or preserve historical object generations. The sandbox SDK suite checks that limitation explicitly. Its concurrent-copy test supplies the missing create-only condition only at the exact test object's stream boundary; the first write, source reads, byte measurements, and Firestore transactions still use the real emulator SDKs. This is not proof that the emulator implements Cloud Storage preconditions.
+
+Cloud Storage's [documented precondition contract](https://docs.cloud.google.com/storage/docs/request-preconditions) remains the production requirement. A separate check against a fresh private object in the staging bucket confirmed one successful write and three precondition rejections under four concurrent create-only uploads, with read-back bytes matching the winner. That Storage-only check does not establish full publishing-flow readiness.
+
 ## 1. Upgrade staging project billing (required)
 
 App Hosting requires Blaze:
