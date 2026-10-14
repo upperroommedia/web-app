@@ -4,12 +4,6 @@ type PlayableMediaElement = {
 
 export type MediaPlayFailureHandler = (error: unknown) => void;
 
-interface WaveformAudioDataInput {
-  url: string;
-  blob?: Blob;
-  signal?: AbortSignal;
-}
-
 export function safePlayMediaElement(
   media: PlayableMediaElement | null | undefined,
   onFailure?: MediaPlayFailureHandler
@@ -26,18 +20,6 @@ export function safePlayMediaElement(
   } catch (error) {
     onFailure?.(error);
   }
-}
-
-export async function readWaveformAudioData({ url, blob, signal }: WaveformAudioDataInput): Promise<ArrayBuffer> {
-  if (blob) {
-    return blob.arrayBuffer();
-  }
-
-  const response = await fetch(url, { signal });
-  if (!response.ok) {
-    throw new Error('Failed to fetch audio');
-  }
-  return response.arrayBuffer();
 }
 
 export function logWaveformPreviewFailure(error: unknown): void {

@@ -62,7 +62,6 @@ import dynamic from 'next/dynamic';
 import { useRouter } from 'next/router';
 import uploadFile, {
   AudioAdmissionReceipt,
-  AudioSource,
   AudioTransferProgress,
   readAudioJob,
   sourceUploadSession,
@@ -71,7 +70,8 @@ import uploadFile, {
 import { useDurableJob } from '../../hooks/useDurableJobs';
 import JobStatusPanel from '../jobs/JobStatusPanel';
 import LinearProgress from '@mui/material/LinearProgress';
-import DropZone, { revokeUploadableFilePreview } from '../DropZone';
+import DropZone from '../DropZone';
+import { useOwnedAudioSource } from '../../hooks/useOwnedAudioSource';
 import BundleListSelector from '../BundleListSelector';
 import { getLatestListFromBundle, getSubtitlesFromBundle } from '../../utils/bundleHelpers';
 import { isDiscoverableRootList } from '../../utils/algolia/searchRecords';
@@ -149,7 +149,7 @@ const Uploader = (props: UploaderProps) => {
     return createEmptySermon(props.user.uid);
   });
   const [sermonList, setSermonList] = useState<List[]>(props.existingList || []);
-  const [audioSource, setAudioSource] = useState<AudioSource | undefined>();
+  const [audioSource, setAudioSource, selectAudioFile] = useOwnedAudioSource();
   const [uploadProgress, setUploadProgress] = useState<AudioTransferProgress>({
     error: false,
     percent: 0,
@@ -694,12 +694,7 @@ const Uploader = (props: UploaderProps) => {
   const clearAudioTrimmer = useCallback(() => {
     setAudioSourceError(true, 'You must select an audio source before uploading');
     setUseYouTubeUrl(false);
-    setAudioSource((currentSource) => {
-      if (currentSource?.type === 'File') {
-        revokeUploadableFilePreview(currentSource.source);
-      }
-      return undefined;
-    });
+    setAudioSource(undefined);
     setTrimStartTime(0);
   }, [setAudioSource, setTrimStartTime, setAudioSourceError]);
 
@@ -1436,7 +1431,7 @@ const Uploader = (props: UploaderProps) => {
                     />
                   ) : (
                     <DropZone
-                      setAudioSource={setAudioSource}
+                      selectAudioFile={selectAudioFile}
                       audioSourceError={formErrors?.audioSource}
                       setAudioSourceError={setAudioSourceError}
                     />
