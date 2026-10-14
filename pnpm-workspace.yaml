@@ -93,6 +93,13 @@ minimumReleaseAgeExclude:
   - '@sentry/server-runtime-injection@11.7.0'
   - '@sentry/server-utils@11.7.0'
   - '@sentry/vercel-edge@11.7.0'
+  - '@videojs/core@10.1.0'
+  - '@videojs/media@10.1.0'
+  - '@videojs/native-hls-video@10.1.0'
+  - '@videojs/react@10.1.0'
+  - '@videojs/spf@10.1.0'
+  - '@videojs/store@10.1.0'
+  - '@videojs/utils@10.1.0'
 patchedDependencies:
   firebase-functions-test@3.5.0: patches/firebase-functions-test@3.5.0.patch
 
