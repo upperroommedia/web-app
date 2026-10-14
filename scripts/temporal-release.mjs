@@ -5,6 +5,25 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { verifyFirebaseRtdbReadiness } from './temporal-platform.mjs';
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import {
+  pinReleaseCheckouts,
+  loadReleaseResourceBinding,
+  assertReleaseRuntimeSource,
+  releaseScript,
+  verifyReleaseResourceIdentity,
+  verifyReleaseOperator,
+  prepareLocalReleaseADC,
+  hash,
+  proofDigest,
+  artifactProof,
+  assertSameArtifact,
+  nativeSnapshotProof,
+  assertNativeSnapshot,
+  confirmBundleProofInTransaction,
+} from './temporal-release-runtime.mjs';
 import {
   reconcileAppHostingRollout,
   restoreReviewedUiRecovery,
@@ -79,7 +98,8 @@ if (
   !configPath
 )
   throw new Error('Usage: temporal-release.mjs ACTION --release PATH [--apply] [--output PATH]');
-const config = validateReleaseConfig(JSON.parse(await readFile(configPath, 'utf8')));
+const descriptorBytes = await readFile(configPath, 'utf8');
+const config = validateReleaseConfig(JSON.parse(descriptorBytes));
 const parent = `projects/${config.projectId}/locations/${config.location}/backends/${config.backendId}`;
 if (action === 'plan') {
   console.log(
@@ -89,28 +109,92 @@ if (action === 'plan') {
 }
 if (!args.includes('--apply'))
   throw new Error('Remote release operations require explicit --apply; use plan for offline review');
-const resources = firebaseAdmin(config.projectId, config.databaseUrl);
+const operatorRoot = resolve(fileURLToPath(new URL('..', import.meta.url)));
+const runtimeRoot = args.includes('--runtime-root') ? resolve(args[args.indexOf('--runtime-root') + 1]) : operatorRoot;
+const binding = pinReleaseCheckouts(operatorRoot, runtimeRoot, config);
+const resourceBinding = loadReleaseResourceBinding(config);
+const operatorIdentity = {
+  descriptorSHA256: hash(descriptorBytes),
+  operatorRoot: binding.operatorRoot,
+  runtimeRoot: binding.runtimeRoot,
+  operatorCommit: binding.operatorCommit,
+  runtimeCommit: binding.runtimeCommit,
+  operatorClosureDigest: binding.operatorClosureDigest,
+  runtimePins: binding.runtimePins,
+  resourceBinding,
+};
+const bindingDigest = proofDigest(operatorIdentity);
+const adc = prepareLocalReleaseADC(binding.operatorRoot, config.projectId);
+let resources;
+try {
+  resources = firebaseAdmin(config.projectId, resourceBinding.resources.databaseUrl);
+} catch (error) {
+  adc.close();
+  throw error;
+}
 await runWithCleanup(
   async () => {
     const { firestore, database, serverTimestamp } = resources;
     const controlRef = firestore.doc(CONTROL_PATH);
     const stateRef = firestore.doc('_control/temporalReleaseState');
     const lockRef = firestore.doc('_control/temporalReleaseOperation');
-    const operationId = randomUUID();
-    let operationAcquired = false;
+    const resumeOperation = args.includes('--resume-operation')
+      ? args[args.indexOf('--resume-operation') + 1]
+      : undefined;
+    if (resumeOperation && !/^[a-f0-9-]{36}$/.test(resumeOperation))
+      throw new Error('Explicit release operation UUID required');
+    if (resources.credential !== adc.credential)
+      throw new Error('Release SDK credential differs from bounded local ADC');
+    const operatorPrincipal = {
+      ...(await verifyReleaseOperator(binding, resources.credential)),
+      adcType: adc.adcType,
+      sdkCredentialImplementationSHA256: adc.sdkCredentialImplementationSHA256,
+    };
+    const operationId = resumeOperation ?? randomUUID();
+    let operationAcquired = false,
+      transitionPending = false,
+      expectedAuthority,
+      resourceIdentity,
+      ownedOperation,
+      sourceControl;
+    const auditPath = (revision) => `_control/temporalReleaseOperatorAudit-${operationId}-${revision}`;
     await runWithCleanup(
       async () => {
         await firestore.runTransaction(async (tx) => {
           const snapshot = await tx.get(lockRef);
-          if (snapshot.exists)
-            throw new Error('Another release operation or crash recovery lock exists; inspect it before proceeding');
-          tx.create(lockRef, { operationId, releaseId: config.releaseId, action, createdAt: Date.now() });
+          if (snapshot.exists) {
+            const held = snapshot.data();
+            if (
+              !resumeOperation ||
+              held.operationId !== resumeOperation ||
+              held.releaseId !== config.releaseId ||
+              held.action !== action ||
+              held.bindingDigest !== bindingDigest
+            )
+              throw new Error('Another release operation or crash recovery lock exists; inspect it before proceeding');
+          } else {
+            if (resumeOperation)
+              throw new Error(
+                'Reviewed operation is absent; inspect its immutable audit before starting a fresh action'
+              );
+            tx.create(lockRef, {
+              operationId,
+              releaseId: config.releaseId,
+              action,
+              bindingDigest,
+              operatorIdentity,
+              operatorPrincipal,
+              createdAt: serverTimestamp(),
+            });
+          }
         });
         operationAcquired = true;
+        ownedOperation = nativeSnapshotProof(await lockRef.get());
 
         function token() {
           return execFileSync('gcloud', ['auth', 'print-access-token'], {
             encoding: 'utf8',
+            timeout: 60000,
             stdio: ['ignore', 'pipe', 'pipe'],
           }).trim();
         }
@@ -157,14 +241,14 @@ await runWithCleanup(
           execFileSync(
             process.execPath,
             [
-              new URL('./deploy-temporal-platform.mjs', import.meta.url).pathname,
+              releaseScript(binding, 'deploy-temporal-platform.mjs'),
               'preflight',
               '--config',
               config.platformConfig,
               '--peer',
               config.platformPeerConfig,
             ],
-            { stdio: 'inherit' }
+            { stdio: 'inherit', cwd: binding.operatorRoot }
           );
           const platform = JSON.parse(await readFile(config.platformConfig, 'utf8'));
           validateWorkerCoverage(config, platform);
@@ -212,7 +296,7 @@ await runWithCleanup(
             execFileSync(
               process.execPath,
               [
-                new URL('./deploy-temporal-platform.mjs', import.meta.url).pathname,
+                releaseScript(binding, 'deploy-temporal-platform.mjs'),
                 'worker-status',
                 '--config',
                 config.platformConfig,
@@ -222,14 +306,31 @@ await runWithCleanup(
                 output,
                 '--apply',
               ],
-              { stdio: 'inherit', timeout: 960_000 }
+              { stdio: 'inherit', timeout: 960_000, cwd: binding.operatorRoot }
+            );
+            await verifyFirebaseRtdbReadiness(
+              platform,
+              {
+                configPath: config.platformConfig,
+                peerPath: config.platformPeerConfig,
+                output: join(directory, 'firebase-rtdb-ready.json'),
+              },
+              {
+                run: (args) =>
+                  execFileSync(process.execPath, [releaseScript(binding, 'deploy-temporal-platform.mjs'), ...args], {
+                    stdio: 'inherit',
+                    timeout: 120000,
+                    cwd: binding.operatorRoot,
+                  }),
+                readProof: async (path) => JSON.parse(await readFile(path, 'utf8')),
+              }
             );
             if (config.domains.includes('emails')) {
               const emailOutput = join(directory, 'email-ready.json');
               execFileSync(
                 process.execPath,
                 [
-                  new URL('./deploy-temporal-platform.mjs', import.meta.url).pathname,
+                  releaseScript(binding, 'deploy-temporal-platform.mjs'),
                   'email-canary',
                   '--config',
                   config.platformConfig,
@@ -239,7 +340,7 @@ await runWithCleanup(
                   emailOutput,
                   '--apply',
                 ],
-                { stdio: 'inherit', timeout: 180000 }
+                { stdio: 'inherit', timeout: 180000, cwd: binding.operatorRoot }
               );
               const emailProof = JSON.parse(await readFile(emailOutput, 'utf8'));
               if (
@@ -297,10 +398,14 @@ await runWithCleanup(
           const validatedControl = validateControl(control.data());
           if (hasCompatibilitySettlingCheckpoint(validatedControl, checkpoint, config))
             assertCompatibilitySettlingCheckpoint(validatedControl, checkpoint, config);
+          sourceControl ??= validatedControl;
+          await assertReleaseRuntimeSource(binding, config, sourceControl);
+          expectedAuthority = { control: nativeSnapshotProof(control), state: nativeSnapshotProof(state) };
           return { control: validatedControl, state: checkpoint, serverReadTime: control.readTime };
         }
         async function transition(revision, phase, update = {}, controlUpdate) {
           await firestore.runTransaction(async (tx) => {
+            transitionPending = false;
             const [current, currentState, operation] = await Promise.all([
               tx.get(controlRef),
               tx.get(stateRef),
@@ -315,6 +420,13 @@ await runWithCleanup(
               operation.data()?.action !== action
             )
               throw new Error('Release revision changed; re-read before proceeding');
+            if (operation.data()?.bindingDigest !== bindingDigest)
+              throw new Error('Operator/runtime operation binding changed');
+            assertNativeSnapshot(ownedOperation, operation);
+            if (expectedAuthority) {
+              assertNativeSnapshot(expectedAuthority.control, current);
+              assertNativeSnapshot(expectedAuthority.state, currentState);
+            }
             if (hasCompatibilitySettlingCheckpoint(current.data(), currentState.data(), config)) {
               assertCompatibilitySettlingCheckpoint(current.data(), currentState.data(), config);
               if (!['compatibility-ready', 'pause', 'resume', 'rollback-ui', 'restore-reviewed-ui'].includes(action))
@@ -409,9 +521,62 @@ await runWithCleanup(
               controlUpdate = { ...controlUpdate, ...cutoff.controlUpdate };
               update = { ...update, ...cutoff.stateUpdate };
             }
+            if (phase === 'bundles-ready') {
+              if (currentState.data().phase !== 'backend-ready' || !update.bundleBootstrapProof)
+                throw new Error('Bundle checkpoint requires current backend-ready and complete artifact proof');
+              await confirmBundleProofInTransaction(tx, firestore, update.bundleBootstrapProof, config.projectId);
+            }
+            transitionPending = true;
+            tx.create(firestore.doc(auditPath(revision + 1)), {
+              schemaVersion: 1,
+              operationId,
+              action,
+              releaseId: config.releaseId,
+              fromRevision: revision,
+              toRevision: revision + 1,
+              fromPhase: currentState.data()?.phase ?? null,
+              toPhase: phase,
+              operatorIdentity,
+              operatorPrincipal,
+              resourceIdentity,
+              operationAuthority: ownedOperation,
+              runtimeSourceVerified: true,
+              authority: expectedAuthority ?? null,
+              bundleBootstrapProof: update.bundleBootstrapProof ?? null,
+              createdAt: serverTimestamp(),
+            });
             tx.update(controlRef, { ...controlUpdate, revision: revision + 1, updatedAt: Date.now() });
             tx.update(stateRef, { ...update, phase, updatedAt: Date.now(), controlRevision: revision + 1 });
           });
+          transitionPending = false;
+          await snapshot();
+        }
+        async function verifyBundleArtifacts(proof) {
+          if (
+            proof.operatorRuntime?.operatorCommit !== binding.operatorCommit ||
+            proof.operatorRuntime?.runtimeCommit !== binding.runtimeCommit ||
+            proof.operatorRuntime?.operatorClosureDigest !== binding.operatorClosureDigest ||
+            proofDigest(proof.operatorRuntime?.resourceBinding) !== proofDigest(resourceBinding) ||
+            proofDigest(proof.operatorRuntime?.resourceIdentity) !== proofDigest(resourceIdentity) ||
+            proof.artifactProofs?.length !== 6
+          )
+            throw new Error('Bundle proof operator/runtime/resource binding changed');
+          for (const expected of proof.artifactProofs) {
+            if (expected.bucket !== resourceBinding.resources.storageBucket)
+              throw new Error('Bundle artifact bucket changed');
+            const url = `https://storage.googleapis.com/storage/v1/b/${encodeURIComponent(
+              expected.bucket
+            )}/o/${encodeURIComponent(expected.path)}`;
+            const pointer = (await firestore.doc(`_durableBundlePointers/${expected.bundleType}`).get()).data();
+            const currentHead = await api(url);
+            assertSameArtifact(expected, artifactProof(expected.bundleType, pointer, currentHead, expected.bucket));
+            const metadata = await api(
+              `${url}?generation=${expected.generation}&ifMetagenerationMatch=${expected.metageneration}`
+            );
+            assertSameArtifact(expected, artifactProof(expected.bundleType, pointer, metadata, expected.bucket));
+            const finalHead = await api(url);
+            assertSameArtifact(expected, artifactProof(expected.bundleType, pointer, finalHead, expected.bucket));
+          }
         }
         function requirePhase(state, phases) {
           if (!phases.includes(state.phase))
@@ -532,6 +697,9 @@ await runWithCleanup(
           return counts;
         }
 
+        resourceIdentity = await verifyReleaseResourceIdentity(resourceBinding, api);
+        sourceControl = (await controlRef.get()).data();
+        await assertReleaseRuntimeSource(binding, config, sourceControl);
         if (action === 'freeze-ui') {
           if (config.environment === 'production')
             validatePromotionApproval(config, JSON.parse(await readFile(config.promotionApprovalEvidence, 'utf8')));
@@ -702,7 +870,7 @@ await runWithCleanup(
                 execFileSync(
                   process.execPath,
                   [
-                    new URL('./temporal-backfill-provider-usage.mjs', import.meta.url).pathname,
+                    releaseScript(binding, 'temporal-backfill-provider-usage.mjs'),
                     '--project',
                     config.projectId,
                     '--release',
@@ -713,7 +881,7 @@ await runWithCleanup(
                     proof,
                     '--apply',
                   ],
-                  { stdio: 'inherit', timeout: config.providerUsageBackfillTimeoutMs }
+                  { stdio: 'inherit', timeout: config.providerUsageBackfillTimeoutMs, cwd: binding.runtimeRoot }
                 );
               } finally {
                 await rm(dir, { recursive: true, force: true });
@@ -775,41 +943,69 @@ await runWithCleanup(
             }
             await transition(control.revision, 'backend-ready', { backendVerifiedAt: Date.now() });
           } else if (action === 'bootstrap-bundles') {
-            requirePhase(state, ['backend-ready']);
             if (!config.domains.includes('bundles')) throw new Error('This release does not own bundle regeneration');
-            const response = execFileSync(
-              process.execPath,
-              [
-                new URL('./temporal-bootstrap-bundles.mjs', import.meta.url).pathname,
-                '--project',
-                config.projectId,
-                '--release-id',
-                config.releaseId,
-                '--control-revision',
-                String(control.revision),
-                '--timeout-ms',
-                '840000',
-                '--apply',
-              ],
-              { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 900_000 }
-            );
-            const proof = JSON.parse(response);
-            if (
-              proof.projectId !== config.projectId ||
-              proof.releaseId !== config.releaseId ||
-              proof.controlRevision !== control.revision ||
-              proof.result !== 'passed' ||
-              !Array.isArray(proof.bundleTypes) ||
-              proof.bundleTypes.length !== 6 ||
-              new Set(proof.bundleTypes).size !== 6
-            )
-              throw new Error('Bundle convergence proof failed; admissions remain paused');
-            await transition(control.revision, 'bundles-ready', {
-              bundlesConverged: true,
-              bundleTypes: proof.bundleTypes,
-              bootstrapJobIds: proof.bootstrapJobIds ?? proof.jobIds,
-              bundleConvergenceJobIds: proof.jobIds,
-            });
+            if (state.phase === 'bundles-ready') {
+              const proof = state.bundleBootstrapProof;
+              const previousAudit = (await firestore.doc(state.bundleBootstrapAudit).get()).data();
+              if (
+                !previousAudit ||
+                previousAudit.releaseId !== config.releaseId ||
+                previousAudit.toRevision !== control.revision ||
+                previousAudit.toPhase !== 'bundles-ready' ||
+                proofDigest(previousAudit.bundleBootstrapProof) !== proofDigest(proof)
+              )
+                throw new Error('Bundle checkpoint audit is absent or changed; inspect before reconciliation');
+              await verifyBundleArtifacts(proof);
+              await firestore.runTransaction(async (tx) => {
+                const [c, checkpoint, op] = await Promise.all([tx.get(controlRef), tx.get(stateRef), tx.get(lockRef)]);
+                assertNativeSnapshot(expectedAuthority.control, c);
+                assertNativeSnapshot(expectedAuthority.state, checkpoint);
+                if (op.data()?.operationId !== operationId || op.data()?.bindingDigest !== bindingDigest)
+                  throw new Error('Owned operation changed during checkpoint reconciliation');
+                await confirmBundleProofInTransaction(tx, firestore, proof, config.projectId);
+              });
+            } else {
+              requirePhase(state, ['backend-ready']);
+              const response = execFileSync(
+                process.execPath,
+                [
+                  releaseScript(binding, 'temporal-bootstrap-bundles.mjs'),
+                  '--project',
+                  config.projectId,
+                  '--release-id',
+                  config.releaseId,
+                  '--control-revision',
+                  String(control.revision),
+                  '--timeout-ms',
+                  '840000',
+                  '--release',
+                  resolve(configPath),
+                  '--runtime-root',
+                  binding.runtimeRoot,
+                  '--operator-binding-digest',
+                  bindingDigest,
+                  '--apply',
+                ],
+                { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 900_000, cwd: binding.runtimeRoot }
+              );
+              const proof = JSON.parse(response);
+              if (
+                proof.projectId !== config.projectId ||
+                proof.releaseId !== config.releaseId ||
+                proof.controlRevision !== control.revision ||
+                proof.result !== 'passed'
+              )
+                throw new Error('Bundle convergence proof failed; admissions remain paused');
+              await verifyBundleArtifacts(proof);
+              await transition(control.revision, 'bundles-ready', {
+                bundlesConverged: true,
+                bundleTypes: proof.bundleTypes,
+                bootstrapJobIds: proof.bootstrapJobIds ?? proof.jobIds,
+                bundleConvergenceJobIds: proof.jobIds,
+                bundleBootstrapProof: proof,
+                bundleBootstrapAudit: auditPath(control.revision + 1),
+              });
+            }
           } else if (action === 'bootstrap-search') {
             requirePhase(state, ['backend-ready']);
             if (!requiresSearchBootstrap(config))
@@ -817,7 +1013,7 @@ await runWithCleanup(
             const response = execFileSync(
               process.execPath,
               [
-                new URL('./temporal-bootstrap-search.mjs', import.meta.url).pathname,
+                releaseScript(binding, 'temporal-bootstrap-search.mjs'),
                 '--project',
                 config.projectId,
                 '--release-id',
@@ -836,7 +1032,7 @@ await runWithCleanup(
                 '840000',
                 '--apply',
               ],
-              { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 900000 }
+              { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 900000, cwd: binding.runtimeRoot }
             );
             const proof = JSON.parse(response);
             if (
@@ -991,13 +1187,26 @@ await runWithCleanup(
         console.log(`Temporal release ${action} checkpoint saved. Existing jobs and worker versions are retained.`);
       },
       async () => {
-        if (!operationAcquired) return;
+        if (!operationAcquired || transitionPending) return;
         await firestore.runTransaction(async (tx) => {
           const lock = await tx.get(lockRef);
-          if (lock.data()?.operationId === operationId) tx.delete(lockRef);
+          if (lock.data()?.operationId === operationId) {
+            assertNativeSnapshot(ownedOperation, lock);
+            if (
+              lock.data()?.bindingDigest !== bindingDigest ||
+              lock.data()?.action !== action ||
+              lock.data()?.releaseId !== config.releaseId
+            )
+              throw new Error('Owned release operation changed; retained for inspection');
+            tx.delete(lockRef);
+          }
         });
       }
     );
   },
-  () => resources.close()
+  () =>
+    runWithCleanup(
+      () => resources.close(),
+      () => adc.close()
+    )
 );

@@ -25,6 +25,8 @@ import {
   assertWorkerQueues,
   databaseApiCanary,
   emailCanary,
+  firebaseRtdbCanary,
+  assertFirebaseRtdbCanaryProof,
 } from './temporal-platform.mjs';
 
 const [action, ...args] = process.argv.slice(2);
@@ -45,6 +47,7 @@ if (
     'worker',
     'worker-status',
     'email-canary',
+    'firebase-rtdb-canary',
     'promote',
     'ramp',
     'retire',
@@ -532,6 +535,22 @@ try {
     for (const deployment of manifests.worker.items.filter((resource) => resource.kind === 'Deployment')) {
       kubectl(['rollout', 'status', `deployment/${deployment.metadata.name}`, '-n', c.namespace, '--timeout=600s']);
     }
+  } else if (action === 'firebase-rtdb-canary') {
+    if (!flags['--output']) throw new Error('Firebase RTDB canary requires private proof output');
+    const name = await job(
+      firebaseRtdbCanary(
+        c,
+        await readFile(new URL('../ops/temporal/firebase-rtdb-canary.cjs', import.meta.url), 'utf8')
+      )
+    );
+    const proof = JSON.parse(
+      kubectl(['logs', `job/${name}`, '-n', c.namespace])
+        .trim()
+        .split('\n')
+        .at(-1)
+    );
+    assertFirebaseRtdbCanaryProof(proof, c);
+    await writeFile(flags['--output'], JSON.stringify(proof) + '\n', { mode: 0o600, flag: 'wx' });
   } else if (action === 'email-canary') {
     if (!c.workerRoles.includes('email') || !flags['--output'])
       throw new Error('Email canary requires configured email worker and private proof output');

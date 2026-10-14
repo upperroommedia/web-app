@@ -41,15 +41,22 @@ Create a dedicated custom VPC/subnet in each project. Set reviewed `applicationE
 Reviewable creation flags (fill the already-created subnet/private address and project; run as the provisioning operator):
 
 ```bash
+gcloud compute addresses create urm-temporal-staging-egress \
+  --project=urm-app-staging --region=us-central1 --network-tier=PREMIUM
 gcloud compute instances create urm-temporal-staging \
   --project=urm-app-staging --zone=us-central1-a \
   --machine-type=e2-standard-4 --image-family=debian-13 --image-project=debian-cloud \
   --service-account=temporal-worker@urm-app-staging.iam.gserviceaccount.com \
-  --scopes=cloud-platform --subnet=REVIEWED_STAGING_SUBNET --private-network-ip=REVIEWED_PRIVATE_IP \
+  --scopes=https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/firebase.database,https://www.googleapis.com/auth/userinfo.email \
+  --address=urm-temporal-staging-egress --subnet=REVIEWED_STAGING_SUBNET --private-network-ip=REVIEWED_PRIVATE_IP \
   --boot-disk-size=30GB --boot-disk-type=pd-balanced --tags=urm-temporal-worker \
   --metadata=enable-oslogin=TRUE,block-project-ssh-keys=TRUE \
   --shielded-secure-boot --shielded-vtpm --shielded-integrity-monitoring
 ```
+
+The reviewed Compute ADC policy requires those three exact, unique scopes. IAM roles and OAuth scopes are separate checks: `cloud-platform` alone can access Firestore while RTDB authentication fails. Firebase's documented minimum is `userinfo.email` with either `cloud-platform` or `firebase.database`; retaining all three is our explicit policy. The instance validator checks actual scopes, and a one-shot SDK read checks their actual effect before worker readiness and admission opening. No broader IAM grant is required. [Firebase Admin setup](https://firebase.google.com/docs/admin/setup).
+
+Preserve a running VM's existing ephemeral IPv4 before a stop/start: promote that exact address with `gcloud compute addresses create NAME --addresses EXISTING_IP --region us-central1`, then verify `IN_USE`, the original VM resource in `users`, project, region and network tier. Do not silently allocate a replacement address. An attached standard-VM static or ephemeral IPv4 has the same $0.005/hour rate (about $3.65 at 730 hours); attached static addresses remain in use while the VM is stopped. Unassigned reservations have a higher rate. [Address promotion](https://docs.cloud.google.com/vpc/docs/reserve-static-external-ip-address), [IP pricing](https://cloud.google.com/vpc/network-pricing).
 
 Create/attach the separately labelled scratch disk sized to cover400Gi of actual mounted capacity before formatting or mounting it. Preserve an existing filesystem; initialize only a confirmed blank new disk. Use its stable `/dev/disk/by-id/google-...` name/UUID in the root-owned mount configuration. Install the reviewed K3s version from `versions.json` using the official release and verified checksum, with secrets encryption enabled, private bind/advertise/node IP, no Traefik/service load balancer and root-only kubeconfig. Configure the local-path provisioner to use only the dedicated mount, and create the reviewed storage class with `Delete` reclaim and `WaitForFirstConsumer`. Production uses the equivalent explicit project/instance names; never reuse staging credentials or clusters.
 
@@ -59,10 +66,17 @@ The dedicated offline bootstrap generator is `scripts/temporal-single-vm-config.
 node scripts/temporal-single-vm-config.mjs \
   --project urm-app-staging --instance-name urm-temporal-staging \
   --instance-id ACTUAL_NUMERIC_INSTANCE_ID --private-ip ACTUAL_PRIVATE_IP \
+  --media-filesystem-uuid ACTUAL_EXT4_FILESYSTEM_UUID \
   --output /private/staging-single-vm-bootstrap
 ```
 
-Review its `bootstrap.sh`, then copy the bundle to the verified VM and run it as root after the dedicated disk is mounted. It verifies VM metadata, actual filesystem size and the pinned official binary checksum before installation. All local Kubernetes calls explicitly address the private VM IP because a default loopback kubeconfig would not reach a private-only bind. The storage setup unit reapplies the dedicated local-path configuration after K3s restarts. The generated files contain no keys, database, private VIP, additional nodes or backup requirement.
+Review its `bootstrap.sh`, then copy the bundle to the verified VM and run it as root after the dedicated disk is mounted. It verifies VM metadata/scopes, the actual ext4 UUID, stable device and mount target, actual filesystem size and the pinned official binary checksum. K3s itself has `RequiresMountsFor` and a startup guard: a missing/wrong disk cannot start the provisioner against an underlying boot-disk directory. Existing active installations require explicit maintenance; a missing enrollment record on an existing server never creates a fresh-install permit automatically.
+
+On the first installation, bootstrap waits for the packaged local-path resources, creates `local-storage.yaml.skip`, explicitly enrolls their actual ConfigMap identity and non-config data, then starts the operator reconciler. Later startup never enrolls or replaces that protected origin record. Reconciliation tests the native ConfigMap UID/resourceVersion and full data before changing only `config.json`; helper scripts, RBAC, StorageClasses and volume lifecycle remain separate. The `.skip` marker matters because K3s rewrites packaged manifests on startup; a successful one-time patch after K3s starts can still be overwritten by its AddOn controller. Do not use `--disable local-storage`, which uninstalls resources, or edit the rewritten packaged manifest. Skipping the packaged AddOn makes provisioner upgrades an explicit operator review. [K3s packaged components](https://docs.k3s.io/installation/packaged-components).
+
+All local Kubernetes calls address the private VM IP. Before accepting bootstrap or a storage change, perform a reviewed quiet restart test: pause admissions, stop orchestration first, require graceful Pod absence and exact settled activity witnesses, drain the other workers serially without force, then restart K3s and prove the startup guard, dedicated map, cluster identity and unrelated storage resources survived. Restore the original worker specifications and prove the actual media claim/PV resolves to the expected mounted UUID. Keep original failed jobs and error evidence; pointer existence is not workflow completion. The generated files contain no keys, database, private VIP, additional nodes or backup requirement.
+
+For this Compute host, `deploy-temporal-platform.mjs firebase-rtdb-canary` runs a bounded one-shot read of `bundle-metadata` using the actual immutable worker image and metadata identity. It validates the selected project/database, Compute ADC principal, reviewed scopes and build; success requires a server read and teardown of its own named Admin SDK app. It never prints tokens or data, writes no RTDB value, and does not run on every health request. The controller invokes it during worker readiness and again before opening admissions, alongside the existing email TLS/authentication canary that sends no message. A missing/failed/authentication/cleanup proof blocks progress. Existing GKE Workload Identity and self-hosted credential paths retain their separate policies.
 
 ## Mounted Temporal credentials and rotation
 

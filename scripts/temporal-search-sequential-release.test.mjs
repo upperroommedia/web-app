@@ -51,6 +51,35 @@ test('actual controller completes sequential staging search onboarding without r
     'epoch changed at open transaction',
     'status changed at open transaction',
   ]);
+  assert.deepEqual(proof.rejectedRtdbBoundaries, [
+    'workers-ready:cli',
+    'workers-ready:auth',
+    'workers-ready:cleanup',
+    'open:cli',
+    'open:auth',
+    'open:cleanup',
+  ]);
+  assert.deepEqual(
+    proof.rtdbCanaryCalls.filter(({ failure }) => failure === null).map(({ action }) => action),
+    ['workers-ready', 'take-ownership', 'open', 'open', 'open']
+  );
   assert.equal(proof.legacyBackfillInvoked, false);
   assert.equal(proof.jobCount, 5);
+});
+
+test('actual bundle controller rejects source/resource/current-head/native races and reconciles both unknown ACK outcomes', async () => {
+  const { stdout } = await exec(
+    process.execPath,
+    [
+      '--experimental-vm-modules',
+      new URL('./tests/fixtures/temporal-search-sequential-release.mjs', import.meta.url).pathname,
+      'runtime-bundle',
+    ],
+    { timeout: 60000, maxBuffer: 2 * 1024 * 1024 }
+  );
+  const proof = JSON.parse(stdout.trim());
+  assert.equal(proof.result, 'passed');
+  assert.equal(proof.cases.length, 9);
+  assert.equal(proof.originalFailedJobsPreserved, true);
+  assert.equal(proof.newGenerationCreatedByController, false);
 });
