@@ -1,4 +1,15 @@
 import { createHash, randomUUID } from 'node:crypto';
+const stable = (value) =>
+  JSON.stringify(value, (_key, item) =>
+    item && typeof item === 'object' && !Array.isArray(item)
+      ? Object.fromEntries(
+          Object.keys(item)
+            .sort()
+            .map((key) => [key, item[key]])
+        )
+      : item
+  );
+const same = (a, b) => stable(a) === stable(b);
 
 const TERMINAL_ROLLOUTS = new Set(['SUCCEEDED', 'FAILED', 'CANCELLED', 'SKIPPED']);
 const FAILED_BUILDS = new Set(['FAILED', 'SKIPPED', 'EXPIRED']);
@@ -11,7 +22,8 @@ function uuid(seed) {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
-export function rolloutIdentity({ parent, releaseId, uiCommit }) {
+export function rolloutIdentity({ parent, releaseId, uiCommit }, version = 2) {
+  if (![1, 2].includes(version)) throw new Error('Unknown rollout identity version');
   if (!/^projects\/[a-z0-9-]+\/locations\/[a-z0-9-]+\/backends\/[a-z0-9-]+$/.test(parent))
     throw new Error('Invalid App Hosting backend identity');
   if (
@@ -19,10 +31,15 @@ export function rolloutIdentity({ parent, releaseId, uiCommit }) {
     !/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(releaseId)
   )
     throw new Error('Immutable commit and release UUID are required');
-  const seed = `${parent}:${releaseId}:${uiCommit}`;
-  const id = `temporal-${createHash('sha256').update(seed).digest('hex').slice(0, 32)}`;
+  const originalSeed = `${parent}:${releaseId}:${uiCommit}`;
+  const seed = version === 1 ? originalSeed : `v2:${originalSeed}`;
+  // App Hosting rejects IDs outside 3..30 characters. V2 is 29 ASCII characters.
+  const id = `temporal-${createHash('sha256')
+    .update(seed)
+    .digest('hex')
+    .slice(0, version === 1 ? 32 : 20)}`;
   return {
-    schemaVersion: 1,
+    schemaVersion: version,
     parent,
     releaseId,
     uiCommit,
@@ -45,6 +62,56 @@ async function lookup(api, name) {
     if (status(error) === 404) return undefined;
     throw error;
   }
+}
+
+/** Read-only proof for the one invalid legacy identity format; never creates resources. */
+export async function prepareLegacyRolloutIdentityMigration({ config, checkpoint, api, now = Date.now }) {
+  const previousIdentity = rolloutIdentity(config, 1),
+    identity = rolloutIdentity(config);
+  if (!same(checkpoint, previousIdentity)) throw new Error('Only the exact deterministic schema1 identity can migrate');
+  const startedAt = now();
+  const before = await api(`${identity.parent}/traffic`);
+  if (!before.etag || before.reconciling || before.rolloutPolicy?.disabled !== true)
+    throw new Error('Frozen settled traffic with an etag is required for identity migration');
+  const absentResources = [];
+  for (const name of [
+    previousIdentity.buildName,
+    previousIdentity.rolloutName,
+    identity.buildName,
+    identity.rolloutName,
+  ]) {
+    try {
+      await api(name);
+      throw new Error('An identity migration resource already exists; inspect it without replacement');
+    } catch (error) {
+      if (status(error) !== 404) throw error;
+    }
+    absentResources.push({ name, httpStatus: 404 });
+  }
+  let pageToken;
+  do {
+    const page = await api(
+      `${identity.parent}/rollouts?pageSize=100${pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ''}`
+    );
+    if ((page.rollouts ?? []).some((row) => !TERMINAL_ROLLOUTS.has(row.state)))
+      throw new Error('Concurrent App Hosting rollout prevents identity migration');
+    pageToken = page.nextPageToken;
+  } while (pageToken);
+  const after = await api(`${identity.parent}/traffic`);
+  if (!same(before, after)) throw new Error('Traffic changed during identity migration inspection');
+  const observedAt = now();
+  if (observedAt < startedAt || observedAt - startedAt >= 60000)
+    throw new Error('Identity migration absence inspection is stale');
+  return {
+    schemaVersion: 1,
+    reason: 'schema1-id-exceeds-api-30-character-limit',
+    previousIdentity,
+    identity,
+    absentResources,
+    traffic: after,
+    inspectionStartedAt: startedAt,
+    observedAt,
+  };
 }
 
 async function createOrObserve(api, name, requestId, queryKey, body) {

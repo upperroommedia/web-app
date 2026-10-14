@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   reconcileAppHostingRollout,
   rolloutIdentity,
+  prepareLegacyRolloutIdentityMigration,
   restoreReviewedUiRecovery,
   ensureFrozenRecoveryPolicy,
 } from './temporal-apphosting-rollout.mjs';
@@ -290,4 +291,109 @@ test('pending recovery target is observed without overwriting an active operatio
   h.pending();
   await assert.rejects(restoreReviewedUiRecovery(h.input), /still pending/);
   assert.equal(h.patches.length, 0);
+});
+
+test('v2 build and rollout IDs satisfy the actual API 3..30 constraint while exact legacy derivation remains available', () => {
+  const old = rolloutIdentity(config, 1),
+    next = rolloutIdentity(config);
+  assert.equal(old.schemaVersion, 1);
+  assert.equal(old.buildName.split('/').at(-1).length, 41);
+  assert.equal(next.schemaVersion, 2);
+  for (const name of [next.buildName, next.rolloutName]) assert.match(name.split('/').at(-1), /^[a-z][a-z0-9-]{2,29}$/);
+  assert.deepEqual(rolloutIdentity(config), next);
+  assert.notEqual(old.buildRequestId, next.buildRequestId);
+  assert.notEqual(old.rolloutRequestId, next.rolloutRequestId);
+  assert.throws(() => rolloutIdentity(config, 3), /version/);
+});
+function migrationHarness() {
+  const previous = rolloutIdentity(config, 1),
+    next = rolloutIdentity(config);
+  const calls = [];
+  const traffic = {
+    etag: 'original',
+    rolloutPolicy: { disabled: true, codebaseBranch: 'staging' },
+    current: { splits: [{ build: 'serving-old', percent: 100 }] },
+  };
+  const existing = new Map();
+  let fault,
+    read = 0,
+    clock = 1000;
+  const api = async (path, method = 'GET') => {
+    calls.push({ path, method });
+    assert.equal(method, 'GET');
+    if (path.endsWith('/traffic')) {
+      const value = structuredClone(traffic);
+      if (++read > 1 && fault === 'changed-policy') value.rolloutPolicy.codebaseBranch = 'foreign';
+      return value;
+    }
+    if (path.includes('/rollouts?')) return { rollouts: fault === 'concurrent' ? [{ state: 'PENDING_BUILD' }] : [] };
+    if (fault === 'auth') throw Object.assign(new Error('Forbidden'), { status: 403 });
+    if (existing.has(path)) return existing.get(path);
+    throw Object.assign(new Error('Absent'), { status: 404 });
+  };
+  return {
+    previous,
+    next,
+    calls,
+    traffic,
+    existing,
+    api,
+    fault: (value) => (fault = value),
+    run: (checkpoint) =>
+      prepareLegacyRolloutIdentityMigration({
+        config,
+        checkpoint: checkpoint ?? previous,
+        api,
+        now: () => {
+          clock += fault === 'stale' ? 60001 : 1;
+          return clock;
+        },
+      }),
+  };
+}
+test('legacy identity migration proves all four absent resources and preserves full original identity/policy without any POST', async () => {
+  const h = migrationHarness(),
+    proof = await h.run();
+  assert.deepEqual(proof.previousIdentity, h.previous);
+  assert.deepEqual(proof.identity, h.next);
+  assert.equal(proof.absentResources.length, 4);
+  assert(proof.absentResources.every((r) => r.httpStatus === 404));
+  assert.deepEqual(proof.traffic, h.traffic);
+  assert(h.calls.every((r) => r.method === 'GET'));
+});
+for (const resource of ['old-build', 'old-rollout', 'new-build', 'new-rollout'])
+  test(`migration refuses existing ${resource}`, async () => {
+    const h = migrationHarness();
+    const names = [h.previous.buildName, h.previous.rolloutName, h.next.buildName, h.next.rolloutName];
+    h.existing.set(names[['old-build', 'old-rollout', 'new-build', 'new-rollout'].indexOf(resource)], {
+      state: 'READY',
+    });
+    await assert.rejects(h.run(), /already exists/);
+  });
+for (const fault of ['auth', 'changed-policy', 'concurrent', 'stale'])
+  test(`migration fails closed for ${fault}`, async () => {
+    const h = migrationHarness();
+    h.fault(fault);
+    await assert.rejects(h.run());
+  });
+test('migration refuses arbitrary saved identities, missing etag, reconciling or enabled automation', async () => {
+  for (const mutate of [
+    (h) => (h.traffic.etag = undefined),
+    (h) => (h.traffic.reconciling = true),
+    (h) => (h.traffic.rolloutPolicy.disabled = false),
+  ]) {
+    const h = migrationHarness();
+    mutate(h);
+    await assert.rejects(h.run());
+  }
+  const h = migrationHarness();
+  await assert.rejects(h.run({ ...h.previous, buildRequestId: h.next.buildRequestId }), /exact deterministic/);
+});
+
+test('migration requires an actual404 rather than an empty successful resource response', async () => {
+  for (const value of [null, false, undefined]) {
+    const h = migrationHarness();
+    h.existing.set(h.previous.buildName, value);
+    await assert.rejects(h.run(), /already exists/);
+  }
 });
