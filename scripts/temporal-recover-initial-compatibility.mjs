@@ -539,6 +539,14 @@ export function expectedPlannedFunctionNames(root, oldRelease) {
     .map((name) => `projects/${oldRelease.projectId}/locations/${oldRelease.location}/functions/${name}`)
     .sort();
 }
+// Cloud Run returns full revision resources for readiness and bare revision IDs in trafficStatuses.
+// Resolve only within this exact service; a matching final path segment is not identity proof.
+function canonicalServiceRevision(reference, serviceName) {
+  if (typeof reference !== 'string') return undefined;
+  const prefix = `${serviceName}/revisions/`;
+  const revision = reference.startsWith(prefix) ? reference.slice(prefix.length) : reference;
+  return /^[a-z][a-z0-9-]{0,62}$/.test(revision) ? `${prefix}${revision}` : undefined;
+}
 export function validatePlannedRuntimeInventory(functions, services, review, oldRelease, expectedNames) {
   validatePlannedSourceSupersession(review, oldRelease);
   if (
@@ -559,7 +567,11 @@ export function validatePlannedRuntimeInventory(functions, services, review, old
     throw new Error('Complete managed Functions source inventory required');
   for (const expected of review.runtime) {
     const actual = managed.find((f) => f.name === expected.name),
-      service = services.find((s) => s.name === actual?.serviceConfig?.service);
+      service = services.find((s) => s.name === actual?.serviceConfig?.service),
+      servicePrefix = `projects/${oldRelease.projectId}/locations/${oldRelease.location}/services/`,
+      serviceId = service?.name?.startsWith(servicePrefix) ? service.name.slice(servicePrefix.length) : '',
+      expectedRevision = service && canonicalServiceRevision(expected.revision, service.name),
+      readyRevision = service && canonicalServiceRevision(service.latestReadyRevision, service.name);
     if (
       !actual ||
       actual.state !== 'ACTIVE' ||
@@ -568,16 +580,23 @@ export function validatePlannedRuntimeInventory(functions, services, review, old
       actual.serviceConfig?.revision !== expected.revision ||
       !same(actual.buildConfig?.source?.storageSource, expected.source) ||
       !service ||
+      !/^[a-z][a-z0-9-]{0,62}$/.test(serviceId) ||
+      !expectedRevision ||
       service.reconciling ||
       service.terminalCondition?.state !== 'CONDITION_SUCCEEDED' ||
       service.latestCreatedRevision !== service.latestReadyRevision ||
-      service.latestReadyRevision?.split('/').at(-1) !== expected.revision ||
+      readyRevision !== expectedRevision ||
       !Array.isArray(service.trafficStatuses) ||
-      service.trafficStatuses.reduce(
-        (total, t) => total + (t.revision === service.latestReadyRevision ? Number(t.percent ?? 0) : 0),
-        0
-      ) !== 100 ||
-      service.trafficStatuses.some((t) => Number(t.percent ?? 0) > 0 && t.revision !== service.latestReadyRevision)
+      !service.trafficStatuses.length ||
+      service.trafficStatuses.some(
+        (t) =>
+          !t ||
+          canonicalServiceRevision(t.revision, service.name) !== readyRevision ||
+          !Number.isInteger(t.percent) ||
+          t.percent < 0 ||
+          t.percent > 100
+      ) ||
+      service.trafficStatuses.reduce((total, t) => total + t.percent, 0) !== 100
     )
       throw new Error('Planned predecessor runtime is not fully ready on its exact successful source');
   }

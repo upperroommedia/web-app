@@ -916,6 +916,87 @@ test('planned source inventory binds every immutable predecessor export, source 
   }
 });
 
+test('planned runtime accepts Cloud Run bare traffic revision IDs and exact full resources', async () => {
+  const { validatePlannedRuntimeInventory } = await import('./temporal-recover-initial-compatibility.mjs');
+  const f = plannedFixture();
+  const revision = 'acceptrolerequest-00140-lek';
+  const service = 'projects/urm-app-staging/locations/us-central1/services/acceptrolerequest';
+  f.review.runtime[0].revision = revision;
+  f.functions[0].serviceConfig.revision = revision;
+  f.functions[0].serviceConfig.service = service;
+  Object.assign(f.services[0], {
+    name: service,
+    latestCreatedRevision: `${service}/revisions/${revision}`,
+    latestReadyRevision: `${service}/revisions/${revision}`,
+    trafficStatuses: [{ type: 'TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST', revision, percent: 100 }],
+  });
+  const check = (x) => validatePlannedRuntimeInventory(x.functions, x.services, x.review, oldRelease, x.names);
+  check(f);
+  const full = clone(f);
+  full.services[0].trafficStatuses[0].revision = `${service}/revisions/${revision}`;
+  check(full);
+  const split = clone(f);
+  split.services[0].trafficStatuses = [
+    { revision, percent: 50 },
+    { revision: `${service}/revisions/${revision}`, percent: 50 },
+  ];
+  check(split);
+  for (const reference of [
+    `projects/urm-app-staging/locations/us-central1/services/other/revisions/${revision}`,
+    `projects/foreign/locations/us-central1/services/acceptrolerequest/revisions/${revision}`,
+    `projects/urm-app-staging/locations/europe-west1/services/acceptrolerequest/revisions/${revision}`,
+    `${service}-lookalike/revisions/${revision}`,
+    `${service}/revisions/${revision}/extra`,
+    `${service}/revisions/other`,
+    'other',
+    '',
+    null,
+    undefined,
+  ]) {
+    const value = clone(f);
+    value.services[0].trafficStatuses[0].revision = reference;
+    assert.throws(() => check(value), `traffic reference ${reference}`);
+    value.services[0].latestCreatedRevision = reference;
+    value.services[0].latestReadyRevision = reference;
+    value.services[0].trafficStatuses[0].revision = revision;
+    assert.throws(() => check(value), `ready reference ${reference}`);
+  }
+  for (const percent of [99, 101, -1, 0.5, '100', null, undefined, NaN, Infinity]) {
+    const value = clone(f);
+    value.services[0].trafficStatuses[0].percent = percent;
+    assert.throws(() => check(value), `percent ${percent}`);
+  }
+  for (const traffic of [
+    [],
+    null,
+    [null],
+    [{ percent: 100 }],
+    [
+      { revision, percent: 100 },
+      { revision: 'other', percent: 0 },
+    ],
+    [
+      { revision, percent: 99 },
+      { revision: 'other', percent: 1 },
+    ],
+  ]) {
+    const value = clone(f);
+    value.services[0].trafficStatuses = traffic;
+    assert.throws(() => check(value));
+  }
+  for (const replacement of [
+    service.replace('urm-app-staging', 'foreign'),
+    service.replace('us-central1', 'europe-west1'),
+  ]) {
+    const value = clone(f);
+    value.functions[0].serviceConfig.service = replacement;
+    value.services[0].name = replacement;
+    value.services[0].latestCreatedRevision = `${replacement}/revisions/${revision}`;
+    value.services[0].latestReadyRevision = `${replacement}/revisions/${revision}`;
+    assert.throws(() => check(value));
+  }
+});
+
 test('planned third-hop archive preserves the full two failed predecessors and rejects reason downgrade/tampering', async () => {
   const f = await repeatedFixture(),
     ancestry = await validateRecoveryAncestry(f.input, f.load);

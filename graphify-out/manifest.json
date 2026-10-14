@@ -2370,8 +2370,8 @@
     "semantic_hash": ""
   },
   "functions/src/sentryBuildInfo.ts": {
-    "mtime": 1791936315.1087534,
-    "ast_hash": "aca249b2aba5187d653e8a1346b0af09",
+    "mtime": 1791940331.384489,
+    "ast_hash": "c79b85ab2f140e33593c1014ec98c6af",
     "semantic_hash": ""
   },
   "functions/src/setUserRole.ts": {
@@ -7195,13 +7195,13 @@
     "semantic_hash": ""
   },
   "scripts/temporal-recover-initial-compatibility.mjs": {
-    "mtime": 1791936028.5230901,
-    "ast_hash": "bc90df3e3bf29dcffc033dbf4f0bf58b",
+    "mtime": 1791943103.5011191,
+    "ast_hash": "d219dbb4bd3561440878a438d4564ebc",
     "semantic_hash": ""
   },
   "scripts/temporal-recover-initial-compatibility.test.mjs": {
-    "mtime": 1791936027.0479276,
-    "ast_hash": "79d29c9c86f4dcf2731132147bfd274d",
+    "mtime": 1791943105.588089,
+    "ast_hash": "d2abe62191810420598c869e9b75189e",
     "semantic_hash": ""
   },
   "scripts/tests/functions-isolated-startup.test.mjs": {
