@@ -1,0 +1,17 @@
+# Full application validation
+
+On macOS, run `pnpm validate:application:local` before pushing. The [local launcher](../scripts/validate-application-local.sh) builds the [Linux validation image](../ops/local-validation/Dockerfile), bundles the committed candidate without pushing it, and validates a fresh clone in an isolated Linux x64 workspace. It requires Docker and at least 15 GiB free after the image build. Failed workspace volumes and evidence are retained. No host credentials, dotenv files, dependencies or emulator ports are shared.
+
+On an already provisioned clean Linux x64 checkout of that exact candidate, run `pnpm validate:application`. GitHub Actions calls the same `scripts/validate-application.mjs` runner. There is one ordered stage list; neither entry point selects a smaller suite.
+
+Use the repository's local validation container when developing on macOS or when host tools differ. The full runner requires Node 22, pnpm 12.11.2, Java 21, Git, Python 3, ffmpeg and the Google Cloud CLI. The latter is used for local upload-manifest checks; no cloud login, provider credentials or real Firebase project is needed. Playwright's Chromium dependencies are installed by the existing browser stage. A matching Linux/toolchain is necessary for parity; sharing commands alone does not make macOS equivalent to Linux native dependencies.
+
+The container workspace must be a usable Git clone preserving the candidate's commit and tree. A plain archive has no `git ls-files` inventory; copying a managed worktree's `.git` pointer is insufficient. Do not mount host credentials, dotenv files or another checkout's `node_modules`. Normal frozen installation and package lifecycle scripts run as the first validation stage. Do not reuse development emulators.
+
+The runner builds the worker and split Functions, verifies native Linux startup and locked dependencies, and runs all backend, rules, recovery, provider, media, contract and kit checks. Functions retain their mandatory full test typecheck before serial Jest execution. Each emulator-backed phase uses `firebase.test.json` and runs serially. The media harness builds the production web application once, tests all authenticated media cases against the owned standalone server, and reuses that verified build for separate cold-navigation checks. It does not start a Next development server.
+
+Validation stops on the first failed command. Remaining stages are recorded as `not-run`, never as passing. Cancellation is forwarded only to owned process groups and waits for cleanup. Forced cleanup fails the run. Test retries, assertions and deadlines are unchanged.
+
+The default summary is `output/validation/application-summary.json`. `URM_VALIDATION_SUMMARY_PATH` can select a different artifact destination, such as `/artifacts/application-summary.json`; it never changes which checks execute. The summary records commit/tree, initial tracked-diff hash, tool versions and every stage's command exit/signal and elapsed time. It does not dump environment variables or credentials. A dirty checkout's diff hash is evidence of that state, not a claim it matches the committed tree.
+
+Browser failure traces remain under `apps/web/test-results/`. CI uploads those when the media stage fails and retains them for three days. CI also retains the summary. Keep failed local workspace/artifacts for diagnosis. Fix failures locally and complete the full sequence on the final frozen source before pushing; a focused test result is not a full validation pass.

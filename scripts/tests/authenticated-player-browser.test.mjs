@@ -1,3 +1,4 @@
+import { applicationStages } from '../validate-application.mjs';
 import test from 'node:test';
 import { MEDIA_FIXTURE_ADMIN, MEDIA_FIXTURE_UPLOADER } from '../../apps/web/tests/helpers/mediaFixtureIdentity.ts';
 import assert from 'node:assert/strict';
@@ -492,31 +493,35 @@ test('CI checks the actual producer/parser contract once before application regr
     new URL('../../.github/workflows/temporal-application-validation.yml', import.meta.url),
     'utf8'
   );
-  const command = 'node --test scripts/tests/authenticated-player-browser.test.mjs';
-  assert.equal(workflow.split(command).length - 1, 1);
-  const position = workflow.indexOf(command);
-  assert(position > workflow.indexOf('name: Validate every kit on genuine Linux native production startup'));
-  assert(position < workflow.indexOf('name: Validate application regressions, admission, rules and SDK compatibility'));
-  assert.match(workflow, /id: media_browser/);
-  assert.match(workflow, /failure\(\) && steps\.media_browser\.outcome == 'failure'/);
+  const stages = applicationStages();
+  const contract = stages.find((stage) => stage.id === 'media-contracts');
+  assert.equal(
+    contract.commands.filter((args) => args.includes('scripts/tests/authenticated-player-browser.test.mjs')).length,
+    1
+  );
+  assert(stages.indexOf(contract) > stages.findIndex((stage) => stage.id === 'kits-native'));
+  assert(stages.indexOf(contract) < stages.findIndex((stage) => stage.id === 'functions'));
+  assert.equal(workflow.split('run: node scripts/validate-application.mjs').length - 1, 1);
+  assert.match(workflow, /failure\(\) && steps\.application_validation\.outputs\.media_failed == 'true'/);
 });
 
 test('CI builds once before real media checks and reuses production artifact for cold navigation', () => {
-  const workflow = readFileSync(
-    new URL('../../.github/workflows/temporal-application-validation.yml', import.meta.url),
-    'utf8'
-  );
+  const stages = applicationStages(),
+    commands = stages.flatMap((stage) => stage.commands);
   const source = readFileSync(new URL('./authenticated-player-browser.mjs', import.meta.url), 'utf8');
-  assert.equal(workflow.split('authenticated-player-browser.mjs --build-production').length - 1, 1);
-  assert.equal(workflow.split('authenticated-player-browser.mjs --cold-navigation').length - 1, 1);
-  assert(workflow.indexOf('--build-production') < workflow.indexOf('id: media_browser'));
-  const guards =
-    'node --test packages/shared/firebase/emulatorPorts.test.mjs packages/shared/firebase/demoEmulatorMode.test.mjs';
-  assert.equal(workflow.split(guards).length - 1, 1);
-  assert(workflow.indexOf(guards) < workflow.indexOf('--build-production'));
+  assert.equal(commands.filter((args) => args.includes('--build-production')).length, 1);
+  assert.equal(commands.filter((args) => args.includes('--cold-navigation')).length, 1);
+  const contracts = stages.findIndex((stage) => stage.id === 'media-contracts');
   assert(
-    workflow.indexOf('node --test scripts/tests/authenticated-player-browser.test.mjs') <
-      workflow.indexOf('--build-production')
+    stages[contracts].commands.some(
+      (args) =>
+        args.includes('packages/shared/firebase/emulatorPorts.test.mjs') &&
+        args.includes('packages/shared/firebase/demoEmulatorMode.test.mjs')
+    )
+  );
+  assert(contracts < stages.findIndex((stage) => stage.id === 'build-web'));
+  assert(
+    stages.findIndex((stage) => stage.id === 'build-web') < stages.findIndex((stage) => stage.id === 'media-browser')
   );
   assert.doesNotMatch(source, /run', 'dev'|prewarmMediaRoutes|DEV_ADMIN_PASSWORD/);
   assert.match(source, /Browser helper exposed as HTTP route/);

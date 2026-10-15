@@ -4,6 +4,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "validate:application": "node scripts/validate-application.mjs",
+    "validate:application:local": "bash scripts/validate-application-local.sh",
     "postinstall": "pnpm run build:packages",
     "build:packages": "./scripts/with-node22.sh pnpm exec turbo run build --filter=@upperroom/shared --filter=@upperroom/contracts --filter=@upperroom/orchestration --continue",
     "build-functions": "./scripts/with-node22.sh bash -c 'pnpm --dir functions run build && pnpm run build-functions-codebases'",

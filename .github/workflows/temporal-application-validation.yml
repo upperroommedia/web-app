@@ -29,102 +29,42 @@ concurrency:
 
 jobs:
   durable-application:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-node@v7.1.0
         with:
-          node-version: '22'
+          node-version: '22.23.3'
       - uses: actions/setup-java@v6.0.1
         with:
           distribution: temurin
-          java-version: '21'
+          java-version: '21.0.12.1'
       - name: Install pinned package manager and native test tools
         run: |
           npm install --global pnpm@12.11.2
           sudo apt-get update
           sudo apt-get install --yes ffmpeg
-      - name: Install locked workspace
-        run: pnpm install --frozen-lockfile
-      - name: Build worker and split Firebase deployment sources
-        run: |
-          pnpm run build:temporal
-          pnpm run build-functions-codebases
-      - name: Validate locked npm Functions startup, lifecycle and loading boundaries
-        env:
-          FIREBASE_PROJECT_ID: demo-temporal-ci
-          FIREBASE_CONFIG: '{"projectId":"demo-temporal-ci","storageBucket":"demo-temporal-ci.appspot.com","databaseURL":"https://demo-temporal-ci-default-rtdb.firebaseio.com"}'
-        run: |
-          node --test scripts/materialize-catalog-for-firebase.test.mjs
-          node scripts/functions-npm-locks.mjs check
-          node --test scripts/kit-npm-lock-contract.test.mjs
-          node scripts/kit-npm-locks.mjs check
-          pnpm run check:function-startup-loads
-          node --test scripts/tests/functions-isolated-startup.test.mjs
-      - name: Validate every kit on genuine Linux native production startup
-        env:
-          KIT_STARTUP_REQUIRE_LINUX_X64: 'true'
-        run: node --test scripts/tests/kits-isolated-startup.test.mjs
-      - name: Validate isolated media fixture contracts before application regressions
-        run: |
-          node --test packages/shared/firebase/emulatorPorts.test.mjs packages/shared/firebase/demoEmulatorMode.test.mjs
-          node --test scripts/tests/authenticated-player-browser.test.mjs
-      - name: Build the canonical production demo web application
-        run: node scripts/tests/authenticated-player-browser.mjs --build-production
-      - name: Verify authenticated player, trimming and upload navigation
-        id: media_browser
-        run: |
-          pnpm --dir apps/web exec playwright install --with-deps chromium
-          node scripts/tests/authenticated-player-browser.mjs
+      - name: Set up read-only upload manifest validation
+        uses: google-github-actions/setup-gcloud@v3.0.1
+        with:
+          version: '588.0.0'
+      - name: Validate the complete application
+        id: application_validation
+        run: node scripts/validate-application.mjs
       - name: Preserve authenticated media failure traces
-        if: ${{ failure() && steps.media_browser.outcome == 'failure' }}
+        if: ${{ failure() && steps.application_validation.outputs.media_failed == 'true' }}
         uses: actions/upload-artifact@v7.0.2
         with:
           name: authenticated-media-failure-${{ github.run_id }}-${{ github.run_attempt }}
           path: apps/web/test-results/
           if-no-files-found: warn
           retention-days: 3
-      - name: Validate application regressions, admission, rules and SDK compatibility
-        run: pnpm --dir functions test
-      - name: Validate workflows, replay, cancellation and native media
-        run: pnpm --dir apps/temporal-worker run test:ci
-      - name: Validate real upload and publishing admission, dispatch and crash recovery
-        run: pnpm run test:temporal:integration
-      - name: Validate media admission, dependencies and retention
-        run: pnpm run test:temporal:media
-      - name: Validate browser recovery and state projections
-        run: pnpm --dir apps/web run test:frontend:unit
-      - name: Set up read-only upload manifest validation
-        uses: google-github-actions/setup-gcloud@v3.0.1
-      - name: Validate audio deployment context, release exclusion and environment isolation
-        run: node --test scripts/process-audio-deployment.test.mjs scripts/test-process-audio-hetzner-isolation.mjs
-      - name: Validate release, bootstrap and migration contracts
-        run: |
-          pnpm run test:temporal:contracts
-          node --test scripts/temporal-recover-initial-compatibility.test.mjs
-          node --test scripts/provider-http-inventory.test.mjs
-      - name: Validate release and recovery through the real Firestore SDK
-        env:
-          RELEASE_RUNTIME_TEST_ROOT: ${{ github.workspace }}
-          BUNDLE_RECOVERY_TEST_RUNTIME_ROOT: ${{ github.workspace }}
-        run: |
-          pnpm --dir functions exec firebase emulators:exec --project demo-release-runtime --only auth,firestore,database,storage --config ../firebase.test.json 'node ../scripts/tests/temporal-release-runtime.firestore.test.mjs'
-          pnpm --dir functions exec firebase emulators:exec --project demo-bundle-recovery --only auth,firestore,database,storage --config ../firebase.test.json 'node ../scripts/tests/temporal-bundle-bootstrap-recovery.firestore.test.mjs'
-      - name: Validate native audio admission, queueing, monitoring and OAuth transport
-        run: |
-          pnpm --dir apps/process-audio run test:legacy-ingress
-          pnpm --dir apps/process-audio run test:queue
-          pnpm --dir apps/process-audio run test:sdk-upgrades
-      - name: Validate email and search kits
-        run: |
-          pnpm --dir function-kits/firestore-send-email test
-          pnpm --dir function-kits/firestore-algolia-search test
-      - name: Validate native email capture without a provider connection
-        env:
-          URM_EMAIL_CAPTURE_EMULATOR_TEST: 'true'
-          URM_EMAIL_CAPTURE_TEST_CONFIG: ${{ github.workspace }}/firebase.test.json
-        run: |
-          pnpm --dir functions exec firebase emulators:exec --project demo-email-capture --only auth,firestore,database,storage --config ../firebase.test.json 'NODE_OPTIONS=--experimental-vm-modules pnpm --dir ../function-kits/firestore-send-email exec jest --runInBand --watchman=false --forceExit test/temporal/capture.firestore.test.ts'
-      - name: Verify production cold navigation on desktop and mobile
-        run: node scripts/tests/authenticated-player-browser.mjs --cold-navigation
+      - name: Preserve validation summary
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: application-validation-${{ github.run_id }}-${{ github.run_attempt }}
+          path: output/validation/application-summary.json
+          if-no-files-found: warn
+          retention-days: 3

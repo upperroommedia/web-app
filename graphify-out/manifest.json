@@ -2965,8 +2965,8 @@
     "semantic_hash": ""
   },
   "package.json": {
-    "mtime": 1791969432.8409977,
-    "ast_hash": "a86cfb31707a687c963a68a272adf102",
+    "mtime": 1792041636.0647972,
+    "ast_hash": "92df665ca5ef476b643731fd3f9992b2",
     "semantic_hash": ""
   },
   "packages/contracts/addIntroOutro/types.ts": {
@@ -6935,8 +6935,8 @@
     "semantic_hash": ""
   },
   ".github/workflows/temporal-application-validation.yml": {
-    "mtime": 1792035093.6345336,
-    "ast_hash": "f2b2cd371e86e0e5af7c1e1907362cce",
+    "mtime": 1792041886.8037143,
+    "ast_hash": "fd54e748d82928cfe5fdda2e3b0ff5ae",
     "semantic_hash": ""
   },
   ".github/workflows/temporal-platform-deploy.yml": {
@@ -7990,8 +7990,8 @@
     "semantic_hash": ""
   },
   "scripts/tests/authenticated-player-browser.test.mjs": {
-    "mtime": 1792035093.8077471,
-    "ast_hash": "e2b89060e2f39709bde471fcfce9eea2",
+    "mtime": 1792041532.3695772,
+    "ast_hash": "2f566201d4cfb2a717634be2d72aabe8",
     "semantic_hash": ""
   },
   "functions/tsconfig.test.json": {
@@ -8067,6 +8067,31 @@
   "apps/web/utils/sermonCardPlayback.render.test.tsx": {
     "mtime": 1792039076.8922558,
     "ast_hash": "8f6ead70f46613f4cec55d26e11c80c2",
+    "semantic_hash": ""
+  },
+  "scripts/tests/local-validation-launcher.test.mjs": {
+    "mtime": 1792041879.2124841,
+    "ast_hash": "7dcd02ae9469d74ca2de1bc12f9cd9f5",
+    "semantic_hash": ""
+  },
+  "scripts/tests/validate-application.test.mjs": {
+    "mtime": 1792041896.2208216,
+    "ast_hash": "e84fab37c48aaa44616a7fa5445d2974",
+    "semantic_hash": ""
+  },
+  "scripts/validate-application-local.sh": {
+    "mtime": 1792041728.2916045,
+    "ast_hash": "1f987a309c94bd152ae832020972e320",
+    "semantic_hash": ""
+  },
+  "scripts/validate-application.mjs": {
+    "mtime": 1792041886.8039024,
+    "ast_hash": "ee41863a40b9ec1b80f31c2bb5c19b44",
+    "semantic_hash": ""
+  },
+  "docs/LOCAL_VALIDATION.md": {
+    "mtime": 1792041636.0650768,
+    "ast_hash": "fe94bd8c5d7e5dffcd74235e34c3e2dd",
     "semantic_hash": ""
   }
 }
