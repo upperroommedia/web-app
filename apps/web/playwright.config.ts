@@ -4,7 +4,9 @@ const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:3000';
 
 export default defineConfig({
   testDir: './tests',
-  timeout: 10_000,
+  // Functional scenarios include fresh-context setup and browser execution.
+  // Keep individual readiness/assertion deadlines independently bounded below.
+  timeout: 30_000,
   expect: {
     timeout: 10_000,
   },

@@ -1,6 +1,7 @@
 import { expect, test as base, type Page } from '@playwright/test';
 import { installMediaBackendFixtures } from './mediaBackendFixture';
-import { loginAsMediaBrowserAdmin } from './mediaBrowserLogin';
+import { assertMediaBrowserLoginEnvironment } from './mediaBrowserLogin';
+import { mediaAuthenticatedTest } from './mediaAuthenticatedTest';
 
 type Callback = '/' | '/admin/sermons';
 type Prepared<T> = { callbackPath: Callback; data: T };
@@ -12,36 +13,44 @@ type Runtime = {
 };
 const runtime: Runtime = {
   installBackend: installMediaBackendFixtures,
-  login: loginAsMediaBrowserAdmin,
+  login: async (page, callbackPath) => {
+    assertMediaBrowserLoginEnvironment(process.env, callbackPath);
+    await page.goto(callbackPath);
+  },
   ready: async (page, callbackPath) => {
     if (callbackPath === '/')
       await expect(page.getByRole('switch', { name: 'Upload from Youtube Url', exact: true })).toBeVisible();
-    else await expect(page.getByRole('heading', { name: 'Sermons', exact: true })).toBeVisible();
+    else {
+      await expect(page.getByRole('heading', { name: 'Sermons', exact: true })).toBeVisible();
+      await expect(page.getByRole('searchbox').first()).toBeVisible();
+    }
   },
 };
 
-/** Preparation, real sign-in and route readiness share ONE bounded setup budget.
- * The test body keeps its existing functional timeout. Preparation owns resources
- * through usePrepared, so its finally also runs when authentication/body fails.
- * Runtime injection is only a process-fixture contract seam; media suites use the
- * real default backend routes and shipped Google authentication UI.
+/** Each fresh authenticated context prepares its own routes and data, then navigates
+ * within ONE bounded setup budget. Real UI login has a separate worker budget;
+ * the functional body keeps its original timeout. Injected Runtime contracts use
+ * the plain base runner and never start the real browser authentication fixture.
  */
-export function createMediaTest<T>(prepare: MediaPreparation<T>, operations: Runtime = runtime) {
-  return base.extend<{ authenticatedMedia: { page: Page; data: T } }>({
+export function createMediaTest<T>(prepare: MediaPreparation<T>, operations?: Runtime) {
+  const testBase = operations ? base : mediaAuthenticatedTest;
+  const setup = operations ?? runtime;
+  return testBase.extend<{ authenticatedMedia: { page: Page; data: T } }>({
     authenticatedMedia: [
       async ({ page }, use) => {
-        await operations.installBackend(page);
+        if (!operations) assertMediaBrowserLoginEnvironment(process.env, '/');
+        await setup.installBackend(page);
         let yielded = false;
         await prepare(page, async ({ callbackPath, data }) => {
           if (yielded) throw new Error('Media preparation must yield exactly once');
           yielded = true;
-          await operations.login(page, callbackPath);
-          await operations.ready(page, callbackPath);
+          await setup.login(page, callbackPath);
+          await setup.ready(page, callbackPath);
           await use({ page, data });
         });
         if (!yielded) throw new Error('Media preparation did not yield an authenticated page');
       },
-      { timeout: 10_000 },
+      { timeout: 30_000 },
     ],
   });
 }

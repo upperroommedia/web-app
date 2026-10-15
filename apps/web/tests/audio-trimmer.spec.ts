@@ -1,5 +1,8 @@
 import { createMediaTest, expect, test } from './helpers/mediaTest';
 import type { ConsoleMessage, Page } from '@playwright/test';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 function createSilentWav(durationSeconds = 0.5, sampleRate = 44100) {
   const numSamples = Math.floor(durationSeconds * sampleRate);
@@ -20,6 +23,17 @@ function createSilentWav(durationSeconds = 0.5, sampleRate = 44100) {
   buffer.writeUInt32LE(dataSize, 40);
   return buffer;
 }
+
+const oversizedPreviewTest = createMediaTest<string>(async (_page, usePrepared) => {
+  const directory = await mkdtemp(join(tmpdir(), 'urm-preview-budget-'));
+  try {
+    const path = join(directory, 'long-recording.wav');
+    await writeFile(path, createSilentWav(400, 44100));
+    await usePrepared({ callbackPath: '/', data: path });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
 
 function collectTrimmerBrowserErrors(page: Page) {
   const messages: string[] = [];
@@ -392,24 +406,23 @@ test.describe('Bounded optional waveform lifetime', () => {
     }
   );
 
-  test('keeps playback and trim controls available when optional preview exceeds its budget', async ({
-    authenticatedMedia: { page },
-  }) => {
-    const dropzone = page.getByText('Drag & drop audio files here, or click to select files').locator('..');
-    // Input stays valid/playable PCM, but exceeds the preview's 32 MiB input budget.
-    await dropzone.locator('input').setInputFiles({
-      name: 'long-recording.wav',
-      mimeType: 'audio/wav',
-      buffer: createSilentWav(400, 44100),
-    });
-    await expect(page.getByRole('img', { name: /Waveform preview unavailable/ })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Play', exact: true })).toBeEnabled();
-    const start = page.getByRole('textbox', { name: 'Trim Start' });
-    await expect(start).toBeEnabled();
-    await start.click();
-    await start.press('ControlOrMeta+A');
-    await start.pressSequentially('0000010');
-    await start.blur();
-    await expect(start).toHaveValue('00:00:01.0');
-  });
+  oversizedPreviewTest(
+    'keeps playback and trim controls available when optional preview exceeds its budget',
+    async ({ authenticatedMedia: { page, data: recordingPath } }) => {
+      const dropzone = page.getByText('Drag & drop audio files here, or click to select files').locator('..');
+      // Input stays valid/playable PCM, but exceeds the preview's 32 MiB input budget.
+      // Use the real file path so transferring a 35 MB inline protocol payload does
+      // not consume the functional playback/trim assertion budget.
+      await dropzone.locator('input').setInputFiles(recordingPath);
+      await expect(page.getByRole('img', { name: /Waveform preview unavailable/ })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Play', exact: true })).toBeEnabled();
+      const start = page.getByRole('textbox', { name: 'Trim Start' });
+      await expect(start).toBeEnabled();
+      await start.click();
+      await start.press('ControlOrMeta+A');
+      await start.pressSequentially('0000010');
+      await start.blur();
+      await expect(start).toHaveValue('00:00:01.0');
+    }
+  );
 });

@@ -206,7 +206,7 @@ test('real TypeScript media fixture limits routes and rejects foreign or malform
       else process.env[key] = original[key];
   }
 });
-test('every media case consumes the shared bounded setup fixture with backend guards before real login', () => {
+test('every media case consumes guarded worker authentication and bounded per-case setup', () => {
   const casesPerSpec = [4, 9, 2];
   for (const [index, spec] of SPECS.entries()) {
     const source = readFileSync(new URL(`../../apps/web/${spec}`, import.meta.url), 'utf8');
@@ -218,14 +218,22 @@ test('every media case consumes the shared bounded setup fixture with backend gu
     assert.equal(authenticatedCases.length, cases.length, `${spec}: every case uses authenticated setup`);
   }
   const fixture = readFileSync(new URL('../../apps/web/tests/helpers/mediaTest.ts', import.meta.url), 'utf8');
+  const workerFixture = readFileSync(
+    new URL('../../apps/web/tests/helpers/mediaAuthenticatedTest.ts', import.meta.url),
+    'utf8'
+  );
   assert.match(fixture, /installBackend: installMediaBackendFixtures/);
-  assert.match(fixture, /login: loginAsMediaBrowserAdmin/);
-  assert.match(fixture, /timeout: 10_000/);
+  assert.match(fixture, /const testBase = operations \? base : mediaAuthenticatedTest/);
+  assert.match(workerFixture, /await installMediaBackendFixtures\(page\)/);
+  assert.match(workerFixture, /await loginAsMediaBrowserAdmin\(page, '\/'\)/);
+  assert.match(workerFixture, /context\.storageState\(\{ indexedDB: true \}\)/);
+  assert.match(workerFixture, /scope: 'worker', timeout: 30_000/);
+  assert.match(fixture, /timeout: 30_000/);
   const ordered = [
-    'await operations.installBackend(page)',
+    'await setup.installBackend(page)',
     'await prepare(page,',
-    'await operations.login(page, callbackPath)',
-    'await operations.ready(page, callbackPath)',
+    'await setup.login(page, callbackPath)',
+    'await setup.ready(page, callbackPath)',
     'await use({ page, data })',
   ].map((operation) => fixture.indexOf(operation));
   assert(ordered.every((offset) => offset >= 0));

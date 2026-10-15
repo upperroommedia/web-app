@@ -128,8 +128,11 @@ exclusion as proof that the new release is drained.
    and explicit `--include-staging-search --release <descriptor>` environment
    materialization for these five instances. `STAGING_TEMPORAL_SEARCH_ONLY=true`
    holds all staging legacy index effects even when compatibility flags still
-   say legacy. `DO_FULL_INDEXING=false` prevents lifecycle/Cloud Tasks full-index
-   jobs. Do not activate old extension reindex queues.
+   say legacy. `DO_FULL_INDEXING=false` makes the handler skip full-index effects;
+   deployment hooks can still enqueue lifecycle tasks. Keep the queues paused,
+   inventory all five queues again after deployment, and review each new task
+   separately from the retained legacy task. Do not activate old extension reindex
+   queues or treat deployment success as proof of an empty queue.
 5. Run `compatibility-ready` with actual fresh compatibility evidence; let the
    server-stamped grace elapse. Run the existing legacy drain, worker rollout and
    provider-usage steps described in `OPERATIONS.md`, then `take-ownership`.

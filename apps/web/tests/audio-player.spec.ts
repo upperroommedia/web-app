@@ -8,7 +8,7 @@ const playableTest = (viewport?: { width: number; height: number }, failFirst = 
     try {
       if (viewport) await page.setViewportSize(viewport);
       await routePlayableAudio(page, seeded.id, failFirst);
-      await usePrepared({ callbackPath: '/', data: seeded });
+      await usePrepared({ callbackPath: '/admin/sermons', data: seeded });
     } finally {
       await seeded.cleanup();
     }
@@ -41,7 +41,6 @@ test.describe('Audio player (floating bar)', () => {
   test('player visible and main content has bottom padding when playing on admin sermons', async ({
     authenticatedMedia: { page, data: seededSermon },
   }) => {
-    await page.goto('/admin/sermons');
     await expect(page.getByRole('heading', { name: 'Sermons' })).toBeVisible({
       timeout: 15_000,
     });
@@ -62,7 +61,6 @@ test.describe('Audio player (floating bar)', () => {
   mobileTest(
     'player visible and bottom spacing on mobile viewport',
     async ({ authenticatedMedia: { page, data: seededSermon } }) => {
-      await page.goto('/admin/sermons');
       await expect(page.getByRole('heading', { name: 'Sermons' })).toBeVisible({
         timeout: 15_000,
       });
@@ -84,10 +82,11 @@ test.describe('Audio player (floating bar)', () => {
 desktopControlsTest(
   'real audio controls support pause, keyboard seek/volume, mute and close with local media',
   async ({ authenticatedMedia: { page, data: seeded } }) => {
-    await page.goto('/admin/sermons');
     await playSermonFromSearch(page, seeded.title);
     const bar = page.getByRole('region', { name: 'Sermon audio player' });
     const audio = bar.locator('audio');
+    await expect(bar).toBeVisible();
+    await expect(audio).toHaveCount(1);
     await expect.poll(() => audio.evaluate((node: HTMLAudioElement) => node.readyState)).toBeGreaterThanOrEqual(3);
     await expect.poll(() => page.evaluate(() => navigator.mediaSession.metadata?.title)).toBe(seeded.title);
     await expect(bar.getByRole('button', { name: 'Pause', exact: true })).toBeEnabled();
@@ -124,7 +123,6 @@ desktopControlsTest(
 failedSourceTest(
   'a failed source URL can be retried without changing the selected sermon',
   async ({ authenticatedMedia: { page, data: seeded } }) => {
-    await page.goto('/admin/sermons');
     await playSermonFromSearch(page, seeded.title);
     const bar = page.getByRole('region', { name: 'Sermon audio player' });
     await expect(bar.getByRole('status')).toContainText('Audio could not load');
