@@ -24,7 +24,7 @@ service firebase.storage {
         && firestore.exists(/databases/(default)/documents/durableJobs/$(jobId))
         && firestore.get(/databases/(default)/documents/durableJobs/$(jobId)).data.requestedBy == uid
         && firestore.get(/databases/(default)/documents/durableJobs/$(jobId)).data.state == 'awaiting_source'
-        && firestore.get(/databases/(default)/documents/durableJobs/$(jobId)).data.kind == 'upload.source.start'
+        && firestore.get(/databases/(default)/documents/durableJobs/$(jobId)).data.kind == 'upload.create'
         && firestore.get(/databases/(default)/documents/durableJobs/$(jobId)).data.result.sourceUpload.storagePath == 'durable-upload-sources/' + uid + '/' + jobId + '/source'
         && firestore.get(/databases/(default)/documents/durableJobs/$(jobId)).data.result.sourceUpload.expectedFile.size == request.resource.size;
       allow read: if request.auth != null && (request.auth.uid == uid || request.auth.token.role == 'admin');

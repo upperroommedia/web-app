@@ -34,7 +34,7 @@ beforeEach(async () => {
       .doc('durableJobs/job-1')
       .set({
         requestedBy: 'owner',
-        kind: 'upload.source.start',
+        kind: 'upload.create',
         state: 'awaiting_source',
         result: { sourceUpload: { storagePath: path, expectedFile: { size: 4 } } },
       });
@@ -427,7 +427,7 @@ describe('direct browser mutation boundaries', () => {
     const cases = [
       {
         id: 'paused-audio-valid',
-        kind: 'upload.source.start',
+        kind: 'upload.create',
         storagePath: 'durable-upload-sources/owner/paused-audio-valid/source',
         allowed: true,
       },
@@ -437,7 +437,13 @@ describe('direct browser mutation boundaries', () => {
         storagePath: 'durable-upload-sources/owner/paused-audio-wrong-kind/source',
         allowed: false,
       },
-      { id: 'paused-audio-wrong-path', kind: 'upload.source.start', storagePath: 'different/path', allowed: false },
+      { id: 'paused-audio-wrong-path', kind: 'upload.create', storagePath: 'different/path', allowed: false },
+      {
+        id: 'paused-audio-obsolete-kind',
+        kind: 'upload.source.start',
+        storagePath: 'durable-upload-sources/owner/paused-audio-obsolete-kind/source',
+        allowed: false,
+      },
     ];
     await environment.withSecurityRulesDisabled(async (context) => {
       for (const fixture of cases)

@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { verifyTemporalCallableTransport } from './temporal-callable-access.mjs';
 import { verifyFirebaseRtdbReadiness } from './temporal-platform.mjs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -639,6 +640,17 @@ await runWithCleanup(
             'cloud'
           );
         }
+        async function verifyCallableTransport(control, managed) {
+          return verifyTemporalCallableTransport({
+            functions: managed ?? (await functionsList()),
+            projectId: config.projectId,
+            projectNumber: resourceIdentity.projectNumber,
+            region: config.location,
+            runtimeCommit: config.compatibilityCommit,
+            flags: flagsForControl(control),
+            api,
+          });
+        }
         async function queuesEmpty() {
           const counts = {};
           const discovered = await list(
@@ -971,6 +983,7 @@ await runWithCleanup(
                 if (deployed?.[key] !== value)
                   throw new Error(`Deployed function ownership flag mismatch:${fn.name.split('/').at(-1)}:${key}`);
             }
+            await verifyCallableTransport(control, managed);
             await transition(control.revision, 'backend-ready', { backendVerifiedAt: Date.now() });
           } else if (action === 'bootstrap-bundles') {
             if (!config.domains.includes('bundles')) throw new Error('This release does not own bundle regeneration');
@@ -1196,6 +1209,7 @@ await runWithCleanup(
               const history = await firestore.doc(providerUsageHistoryPath(state)).get();
               validateProviderUsageContinuity(config, control, state, usage, history.data(), state.providerUsageEpoch);
             } else validateProviderUsageMarker(config, usage.data(), state.providerUsageEpoch);
+            await verifyCallableTransport(control);
             const domains = structuredClone(control.domains);
             for (const domain of config.domains) domains[domain].admission = 'open';
             await transition(control.revision, 'open', { openedAt: Date.now() }, { admission: 'open', domains });

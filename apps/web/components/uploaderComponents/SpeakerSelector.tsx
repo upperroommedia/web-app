@@ -4,7 +4,7 @@ import ListItem from '@mui/material/ListItem';
 import { ISpeaker } from '../../types/Speaker';
 import Autocomplete from '@mui/material/Autocomplete';
 import { UploaderFieldError } from '../../context/types';
-import firestore, { collection, getDocs, query, where } from '../../firebase/firestore';
+import firestore, { collection, doc, getDocFromServer, getDocs, query, where } from '../../firebase/firestore';
 import TextField from '@mui/material/TextField';
 import Chip from '@mui/material/Chip';
 import { List, ListType, listConverter } from '../../types/List';
@@ -20,6 +20,7 @@ import Box from '@mui/material/Box';
 import { useAlgoliaSearch } from '../../context/search/AlgoliaSearchContext';
 import SearchAttribution from '../algoliaComponents/SearchAttribution';
 import { browseSpeakers, type BrowsePage } from '../../utils/algolia/browseRecords';
+import { applySpeakerImageDefaults, loadSpeakerImageDefaults } from '../../utils/speakerImageDefaults';
 
 interface AlgoliaSpeaker extends ISpeaker {
   nbHits?: number;
@@ -100,6 +101,9 @@ function SpeakerSelector({
   const [browsePage, setBrowsePage] = useState<BrowsePage<ISpeaker>>();
   const [browseError, setBrowseError] = useState<string>();
   const browseInFlight = useRef(false);
+  const imageSelection = useRef(0);
+  const mounted = useRef(true);
+  const [defaultImageWarning, setDefaultImageWarning] = useState<string>();
   const loadMoreSpeakers = async (reset = false) => {
     if (!reset && browseInFlight.current) return;
     browseInFlight.current = true;
@@ -152,7 +156,10 @@ function SpeakerSelector({
   }, [client]);
 
   useEffect(() => {
+    mounted.current = true;
     return () => {
+      mounted.current = false;
+      imageSelection.current++;
       if (timerRef.current) {
         clearTimeout(timerRef.current);
       }
@@ -178,6 +185,8 @@ function SpeakerSelector({
             alert('You can only add up to 3 speakers');
             return;
           }
+          const selection = ++imageSelection.current;
+          setDefaultImageWarning(undefined);
           if (reason === 'removeOption' && details?.option.listId) {
             setSermonList((previousList) => {
               return previousList.filter((prevList) => prevList.id !== details.option.listId);
@@ -190,12 +199,30 @@ function SpeakerSelector({
 
           if (newValue !== null && newValue.length <= 3) {
             if (newValue.length === 1) {
-              const currentTypes = sermonImages.map((img) => img.type);
-              const newImages = [
-                ...sermonImages,
-                ...newValue[0].images.filter((img) => !currentTypes.includes(img.type)),
-              ];
-              updateSermon('images', newImages);
+              const speaker = newValue[0];
+              const imagesAtSelection = sermonImages;
+              void loadSpeakerImageDefaults(speaker.images ?? [], imagesAtSelection, async (id) => {
+                const snapshot = await getDocFromServer(doc(firestore, 'images', id));
+                return snapshot.exists() ? { id: snapshot.id, data: snapshot.data() } : undefined;
+              })
+                .then(({ images, unavailable }) => {
+                  if (!mounted.current || selection !== imageSelection.current) return;
+                  if (unavailable)
+                    setDefaultImageWarning('Some speaker default images are unavailable. Choose an image if needed.');
+                  setSermon((current) =>
+                    applySpeakerImageDefaults(current, images, {
+                      speakerId: speaker.id,
+                      imagesAtSelection,
+                      selection,
+                      currentSelection: imageSelection.current,
+                      mounted: mounted.current,
+                    })
+                  );
+                })
+                .catch(() => {
+                  if (mounted.current && selection === imageSelection.current)
+                    setDefaultImageWarning('Speaker default images could not be checked. Choose an image if needed.');
+                });
             }
 
             updateSermon(
@@ -290,6 +317,8 @@ function SpeakerSelector({
               <Chip
                 {...tagProps}
                 onDelete={() => {
+                  imageSelection.current++;
+                  setDefaultImageWarning(undefined);
                   setSpeakerError(false, '');
                   setSermon((previousSermon) => {
                     const newImages = previousSermon.images.filter((img) => {
@@ -357,6 +386,11 @@ function SpeakerSelector({
           );
         }}
       />
+      {defaultImageWarning && (
+        <Typography role="status" color="warning.main">
+          {defaultImageWarning}
+        </Typography>
+      )}
       {!client && (
         <Typography variant="caption">
           Search is unavailable. Filter the speakers loaded below, or load more.

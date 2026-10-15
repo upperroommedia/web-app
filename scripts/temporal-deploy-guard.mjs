@@ -103,6 +103,10 @@ export async function runGuardedCommand(
   }
 }
 async function main() {
+  if (process.argv.includes('--storage-rules-repair')) {
+    await (await import('./temporal-storage-rules-repair.mjs')).main(process.argv.slice(2));
+    return;
+  }
   const argv = process.argv.slice(2),
     separator = argv.indexOf('--');
   const options = argv.slice(0, separator),

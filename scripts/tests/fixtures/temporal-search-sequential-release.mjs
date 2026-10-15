@@ -12,6 +12,10 @@ import * as crypto from 'node:crypto';
 import * as net from 'node:net';
 import * as urlApi from 'node:url';
 import * as httpsApi from 'node:https';
+const callableIds = ['submitDurableJob', 'getDurableJobReceipt', 'commandDurableJob'];
+let callableFault;
+const callableIamReads = [];
+const rejectedCallableAccess = [];
 import { execFileSync as realExecFileSync } from 'node:child_process';
 import { PROVIDER_USAGE_SCAN_GROUPS } from '../../temporal-backfill-provider-usage.mjs';
 const root = urlApi.fileURLToPath(new URL('../../../', import.meta.url));
@@ -396,10 +400,46 @@ async function fetchTransport(raw, options = {}) {
       status = 404;
       result = {};
     }
+  } else if (parsed.hostname === 'run.googleapis.com') {
+    assert.equal(method, 'GET');
+    callableIamReads.push({ action: currentAction, path: parsed.pathname, fault: callableFault ?? null });
+    result =
+      callableFault === 'private'
+        ? {}
+        : {
+            bindings: [
+              {
+                role: 'roles/run.invoker',
+                members: ['allUsers'],
+                ...(callableFault === 'conditional' ? { condition: { expression: 'true' } } : {}),
+              },
+            ],
+          };
   } else if (parsed.hostname === 'cloudfunctions.googleapis.com') {
     const control = records.get('_control/temporalRelease');
     result = {
       functions: [
+        ...callableIds
+          .filter((id) => callableFault !== 'missing:' + id)
+          .map((id) => ({
+            name: `projects/${projectId}/locations/us-central1/functions/${id}`,
+            state: 'ACTIVE',
+            environment: 'GEN_2',
+            labels: { 'deployment-callable': 'true', 'firebase-functions-codebase': 'core' },
+            buildConfig: { entryPoint: id, build: 'projects/123456789/locations/us-central1/builds/callable-fixture' },
+            serviceConfig: {
+              service: `projects/${callableFault === 'foreign-project' ? 'foreign-project' : projectId}/locations/${
+                callableFault === 'foreign-region' ? 'europe-west1' : 'us-central1'
+              }/services/${id.toLowerCase()}`,
+              revision: id.toLowerCase() + '-00001-abc',
+              environmentVariables: {
+                ...Object.fromEntries(
+                  domains.map((d) => ['TASK_ORCHESTRATOR_' + d.toUpperCase(), control.domains[d].owner])
+                ),
+                TEMPORAL_RELEASE_COMMIT: config.compatibilityCommit,
+              },
+            },
+          })),
         {
           name: `projects/${projectId}/locations/us-central1/functions/kit-sermons-index-executeIndexOperation`,
           state: 'ACTIVE',
@@ -416,6 +456,8 @@ async function fetchTransport(raw, options = {}) {
         },
       ],
     };
+    if (!parsed.pathname.endsWith('/functions'))
+      result = result.functions.find((fn) => parsed.pathname.endsWith('/' + fn.name.split('/').at(-1)));
   } else if (parsed.hostname === 'cloudtasks.googleapis.com')
     result = parsed.pathname.endsWith('/tasks') ? { tasks: [] } : { queues: [] };
   else if (parsed.hostname === 'cloudresourcemanager.googleapis.com')
@@ -713,6 +755,7 @@ async function run(action) {
       },
     },
     'node:path': path,
+    'node:assert/strict': { default: assert },
     'node:os': os,
     'node:crypto': crypto,
     'node:net': net,
@@ -848,6 +891,27 @@ async function rejectsMutation(label, action, mutate, insideTransaction = false)
   for (const pair of savedVersions) versions.set(...pair);
   rejectedBoundaries.push(label);
 }
+async function rejectsCallableAccess(action) {
+  for (const fault of [
+    ...callableIds.map((id) => 'missing:' + id),
+    'private',
+    'conditional',
+    'foreign-project',
+    'foreign-region',
+  ]) {
+    const beforeState = clone(records.get('_control/temporalReleaseState'));
+    const beforeControl = clone(records.get('_control/temporalRelease'));
+    callableFault = fault;
+    try {
+      await assert.rejects(run(action), /callable|Callable/);
+    } finally {
+      callableFault = undefined;
+    }
+    assert.deepEqual(records.get('_control/temporalReleaseState'), beforeState);
+    assert.deepEqual(records.get('_control/temporalRelease'), beforeControl);
+    rejectedCallableAccess.push({ action, fault });
+  }
+}
 async function rejectsRtdbCanary(action, failure) {
   const beforeState = clone(records.get('_control/temporalReleaseState'));
   const beforeControl = clone(records.get('_control/temporalRelease'));
@@ -964,6 +1028,7 @@ if (process.argv[2] === 'ui-identity-migration') {
     runtimeServicesDeployed: true,
     facadeOwnershipVerified: true,
   });
+  if (process.argv[2] === 'callable-access') await rejectsCallableAccess('backend-ready');
   await run('backend-ready');
   checkDomains();
   await run('bootstrap-search');
@@ -979,6 +1044,7 @@ if (process.argv[2] === 'ui-identity-migration') {
     readonlySmokePassed: true,
     claimsFreshWriteE2E: false,
   });
+  if (process.argv[2] === 'callable-access') await rejectsCallableAccess('open');
   await rejectsMutation(
     'epoch changed at open transaction',
     'open',
@@ -1014,6 +1080,7 @@ if (process.argv[2] === 'ui-identity-migration') {
     )
   );
   for (const name of [
+    'temporal-callable-access.mjs',
     'temporal-release-lib.mjs',
     'temporal-compatibility-cutoff.mjs',
     'temporal-bootstrap-search.mjs',
@@ -1030,7 +1097,14 @@ if (process.argv[2] === 'ui-identity-migration') {
   );
   assert.deepEqual(
     rtdbCanaryCalls.filter((call) => call.failure === null).map((call) => call.action),
-    ['workers-ready', 'take-ownership', 'open', 'open', 'open'],
+    [
+      'workers-ready',
+      'take-ownership',
+      ...(process.argv[2] === 'callable-access' ? Array(7).fill('open') : []),
+      'open',
+      'open',
+      'open',
+    ],
     'workers-ready, ownership, and every open attempt must run the actual readiness helper'
   );
   console.log(
@@ -1040,6 +1114,8 @@ if (process.argv[2] === 'ui-identity-migration') {
       rtdbCanaryCalls,
       providerTamperingRejected: true,
       actualValidators: true,
+      callableIamReads,
+      rejectedCallableAccess,
       phase: records.get('_control/temporalReleaseState').phase,
       actions,
       providerEpoch: marker.epoch,

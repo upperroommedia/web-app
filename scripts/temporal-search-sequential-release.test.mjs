@@ -132,3 +132,26 @@ test('actual complete UI pause/resume verifies canonical build against explicit 
     ['pause', 'resume']
   );
 });
+
+test('actual controller blocks missing/private mandatory callable transport at readiness and preopen', async () => {
+  const { stdout } = await exec(
+    process.execPath,
+    [
+      '--experimental-vm-modules',
+      new URL('./tests/fixtures/temporal-search-sequential-release.mjs', import.meta.url).pathname,
+      'callable-access',
+    ],
+    { timeout: 60000, maxBuffer: 2 * 1024 * 1024 }
+  );
+  const proof = JSON.parse(stdout.trim());
+  assert.equal(proof.phase, 'complete');
+  assert.equal(proof.rejectedCallableAccess.length, 14);
+  for (const action of ['backend-ready', 'open']) {
+    const paths = new Set(
+      proof.callableIamReads.filter((row) => row.action === action && row.fault === null).map((row) => row.path)
+    );
+    assert.equal(paths.size, 3);
+    for (const id of ['submitdurablejob', 'getdurablejobreceipt', 'commanddurablejob'])
+      assert([...paths].some((path) => path.endsWith('/services/' + id + ':getIamPolicy')));
+  }
+});
