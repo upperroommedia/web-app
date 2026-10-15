@@ -59,7 +59,7 @@ test.describe('Player clear on upload / edit routes', () => {
 
       // This transition verifies route ownership and media disposal; the separate upload-page
       // case above checks the lazy form controls once that form has loaded.
-      await expect(page).toHaveTitle('Upload Sermon | Upper Room Media');
+      await expect(page).toHaveTitle('Uploader');
       await expect(page.getByTestId('floating-audio-bar')).toHaveCount(0);
       await expect(page.locator('audio')).toHaveCount(0);
       await expect.poll(() => page.evaluate(() => navigator.mediaSession.metadata)).toBeNull();
