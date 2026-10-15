@@ -28,8 +28,13 @@ test('production cold navigation loads protected page dependencies before redire
   await expect(page.getByRole('button', { name: /google/i }).first()).toBeVisible();
   await expect(page.getByRole('button', { name: /dev login/i })).toHaveCount(0);
   await page.evaluate(() => {
-    const next = (window as Window & { next: { router: { push: (path: string) => Promise<boolean> } } }).next;
-    return next.router.push('/admin/sermons/pw-production-cold-navigation');
+    const next = 'next' in window ? window.next : undefined;
+    if (!next || typeof next !== 'object' || !('router' in next))
+      throw new Error('The production client router is unavailable');
+    const router = next.router;
+    if (!router || typeof router !== 'object' || !('push' in router) || typeof router.push !== 'function')
+      throw new Error('The production client router cannot navigate');
+    return router.push('/admin/sermons/pw-production-cold-navigation');
   });
   await expect(page).toHaveURL(/\/login(?:\?|$)/);
   await expect(page.getByRole('button', { name: /google/i }).first()).toBeVisible();

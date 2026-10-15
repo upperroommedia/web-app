@@ -18,7 +18,8 @@
     "style:all": "tsc -p tsconfig.json && pnpm run style:lint && pnpm run style:prettier",
     "style:lint": "eslint .",
     "style:prettier": "prettier --check '**/*.{js,jsx,ts,tsx}' --ignore-path ../../.gitignore",
-    "make-pretty": "prettier --write '**/*.{js,jsx,ts,tsx}' --ignore-path ../../.gitignore"
+    "make-pretty": "prettier --write '**/*.{js,jsx,ts,tsx}' --ignore-path ../../.gitignore",
+    "test:media:types": "tsc --project tsconfig.playwright.json --noEmit --incremental false"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

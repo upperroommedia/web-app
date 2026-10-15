@@ -750,8 +750,8 @@
     "semantic_hash": ""
   },
   "apps/web/package.json": {
-    "mtime": 1791962173.0906177,
-    "ast_hash": "79fceab3e2110dbbe0cbcb5745a4c0c8",
+    "mtime": 1792047814.5739644,
+    "ast_hash": "f4856b5df3cb653886bbe058504310ce",
     "semantic_hash": ""
   },
   "apps/web/pages/_app.tsx": {
@@ -920,13 +920,13 @@
     "semantic_hash": ""
   },
   "apps/web/tests/audio-player.spec.ts": {
-    "mtime": 1792039098.6057057,
-    "ast_hash": "cfc2dc7e96614bf948b2a9ee4aff21fb",
+    "mtime": 1792047397.637105,
+    "ast_hash": "e9b44ff3f6ff5123d8db27fe37bbc960",
     "semantic_hash": ""
   },
   "apps/web/tests/audio-trimmer.spec.ts": {
-    "mtime": 1792034654.8664613,
-    "ast_hash": "2d7f8d55d041b5ef0bd3be8f7578ffda",
+    "mtime": 1792047373.8382452,
+    "ast_hash": "dba227fc5ccbbdc7e6f61c7d356985ef",
     "semantic_hash": ""
   },
   "apps/web/tests/helpers/seedPlayableSermon.ts": {
@@ -945,8 +945,8 @@
     "semantic_hash": ""
   },
   "apps/web/tests/player-clear-on-upload.spec.ts": {
-    "mtime": 1792039098.6060488,
-    "ast_hash": "d2c947a61a617aed888022d4a7ae43ff",
+    "mtime": 1792047373.8380053,
+    "ast_hash": "41c0a6a34e519cd0f43650a5aab2ffaa",
     "semantic_hash": ""
   },
   "apps/web/tests/utils/categoryScopedLists.test.ts": {
@@ -4970,8 +4970,8 @@
     "semantic_hash": ""
   },
   "apps/web/tests/production-cold-navigation.spec.ts": {
-    "mtime": 1791961998.311563,
-    "ast_hash": "24e524a4e6128c39007d70b8b1f0957e",
+    "mtime": 1792048055.1283488,
+    "ast_hash": "e6f32778876a0a185546e0f674c4e34f",
     "semantic_hash": ""
   },
   "apps/web/tests/publish-admission-lifecycle.spec.ts": {
@@ -7990,8 +7990,8 @@
     "semantic_hash": ""
   },
   "scripts/tests/authenticated-player-browser.test.mjs": {
-    "mtime": 1792041532.3695772,
-    "ast_hash": "2f566201d4cfb2a717634be2d72aabe8",
+    "mtime": 1792047409.6301267,
+    "ast_hash": "689fbb7c7a90f5511ac1edaea772f5f2",
     "semantic_hash": ""
   },
   "functions/tsconfig.test.json": {
@@ -8085,13 +8085,13 @@
     "semantic_hash": ""
   },
   "scripts/validate-application.mjs": {
-    "mtime": 1792045632.536706,
-    "ast_hash": "afecae560599ee340c2be52587b89a18",
+    "mtime": 1792047814.5742188,
+    "ast_hash": "fccfa557535938d22329c1f7438370d9",
     "semantic_hash": ""
   },
   "docs/LOCAL_VALIDATION.md": {
-    "mtime": 1792045668.3478065,
-    "ast_hash": "b62ec44141a92fbf8b4d78d0e2b834cf",
+    "mtime": 1792047814.5745015,
+    "ast_hash": "3c1f635cf789571af8c2d3932ed82b2a",
     "semantic_hash": ""
   },
   "apps/temporal-worker/src/test-support/local-test-environment.ts": {
@@ -8112,6 +8112,21 @@
   "scripts/tests/test-temporal-worker.test.mjs": {
     "mtime": 1792045641.8101974,
     "ast_hash": "107e32e4e2530e1763e81fdef1d1d24f",
+    "semantic_hash": ""
+  },
+  "apps/web/tests/helpers/mediaTest.ts": {
+    "mtime": 1792047286.1029892,
+    "ast_hash": "204730b53d89cb0fad5205dd170d6f19",
+    "semantic_hash": ""
+  },
+  "apps/web/tsconfig.playwright.json": {
+    "mtime": 1792047853.7660892,
+    "ast_hash": "3b0d3e45bf76c61e53ae393eb61e28c2",
+    "semantic_hash": ""
+  },
+  "scripts/tests/media-auth-fixture.test.mjs": {
+    "mtime": 1792047603.0688245,
+    "ast_hash": "5ad591d3b92742aebd481ba749b7d3d9",
     "semantic_hash": ""
   }
 }

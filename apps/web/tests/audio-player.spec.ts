@@ -1,17 +1,23 @@
-import { loginAsMediaBrowserAdmin } from './helpers/mediaBrowserLogin';
 import { routePlayableAudio } from './helpers/ownedAudioFixture';
-import { installMediaBackendFixtures } from './helpers/mediaBackendFixture';
-import { expect, test } from '@playwright/test';
-import { seedPlayableSermon } from './helpers/seedPlayableSermon';
+import { createMediaTest, expect } from './helpers/mediaTest';
+import { seedPlayableSermon, type SeededPlayableSermon } from './helpers/seedPlayableSermon';
 
-test.beforeEach(async ({ page }) => {
-  await installMediaBackendFixtures(page);
-});
-
-async function loginAsAdmin(page: import('@playwright/test').Page) {
-  await loginAsMediaBrowserAdmin(page);
-  await expect(page.getByRole('switch', { name: 'Upload from Youtube Url', exact: true })).toBeVisible();
-}
+const playableTest = (viewport?: { width: number; height: number }, failFirst = false) =>
+  createMediaTest<SeededPlayableSermon>(async (page, usePrepared) => {
+    const seeded = await seedPlayableSermon();
+    try {
+      if (viewport) await page.setViewportSize(viewport);
+      await routePlayableAudio(page, seeded.id, failFirst);
+      await usePrepared({ callbackPath: '/', data: seeded });
+    } finally {
+      await seeded.cleanup();
+    }
+  });
+const test = playableTest();
+const mobileTest = playableTest({ width: 375, height: 667 });
+// The app's desktop volume controls begin at its 1300px lg breakpoint.
+const desktopControlsTest = playableTest({ width: 1440, height: 800 });
+const failedSourceTest = playableTest(undefined, true);
 
 async function playSermonFromSearch(page: import('@playwright/test').Page, sermonTitle: string) {
   const searchBox = page.getByRole('searchbox').first();
@@ -32,41 +38,31 @@ async function playSermonFromSearch(page: import('@playwright/test').Page, sermo
 test.describe('Audio player (floating bar)', () => {
   test.setTimeout(30_000);
 
-  test('player visible and main content has bottom padding when playing on admin sermons', async ({ page }) => {
-    const seededSermon = await seedPlayableSermon();
-    try {
-      await routePlayableAudio(page, seededSermon.id);
-      await loginAsAdmin(page);
-      await page.goto('/admin/sermons');
+  test('player visible and main content has bottom padding when playing on admin sermons', async ({
+    authenticatedMedia: { page, data: seededSermon },
+  }) => {
+    await page.goto('/admin/sermons');
+    await expect(page.getByRole('heading', { name: 'Sermons' })).toBeVisible({
+      timeout: 15_000,
+    });
 
-      await expect(page.getByRole('heading', { name: 'Sermons' })).toBeVisible({
-        timeout: 15_000,
-      });
+    await playSermonFromSearch(page, seededSermon.title);
 
-      await playSermonFromSearch(page, seededSermon.title);
+    await expect(page.getByTestId('floating-audio-bar')).toBeVisible({ timeout: 10_000 });
 
-      await expect(page.getByTestId('floating-audio-bar')).toBeVisible({ timeout: 10_000 });
-
-      const mainScroll = page.getByTestId('main-content-scroll');
-      await expect(mainScroll).toBeVisible();
-      const paddingBottom = await mainScroll.evaluate((el) => {
-        const v = getComputedStyle(el).paddingBottom;
-        return parseFloat(v) || 0;
-      });
-      expect(paddingBottom).toBeGreaterThan(0);
-    } finally {
-      await seededSermon.cleanup();
-    }
+    const mainScroll = page.getByTestId('main-content-scroll');
+    await expect(mainScroll).toBeVisible();
+    const paddingBottom = await mainScroll.evaluate((el) => {
+      const v = getComputedStyle(el).paddingBottom;
+      return parseFloat(v) || 0;
+    });
+    expect(paddingBottom).toBeGreaterThan(0);
   });
 
-  test('player visible and bottom spacing on mobile viewport', async ({ page }) => {
-    const seededSermon = await seedPlayableSermon();
-    try {
-      await page.setViewportSize({ width: 375, height: 667 });
-      await routePlayableAudio(page, seededSermon.id);
-      await loginAsAdmin(page);
+  mobileTest(
+    'player visible and bottom spacing on mobile viewport',
+    async ({ authenticatedMedia: { page, data: seededSermon } }) => {
       await page.goto('/admin/sermons');
-
       await expect(page.getByRole('heading', { name: 'Sermons' })).toBeVisible({
         timeout: 15_000,
       });
@@ -81,19 +77,13 @@ test.describe('Audio player (floating bar)', () => {
         return parseFloat(v) || 0;
       });
       expect(paddingBottom).toBeGreaterThan(0);
-    } finally {
-      await seededSermon.cleanup();
     }
-  });
+  );
 });
 
-test('real audio controls support pause, keyboard seek/volume, mute and close with local media', async ({ page }) => {
-  const seeded = await seedPlayableSermon();
-  try {
-    // The app's desktop volume controls begin at its 1300px lg breakpoint.
-    await page.setViewportSize({ width: 1440, height: 800 });
-    await routePlayableAudio(page, seeded.id);
-    await loginAsAdmin(page);
+desktopControlsTest(
+  'real audio controls support pause, keyboard seek/volume, mute and close with local media',
+  async ({ authenticatedMedia: { page, data: seeded } }) => {
     await page.goto('/admin/sermons');
     await playSermonFromSearch(page, seeded.title);
     const bar = page.getByRole('region', { name: 'Sermon audio player' });
@@ -128,16 +118,12 @@ test('real audio controls support pause, keyboard seek/volume, mute and close wi
     await expect(bar).toHaveCount(0);
     await expect(page.locator('audio')).toHaveCount(0);
     await expect.poll(() => page.evaluate(() => navigator.mediaSession.metadata)).toBeNull();
-  } finally {
-    await seeded.cleanup();
   }
-});
+);
 
-test('a failed source URL can be retried without changing the selected sermon', async ({ page }) => {
-  const seeded = await seedPlayableSermon();
-  try {
-    await routePlayableAudio(page, seeded.id, true);
-    await loginAsAdmin(page);
+failedSourceTest(
+  'a failed source URL can be retried without changing the selected sermon',
+  async ({ authenticatedMedia: { page, data: seeded } }) => {
     await page.goto('/admin/sermons');
     await playSermonFromSearch(page, seeded.title);
     const bar = page.getByRole('region', { name: 'Sermon audio player' });
@@ -150,7 +136,5 @@ test('a failed source URL can be retried without changing the selected sermon', 
     await expect(bar.getByText(seeded.title, { exact: true })).toBeVisible();
     await bar.getByRole('button', { name: 'Close audio player' }).click();
     await expect(bar).toHaveCount(0);
-  } finally {
-    await seeded.cleanup();
   }
-});
+);

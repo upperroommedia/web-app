@@ -206,14 +206,30 @@ test('real TypeScript media fixture limits routes and rejects foreign or malform
       else process.env[key] = original[key];
   }
 });
-test('each media spec installs the backend fixtures and status guard before any login', () => {
-  for (const spec of SPECS) {
+test('every media case consumes the shared bounded setup fixture with backend guards before real login', () => {
+  const casesPerSpec = [4, 9, 2];
+  for (const [index, spec] of SPECS.entries()) {
     const source = readFileSync(new URL(`../../apps/web/${spec}`, import.meta.url), 'utf8');
-    assert.match(source, /test\.beforeEach\(async \(\{ page \}\) => \{\s*await installMediaBackendFixtures\(page\);/);
-    assert.match(source, /import \{ installMediaBackendFixtures \} from '\.\/helpers\/mediaBackendFixture'/);
-    assert.doesNotMatch(source, /Dev Login|loginAsDevAdmin/);
-    assert.match(source, /loginAsMediaBrowserAdmin/);
+    assert.match(source, /import \{[^}]*createMediaTest[^}]*\} from '\.\/helpers\/mediaTest'/);
+    assert.doesNotMatch(source, /Dev Login|loginAsDevAdmin|loginAsMediaBrowserAdmin|test\.beforeEach/);
+    const cases = source.match(/^\s*(?:test|[A-Za-z]+Test)\(\s*['"]/gm) ?? [];
+    const authenticatedCases = source.match(/async \(\{\s*authenticatedMedia:/g) ?? [];
+    assert.equal(cases.length, casesPerSpec[index], `${spec}: all existing cases remain enrolled`);
+    assert.equal(authenticatedCases.length, cases.length, `${spec}: every case uses authenticated setup`);
   }
+  const fixture = readFileSync(new URL('../../apps/web/tests/helpers/mediaTest.ts', import.meta.url), 'utf8');
+  assert.match(fixture, /installBackend: installMediaBackendFixtures/);
+  assert.match(fixture, /login: loginAsMediaBrowserAdmin/);
+  assert.match(fixture, /timeout: 10_000/);
+  const ordered = [
+    'await operations.installBackend(page)',
+    'await prepare(page,',
+    'await operations.login(page, callbackPath)',
+    'await operations.ready(page, callbackPath)',
+    'await use({ page, data })',
+  ].map((operation) => fixture.indexOf(operation));
+  assert(ordered.every((offset) => offset >= 0));
+  assert(ordered.every((offset, index) => index === 0 || ordered[index - 1] < offset));
   const adapter = readFileSync(new URL('../../apps/web/tests/helpers/mediaBackendFixture.ts', import.meta.url), 'utf8');
   assert.match(
     adapter,

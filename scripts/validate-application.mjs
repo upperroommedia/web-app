@@ -51,9 +51,11 @@ export function applicationStages(root = ROOT) {
         'scripts/tests/validate-application.test.mjs',
         'scripts/tests/local-validation-launcher.test.mjs',
         'scripts/tests/test-temporal-worker.test.mjs',
-        'scripts/tests/local-test-server-owner.test.mjs'
+        'scripts/tests/local-test-server-owner.test.mjs',
+        'scripts/tests/media-auth-fixture.test.mjs'
       ),
       node('--test', 'scripts/tests/authenticated-player-browser.test.mjs'),
+      pnpm('--dir', 'apps/web', 'run', 'test:media:types'),
     ]),
     stage('build-web', 'Build the canonical production demo web application', [
       node('scripts/tests/authenticated-player-browser.mjs', '--build-production'),
