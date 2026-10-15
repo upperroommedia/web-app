@@ -5,6 +5,7 @@ import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { submitServerDurableJob, temporalProjectId } from './bridge';
 
 let environment: RulesTestEnvironment;
+let sourceStoragePath: string | undefined;
 const actorUid = 'rules-real-upload-owner';
 const bytes = new Uint8Array([1, 2, 3, 4]);
 
@@ -22,6 +23,24 @@ beforeAll(async () => {
       rules: readFileSync(resolve(__dirname, '../../../storage.rules'), 'utf8'),
     },
   });
+});
+afterEach(async () => {
+  const cleanup = await Promise.allSettled([
+    environment.clearFirestore(),
+    firebaseAdmin.auth().deleteUser(actorUid).catch((error: unknown) => {
+      if ((error as { code?: string }).code !== 'auth/user-not-found') throw error;
+    }),
+    environment.withSecurityRulesDisabled(async (context) => {
+      // clearStorage() does not traverse nested prefixes in the installed test SDK.
+      if (!sourceStoragePath) return;
+      await context.storage().ref(sourceStoragePath).delete().catch((error: unknown) => {
+        if ((error as { code?: string }).code !== 'storage/object-not-found') throw error;
+      });
+    }),
+  ]);
+  sourceStoragePath = undefined;
+  const failures = cleanup.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
+  if (failures.length) throw new AggregateError(failures.map((result) => result.reason), 'Upload rules fixture cleanup failed');
 });
 afterAll(async () => environment?.cleanup());
 
@@ -61,6 +80,7 @@ it('accepts the real server-admitted source once during pause and preserves ever
     expect(receipt.admissionState).toBe('awaiting_source');
     expect(receipt.sourceUpload).toBeDefined();
     const source = receipt.sourceUpload!;
+    sourceStoragePath = source.storagePath;
     const projection = await db.doc(`durableJobs/${receipt.jobId}`).get();
     expect(projection.get('result.sourceUpload')).toEqual(source);
     expect(projection.get('requestedBy')).toBe(actorUid);
