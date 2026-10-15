@@ -4525,8 +4525,8 @@
     "semantic_hash": ""
   },
   "apps/temporal-worker/package.json": {
-    "mtime": 1791961998.1952298,
-    "ast_hash": "70fcef85b2968c1619244088b0666f02",
+    "mtime": 1792044865.0901752,
+    "ast_hash": "53f5297ebf1641fd7158309a70629d18",
     "semantic_hash": ""
   },
   "apps/temporal-worker/src/activities/email/controls.ts": {
@@ -4555,13 +4555,13 @@
     "semantic_hash": ""
   },
   "apps/temporal-worker/src/integration/local-stack.test.ts": {
-    "mtime": 1791961998.198544,
-    "ast_hash": "d4d7dc582dc19f2b13e16b1214307b6c",
+    "mtime": 1792045100.759188,
+    "ast_hash": "2c47201ae6f617f602a76fa77617ddb6",
     "semantic_hash": ""
   },
   "apps/temporal-worker/src/integration/publishing-stack.test.ts": {
-    "mtime": 1791961998.1992407,
-    "ast_hash": "373eb0354f0a9d3c8b5a72926c04226c",
+    "mtime": 1792045100.760084,
+    "ast_hash": "3a1b7b95718fc917a55ae6b153e353b4",
     "semantic_hash": ""
   },
   "apps/temporal-worker/src/runtime/activities.ts": {
@@ -6935,8 +6935,8 @@
     "semantic_hash": ""
   },
   ".github/workflows/temporal-application-validation.yml": {
-    "mtime": 1792041886.8037143,
-    "ast_hash": "fd54e748d82928cfe5fdda2e3b0ff5ae",
+    "mtime": 1792045726.2167265,
+    "ast_hash": "f0e2f7bbe2717ecd3a27ecde426b9905",
     "semantic_hash": ""
   },
   ".github/workflows/temporal-platform-deploy.yml": {
@@ -7185,8 +7185,8 @@
     "semantic_hash": ""
   },
   "scripts/process-audio-deployment.test.mjs": {
-    "mtime": 1791961999.621008,
-    "ast_hash": "7db236132e0f05c47ad1f0926026af6a",
+    "mtime": 1792045200.1060054,
+    "ast_hash": "293c14ac55625aec00c86d40f2fe29be",
     "semantic_hash": ""
   },
   "scripts/test-process-audio-hetzner-isolation.mjs": {
@@ -7655,8 +7655,8 @@
     "semantic_hash": ""
   },
   "apps/temporal-worker/src/integration/worker-lifecycle.test.ts": {
-    "mtime": 1791966601.1930134,
-    "ast_hash": "e47775e310115219a87ba261cd4e6791",
+    "mtime": 1792045100.7608478,
+    "ast_hash": "4c65c0e91d63d365bd1a8be439b5702a",
     "semantic_hash": ""
   },
   "apps/temporal-worker/src/runtime/entrypoint-lifecycle.test.ts": {
@@ -8085,13 +8085,33 @@
     "semantic_hash": ""
   },
   "scripts/validate-application.mjs": {
-    "mtime": 1792042003.2372627,
-    "ast_hash": "6f162f916576b78e4154967019c6cbdb",
+    "mtime": 1792045632.536706,
+    "ast_hash": "afecae560599ee340c2be52587b89a18",
     "semantic_hash": ""
   },
   "docs/LOCAL_VALIDATION.md": {
-    "mtime": 1792041636.0650768,
-    "ast_hash": "fe94bd8c5d7e5dffcd74235e34c3e2dd",
+    "mtime": 1792045668.3478065,
+    "ast_hash": "b62ec44141a92fbf8b4d78d0e2b834cf",
+    "semantic_hash": ""
+  },
+  "apps/temporal-worker/src/test-support/local-test-environment.ts": {
+    "mtime": 1792045283.1323638,
+    "ast_hash": "6965d02ae0fb85067fb7d39221e53ace",
+    "semantic_hash": ""
+  },
+  "scripts/test-temporal-worker.mjs": {
+    "mtime": 1792045052.0170805,
+    "ast_hash": "c4da5a6dbe486bbf6e7ced1e58ba2860",
+    "semantic_hash": ""
+  },
+  "scripts/tests/local-test-server-owner.test.mjs": {
+    "mtime": 1792045596.6091459,
+    "ast_hash": "66ff66ff7ae2e3d6c3c52cc6cd1d5c59",
+    "semantic_hash": ""
+  },
+  "scripts/tests/test-temporal-worker.test.mjs": {
+    "mtime": 1792045641.8101974,
+    "ast_hash": "107e32e4e2530e1763e81fdef1d1d24f",
     "semantic_hash": ""
   }
 }

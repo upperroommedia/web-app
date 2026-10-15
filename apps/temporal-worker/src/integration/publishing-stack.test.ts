@@ -173,7 +173,8 @@ jest.mock('../runtime/execution', () => {
 
 import axios from 'axios';
 import { createHash, randomUUID } from 'node:crypto';
-import { TestWorkflowEnvironment } from '@temporalio/testing';
+import type { TestWorkflowEnvironment } from '@temporalio/testing';
+import { createLocalTestEnvironment } from '../test-support/local-test-environment';
 import { Worker } from '@temporalio/worker';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import {
@@ -776,7 +777,7 @@ test.each([
         trackAbsent = true;
         return { status: 204, data: null } as any;
       });
-      environment = await TestWorkflowEnvironment.createLocal();
+      environment = await createLocalTestEnvironment();
       const composition = createRuntimeActivities(
         projectId,
         ['urm-orchestration', 'urm-controls'],

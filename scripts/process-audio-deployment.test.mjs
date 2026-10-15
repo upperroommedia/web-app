@@ -1,3 +1,4 @@
+import { applicationStages } from './validate-application.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, cpSync, rmSync, existsSync } from 'node:fs';
@@ -153,15 +154,14 @@ test('application CI runs both audio deployment suites for workflow and host cha
   const workflow = readFileSync(join(root, '.github/workflows/temporal-application-validation.yml'), 'utf8');
   assert.ok(workflow.includes("- '.github/workflows/*process-audio*deploy.yml'"));
   assert.ok(workflow.includes("- 'ops/process-audio-hetzner/**'"));
-  assert.ok(
-    workflow.includes(
-      'node --test scripts/process-audio-deployment.test.mjs scripts/test-process-audio-hetzner-isolation.mjs'
-    )
-  );
-  assert.ok(
-    workflow.indexOf('google-github-actions/setup-gcloud@') <
-      workflow.indexOf('node --test scripts/process-audio-deployment.test.mjs')
-  );
+  const validationCommand = 'node scripts/validate-application.mjs';
+  assert.equal(workflow.split(validationCommand).length - 1, 1);
+  const deployment = applicationStages().find((stage) => stage.id === 'audio-deployment');
+  assert.deepEqual(deployment.commands, [[
+    'node', '--test', 'scripts/process-audio-deployment.test.mjs',
+    'scripts/test-process-audio-hetzner-isolation.mjs',
+  ]]);
+  assert.ok(workflow.indexOf('google-github-actions/setup-gcloud@') < workflow.indexOf(validationCommand));
 });
 
 test('actual deployment allowlist parsers accept exact Google service identities and reject broad or malformed trust', () => {

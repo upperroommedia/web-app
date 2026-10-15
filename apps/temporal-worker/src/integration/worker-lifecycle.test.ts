@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
 import { resolve } from 'node:path';
-import { TestWorkflowEnvironment } from '@temporalio/testing';
+import { createLocalTestEnvironment } from '../test-support/local-test-environment';
 
 async function unusedPort() {
   const server = createServer();
@@ -17,7 +17,7 @@ async function unusedPort() {
 
 test('real entrypoint naturally exits after repeated signals with live RTDB and Firestore sockets', async () => {
   const projectId = process.env.FIREBASE_PROJECT_ID || 'demo-worker-lifecycle';
-  const environment = await TestWorkflowEnvironment.createLocal({
+  const environment = await createLocalTestEnvironment({
     server: {
       namespace: projectId,
       ip: '127.0.0.1',

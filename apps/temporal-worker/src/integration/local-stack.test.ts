@@ -2,7 +2,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { TestWorkflowEnvironment } from '@temporalio/testing';
+import type { TestWorkflowEnvironment } from '@temporalio/testing';
+import { createLocalTestEnvironment } from '../test-support/local-test-environment';
 import { Worker } from '@temporalio/worker';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { extractProviderResources, PROVIDER_USAGE_CONTROL } from '@upperroom/orchestration/provider-usage';
@@ -135,7 +136,7 @@ test('real admission, immutable upload, dispatcher and Temporal workers publish 
     const childDoc = db.doc(`durableJobs/${child.jobId}`);
     expect((await childDoc.get()).get('state')).toBe('queued');
     sermonId = (await childDoc.get()).get('entity.id');
-    environment = await TestWorkflowEnvironment.createLocal();
+    environment = await createLocalTestEnvironment();
     const activities = createRuntimeActivities(
       projectId,
       ['urm-orchestration', 'urm-media', 'urm-controls'],

@@ -46,7 +46,13 @@ export function applicationStages(root = ROOT) {
         'packages/shared/firebase/emulatorPorts.test.mjs',
         'packages/shared/firebase/demoEmulatorMode.test.mjs'
       ),
-      node('--test', 'scripts/tests/validate-application.test.mjs', 'scripts/tests/local-validation-launcher.test.mjs'),
+      node(
+        '--test',
+        'scripts/tests/validate-application.test.mjs',
+        'scripts/tests/local-validation-launcher.test.mjs',
+        'scripts/tests/test-temporal-worker.test.mjs',
+        'scripts/tests/local-test-server-owner.test.mjs'
+      ),
       node('--test', 'scripts/tests/authenticated-player-browser.test.mjs'),
     ]),
     stage('build-web', 'Build the canonical production demo web application', [
@@ -282,6 +288,7 @@ export function preflight(root = ROOT) {
     git: inspect('git', ['--version'], root),
     python: inspect('python3', ['--version'], root),
     ffmpeg: inspect('ffmpeg', ['-version'], root).split('\n')[0],
+    rsync: inspect('rsync', ['--version'], root).split('\n')[0],
     gcloud: inspect('gcloud', ['--version'], root),
   };
   assert.equal(inspect('node', ['--version'], root), process.version, 'PATH node must match the Node22 runner');

@@ -6,8 +6,8 @@
     "build": "tsc -p tsconfig.json && node ../../scripts/build-temporal-workflows.mjs",
     "build:ci": "pnpm run build",
     "start": "node lib/apps/temporal-worker/src/index.js",
-    "test": "jest --runInBand",
-    "test:ci": "jest --runInBand"
+    "test": "node ../../scripts/test-temporal-worker.mjs",
+    "test:ci": "node ../../scripts/test-temporal-worker.mjs"
   },
   "dependencies": {
     "@google-cloud/functions-framework": "catalog:",

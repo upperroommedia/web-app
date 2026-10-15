@@ -16,6 +16,7 @@ on:
       - '.github/workflows/temporal-application-validation.yml'
       - '.github/workflows/*process-audio*deploy.yml'
       - 'ops/process-audio-hetzner/**'
+      - 'ops/local-validation/**'
   push:
     branches: [staging, main]
   workflow_dispatch:
@@ -44,7 +45,7 @@ jobs:
         run: |
           npm install --global pnpm@12.11.2
           sudo apt-get update
-          sudo apt-get install --yes ffmpeg
+          sudo apt-get install --yes ffmpeg rsync
       - name: Set up read-only upload manifest validation
         uses: google-github-actions/setup-gcloud@v3.0.1
         with:
@@ -65,6 +66,8 @@ jobs:
         uses: actions/upload-artifact@v7.0.2
         with:
           name: application-validation-${{ github.run_id }}-${{ github.run_attempt }}
-          path: output/validation/application-summary.json
+          path: |
+            output/validation/application-summary.json
+            output/validation/temporal-worker-summary.json
           if-no-files-found: warn
           retention-days: 3

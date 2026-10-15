@@ -1,5 +1,5 @@
 # Linux x64 browser/native-tool environment for the same validation entrypoint as CI.
-FROM mcr.microsoft.com/playwright:v1.62.1-noble@sha256:c091b21d9fae78c76e85cd4356431e9b018402f172a214fc7d7a5e9a7e29d8ac
+FROM mcr.microsoft.com/playwright:v1.64.0-noble@sha256:bc72a8df40831ded821e3cbc79c318c21b44d6e51dff9fd89ace7a8249c5b462
 
 USER root
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -39,5 +39,10 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/* /tmp/google-cloud.gpg \
  && mkdir -p /root/.cache \
  && ln -s /ms-playwright /root/.cache/ms-playwright
+
+# Deployment-context tests exercise the real file-copy tool used by CI.
+RUN apt-get update \
+ && apt-get install --yes --no-install-recommends rsync \
+ && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /workspace
