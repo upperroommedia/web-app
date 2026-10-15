@@ -57,12 +57,14 @@ test.describe('Player clear on upload / edit routes', () => {
       await uploadLink.click();
       await page.waitForURL((url) => url.pathname === '/');
 
-      // This transition verifies route ownership and media disposal; the separate upload-page
-      // case above checks the lazy form controls once that form has loaded.
-      await expect(page).toHaveTitle('Uploader');
-      await expect(page.getByTestId('floating-audio-bar')).toHaveCount(0);
-      await expect(page.locator('audio')).toHaveCount(0);
-      await expect.poll(() => page.evaluate(() => navigator.mediaSession.metadata)).toBeNull();
+      // The root route has an index title before its lazy uploader supplies the final title.
+      // Verify independent media cleanup immediately rather than waiting for that form to load.
+      await Promise.all([
+        expect(page).toHaveTitle(/^(?:Upload Sermon \| Upper Room Media|Uploader)$/),
+        expect(page.getByTestId('floating-audio-bar')).toHaveCount(0),
+        expect(page.locator('audio')).toHaveCount(0),
+        expect.poll(() => page.evaluate(() => navigator.mediaSession.metadata)).toBeNull(),
+      ]);
       expect(
         await page.evaluate(() => (window as unknown as { __mediaSpaNavigation?: string }).__mediaSpaNavigation)
       ).toBe('player-clear');
