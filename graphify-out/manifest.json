@@ -8050,13 +8050,13 @@
     "semantic_hash": ""
   },
   "packages/shared/firebase/demoEmulatorMode.test.mjs": {
-    "mtime": 1792035428.9834096,
-    "ast_hash": "ea21cd249d871ad4e0eeb64db9dc75c6",
+    "mtime": 1792037289.1430876,
+    "ast_hash": "f641d81d0484b76e3f133d90ed6149b0",
     "semantic_hash": ""
   },
   "packages/shared/firebase/demoEmulatorMode.ts": {
-    "mtime": 1792035428.9832008,
-    "ast_hash": "d5f680cd4f9b8652b14fd29b74e5caa7",
+    "mtime": 1792037288.8290956,
+    "ast_hash": "4825cdea8e7728c7c7513f1670618834",
     "semantic_hash": ""
   }
 }

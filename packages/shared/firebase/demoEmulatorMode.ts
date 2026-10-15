@@ -66,17 +66,21 @@ if (isDemoEmulatorMode) {
     throw new Error('Firebase demo mode does not allow messaging configuration');
   if (process.env.__FIREBASE_DEFAULTS__ !== undefined)
     throw new Error('Firebase demo mode does not allow environment Firebase defaults');
+  const browserGlobals = globalThis as {
+    document?: { cookie: string };
+    window?: { location: { origin: string } };
+  };
   if (
-    typeof document !== 'undefined' &&
-    document.cookie.split(';').some((part) => part.trim().startsWith('__FIREBASE_DEFAULTS__='))
+    browserGlobals.document !== undefined &&
+    browserGlobals.document.cookie.split(';').some((part) => part.trim().startsWith('__FIREBASE_DEFAULTS__='))
   )
     throw new Error('Firebase demo mode does not allow cookie Firebase defaults');
   if (process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID !== undefined)
     throw new Error('Firebase demo mode does not allow analytics configuration');
   if ((globalThis as { __FIREBASE_DEFAULTS__?: unknown }).__FIREBASE_DEFAULTS__ !== undefined)
     throw new Error('Firebase demo mode does not allow implicit Firebase defaults');
-  if (typeof window !== 'undefined') {
-    if (!['http://127.0.0.1:3004', 'http://127.0.0.1:3002'].includes(window.location.origin))
+  if (browserGlobals.window !== undefined) {
+    if (!['http://127.0.0.1:3004', 'http://127.0.0.1:3002'].includes(browserGlobals.window.location.origin))
       throw new Error('Firebase demo mode requires its loopback browser origin');
   } else {
     // Validate before importing any SDK or reading credentials; no reachability checks.

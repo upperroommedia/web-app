@@ -399,3 +399,54 @@ test('BundleManager uses the verified explicit demo branch while production at12
   });
   assert.equal(manager.getBundleUrl(), 'http://127.0.0.1:5001/demo-temporal-ci/us-central1/createlatestlistbundle');
 });
+
+test('complete helper typechecks with real Node declarations and the server ES2022 library without DOM', () => {
+  const helper = resolve(root, 'packages/shared/firebase/demoEmulatorMode.ts');
+  const nodeTypes = dirname(dirname(require.resolve('@types/node/package.json')));
+  const serverConfig = JSON.parse(readFileSync(resolve(root, 'apps/process-audio/tsconfig.json'), 'utf8'));
+  assert.deepEqual(serverConfig.compilerOptions.lib, ['ES2022']);
+  const options = {
+    target: ts.ScriptTarget.ES2022,
+    module: ts.ModuleKind.CommonJS,
+    moduleResolution: ts.ModuleResolutionKind.Node10,
+    lib: ['lib.es2022.d.ts'],
+    types: ['node'],
+    typeRoots: [nodeTypes],
+    strict: true,
+    skipLibCheck: true,
+    noEmit: true,
+    noImplicitReturns: true,
+    noUnusedLocals: true,
+  };
+  const compile = (extraSource = '') => {
+    const host = ts.createCompilerHost(options);
+    const original = host.readFile;
+    host.readFile = (file) => {
+      const source = original(file);
+      return file === helper && source !== undefined ? source + extraSource : source;
+    };
+    host.writeFile = () => assert.fail('No-emit typecheck must not write generated output');
+    const program = ts.createProgram([helper], options, host);
+    assert.equal(
+      program.getSourceFiles().some((file) => /lib\.dom(?:\.iterable)?\.d\.ts$/.test(file.fileName)),
+      false
+    );
+    assert.ok(program.getSourceFiles().some((file) => file.fileName.includes('/@types/node/')));
+    program.emit();
+    return ts.getPreEmitDiagnostics(program);
+  };
+  assert.deepEqual(
+    compile().map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n')),
+    []
+  );
+  // This control proves the same compiler would catch the exact accidental DOM dependency.
+  const control = compile('\nexport const forbiddenBrowserGlobals = window.location.origin + document.cookie;\n');
+  for (const name of ['window', 'document'])
+    assert.ok(
+      control.some(
+        (diagnostic) =>
+          [2304, 2584].includes(diagnostic.code) &&
+          ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n').includes(`'${name}'`)
+      )
+    );
+});
