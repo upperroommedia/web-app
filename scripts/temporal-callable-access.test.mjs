@@ -263,9 +263,10 @@ function temporalFixture() {
     api: async (url, method) => {
       calls.push({ url, method });
       assert.equal(method, 'GET');
-      if (url.includes('run.googleapis.com'))
-        return { bindings: [{ role: 'roles/run.invoker', members: ['allUsers'] }] };
-      return structuredClone(functions.find((fn) => url.endsWith(fn.name)));
+      const fn = functions.find((item) => url === `https://cloudfunctions.googleapis.com/v2/${item.name}`);
+      if (fn) return structuredClone(fn);
+      assert(functions.some((item) => url === `https://run.googleapis.com/v2/${item.serviceConfig.service}:getIamPolicy`));
+      return { bindings: [{ role: 'roles/run.invoker', members: ['allUsers'] }] };
     },
   };
 }
