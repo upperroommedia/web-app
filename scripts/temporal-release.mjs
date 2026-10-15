@@ -651,6 +651,26 @@ await runWithCleanup(
             api,
           });
         }
+        async function verifyStorageFirestoreRulesAccess() {
+          const member = `serviceAccount:service-${resourceIdentity.projectNumber}@gcp-sa-firebasestorage.iam.gserviceaccount.com`;
+          // getIamPolicy is an official POST read; it never grants or changes a role.
+          const policy = await api(
+            `https://cloudresourcemanager.googleapis.com/v1/projects/${config.projectId}:getIamPolicy`,
+            'POST',
+            { options: { requestedPolicyVersion: 3 } }
+          );
+          if (
+            !Array.isArray(policy.bindings) ||
+            !policy.bindings.some(
+              (binding) =>
+                binding.role === 'roles/firebaserules.firestoreServiceAgent' &&
+                Array.isArray(binding.members) &&
+                binding.members.includes(member) &&
+                !Object.hasOwn(binding, 'condition')
+            )
+          )
+            throw new Error('Storage cross-service Firestore rules permission missing');
+        }
         async function queuesEmpty() {
           const counts = {};
           const discovered = await list(
@@ -984,6 +1004,7 @@ await runWithCleanup(
                   throw new Error(`Deployed function ownership flag mismatch:${fn.name.split('/').at(-1)}:${key}`);
             }
             await verifyCallableTransport(control, managed);
+            await verifyStorageFirestoreRulesAccess();
             await transition(control.revision, 'backend-ready', { backendVerifiedAt: Date.now() });
           } else if (action === 'bootstrap-bundles') {
             if (!config.domains.includes('bundles')) throw new Error('This release does not own bundle regeneration');
@@ -1210,6 +1231,7 @@ await runWithCleanup(
               validateProviderUsageContinuity(config, control, state, usage, history.data(), state.providerUsageEpoch);
             } else validateProviderUsageMarker(config, usage.data(), state.providerUsageEpoch);
             await verifyCallableTransport(control);
+            await verifyStorageFirestoreRulesAccess();
             const domains = structuredClone(control.domains);
             for (const domain of config.domains) domains[domain].admission = 'open';
             await transition(control.revision, 'open', { openedAt: Date.now() }, { admission: 'open', domains });

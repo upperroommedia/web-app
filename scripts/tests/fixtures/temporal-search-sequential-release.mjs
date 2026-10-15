@@ -16,6 +16,9 @@ const callableIds = ['submitDurableJob', 'getDurableJobReceipt', 'commandDurable
 let callableFault;
 const callableIamReads = [];
 const rejectedCallableAccess = [];
+let storagePolicyFault;
+const storagePolicyReads = [];
+const rejectedStorageRulesAccess = [];
 import { execFileSync as realExecFileSync } from 'node:child_process';
 import { PROVIDER_USAGE_SCAN_GROUPS } from '../../temporal-backfill-provider-usage.mjs';
 const root = urlApi.fileURLToPath(new URL('../../../', import.meta.url));
@@ -460,9 +463,33 @@ async function fetchTransport(raw, options = {}) {
       result = result.functions.find((fn) => parsed.pathname.endsWith('/' + fn.name.split('/').at(-1)));
   } else if (parsed.hostname === 'cloudtasks.googleapis.com')
     result = parsed.pathname.endsWith('/tasks') ? { tasks: [] } : { queues: [] };
-  else if (parsed.hostname === 'cloudresourcemanager.googleapis.com')
-    result = { projectId, projectNumber: '123456789', lifecycleState: 'ACTIVE' };
-  else if (parsed.hostname === 'storage.googleapis.com') {
+  else if (parsed.hostname === 'cloudresourcemanager.googleapis.com') {
+    if (parsed.pathname.endsWith(':getIamPolicy')) {
+      assert.equal(parsed.pathname, `/v1/projects/${projectId}:getIamPolicy`);
+      assert.equal(method, 'POST');
+      assert.deepEqual(body, { options: { requestedPolicyVersion: 3 } });
+      storagePolicyReads.push({ action: currentAction, fault: storagePolicyFault ?? null });
+      result = {
+        bindings:
+          storagePolicyFault === 'missing'
+            ? []
+            : [
+                {
+                  role: 'roles/firebaserules.firestoreServiceAgent',
+                  members: [
+                    `serviceAccount:service-${
+                      storagePolicyFault === 'foreign-member' ? '999999' : '123456789'
+                    }@gcp-sa-firebasestorage.iam.gserviceaccount.com`,
+                  ],
+                  ...(storagePolicyFault === 'conditional' ? { condition: { expression: 'true' } } : {}),
+                },
+              ],
+      };
+    } else {
+      assert.equal(method, 'GET');
+      result = { projectId, projectNumber: '123456789', lifecycleState: 'ACTIVE' };
+    }
+  } else if (parsed.hostname === 'storage.googleapis.com') {
     if (parsed.pathname.includes('/o/')) {
       const object = decodeURIComponent(parsed.pathname.split('/o/')[1]);
       result = clone(bundleMetadata.get(object));
@@ -912,6 +939,21 @@ async function rejectsCallableAccess(action) {
     rejectedCallableAccess.push({ action, fault });
   }
 }
+async function rejectsStorageRulesAccess(action) {
+  for (const fault of ['missing', 'conditional', 'foreign-member']) {
+    const beforeState = clone(records.get('_control/temporalReleaseState'));
+    const beforeControl = clone(records.get('_control/temporalRelease'));
+    storagePolicyFault = fault;
+    try {
+      await assert.rejects(run(action), /Storage cross-service Firestore rules permission missing/);
+    } finally {
+      storagePolicyFault = undefined;
+    }
+    assert.deepEqual(records.get('_control/temporalReleaseState'), beforeState);
+    assert.deepEqual(records.get('_control/temporalRelease'), beforeControl);
+    rejectedStorageRulesAccess.push({ action, fault });
+  }
+}
 async function rejectsRtdbCanary(action, failure) {
   const beforeState = clone(records.get('_control/temporalReleaseState'));
   const beforeControl = clone(records.get('_control/temporalRelease'));
@@ -1010,7 +1052,14 @@ if (process.argv[2] === 'ui-identity-migration') {
     'provider native snapshot identity stays unchanged'
   );
   assert.equal(records.get('_control/temporalReleaseState').providerUsageEpoch, marker.epoch);
-  await run('pause');
+  const policyReadsBeforePause = storagePolicyReads.length;
+  if (process.argv[2] === 'callable-access') storagePolicyFault = 'missing';
+  try {
+    await run('pause');
+  } finally {
+    storagePolicyFault = undefined;
+  }
+  assert.equal(storagePolicyReads.length, policyReadsBeforePause, 'safe pause must not depend on IAM readiness');
   checkDomains();
   assert.equal(records.get('_control/temporalReleaseState').pausedFrom, 'provider-usage-ready');
   await run('resume');
@@ -1028,7 +1077,10 @@ if (process.argv[2] === 'ui-identity-migration') {
     runtimeServicesDeployed: true,
     facadeOwnershipVerified: true,
   });
-  if (process.argv[2] === 'callable-access') await rejectsCallableAccess('backend-ready');
+  if (process.argv[2] === 'callable-access') {
+    await rejectsCallableAccess('backend-ready');
+    await rejectsStorageRulesAccess('backend-ready');
+  }
   await run('backend-ready');
   checkDomains();
   await run('bootstrap-search');
@@ -1044,7 +1096,10 @@ if (process.argv[2] === 'ui-identity-migration') {
     readonlySmokePassed: true,
     claimsFreshWriteE2E: false,
   });
-  if (process.argv[2] === 'callable-access') await rejectsCallableAccess('open');
+  if (process.argv[2] === 'callable-access') {
+    await rejectsCallableAccess('open');
+    await rejectsStorageRulesAccess('open');
+  }
   await rejectsMutation(
     'epoch changed at open transaction',
     'open',
@@ -1100,7 +1155,7 @@ if (process.argv[2] === 'ui-identity-migration') {
     [
       'workers-ready',
       'take-ownership',
-      ...(process.argv[2] === 'callable-access' ? Array(7).fill('open') : []),
+      ...(process.argv[2] === 'callable-access' ? Array(10).fill('open') : []),
       'open',
       'open',
       'open',
@@ -1116,6 +1171,8 @@ if (process.argv[2] === 'ui-identity-migration') {
       actualValidators: true,
       callableIamReads,
       rejectedCallableAccess,
+      rejectedStorageRulesAccess,
+      storagePolicyReads,
       phase: records.get('_control/temporalReleaseState').phase,
       actions,
       providerEpoch: marker.epoch,

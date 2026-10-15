@@ -146,7 +146,10 @@ test('actual controller blocks missing/private mandatory callable transport at r
   const proof = JSON.parse(stdout.trim());
   assert.equal(proof.phase, 'complete');
   assert.equal(proof.rejectedCallableAccess.length, 14);
+  assert.equal(proof.rejectedStorageRulesAccess.length, 6);
+  assert(proof.storagePolicyReads.every((row) => ['backend-ready', 'open'].includes(row.action)));
   for (const action of ['backend-ready', 'open']) {
+    assert(proof.storagePolicyReads.some((row) => row.action === action && row.fault === null));
     const paths = new Set(
       proof.callableIamReads.filter((row) => row.action === action && row.fault === null).map((row) => row.path)
     );

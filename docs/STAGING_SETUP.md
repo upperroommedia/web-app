@@ -167,6 +167,25 @@ Map RTDB deploy target to the staging instance:
 firebase target:apply database rtdb urm-app-staging-815ca --project urm-app-staging
 ```
 
+## 4b. Allow Storage rules to read their Firestore reservations
+
+Storage rules validate each durable upload against its Firestore job. Grant the
+[documented cross-service role](https://firebase.google.com/docs/rules/manage-deploy#manage_permissions_for_cross-service)
+to staging's existing Firebase Storage service agent:
+
+```bash
+gcloud projects add-iam-policy-binding urm-app-staging \
+  --member=serviceAccount:service-251680231116@gcp-sa-firebasestorage.iam.gserviceaccount.com \
+  --role=roles/firebaserules.firestoreServiceAgent --condition=None
+```
+
+The Firebase CLI's non-interactive rules deployment skips its interactive check
+for this permission. A successful rules deployment therefore does not establish
+upload readiness. The Temporal controller verifies the role before backend
+readiness and admission opening; pausing remains available if the role is missing.
+Allow IAM changes to propagate, then verify a real authenticated source upload.
+Keep job ownership, reservation size and immutable-source rules enforced.
+
 ## 5. Configure GitHub OIDC for staging deploy workflow
 
 Create a Workload Identity Provider and service account with Firebase deploy permissions, then add these repository secrets:
