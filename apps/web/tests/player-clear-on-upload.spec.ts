@@ -46,6 +46,8 @@ test.describe('Player clear on upload / edit routes', () => {
       await playSermonFromSearch(page, seededSermon.title);
 
       await expect(page.getByTestId('floating-audio-bar')).toBeVisible({ timeout: 6000 });
+      await expect(page.getByRole('region', { name: 'Sermon audio player' }).locator('audio')).toHaveCount(1);
+      await expect.poll(() => page.evaluate(() => navigator.mediaSession.metadata?.title)).toBe(seededSermon.title);
 
       await page.evaluate(() => {
         Object.assign(window, { __mediaSpaNavigation: 'player-clear' });
@@ -53,10 +55,14 @@ test.describe('Player clear on upload / edit routes', () => {
       const uploadLink = page.getByRole('link', { name: 'Upload Sermon', exact: true });
       if (!(await uploadLink.isVisible())) await page.getByRole('button', { name: 'open drawer', exact: true }).click();
       await uploadLink.click();
-      await page.waitForURL(/\/(\?|$)/);
+      await page.waitForURL((url) => url.pathname === '/');
 
-      await expect(page.getByRole('switch', { name: 'Upload from Youtube Url', exact: true })).toBeVisible();
+      // This transition verifies route ownership and media disposal; the separate upload-page
+      // case above checks the lazy form controls once that form has loaded.
+      await expect(page).toHaveTitle('Upload Sermon | Upper Room Media');
       await expect(page.getByTestId('floating-audio-bar')).toHaveCount(0);
+      await expect(page.locator('audio')).toHaveCount(0);
+      await expect.poll(() => page.evaluate(() => navigator.mediaSession.metadata)).toBeNull();
       expect(
         await page.evaluate(() => (window as unknown as { __mediaSpaNavigation?: string }).__mediaSpaNavigation)
       ).toBe('player-clear');

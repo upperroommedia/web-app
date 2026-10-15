@@ -68,6 +68,19 @@ jobs:
         run: node --test scripts/tests/kits-isolated-startup.test.mjs
       - name: Validate isolated media fixture contracts before application regressions
         run: node --test scripts/tests/authenticated-player-browser.test.mjs
+      - name: Verify authenticated player, trimming and upload navigation
+        id: media_browser
+        run: |
+          pnpm --dir apps/web exec playwright install --with-deps chromium
+          node scripts/tests/authenticated-player-browser.mjs
+      - name: Preserve authenticated media failure traces
+        if: ${{ failure() && steps.media_browser.outcome == 'failure' }}
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: authenticated-media-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          path: apps/web/test-results/
+          if-no-files-found: warn
+          retention-days: 3
       - name: Validate application regressions, admission, rules and SDK compatibility
         run: pnpm --dir functions test
       - name: Validate workflows, replay, cancellation and native media
@@ -110,19 +123,6 @@ jobs:
           URM_EMAIL_CAPTURE_TEST_CONFIG: ${{ github.workspace }}/firebase.test.json
         run: |
           pnpm --dir functions exec firebase emulators:exec --project demo-email-capture --only auth,firestore,database,storage --config ../firebase.test.json 'NODE_OPTIONS=--experimental-vm-modules pnpm --dir ../function-kits/firestore-send-email exec jest --runInBand --watchman=false --forceExit test/temporal/capture.firestore.test.ts'
-      - name: Verify authenticated player, trimming and upload navigation
-        id: media_browser
-        run: |
-          pnpm --dir apps/web exec playwright install --with-deps chromium
-          node scripts/tests/authenticated-player-browser.mjs
-      - name: Preserve authenticated media failure traces
-        if: ${{ failure() && steps.media_browser.outcome == 'failure' }}
-        uses: actions/upload-artifact@v7.0.2
-        with:
-          name: authenticated-media-failure-${{ github.run_id }}-${{ github.run_attempt }}
-          path: apps/web/test-results/
-          if-no-files-found: warn
-          retention-days: 3
       - name: Build the production web application
         env:
           NEXT_PUBLIC_FIREBASE_PROJECT_ID: demo-temporal-ci

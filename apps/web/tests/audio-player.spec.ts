@@ -92,7 +92,8 @@ test.describe('Audio player (floating bar)', () => {
 test('real audio controls support pause, keyboard seek/volume, mute and close with local media', async ({ page }) => {
   const seeded = await seedPlayableSermon();
   try {
-    await page.setViewportSize({ width: 1280, height: 800 });
+    // The app's desktop volume controls begin at its 1300px lg breakpoint.
+    await page.setViewportSize({ width: 1440, height: 800 });
     await routePlayableAudio(page, seeded.id);
     await loginAsDevAdmin(page);
     await page.goto('/admin/sermons');
