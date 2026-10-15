@@ -1,3 +1,4 @@
+import { MEDIA_FIXTURE_UPLOADER } from '../helpers/mediaFixtureIdentity';
 import { routePlayableAudio } from '../helpers/ownedAudioFixture';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -20,11 +21,11 @@ const fixture = () => ({
   ),
   users: [
     {
-      uid: 'playwright-e2e',
-      email: 'syntheticmedia-uploader@example.test',
+      uid: MEDIA_FIXTURE_UPLOADER.uid,
+      email: MEDIA_FIXTURE_UPLOADER.email,
       photoURL: null,
-      displayName: 'Media Fixture Uploader',
-      role: 'uploader',
+      displayName: MEDIA_FIXTURE_UPLOADER.displayName,
+      role: MEDIA_FIXTURE_UPLOADER.role,
       refreshToken: '',
       phoneNumber: null,
       tenantId: null,
@@ -53,6 +54,20 @@ describe('exact isolated media transport fixtures', () => {
     const changed = fixture();
     changed.bundles.createlatestlistbundle.namedQuery = 'latest-latest-list-query';
     expect(() => parseMediaBackendFixture(changed)).toThrow();
+  });
+  it('roundtrips the shared strict identity and rejects the old spelling or any changed identity field', () => {
+    const serialized = JSON.parse(JSON.stringify(fixture()));
+    expect(parseMediaBackendFixture(serialized).users[0]).toMatchObject(MEDIA_FIXTURE_UPLOADER);
+    for (const patch of [
+      { email: 'syntheticmedia-uploader@example.test' },
+      { email: 'different@example.test' },
+      { uid: 'different-uploader' },
+      { displayName: 'Different uploader' },
+      { role: 'admin' },
+    ])
+      expect(() => parseMediaBackendFixture({ ...fixture(), users: [{ ...fixture().users[0], ...patch }] })).toThrow(
+        'Invalid synthetic uploader'
+      );
   });
   it('rejects malformed and oversized payload encodings', () => {
     for (const bodyBase64 of ['', 'not base64', Buffer.alloc(1024 * 1024 + 1).toString('base64')]) {
@@ -119,7 +134,7 @@ describe('exact isolated media transport fixtures', () => {
         }),
         fulfill,
       });
-      await lookup.handle(request(['playwright-e2e']) as unknown as Route);
+      await lookup.handle(request([MEDIA_FIXTURE_UPLOADER.uid]) as unknown as Route);
       expect(fulfill).toHaveBeenLastCalledWith(
         expect.objectContaining({ json: { result: { status: 'success', data: fixture().users } } })
       );

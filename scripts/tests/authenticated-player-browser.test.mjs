@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { MEDIA_FIXTURE_UPLOADER } from '../../apps/web/tests/helpers/mediaFixtureIdentity.ts';
 import assert from 'node:assert/strict';
 import { DEV_ADMIN_EMAIL, DEV_ADMIN_PASSWORD } from '../../apps/web/context/user/devAuth.ts';
 import { readFileSync } from 'node:fs';
@@ -265,40 +266,35 @@ test('actual six bundle configs and directory mapper load without initializing a
     false
   );
   const user = toDirectoryUser({
-    uid: 'playwright-e2e',
-    email: 'media-uploader@example.test',
+    uid: MEDIA_FIXTURE_UPLOADER.uid,
+    email: MEDIA_FIXTURE_UPLOADER.email,
     metadata: {},
     providerData: [],
-    customClaims: { role: 'uploader' },
+    customClaims: { role: MEDIA_FIXTURE_UPLOADER.role },
     emailVerified: true,
   });
-  assert.equal(user.uid, 'playwright-e2e');
-  assert.equal(user.role, 'uploader');
+  assert.equal(user.uid, MEDIA_FIXTURE_UPLOADER.uid);
+  assert.equal(user.role, MEDIA_FIXTURE_UPLOADER.role);
   assert.equal(user.refreshToken, '');
 });
 
-test('bundle fixture uses actual config filters and order, owned user and metadata with bounded bytes', async () => {
+test('actual producer JSON roundtrip passes the actual parser with shared directory identity and query metadata', async () => {
   const { createRequire } = await import('node:module');
-  const { configs, toDirectoryUser } = loadMediaFixtureSources(
-    createRequire(new URL('../../functions/package.json', import.meta.url))
-  );
+  const require = createRequire(new URL('../../functions/package.json', import.meta.url));
+  const { configs, toDirectoryUser, parseMediaBackendFixture } = loadMediaFixtureSources(require);
   const events = [];
   const app = { options: { projectId: PROJECT } };
-  const record = {
-    uid: 'playwright-e2e',
-    email: 'media-uploader@example.test',
-    metadata: {},
-    providerData: [],
-    customClaims: { role: 'uploader' },
-    emailVerified: true,
-  };
+  let record;
   const auth = {
     app,
     createUser: async (value) => {
       events.push(['user', value.uid]);
+      record = { ...value, metadata: {}, providerData: [] };
     },
     setCustomUserClaims: async (uid, claims) => {
       events.push(['claims', uid, claims]);
+      assert.equal(uid, record.uid);
+      record.customClaims = claims;
     },
     getUser: async (uid) => {
       assert.equal(uid, record.uid);
@@ -334,6 +330,11 @@ test('bundle fixture uses actual config filters and order, owned user and metada
   };
   const database = { app, ref: (path) => ({ set: async (value) => events.push(['metadata', path, value]) }) };
   const fixture = await buildMediaBackendFixture({ db, auth, database, configs, toDirectoryUser });
+  const parsedFixture = parseMediaBackendFixture(JSON.parse(JSON.stringify(fixture)));
+  assert.equal(parsedFixture.users[0].uid, MEDIA_FIXTURE_UPLOADER.uid);
+  assert.equal(parsedFixture.users[0].email, MEDIA_FIXTURE_UPLOADER.email);
+  assert.equal(parsedFixture.users[0].displayName, MEDIA_FIXTURE_UPLOADER.displayName);
+  assert.equal(parsedFixture.users[0].role, MEDIA_FIXTURE_UPLOADER.role);
   assert.equal(fixture.projectId, PROJECT);
   assert.equal(fixture.schemaVersion, 1);
   assert.equal(Object.keys(fixture.bundles).length, 6);
@@ -427,4 +428,18 @@ test('prewarms only fixed demo media pages and fails on compilation errors', asy
     })),
     /did not compile/
   );
+});
+
+test('CI checks the actual producer/parser contract once before application regression tests', () => {
+  const workflow = readFileSync(
+    new URL('../../.github/workflows/temporal-application-validation.yml', import.meta.url),
+    'utf8'
+  );
+  const command = 'node --test scripts/tests/authenticated-player-browser.test.mjs';
+  assert.equal(workflow.split(command).length - 1, 1);
+  const position = workflow.indexOf(command);
+  assert(position > workflow.indexOf('name: Validate every kit on genuine Linux native production startup'));
+  assert(position < workflow.indexOf('name: Validate application regressions, admission, rules and SDK compatibility'));
+  assert.match(workflow, /id: media_browser/);
+  assert.match(workflow, /failure\(\) && steps\.media_browser\.outcome == 'failure'/);
 });

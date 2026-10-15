@@ -1,5 +1,6 @@
 // CI-only authenticated UI checks. Never loads a real project or credential file.
 import assert from 'node:assert/strict';
+import { MEDIA_FIXTURE_UPLOADER } from '../../apps/web/tests/helpers/mediaFixtureIdentity.ts';
 import { DEV_ADMIN_EMAIL, DEV_ADMIN_PASSWORD } from '../../apps/web/context/user/devAuth.ts';
 import { spawn } from 'node:child_process';
 import { readFile, readdir, mkdtemp, writeFile, rm } from 'node:fs/promises';
@@ -42,7 +43,8 @@ export function loadMediaFixtureSources(require) {
     assert.equal(configs.length, 6);
     assert.equal(new Set(configs.map((config) => config.functionName)).size, 6);
     const { toDirectoryUser } = require(resolve(ROOT, 'functions/src/userDirectory.ts'));
-    return { configs, toDirectoryUser };
+    const { parseMediaBackendFixture } = require(resolve(ROOT, 'apps/web/tests/helpers/mediaBackendFixture.ts'));
+    return { configs, toDirectoryUser, parseMediaBackendFixture };
   } finally {
     service.enabled(false);
   }
@@ -52,14 +54,14 @@ export async function buildMediaBackendFixture({ db, auth, database, configs, to
   assert.equal(db.projectId, PROJECT, 'Demo Firestore required for fixtures');
   assert.equal(auth.app.options.projectId, PROJECT, 'Demo Auth required for fixtures');
   assert.equal(database.app.options.projectId, PROJECT, 'Demo RTDB required for fixtures');
-  const uid = 'playwright-e2e';
+  const { uid, email, displayName, role } = MEDIA_FIXTURE_UPLOADER;
   await auth.createUser({
     uid,
-    email: 'media-uploader@example.test',
-    displayName: 'Media Fixture Uploader',
+    email,
+    displayName,
     emailVerified: true,
   });
-  await auth.setCustomUserClaims(uid, { role: 'uploader' });
+  await auth.setCustomUserClaims(uid, { role });
   const users = [toDirectoryUser(await auth.getUser(uid))];
   assert.equal(users[0].uid, uid);
   const bundles = {};
@@ -286,6 +288,8 @@ async function main() {
         const source = loadMediaFixtureSources(require);
         const fixture = await buildMediaBackendFixture({ db, auth, database, ...source });
         const json = JSON.stringify(fixture);
+        // Validate the same serialized handoff the Playwright fixture will read before starting any browser.
+        source.parseMediaBackendFixture(JSON.parse(json));
         assert(Buffer.byteLength(json) <= 8 * 1024 * 1024, 'Media fixtures exceed budget');
         fixtureDirectory = await mkdtemp(resolve(tmpdir(), 'urm-media-browser-'));
         env.URM_MEDIA_BROWSER_BUNDLE_FIXTURES_FILE = resolve(fixtureDirectory, 'fixtures.json');

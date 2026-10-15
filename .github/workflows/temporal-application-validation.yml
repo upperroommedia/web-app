@@ -66,6 +66,8 @@ jobs:
         env:
           KIT_STARTUP_REQUIRE_LINUX_X64: 'true'
         run: node --test scripts/tests/kits-isolated-startup.test.mjs
+      - name: Validate isolated media fixture contracts before application regressions
+        run: node --test scripts/tests/authenticated-player-browser.test.mjs
       - name: Validate application regressions, admission, rules and SDK compatibility
         run: pnpm --dir functions test
       - name: Validate workflows, replay, cancellation and native media
@@ -111,7 +113,6 @@ jobs:
       - name: Verify authenticated player, trimming and upload navigation
         id: media_browser
         run: |
-          node --test scripts/tests/authenticated-player-browser.test.mjs
           pnpm --dir apps/web exec playwright install --with-deps chromium
           node scripts/tests/authenticated-player-browser.mjs
       - name: Preserve authenticated media failure traces

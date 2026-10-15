@@ -1,3 +1,4 @@
+import { MEDIA_FIXTURE_UPLOADER } from './mediaFixtureIdentity';
 import { readFile } from 'node:fs/promises';
 import type { Page } from '@playwright/test';
 import type { DirectoryUser } from '@upperroom/shared/types/User';
@@ -66,9 +67,10 @@ export function parseMediaBackendFixture(value: unknown): Fixture {
     !Array.isArray(fixture.users) ||
     fixture.users.length !== 1 ||
     !user ||
-    user.uid !== 'playwright-e2e' ||
-    user.email !== 'syntheticmedia-uploader@example.test' ||
-    user.role !== 'uploader' ||
+    user.uid !== MEDIA_FIXTURE_UPLOADER.uid ||
+    user.email !== MEDIA_FIXTURE_UPLOADER.email ||
+    user.role !== MEDIA_FIXTURE_UPLOADER.role ||
+    user.displayName !== MEDIA_FIXTURE_UPLOADER.displayName ||
     user.refreshToken !== '' ||
     user.photoURL !== null ||
     user.phoneNumber !== null ||
@@ -163,7 +165,7 @@ export async function installMediaBackendFixtures(page: Page): Promise<void> {
         Object.keys(body.data ?? {}).join(',') !== 'uids' ||
         !Array.isArray(uids) ||
         uids.length > 100 ||
-        uids.some((uid) => uid !== 'playwright-e2e')
+        uids.some((uid) => uid !== MEDIA_FIXTURE_UPLOADER.uid)
       )
         throw new Error('Unexpected demo uploader lookup');
       await route.fulfill({
