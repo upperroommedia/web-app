@@ -60,30 +60,53 @@ describe('subsplash auth cache', () => {
   });
 
   it('collapses concurrent auth refreshes into one OAuth request', async () => {
+    let markAuthStarted!: () => void;
+    const authStarted = new Promise<void>((resolve) => {
+      markAuthStarted = resolve;
+    });
     let resolveAuth!: (value: unknown) => void;
     const pendingAuthResponse = new Promise((resolve) => {
       resolveAuth = resolve;
     });
-    mockAxios.mockImplementation(
-      () => pendingAuthResponse as never
-    );
+    mockAxios.mockImplementation(() => {
+      markAuthStarted();
+      return pendingAuthResponse as never;
+    });
 
     const firstPromise = authenticateSubsplash();
     const secondPromise = authenticateSubsplash();
+    const settledRequests = Promise.allSettled([firstPromise, secondPromise]);
+    const releaseAuth = () =>
+      resolveAuth({
+        data: {
+          access_token: 'token-1',
+          expires_in: 300,
+        },
+      });
 
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(mockAxios).toHaveBeenCalledTimes(1);
+    try {
+      // Real RTDB reads and lock acquisition must reach OAuth before we inspect it.
+      await Promise.race([
+        authStarted,
+        settledRequests.then((results) => {
+          const failures = results.flatMap((result) =>
+            result.status === 'rejected' ? [result.reason] : []
+          );
+          if (failures.length) throw new AggregateError(failures, 'Authentication failed before OAuth started');
+          throw new Error('Authentication completed without an OAuth request');
+        }),
+      ]);
+      expect(mockAxios).toHaveBeenCalledTimes(1);
 
-    resolveAuth({
-      data: {
-        access_token: 'token-1',
-        expires_in: 300,
-      },
-    });
-
-    await expect(firstPromise).resolves.toBe('token-1');
-    await expect(secondPromise).resolves.toBe('token-1');
-    expect(mockAxios).toHaveBeenCalledTimes(1);
+      releaseAuth();
+      await expect(firstPromise).resolves.toBe('token-1');
+      await expect(secondPromise).resolves.toBe('token-1');
+      expect(mockAxios).toHaveBeenCalledTimes(1);
+    } finally {
+      // An assertion failure must not leave refreshes running into the next test.
+      releaseAuth();
+      await settledRequests;
+    }
   });
 
   it('refreshes when the cached token has expired', async () => {
