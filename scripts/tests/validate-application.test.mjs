@@ -210,7 +210,22 @@ test('cancellation permits nested detached cleanup beyond the previous ten-secon
     });
     let text = '',
       nestedPid;
-    const watchdog = setTimeout(() => child.kill('SIGKILL'), 30000);
+    const stopNested = () => {
+      if (nestedPid) {
+        try {
+          process.kill(-nestedPid, 'SIGTERM');
+        } catch (error) {
+          if (error.code !== 'ESRCH') throw error;
+        }
+      }
+    };
+    // An orphan can hold inherited stdout open after the runner exits. Close only
+    // this fixture's known group before awaiting close, including failure paths.
+    child.once('exit', stopNested);
+    const watchdog = setTimeout(() => {
+      stopNested();
+      child.kill('SIGKILL');
+    }, 30000);
     try {
       child.stdout.on('data', (bytes) => {
         text += bytes;

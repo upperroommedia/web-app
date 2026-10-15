@@ -8075,8 +8075,8 @@
     "semantic_hash": ""
   },
   "scripts/tests/validate-application.test.mjs": {
-    "mtime": 1792041896.2208216,
-    "ast_hash": "e84fab37c48aaa44616a7fa5445d2974",
+    "mtime": 1792042167.6441364,
+    "ast_hash": "d412b94ae88afa5043a5319e3a30952f",
     "semantic_hash": ""
   },
   "scripts/validate-application-local.sh": {
@@ -8085,8 +8085,8 @@
     "semantic_hash": ""
   },
   "scripts/validate-application.mjs": {
-    "mtime": 1792041886.8039024,
-    "ast_hash": "ee41863a40b9ec1b80f31c2bb5c19b44",
+    "mtime": 1792042003.2372627,
+    "ast_hash": "6f162f916576b78e4154967019c6cbdb",
     "semantic_hash": ""
   },
   "docs/LOCAL_VALIDATION.md": {
