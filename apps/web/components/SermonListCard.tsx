@@ -486,6 +486,7 @@ const SermonListCard: FunctionComponent<Props> = ({
   const renderPlayButton = () => (
     <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexShrink: 0 }}>
       <IconButton
+        aria-label={isCurrentlyPlaying ? 'Pause sermon' : 'Play sermon'}
         onClick={handlePlayPause}
         size="small"
         sx={{

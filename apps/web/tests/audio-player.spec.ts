@@ -24,7 +24,7 @@ async function playSermonFromSearch(page: import('@playwright/test').Page, sermo
 
   const card = page.locator('.MuiCard-root').filter({ has: page.getByText(sermonTitle, { exact: true }) });
   await expect(card).toHaveCount(1);
-  const playButton = card.locator('button:has([data-testid="PlayArrowIcon"])');
+  const playButton = card.getByRole('button', { name: 'Play sermon', exact: true });
   await expect(playButton).toBeVisible();
   await playButton.click();
 }
