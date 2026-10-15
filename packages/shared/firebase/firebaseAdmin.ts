@@ -1,3 +1,4 @@
+import { isDemoEmulatorMode, assertDemoFirebaseApp } from './demoEmulatorMode';
 import { getFirebaseEmulatorPort } from './emulatorPorts';
 import { readFileSync } from 'node:fs';
 import { getApp, getApps, initializeApp, deleteApp } from 'firebase-admin/app';
@@ -58,6 +59,8 @@ if (isTemporalCloud) {
     throw new Error('Temporal Cloud existing Firebase app belongs to another project');
   }
 }
+
+if (isDemoEmulatorMode && getApps().length) assertDemoFirebaseApp(getApp().options, true);
 
 if (!getApps().length) {
   if (isDevelopment) {

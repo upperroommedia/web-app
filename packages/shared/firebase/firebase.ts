@@ -1,3 +1,4 @@
+import { isDemoEmulatorMode, assertDemoFirebaseApp } from './demoEmulatorMode';
 import { getFirebaseEmulatorPort } from './emulatorPorts';
 import { FirebaseApp, getApps, initializeApp } from 'firebase/app';
 import {
@@ -8,6 +9,7 @@ import {
 } from '../shared/firebaseProjectConfig';
 
 export const isDevelopment = process.env.NODE_ENV === 'development';
+export const isEmulatorMode = isDevelopment || isDemoEmulatorMode;
 // Your web app's Firebase configuration
 // These keys are ok to leave public according to Firebase docs
 // Initialize Firebase
@@ -41,12 +43,15 @@ if (!apps.length) {
     messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || defaults.messagingSenderId || '',
     appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID || defaults.appId || '',
     measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID || defaults.measurementId,
-    databaseURL: isDevelopment
+    databaseURL: isDemoEmulatorMode
+      ? getFirebaseDatabaseUrl()
+      : isDevelopment
       ? `http://127.0.0.1:${getFirebaseEmulatorPort('database')}/?ns=${projectId}-default-rtdb`
       : getFirebaseDatabaseUrl(),
   });
 } else {
   firebase = apps[0];
 }
+assertDemoFirebaseApp(firebase.options);
 export default firebase as FirebaseApp;
 export * from 'firebase/app';

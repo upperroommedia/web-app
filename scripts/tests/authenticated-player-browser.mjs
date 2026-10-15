@@ -1,9 +1,9 @@
 // CI-only authenticated UI checks. Never loads a real project or credential file.
 import assert from 'node:assert/strict';
-import { MEDIA_FIXTURE_UPLOADER } from '../../apps/web/tests/helpers/mediaFixtureIdentity.ts';
-import { DEV_ADMIN_EMAIL, DEV_ADMIN_PASSWORD } from '../../apps/web/context/user/devAuth.ts';
+import { MEDIA_FIXTURE_ADMIN, MEDIA_FIXTURE_UPLOADER } from '../../apps/web/tests/helpers/mediaFixtureIdentity.ts';
+import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { readFile, readdir, mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { readFile, readdir, mkdtemp, writeFile, rm, cp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { createRequire } from 'node:module';
 import net from 'node:net';
@@ -26,8 +26,34 @@ const SERVICE_ENV = {
 const owned = new WeakSet();
 const delay = (ms) => new Promise((r) => setTimeout(r, ms));
 
-export function devAdminSeed() {
-  return { uid: 'ci-player-admin', email: DEV_ADMIN_EMAIL, password: DEV_ADMIN_PASSWORD, emailVerified: true };
+export async function seedMediaAdmin(auth) {
+  assert.equal(auth.app.options.projectId, PROJECT, 'Demo Auth required for administrator');
+  const { uid, email, displayName, providerUid, providerId, role } = MEDIA_FIXTURE_ADMIN;
+  const result = await auth.importUsers([
+    {
+      uid,
+      email,
+      displayName,
+      emailVerified: true,
+      providerData: [{ uid: providerUid, providerId, email, displayName }],
+      customClaims: { role },
+    },
+  ]);
+  assert.equal(result.successCount, 1, 'Administrator import did not succeed');
+  assert.equal(result.failureCount, 0, 'Administrator import failed');
+  assert.deepEqual(result.errors, [], 'Administrator import errors');
+  const actual = await auth.getUser(uid);
+  assert.equal(actual.uid, uid);
+  assert.equal(actual.email, email);
+  assert.equal(actual.displayName, displayName);
+  assert.equal(actual.emailVerified, true);
+  assert.equal(actual.disabled, false);
+  assert.deepEqual(actual.customClaims, { role });
+  assert.equal(actual.providerData.length, 1);
+  assert.deepEqual(
+    actual.providerData.map(({ uid, providerId, email, displayName }) => ({ uid, providerId, email, displayName })),
+    [{ uid: providerUid, providerId, email, displayName }]
+  );
 }
 
 export function loadMediaFixtureSources(require) {
@@ -102,15 +128,6 @@ export async function cleanupMediaSeed(db, database, app, deleteApp, originalErr
   if (errors.length > 1) throw new AggregateError(errors, 'Demo fixture seed and cleanup failed');
 }
 
-export async function prewarmMediaRoutes(baseURL, request = fetch) {
-  assert.equal(baseURL, 'http://127.0.0.1:3004');
-  for (const path of ['/login', '/', '/admin/sermons']) {
-    const response = await request(`${baseURL}${path}`, { redirect: 'error', signal: AbortSignal.timeout(90_000) });
-    await response.body?.cancel();
-    assert(response.ok, `Owned media route did not compile successfully: ${path} (${response.status})`);
-  }
-}
-
 export function isLoadedDotenv(name) {
   return /^\.env(?:\.(?:local|(?:development|production|test)(?:\.local)?))?$/.test(name);
 }
@@ -138,12 +155,18 @@ export function isolatedEnvironment(inherited, ports) {
   }
   Object.assign(env, {
     CI: 'true',
+    NODE_ENV: 'production',
+    NEXT_PUBLIC_FIREBASE_DEMO_EMULATORS: 'true',
     GCLOUD_PROJECT: PROJECT,
     GOOGLE_CLOUD_PROJECT: PROJECT,
     FIREBASE_PROJECT_ID: PROJECT,
     NEXT_PUBLIC_FIREBASE_PROJECT_ID: PROJECT,
     NEXT_PUBLIC_FIREBASE_API_KEY: 'synthetic-public-browser-test-key',
     NEXT_PUBLIC_FIREBASE_APP_ID: '1:123456789:web:synthetic',
+    NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: `${PROJECT}.firebaseapp.com`,
+    NEXT_PUBLIC_FIREBASE_IMAGES_BUCKET: `${PROJECT}-images`,
+    NEXT_PUBLIC_FIREBASE_FUNCTIONS_REGION: 'us-central1',
+    NEXT_PUBLIC_FIREBASE_FUNCTIONS_URL: `http://127.0.0.1:${ports.functions}/${PROJECT}/us-central1`,
     NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: `${PROJECT}.appspot.com`,
     NEXT_PUBLIC_FIREBASE_DATABASE_URL: `http://127.0.0.1:${ports.database}?ns=${PROJECT}`,
     FIREBASE_CONFIG: JSON.stringify({
@@ -160,7 +183,130 @@ export function isolatedEnvironment(inherited, ports) {
   });
   for (const name of ['auth', 'firestore', 'database', 'storage', 'functions'])
     env[`NEXT_PUBLIC_FIREBASE_${name.toUpperCase()}_EMULATOR_PORT`] = String(ports[name]);
+  for (const [service, key] of Object.entries(SERVICE_ENV)) env[key] = `127.0.0.1:${ports[service]}`;
   return env;
+}
+
+const BUILD_RECEIPT = 'apps/web/.next/media-browser-build.json';
+const BUILD_ROOTS = [
+  'apps/web/.next/BUILD_ID',
+  'apps/web/.next/required-server-files.json',
+  'apps/web/.next/static',
+  'apps/web/.next/server',
+  'apps/web/.next/standalone/apps/web/server.js',
+  'apps/web/.next/standalone/apps/web/.next/BUILD_ID',
+  'apps/web/.next/standalone/apps/web/.next/server',
+  'apps/web/.next/standalone/apps/web/.next/static',
+  'apps/web/.next/standalone/apps/web/public',
+];
+export function productionConfiguration(env) {
+  assert.equal(env.NODE_ENV, 'production');
+  assert.equal(env.NEXT_PUBLIC_FIREBASE_DEMO_EMULATORS, 'true');
+  assert.equal(env.NEXT_PUBLIC_FIREBASE_PROJECT_ID, PROJECT);
+  const expected = isolatedEnvironment({}, emulatorPorts(JSON.parse(requireConfigText())));
+  const keys = Object.keys(expected).filter(
+    (key) =>
+      key.startsWith('NEXT_PUBLIC_') ||
+      Object.values(SERVICE_ENV).includes(key) ||
+      ['GCLOUD_PROJECT', 'GOOGLE_CLOUD_PROJECT', 'FIREBASE_PROJECT_ID', 'FIREBASE_CONFIG', 'NODE_ENV'].includes(key)
+  );
+  for (const key of keys) assert.equal(env[key], expected[key], `Wrong production demo configuration: ${key}`);
+  return Object.fromEntries(keys.sort().map((key) => [key, env[key]]));
+}
+function requireConfigText() {
+  return createRequire(import.meta.url)('node:fs').readFileSync(resolve(ROOT, 'firebase.test.json'), 'utf8');
+}
+async function buildFileHashes(root) {
+  const files = {};
+  async function visit(path) {
+    const { lstat } = await import('node:fs/promises');
+    const entry = await lstat(resolve(root, path));
+    assert(!entry.isSymbolicLink(), `Unexpected build output symlink: ${path}`);
+    if (entry.isDirectory()) {
+      for (const name of (await readdir(resolve(root, path))).sort()) await visit(`${path}/${name}`);
+    } else {
+      assert(entry.isFile(), 'Expected regular production artifact');
+      files[path] = createHash('sha256')
+        .update(await readFile(resolve(root, path)))
+        .digest('hex');
+    }
+  }
+  for (const path of BUILD_ROOTS) await visit(path);
+  return files;
+}
+export async function recordProductionBuild(root, env) {
+  const configuration = productionConfiguration(env);
+  const buildId = (await readFile(resolve(root, 'apps/web/.next/BUILD_ID'), 'utf8')).trim();
+  assert(/^[A-Za-z0-9_-]{1,128}$/.test(buildId), 'Invalid production BUILD_ID');
+  const pages = JSON.parse(await readFile(resolve(root, 'apps/web/.next/server/pages-manifest.json'), 'utf8'));
+  for (const route of ['/api/uploadFile', '/api/editSermon'])
+    assert(!(route in pages), `Browser helper exposed as HTTP route: ${route}`);
+  const receipt = { schemaVersion: 1, buildId, configuration, files: await buildFileHashes(root) };
+  await writeFile(resolve(root, BUILD_RECEIPT), JSON.stringify(receipt), { mode: 0o600, flag: 'wx' });
+  return receipt;
+}
+export async function verifyProductionBuild(root, env) {
+  const receipt = JSON.parse(await readFile(resolve(root, BUILD_RECEIPT), 'utf8'));
+  assert.equal(receipt.schemaVersion, 1, 'Invalid production build receipt');
+  assert.deepEqual(receipt.configuration, productionConfiguration(env), 'Compiled/runtime configuration differs');
+  assert.equal(
+    (await readFile(resolve(root, 'apps/web/.next/BUILD_ID'), 'utf8')).trim(),
+    receipt.buildId,
+    'Production BUILD_ID changed'
+  );
+  assert.deepEqual(await buildFileHashes(root), receipt.files, 'Production build output changed');
+  return receipt;
+}
+export async function runOwnedBuild(env, args = ['--dir', 'apps/web', 'build'], executable = 'pnpm') {
+  let child, failure;
+  const abort = () => {
+    failure ??= new Error('Production build interrupted');
+    if (child?.pid && groupAlive(child)) process.kill(-child.pid, 'SIGTERM');
+  };
+  process.on('SIGTERM', abort);
+  process.on('SIGINT', abort);
+  try {
+    child = start(args, env, executable);
+    await child.result;
+  } catch (error) {
+    failure = failure ? new AggregateError([failure, error], 'Build interrupted and command failed') : error;
+  } finally {
+    try {
+      await stop(child);
+    } catch (error) {
+      failure = failure ? new AggregateError([failure, error], 'Build and cleanup failed') : error;
+    }
+    process.off('SIGTERM', abort);
+    process.off('SIGINT', abort);
+  }
+  if (failure) throw failure;
+}
+export async function buildProduction(env, root = ROOT, runBuild = runOwnedBuild) {
+  productionConfiguration(env);
+  await rm(resolve(root, 'apps/web/.next'), { recursive: true, force: true });
+  try {
+    await runBuild(env);
+    const output = resolve(root, 'apps/web/.next/standalone/apps/web');
+    await cp(resolve(root, 'apps/web/public'), resolve(output, 'public'), {
+      recursive: true,
+      errorOnExist: true,
+      force: false,
+    });
+    await cp(resolve(root, 'apps/web/.next/static'), resolve(output, '.next/static'), {
+      recursive: true,
+      errorOnExist: true,
+      force: false,
+    });
+    await recordProductionBuild(root, env);
+    await verifyProductionBuild(root, env);
+  } catch (error) {
+    try {
+      await rm(resolve(root, BUILD_RECEIPT), { force: true });
+    } catch (cleanupError) {
+      throw new AggregateError([error, cleanupError], 'Production build and receipt cleanup failed');
+    }
+    throw error;
+  }
 }
 
 export function validateEmulatorContext(env, ports) {
@@ -186,8 +332,8 @@ export function emulatorCommand() {
   ];
 }
 
-function start(args, env) {
-  const child = spawn('pnpm', args, { cwd: ROOT, env, detached: true, stdio: 'inherit' });
+function start(args, env, executable = 'pnpm') {
+  const child = spawn(executable, args, { cwd: ROOT, env, detached: true, stdio: 'inherit' });
   owned.add(child);
   child.result = new Promise((resolveResult, reject) => {
     child.once('error', reject);
@@ -242,6 +388,75 @@ async function assertClosed(ports) {
   for (const port of ports)
     assert(await portClosed(port), `Port ${port} occupied; refusing to reuse or stop another process`);
 }
+async function coldNavigation(env) {
+  await assertClosed([3002]);
+  let server, browser, failure;
+  const abort = () => {
+    failure ??= new Error('Cold navigation interrupted');
+    for (const child of [browser, server]) if (child?.pid && groupAlive(child)) process.kill(-child.pid, 'SIGTERM');
+  };
+  process.on('SIGTERM', abort);
+  process.on('SIGINT', abort);
+  try {
+    server = start(
+      [resolve(ROOT, 'apps/web/.next/standalone/apps/web/server.js')],
+      { ...env, PORT: '3002', HOSTNAME: '127.0.0.1' },
+      process.execPath
+    );
+    const deadline = Date.now() + 30_000;
+    let ready = false;
+    while (Date.now() < deadline) {
+      try {
+        const response = await fetch('http://127.0.0.1:3002/login', { signal: AbortSignal.timeout(2000) });
+        await response.body?.cancel();
+        if (response.ok) {
+          ready = true;
+          break;
+        }
+      } catch {}
+      await delay(250);
+    }
+    assert(ready, 'Production cold-navigation server did not become ready');
+    browser = start(
+      [
+        '--dir',
+        'apps/web',
+        'exec',
+        'playwright',
+        'test',
+        'tests/production-cold-navigation.spec.ts',
+        '--workers=1',
+        '--reporter=line',
+      ],
+      { ...env, PLAYWRIGHT_BASE_URL: 'http://127.0.0.1:3002', PLAYWRIGHT_PRODUCTION_SMOKE: '1' }
+    );
+    await Promise.race([
+      browser.result,
+      server.result.then(() => {
+        throw new Error('Cold server exited during tests');
+      }),
+    ]);
+  } catch (error) {
+    failure = failure ? new AggregateError([failure, error], 'Cold navigation interrupted and command failed') : error;
+  } finally {
+    for (const child of [browser, server]) {
+      try {
+        await stop(child);
+      } catch (error) {
+        failure = failure ? new AggregateError([failure, error], 'Cold navigation and cleanup failed') : error;
+      }
+    }
+    process.off('SIGTERM', abort);
+    process.off('SIGINT', abort);
+    try {
+      await assertClosed([3002]);
+    } catch (error) {
+      failure = failure ? new AggregateError([failure, error], 'Cold navigation port cleanup failed') : error;
+    }
+  }
+  if (failure) throw failure;
+}
+
 async function main() {
   assert.notEqual(process.platform, 'win32', 'POSIX-owned process groups required');
   const ports = emulatorPorts(JSON.parse(await readFile(resolve(ROOT, 'firebase.test.json'), 'utf8')));
@@ -250,6 +465,13 @@ async function main() {
     assert(!(await readdir(folder)).some(isLoadedDotenv), 'Clean CI checkout without dotenv files required');
   }
   const env = isolatedEnvironment(process.env, ports);
+  if (process.argv.includes('--build-production')) {
+    await buildProduction(env);
+    return;
+  }
+  await verifyProductionBuild(ROOT, env);
+  if (process.argv.includes('--verify-production')) return;
+  if (process.argv.includes('--cold-navigation')) return coldNavigation(env);
   let child;
   let failure;
   let stopping = false;
@@ -283,8 +505,7 @@ async function main() {
       let seedError;
       try {
         const auth = getAuth(app);
-        await auth.createUser(devAdminSeed());
-        await auth.setCustomUserClaims('ci-player-admin', { role: 'admin' });
+        await seedMediaAdmin(auth);
         const source = loadMediaFixtureSources(require);
         const fixture = await buildMediaBackendFixture({ db, auth, database, ...source });
         const json = JSON.stringify(fixture);
@@ -299,7 +520,12 @@ async function main() {
       } finally {
         await cleanupMediaSeed(db, database, app, deleteApp, seedError);
       }
-      child = start(['--dir', 'apps/web', 'run', 'dev', '--hostname', '127.0.0.1', '--port', '3004'], env);
+      await verifyProductionBuild(ROOT, env);
+      child = start(
+        [resolve(ROOT, 'apps/web/.next/standalone/apps/web/server.js')],
+        { ...env, PORT: '3004', HOSTNAME: '127.0.0.1' },
+        process.execPath
+      );
       const ready = async () => {
         const deadline = Date.now() + 90_000;
         while (Date.now() < deadline) {
@@ -317,12 +543,6 @@ async function main() {
         ready(),
         child.result.then(() => {
           throw new Error('Next exited before tests');
-        }),
-      ]);
-      await Promise.race([
-        prewarmMediaRoutes(env.PLAYWRIGHT_BASE_URL),
-        child.result.then(() => {
-          throw new Error('Next exited during route compilation');
         }),
       ]);
       const browser = start(

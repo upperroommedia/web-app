@@ -1,3 +1,4 @@
+import { isDemoEmulatorMode, assertDemoFirebaseApp } from '../../../packages/shared/firebase/demoEmulatorMode';
 import { getFirebaseEmulatorPort } from '../../../packages/shared/firebase/emulatorPorts';
 import { getApp, getApps, initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
@@ -12,6 +13,8 @@ import {
 
 const isDevelopment = process.env.NODE_ENV === 'development';
 const projectId = getFirebaseProjectId();
+
+if (isDemoEmulatorMode && getApps().length) assertDemoFirebaseApp(getApp().options, true);
 
 if (!getApps().length) {
   if (isDevelopment) {

@@ -1,3 +1,9 @@
+import {
+  isDemoEmulatorMode,
+  connectDemoFirebaseEmulator,
+  assertDemoFirebaseApp,
+} from '../../../packages/shared/firebase/demoEmulatorMode';
+import firebase, { isEmulatorMode } from './firebase';
 import { getFirebaseEmulatorPort } from '../../../packages/shared/firebase/emulatorPorts';
 /* eslint-disable no-console */
 
@@ -8,7 +14,6 @@ import {
   initializeFirestore,
   type FirestoreSettings,
 } from 'firebase/firestore';
-import firebase, { isDevelopment } from './firebase';
 
 declare global {
   var __URM_FIRESTORE__: Firestore | undefined;
@@ -17,6 +22,7 @@ declare global {
 
 const createBrowserFirestore = (): Firestore => {
   if (globalThis.__URM_FIRESTORE__) {
+    if (isDemoEmulatorMode) assertDemoFirebaseApp(globalThis.__URM_FIRESTORE__.app.options);
     return globalThis.__URM_FIRESTORE__;
   }
 
@@ -33,7 +39,11 @@ const createBrowserFirestore = (): Firestore => {
 
 const firestore = typeof window === 'undefined' ? getFirestore(firebase) : createBrowserFirestore();
 
-if (isDevelopment && !globalThis.__URM_FIRESTORE_EMULATOR_CONNECTED__) {
+if (isDemoEmulatorMode) {
+  connectDemoFirebaseEmulator('firestore', firestore, () =>
+    connectFirestoreEmulator(firestore, '127.0.0.1', getFirebaseEmulatorPort('firestore'))
+  );
+} else if (isEmulatorMode && !globalThis.__URM_FIRESTORE_EMULATOR_CONNECTED__) {
   console.log('Connecting to Firestore emulator');
   globalThis.__URM_FIRESTORE_EMULATOR_CONNECTED__ = true;
   connectFirestoreEmulator(firestore, '127.0.0.1', getFirebaseEmulatorPort('firestore'));

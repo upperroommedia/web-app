@@ -1,15 +1,17 @@
 import test from 'node:test';
-import { MEDIA_FIXTURE_UPLOADER } from '../../apps/web/tests/helpers/mediaFixtureIdentity.ts';
+import { MEDIA_FIXTURE_ADMIN, MEDIA_FIXTURE_UPLOADER } from '../../apps/web/tests/helpers/mediaFixtureIdentity.ts';
 import assert from 'node:assert/strict';
-import { DEV_ADMIN_EMAIL, DEV_ADMIN_PASSWORD } from '../../apps/web/context/user/devAuth.ts';
 import { readFileSync } from 'node:fs';
 import {
   emulatorPorts,
   loadMediaFixtureSources,
   buildMediaBackendFixture,
   cleanupMediaSeed,
-  prewarmMediaRoutes,
-  devAdminSeed,
+  seedMediaAdmin,
+  buildProduction,
+  productionConfiguration,
+  recordProductionBuild,
+  verifyProductionBuild,
   isLoadedDotenv,
   isolatedEnvironment,
   validateEmulatorContext,
@@ -208,7 +210,8 @@ test('each media spec installs the backend fixtures and status guard before any 
     const source = readFileSync(new URL(`../../apps/web/${spec}`, import.meta.url), 'utf8');
     assert.match(source, /test\.beforeEach\(async \(\{ page \}\) => \{\s*await installMediaBackendFixtures\(page\);/);
     assert.match(source, /import \{ installMediaBackendFixtures \} from '\.\/helpers\/mediaBackendFixture'/);
-    assert(source.indexOf('test.beforeEach') < source.indexOf('async function loginAsDevAdmin'));
+    assert.doesNotMatch(source, /Dev Login|loginAsDevAdmin/);
+    assert.match(source, /loginAsMediaBrowserAdmin/);
   }
   const adapter = readFileSync(new URL('../../apps/web/tests/helpers/mediaBackendFixture.ts', import.meta.url), 'utf8');
   assert.match(
@@ -233,17 +236,47 @@ test('rejects only loadable dotenv files, permits tracked inert templates', () =
     assert.equal(isLoadedDotenv(name), false);
 });
 
-test('seeds the real emulator dev-login fixture without duplicating its credentials', () => {
-  assert.deepEqual(devAdminSeed(), {
-    uid: 'ci-player-admin',
-    email: DEV_ADMIN_EMAIL,
-    password: DEV_ADMIN_PASSWORD,
+test('imports only the exact linked Google administrator and verifies actual identity and claims', async () => {
+  const { uid, email, displayName, role, providerUid, providerId } = MEDIA_FIXTURE_ADMIN;
+  const actual = {
+    uid,
+    email,
+    displayName,
     emailVerified: true,
-  });
-  const source = readFileSync(new URL('./authenticated-player-browser.mjs', import.meta.url), 'utf8');
-  assert.equal(source.includes(DEV_ADMIN_EMAIL), false);
-  assert.equal(source.includes(DEV_ADMIN_PASSWORD), false);
-  assert.match(source, /await auth\.createUser\(devAdminSeed\(\)\)/);
+    disabled: false,
+    customClaims: { role },
+    providerData: [{ uid: providerUid, providerId, email, displayName }],
+  };
+  let imported;
+  const auth = {
+    app: { options: { projectId: PROJECT } },
+    importUsers: async (users) => {
+      imported = users;
+      return { successCount: 1, failureCount: 0, errors: [] };
+    },
+    getUser: async (id) => {
+      assert.equal(id, uid);
+      return actual;
+    },
+  };
+  await seedMediaAdmin(auth);
+  assert.deepEqual(imported, [
+    { uid, email, displayName, emailVerified: true, providerData: actual.providerData, customClaims: { role } },
+  ]);
+  assert.equal('password' in imported[0], false);
+  for (const patch of [
+    { uid: 'foreign' },
+    { email: 'foreign@example.test' },
+    { disabled: true },
+    { customClaims: { role: 'uploader' } },
+    { providerData: [] },
+    { providerData: [{ ...actual.providerData[0], uid: 'foreign' }] },
+  ])
+    await assert.rejects(seedMediaAdmin({ ...auth, getUser: async () => ({ ...actual, ...patch }) }));
+  await assert.rejects(seedMediaAdmin({ ...auth, app: { options: { projectId: 'urm-app' } } }));
+  await assert.rejects(
+    seedMediaAdmin({ ...auth, importUsers: async () => ({ successCount: 0, failureCount: 1, errors: [{}] }) })
+  );
 });
 
 test('actual six bundle configs and directory mapper load without initializing a browser Firebase app', async () => {
@@ -407,27 +440,51 @@ test('seed teardown tries every owned SDK even on seed and cleanup failures', as
   assert.deepEqual(order, ['firestore', 'database', 'app']);
 });
 
-test('prewarms only fixed demo media pages and fails on compilation errors', async () => {
-  const urls = [];
-  await prewarmMediaRoutes('http://127.0.0.1:3004', async (url, options) => {
-    urls.push(url);
-    assert.equal(options.redirect, 'error');
-    return { ok: true, body: { cancel: async () => {} } };
-  });
-  assert.deepEqual(urls, [
-    'http://127.0.0.1:3004/login',
-    'http://127.0.0.1:3004/',
-    'http://127.0.0.1:3004/admin/sermons',
-  ]);
-  await assert.rejects(prewarmMediaRoutes('https://production.example'), /Expected values/);
-  await assert.rejects(
-    prewarmMediaRoutes('http://127.0.0.1:3004', async () => ({
-      ok: false,
-      status: 500,
-      body: { cancel: async () => {} },
-    })),
-    /did not compile/
-  );
+test('production artifact binds actual built bytes, BUILD_ID and exact compile/runtime demo configuration', async () => {
+  const { mkdtemp, mkdir, writeFile, rm } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join, dirname } = await import('node:path');
+  const root = await mkdtemp(join(tmpdir(), 'urm-media-build-proof-'));
+  const env = isolatedEnvironment({}, ports);
+  try {
+    for (const path of [
+      'apps/web/.next/static/chunk.js',
+      'apps/web/.next/server/pages-manifest.json',
+      'apps/web/.next/standalone/apps/web/server.js',
+      'apps/web/.next/standalone/apps/web/.next/BUILD_ID',
+      'apps/web/.next/standalone/apps/web/.next/server/pages-manifest.json',
+      'apps/web/.next/standalone/apps/web/.next/static/chunk.js',
+      'apps/web/.next/standalone/apps/web/public/icon.png',
+      'apps/web/.next/required-server-files.json',
+      'apps/web/.next/BUILD_ID',
+    ]) {
+      await mkdir(dirname(join(root, path)), { recursive: true });
+      await writeFile(
+        join(root, path),
+        path.endsWith('BUILD_ID') ? 'test-build' : path.endsWith('.json') ? '{}' : 'built-content'
+      );
+    }
+    await assert.rejects(verifyProductionBuild(root, env), /ENOENT/);
+    await recordProductionBuild(root, env);
+    await verifyProductionBuild(root, env);
+    for (const patch of [
+      { NODE_ENV: 'development' },
+      { NEXT_PUBLIC_FIREBASE_DEMO_EMULATORS: 'false' },
+      { NEXT_PUBLIC_FIREBASE_PROJECT_ID: 'urm-app' },
+      { NEXT_PUBLIC_FIREBASE_AUTH_EMULATOR_PORT: '9099' },
+      { FIREBASE_AUTH_EMULATOR_HOST: 'example.com:9100' },
+    ]) {
+      assert.throws(() => productionConfiguration({ ...env, ...patch }));
+      await assert.rejects(verifyProductionBuild(root, { ...env, ...patch }));
+    }
+    await writeFile(join(root, 'apps/web/.next/static/chunk.js'), 'tampered');
+    await assert.rejects(verifyProductionBuild(root, env), /output changed/);
+    await writeFile(join(root, 'apps/web/.next/static/chunk.js'), 'built-content');
+    await writeFile(join(root, 'apps/web/.next/BUILD_ID'), 'other-build');
+    await assert.rejects(verifyProductionBuild(root, env), /BUILD_ID changed/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test('CI checks the actual producer/parser contract once before application regression tests', () => {
@@ -442,4 +499,70 @@ test('CI checks the actual producer/parser contract once before application regr
   assert(position < workflow.indexOf('name: Validate application regressions, admission, rules and SDK compatibility'));
   assert.match(workflow, /id: media_browser/);
   assert.match(workflow, /failure\(\) && steps\.media_browser\.outcome == 'failure'/);
+});
+
+test('CI builds once before real media checks and reuses production artifact for cold navigation', () => {
+  const workflow = readFileSync(
+    new URL('../../.github/workflows/temporal-application-validation.yml', import.meta.url),
+    'utf8'
+  );
+  const source = readFileSync(new URL('./authenticated-player-browser.mjs', import.meta.url), 'utf8');
+  assert.equal(workflow.split('authenticated-player-browser.mjs --build-production').length - 1, 1);
+  assert.equal(workflow.split('authenticated-player-browser.mjs --cold-navigation').length - 1, 1);
+  assert(workflow.indexOf('--build-production') < workflow.indexOf('id: media_browser'));
+  const guards =
+    'node --test packages/shared/firebase/emulatorPorts.test.mjs packages/shared/firebase/demoEmulatorMode.test.mjs';
+  assert.equal(workflow.split(guards).length - 1, 1);
+  assert(workflow.indexOf(guards) < workflow.indexOf('--build-production'));
+  assert(
+    workflow.indexOf('node --test scripts/tests/authenticated-player-browser.test.mjs') <
+      workflow.indexOf('--build-production')
+  );
+  assert.doesNotMatch(source, /run', 'dev'|prewarmMediaRoutes|DEV_ADMIN_PASSWORD/);
+  assert.match(source, /Browser helper exposed as HTTP route/);
+});
+
+test('owned production command preserves failures and settles detached children on interrupt', async () => {
+  const { spawnSync } = await import('node:child_process');
+  const harness = new URL('./authenticated-player-browser.mjs', import.meta.url).href;
+  const program = `import assert from 'node:assert/strict';
+    import {runOwnedBuild} from ${JSON.stringify(harness)};
+    await assert.rejects(runOwnedBuild(process.env,['-e','process.exitCode=23'],process.execPath),/23/);
+    const timer=setTimeout(()=>process.kill(process.pid,'SIGTERM'),150);
+    try { await assert.rejects(runOwnedBuild(process.env,['-e','setInterval(()=>{},1000)'],process.execPath),/interrupted/); }
+    finally {clearTimeout(timer);}
+    assert.equal(process.listenerCount('SIGTERM'),0);
+    assert.equal(process.listenerCount('SIGINT'),0);`;
+  const result = spawnSync(process.execPath, ['--input-type=module', '-e', program], {
+    encoding: 'utf8',
+    timeout: 15000,
+  });
+  assert.equal(result.error, undefined);
+  assert.equal(result.status, 0, result.stderr);
+});
+
+test('failed production compilation leaves no completed artifact receipt and is not reused', async () => {
+  const { mkdtemp, mkdir, writeFile, readFile, rm } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const root = await mkdtemp(join(tmpdir(), 'urm-media-build-failure-'));
+  const env = isolatedEnvironment({}, ports);
+  try {
+    await mkdir(join(root, 'apps/web/.next'), { recursive: true });
+    await writeFile(join(root, 'apps/web/.next/media-browser-build.json'), 'stale-success');
+    const error = new Error('real compilation failed');
+    await assert.rejects(
+      buildProduction(env, root, async () => {
+        await mkdir(join(root, 'apps/web/.next'), { recursive: true });
+        await writeFile(join(root, 'apps/web/.next/partial-chunk.js'), 'partial');
+        throw error;
+      }),
+      (e) => e === error
+    );
+    await assert.rejects(readFile(join(root, 'apps/web/.next/media-browser-build.json')), /ENOENT/);
+    await assert.rejects(verifyProductionBuild(root, env), /ENOENT/);
+    assert.equal(await readFile(join(root, 'apps/web/.next/partial-chunk.js'), 'utf8'), 'partial');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

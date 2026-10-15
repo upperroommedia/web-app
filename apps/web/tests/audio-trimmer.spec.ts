@@ -1,3 +1,4 @@
+import { loginAsMediaBrowserAdmin } from './helpers/mediaBrowserLogin';
 import { installMediaBackendFixtures } from './helpers/mediaBackendFixture';
 import { expect, test } from '@playwright/test';
 import type { ConsoleMessage, Page } from '@playwright/test';
@@ -26,11 +27,8 @@ function createSilentWav(durationSeconds = 0.5, sampleRate = 44100) {
   return buffer;
 }
 
-async function loginAsDevAdmin(page: import('@playwright/test').Page) {
-  await page.goto('/login?callbackurl=/');
-  const devLoginButton = page.getByRole('button', { name: /Dev Login/i });
-  await expect(devLoginButton).toBeVisible();
-  await devLoginButton.click();
+async function loginAsAdmin(page: import('@playwright/test').Page) {
+  await loginAsMediaBrowserAdmin(page);
   await expect(page.getByRole('switch', { name: 'Upload from Youtube Url' })).toBeVisible();
 }
 
@@ -71,7 +69,7 @@ test.describe('Audio trimmer', () => {
         });
       }
     );
-    await loginAsDevAdmin(page);
+    await loginAsAdmin(page);
     await expect(page.getByRole('button', { name: 'Upload', exact: true })).toBeEnabled();
     expect(rejected.size).toBe(2);
     const dropzone = page.getByText('Drag & drop audio files here, or click to select files').locator('..');
@@ -94,7 +92,7 @@ test.describe('Audio trimmer', () => {
   });
 
   test('scrub, trim end, and reset without console errors', async ({ page }) => {
-    await loginAsDevAdmin(page);
+    await loginAsAdmin(page);
 
     const toggle = page.getByRole('switch', { name: 'Upload from Youtube Url' });
     if (await toggle.isChecked()) {
@@ -130,7 +128,7 @@ test.describe('Audio trimmer', () => {
   });
 
   test('scrub while playing stays stable', async ({ page }) => {
-    await loginAsDevAdmin(page);
+    await loginAsAdmin(page);
 
     const toggle = page.getByRole('switch', { name: 'Upload from Youtube Url' });
     if (await toggle.isChecked()) {
@@ -160,7 +158,7 @@ test.describe('Audio trimmer', () => {
   });
 
   test('drag playhead while playing does not jump', async ({ page }) => {
-    await loginAsDevAdmin(page);
+    await loginAsAdmin(page);
 
     const toggle = page.getByRole('switch', { name: 'Upload from Youtube Url' });
     if (await toggle.isChecked()) {
@@ -198,7 +196,7 @@ test.describe('Audio trimmer', () => {
 
   test('trim Start/End inputs visible and actionable on mobile viewport', async ({ page }) => {
     await page.setViewportSize({ width: 360, height: 640 });
-    await loginAsDevAdmin(page);
+    await loginAsAdmin(page);
 
     const toggle = page.getByRole('switch', { name: 'Upload from Youtube Url' });
     if (await toggle.isChecked()) {
@@ -262,7 +260,7 @@ test.describe('Audio trimmer', () => {
       };
     });
 
-    await loginAsDevAdmin(page);
+    await loginAsAdmin(page);
 
     const toggle = page.getByRole('switch', { name: 'Upload from Youtube Url' });
     if (await toggle.isChecked()) {
@@ -288,7 +286,7 @@ test.describe('Audio trimmer', () => {
         Promise.reject(new DOMException('The operation is not supported.', 'NotSupportedError'));
     });
 
-    await loginAsDevAdmin(page);
+    await loginAsAdmin(page);
 
     const toggle = page.getByRole('switch', { name: 'Upload from Youtube Url' });
     if (await toggle.isChecked()) {
@@ -345,7 +343,7 @@ test.describe('Bounded optional waveform lifetime', () => {
         Reflect.apply(post, this, [message, options ?? {}]);
       };
     });
-    await loginAsDevAdmin(page);
+    await loginAsAdmin(page);
     const dropzone = page.getByText('Drag & drop audio files here, or click to select files').locator('..');
     await dropzone
       .locator('input')
@@ -386,7 +384,7 @@ test.describe('Bounded optional waveform lifetime', () => {
   });
 
   test('keeps playback and trim controls available when optional preview exceeds its budget', async ({ page }) => {
-    await loginAsDevAdmin(page);
+    await loginAsAdmin(page);
     const dropzone = page.getByText('Drag & drop audio files here, or click to select files').locator('..');
     // Input stays valid/playable PCM, but exceeds the preview's 32 MiB input budget.
     await dropzone.locator('input').setInputFiles({

@@ -1,3 +1,4 @@
+import { loginAsMediaBrowserAdmin } from './helpers/mediaBrowserLogin';
 import { routePlayableAudio } from './helpers/ownedAudioFixture';
 import { installMediaBackendFixtures } from './helpers/mediaBackendFixture';
 import { expect, test } from '@playwright/test';
@@ -6,14 +7,6 @@ import { seedPlayableSermon } from './helpers/seedPlayableSermon';
 test.beforeEach(async ({ page }) => {
   await installMediaBackendFixtures(page);
 });
-
-async function loginAsDevAdmin(page: import('@playwright/test').Page, callbackPath = '/') {
-  await page.goto(`/login?callbackurl=${encodeURIComponent(callbackPath)}`);
-  const devLoginButton = page.getByRole('button', { name: /Dev Login/i });
-  await expect(devLoginButton).toBeVisible();
-  await devLoginButton.click();
-  await page.waitForURL(/^(?!.*\/login)/);
-}
 
 async function playSermonFromSearch(page: import('@playwright/test').Page, sermonTitle: string) {
   const searchBox = page.getByRole('searchbox').first();
@@ -31,7 +24,7 @@ async function playSermonFromSearch(page: import('@playwright/test').Page, sermo
 
 test.describe('Player clear on upload / edit routes', () => {
   test('bottom audio bar is not shown on upload page', async ({ page }) => {
-    await loginAsDevAdmin(page, '/');
+    await loginAsMediaBrowserAdmin(page, '/');
     await expect(page.getByRole('switch', { name: 'Upload from Youtube Url', exact: true })).toBeVisible();
     await expect(page.getByTestId('floating-audio-bar')).toHaveCount(0);
   });
@@ -40,7 +33,7 @@ test.describe('Player clear on upload / edit routes', () => {
     const seededSermon = await seedPlayableSermon();
     try {
       await routePlayableAudio(page, seededSermon.id);
-      await loginAsDevAdmin(page, '/admin/sermons');
+      await loginAsMediaBrowserAdmin(page, '/admin/sermons');
       await page.waitForURL(/\/admin\/sermons$/);
 
       await playSermonFromSearch(page, seededSermon.title);

@@ -67,7 +67,11 @@ jobs:
           KIT_STARTUP_REQUIRE_LINUX_X64: 'true'
         run: node --test scripts/tests/kits-isolated-startup.test.mjs
       - name: Validate isolated media fixture contracts before application regressions
-        run: node --test scripts/tests/authenticated-player-browser.test.mjs
+        run: |
+          node --test packages/shared/firebase/emulatorPorts.test.mjs packages/shared/firebase/demoEmulatorMode.test.mjs
+          node --test scripts/tests/authenticated-player-browser.test.mjs
+      - name: Build the canonical production demo web application
+        run: node scripts/tests/authenticated-player-browser.mjs --build-production
       - name: Verify authenticated player, trimming and upload navigation
         id: media_browser
         run: |
@@ -100,7 +104,6 @@ jobs:
           pnpm run test:temporal:contracts
           node --test scripts/temporal-recover-initial-compatibility.test.mjs
           node --test scripts/provider-http-inventory.test.mjs
-          node --test packages/shared/firebase/emulatorPorts.test.mjs
       - name: Validate release and recovery through the real Firestore SDK
         env:
           RELEASE_RUNTIME_TEST_ROOT: ${{ github.workspace }}
@@ -123,36 +126,5 @@ jobs:
           URM_EMAIL_CAPTURE_TEST_CONFIG: ${{ github.workspace }}/firebase.test.json
         run: |
           pnpm --dir functions exec firebase emulators:exec --project demo-email-capture --only auth,firestore,database,storage --config ../firebase.test.json 'NODE_OPTIONS=--experimental-vm-modules pnpm --dir ../function-kits/firestore-send-email exec jest --runInBand --watchman=false --forceExit test/temporal/capture.firestore.test.ts'
-      - name: Build the production web application
-        env:
-          NEXT_PUBLIC_FIREBASE_PROJECT_ID: demo-temporal-ci
-          NEXT_PUBLIC_FIREBASE_API_KEY: synthetic-public-browser-test-key
-          NEXT_PUBLIC_FIREBASE_APP_ID: 1:123456789:web:synthetic
-        run: |
-          pnpm --dir apps/web build
-          node --input-type=module <<'NODE'
-          import { readFileSync } from 'node:fs';
-          const pages = JSON.parse(readFileSync('apps/web/.next/server/pages-manifest.json', 'utf8'));
-          for (const route of ['/api/uploadFile', '/api/editSermon']) {
-            if (route in pages) throw new Error(`Browser helper exposed as HTTP route: ${route}`);
-          }
-          NODE
       - name: Verify production cold navigation on desktop and mobile
-        run: |
-          pnpm --dir apps/web exec playwright install --with-deps chromium
-          cp -R apps/web/public apps/web/.next/standalone/apps/web/public
-          cp -R apps/web/.next/static apps/web/.next/standalone/apps/web/.next/static
-          PORT=3002 HOSTNAME=127.0.0.1 node apps/web/.next/standalone/apps/web/server.js > /tmp/temporal-web-smoke.log 2>&1 &
-          temporal_web_smoke_pid=$!
-          trap 'kill "$temporal_web_smoke_pid" 2>/dev/null || true' EXIT
-          node --input-type=module <<'NODE'
-          const deadline = Date.now() + 30_000;
-          let ready = false;
-          while (Date.now() < deadline) {
-            try { ready = (await fetch('http://127.0.0.1:3002/login')).ok; } catch {}
-            if (ready) break;
-            await new Promise(resolve => setTimeout(resolve, 250));
-          }
-          if (!ready) throw new Error('Production web server did not become ready.');
-          NODE
-          PLAYWRIGHT_BASE_URL=http://127.0.0.1:3002 PLAYWRIGHT_PRODUCTION_SMOKE=1 pnpm --dir apps/web exec playwright test tests/production-cold-navigation.spec.ts --workers=1 --reporter=line
+        run: node scripts/tests/authenticated-player-browser.mjs --cold-navigation

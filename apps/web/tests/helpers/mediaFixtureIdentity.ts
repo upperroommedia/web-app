@@ -5,3 +5,13 @@ export const MEDIA_FIXTURE_UPLOADER = {
   displayName: 'Media Fixture Uploader',
   role: 'uploader',
 } as const;
+
+// Synthetic Google-linked administrator selected only in the local Auth emulator UI.
+export const MEDIA_FIXTURE_ADMIN = {
+  uid: 'ci-player-admin',
+  email: 'media-browser-admin@example.test',
+  displayName: 'Media Browser Admin',
+  providerUid: 'media-browser-admin-google',
+  providerId: 'google.com',
+  role: 'admin',
+} as const;

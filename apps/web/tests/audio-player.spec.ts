@@ -1,3 +1,4 @@
+import { loginAsMediaBrowserAdmin } from './helpers/mediaBrowserLogin';
 import { routePlayableAudio } from './helpers/ownedAudioFixture';
 import { installMediaBackendFixtures } from './helpers/mediaBackendFixture';
 import { expect, test } from '@playwright/test';
@@ -7,11 +8,8 @@ test.beforeEach(async ({ page }) => {
   await installMediaBackendFixtures(page);
 });
 
-async function loginAsDevAdmin(page: import('@playwright/test').Page) {
-  await page.goto('/login?callbackurl=/');
-  const devLoginButton = page.getByRole('button', { name: /Dev Login/i });
-  await expect(devLoginButton).toBeVisible();
-  await devLoginButton.click();
+async function loginAsAdmin(page: import('@playwright/test').Page) {
+  await loginAsMediaBrowserAdmin(page);
   await expect(page.getByRole('switch', { name: 'Upload from Youtube Url', exact: true })).toBeVisible();
 }
 
@@ -38,7 +36,7 @@ test.describe('Audio player (floating bar)', () => {
     const seededSermon = await seedPlayableSermon();
     try {
       await routePlayableAudio(page, seededSermon.id);
-      await loginAsDevAdmin(page);
+      await loginAsAdmin(page);
       await page.goto('/admin/sermons');
 
       await expect(page.getByRole('heading', { name: 'Sermons' })).toBeVisible({
@@ -66,7 +64,7 @@ test.describe('Audio player (floating bar)', () => {
     try {
       await page.setViewportSize({ width: 375, height: 667 });
       await routePlayableAudio(page, seededSermon.id);
-      await loginAsDevAdmin(page);
+      await loginAsAdmin(page);
       await page.goto('/admin/sermons');
 
       await expect(page.getByRole('heading', { name: 'Sermons' })).toBeVisible({
@@ -95,7 +93,7 @@ test('real audio controls support pause, keyboard seek/volume, mute and close wi
     // The app's desktop volume controls begin at its 1300px lg breakpoint.
     await page.setViewportSize({ width: 1440, height: 800 });
     await routePlayableAudio(page, seeded.id);
-    await loginAsDevAdmin(page);
+    await loginAsAdmin(page);
     await page.goto('/admin/sermons');
     await playSermonFromSearch(page, seeded.title);
     const bar = page.getByRole('region', { name: 'Sermon audio player' });
@@ -139,7 +137,7 @@ test('a failed source URL can be retried without changing the selected sermon', 
   const seeded = await seedPlayableSermon();
   try {
     await routePlayableAudio(page, seeded.id, true);
-    await loginAsDevAdmin(page);
+    await loginAsAdmin(page);
     await page.goto('/admin/sermons');
     await playSermonFromSearch(page, seeded.title);
     const bar = page.getByRole('region', { name: 'Sermon audio player' });

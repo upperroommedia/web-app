@@ -38,7 +38,16 @@ function fixture(environment = {}, development = true) {
     );
     const localRequire = (name) => {
       if (name.endsWith('/emulatorPorts') || name === './emulatorPorts') return ports;
-      if (name === './firebase') return { __esModule: true, default: app, isDevelopment: development };
+      if (name.endsWith('/demoEmulatorMode'))
+        return {
+          isDemoEmulatorMode: false,
+          assertDemoFirebaseApp() {},
+          connectDemoFirebaseEmulator() {
+            throw new Error('Unexpected demo branch');
+          },
+        };
+      if (name === './firebase')
+        return { __esModule: true, default: app, isDevelopment: development, isEmulatorMode: development };
       if (name.includes('firebaseProjectConfig')) return config;
       if (name === './firebaseAdminOwnership') return { recordSharedFirebaseAppCreation() {} };
       if (name.startsWith('firebase/') || name.startsWith('firebase-admin/')) return sdk;

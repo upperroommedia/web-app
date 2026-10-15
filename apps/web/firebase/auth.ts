@@ -1,3 +1,5 @@
+import { isDemoEmulatorMode, connectDemoFirebaseEmulator } from '../../../packages/shared/firebase/demoEmulatorMode';
+import firebase, { isEmulatorMode } from './firebase';
 import { getFirebaseEmulatorPort } from '../../../packages/shared/firebase/emulatorPorts';
 /* eslint-disable no-console */
 
@@ -10,7 +12,6 @@ import {
   initializeAuth,
 } from 'firebase/auth';
 import type { Auth } from 'firebase/auth';
-import firebase, { isDevelopment } from './firebase';
 
 const isAlreadyInitializedError = (error: unknown): boolean =>
   typeof error === 'object' && error !== null && 'code' in error && error.code === 'auth/already-initialized';
@@ -37,7 +38,11 @@ const initializeBrowserAuth = (): Auth => {
 };
 
 const auth = initializeBrowserAuth();
-if (isDevelopment && process.env.AUTH_EMULATOR_STARTED !== 'true') {
+if (isDemoEmulatorMode) {
+  connectDemoFirebaseEmulator('auth', auth, () =>
+    connectAuthEmulator(auth, `http://127.0.0.1:${getFirebaseEmulatorPort('auth')}`)
+  );
+} else if (isEmulatorMode && process.env.AUTH_EMULATOR_STARTED !== 'true') {
   console.log('Connecting to Auth emulator');
   process.env.AUTH_EMULATOR_STARTED = 'true';
   connectAuthEmulator(auth, `http://127.0.0.1:${getFirebaseEmulatorPort('auth')}`);

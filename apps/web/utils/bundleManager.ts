@@ -1,3 +1,4 @@
+import { isDemoEmulatorMode } from '../../../packages/shared/firebase/demoEmulatorMode';
 import firestore, { loadBundle, namedQuery, getDocsFromCache } from '../firebase/firestore';
 import database, { ref, get } from '../firebase/database';
 import { BundleConfig } from '../shared/bundleConfigs';
@@ -63,6 +64,7 @@ export class BundleManager<T> {
   }
 
   private getBundleUrl(): string {
+    if (isDemoEmulatorMode) return `${getFirebaseFunctionsEmulatorBaseUrl()}/${this.config.functionName}`;
     // Check if we're in development/emulator mode
     const isDevelopment =
       process.env.NODE_ENV === 'development' ||
