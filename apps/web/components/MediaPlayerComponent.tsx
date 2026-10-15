@@ -99,7 +99,9 @@ function MediaPlayerComponent({ children }: { children: React.ReactNode }) {
                 setSourceFailure(undefined);
                 setSourceAttempt((attempt) => attempt + 1);
               }}
-              sourceError={!sermonUrl && sourceFailure?.sermonId === sermonId ? sourceFailure.message : undefined}
+              sourceError={
+                !sermonUrl && sourceFailure && sourceFailure.sermonId === sermonId ? sourceFailure.message : undefined
+              }
             />
           )}
         </div>
