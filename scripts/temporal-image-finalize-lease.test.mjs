@@ -279,9 +279,13 @@ test('strict live-transport fixture rejects unexpected endpoints and methods', a
     () => f.request({ url: 'https://wrong.test/', method: 'GET', maxRedirects: 0, timeout: 30000 }),
     /Unexpected provider method/
   );
+  const expectedEndpointInError = /https:\/\/core\.subsplash\.com/;
   await assert.rejects(
     () => f.request({ url: 'https://wrong.test/', method: 'POST', maxRedirects: 0, timeout: 30000 }),
-    /https:\/\/core.subsplash.com/
+    expectedEndpointInError
   );
+  // This matcher checks assertion diagnostics; the transport fixture already compares the entire URL exactly.
+  for (const lookalike of ['https://coreXsubsplash.com', 'https://core.subsplashXcom', 'https://coreXsubsplashYcom'])
+    assert.equal(expectedEndpointInError.test(lookalike), false);
   assert.deepEqual(f.calls, accepted);
 });
