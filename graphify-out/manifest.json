@@ -640,8 +640,8 @@
     "semantic_hash": "77c152b4792979b12753127d65957535"
   },
   "apps/web/context/search/AlgoliaSearchContext.tsx": {
-    "mtime": 1791961998.2589056,
-    "ast_hash": "96e7a36a2afd55c3a0fdb9157b238dcf",
+    "mtime": 1792038241.6736465,
+    "ast_hash": "419fe06f31607f6d1914d9ff24d1407b",
     "semantic_hash": ""
   },
   "apps/web/context/trimmerStore.ts": {
@@ -8057,6 +8057,11 @@
   "packages/shared/firebase/demoEmulatorMode.ts": {
     "mtime": 1792037288.8290956,
     "ast_hash": "4825cdea8e7728c7c7513f1670618834",
+    "semantic_hash": ""
+  },
+  "apps/web/utils/algoliaSearchMode.render.test.tsx": {
+    "mtime": 1792038275.34127,
+    "ast_hash": "daf635ce05c320942dbdeae199d29949",
     "semantic_hash": ""
   }
 }

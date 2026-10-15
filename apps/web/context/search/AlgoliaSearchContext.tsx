@@ -7,7 +7,7 @@ import type {
   GenerateSecuredApiKeyInputType,
   GenerateSecuredApiKeyOutputType,
 } from '@upperroom/contracts/generateAlgoliaSecureApiKey';
-import { isDevelopment } from '../../firebase/firebase';
+import { isEmulatorMode } from '../../firebase/firebase';
 import { createMockAlgoliaSearchClient } from '../../utils/mockAlgoliaSearchClient';
 import {
   browserAlgoliaAppId,
@@ -72,17 +72,17 @@ export const AlgoliaSearchProvider = ({ children }: { children: React.ReactNode 
     shared: ReturnType<typeof rotatingClient>;
   } | null>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(!isDevelopment && !appId ? browserSearchUnavailableMessage : null);
+  const [error, setError] = useState<string | null>(!isEmulatorMode && !appId ? browserSearchUnavailableMessage : null);
   const [sermonSearchRevision, setSermonSearchRevision] = useState(0);
   const [refreshRevision, setRefreshRevision] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
     let refreshTimer: ReturnType<typeof setTimeout> | undefined;
-    if (isDevelopment || !appId || externalSearchDisabled || !user?.canUpload()) {
+    if (isEmulatorMode || !appId || externalSearchDisabled || !user?.canUpload()) {
       setCredentials(null);
       setLoading(false);
-      setError(!isDevelopment && (!appId || externalSearchDisabled) ? browserSearchUnavailableMessage : null);
+      setError(!isEmulatorMode && (!appId || externalSearchDisabled) ? browserSearchUnavailableMessage : null);
       return;
     }
     const ownerUid = user.uid;
@@ -170,9 +170,10 @@ export const AlgoliaSearchProvider = ({ children }: { children: React.ReactNode 
     return () => clearTimeout(timer);
   }, [credentials]);
 
+  // Verified demo builds use the same real Firestore search adapter as development.
   const mockClient = useMemo(
     () =>
-      isDevelopment && user?.canUpload()
+      isEmulatorMode && user?.canUpload()
         ? createMockAlgoliaSearchClient({ userId: user.uid, canSearchAllSermons: user.isAdmin() })
         : null,
     [user]
