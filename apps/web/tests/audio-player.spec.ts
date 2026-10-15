@@ -104,6 +104,15 @@ test('real audio controls support pause, keyboard seek/volume, mute and close wi
     await expect(bar.getByRole('button', { name: 'Pause', exact: true })).toBeEnabled();
     await bar.getByRole('button', { name: 'Pause', exact: true }).click();
     await expect.poll(() => audio.evaluate((node: HTMLAudioElement) => node.paused)).toBe(true);
+    // A decoded duration alone does not prove the HTTP resource is seekable.
+    // Keep the real keyboard assertion below; fail at readiness if the media transport regresses.
+    await expect
+      .poll(() =>
+        audio.evaluate((node: HTMLAudioElement) =>
+          node.seekable.length ? node.seekable.end(node.seekable.length - 1) : 0
+        )
+      )
+      .toBeGreaterThan(50);
     const position = bar.getByRole('slider', { name: 'Playback position' }).first();
     await position.focus();
     await position.press('End');

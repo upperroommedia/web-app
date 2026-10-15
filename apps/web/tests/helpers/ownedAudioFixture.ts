@@ -41,7 +41,59 @@ export async function routePlayableAudio(page: Page, sermonId: string, failFirst
       };
       if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers });
       if (url.searchParams.get('alt') === 'media') {
-        return route.fulfill({ status: 200, contentType: 'audio/wav', headers, body: method === 'HEAD' ? '' : wav });
+        const mediaHeaders = { ...headers, 'accept-ranges': 'bytes', 'content-length': String(wav.length) };
+        const fullResponse = () =>
+          route.fulfill({
+            status: 200,
+            contentType: 'audio/wav',
+            headers: mediaHeaders,
+            body: method === 'HEAD' ? '' : wav,
+          });
+        // RFC 9110 §14.2: Range is defined for GET only; HEAD describes the complete representation.
+        const range = route.request().headers().range;
+        if (method === 'HEAD' || range === undefined) return fullResponse();
+        const invalid = () =>
+          route.fulfill({ status: 400, headers: { ...mediaHeaders, 'content-length': '0' }, body: '' });
+        const unsatisfiable = () =>
+          route.fulfill({
+            status: 416,
+            headers: { ...mediaHeaders, 'content-length': '0', 'content-range': `bytes */${wav.length}` },
+            body: '',
+          });
+        const field = /^([^\s=]+)=(.*)$/.exec(range.trim());
+        if (!field) return invalid();
+        // Unknown units must be ignored. This single-range fixture also ignores multipart ranges
+        // as permitted by §14.2, returning the full representation without inventing a slice.
+        if (field[1].toLowerCase() !== 'bytes' || field[2].includes(',')) return fullResponse();
+        const bounds = /^(\d*)-(\d*)$/.exec(field[2].trim());
+        if (!bounds || (!bounds[1] && !bounds[2])) return invalid();
+        // BigInt preserves arbitrarily large decimal positions without integer-overflow rounding.
+        const length = BigInt(wav.length);
+        let start: bigint;
+        let end: bigint;
+        if (!bounds[1]) {
+          const suffix = BigInt(bounds[2]);
+          if (suffix === BigInt(0)) return unsatisfiable();
+          start = suffix >= length ? BigInt(0) : length - suffix;
+          end = length - BigInt(1);
+        } else {
+          start = BigInt(bounds[1]);
+          end = bounds[2] ? BigInt(bounds[2]) : length - BigInt(1);
+          if (bounds[2] && end < start) return invalid();
+          if (start >= length) return unsatisfiable();
+          if (end >= length) end = length - BigInt(1);
+        }
+        const body = wav.subarray(Number(start), Number(end) + 1);
+        return route.fulfill({
+          status: 206,
+          contentType: 'audio/wav',
+          headers: {
+            ...mediaHeaders,
+            'content-length': String(body.length),
+            'content-range': `bytes ${start}-${end}/${wav.length}`,
+          },
+          body,
+        });
       }
       if (method === 'HEAD') return route.fulfill({ status: 200, contentType: 'application/json', headers, body: '' });
       if (failFirstMetadata && metadataRequests++ === 0) {

@@ -143,34 +143,39 @@ const SidebarLayout = ({ children }: SidebarLayoutProps) => {
   const renderNavItem = useCallback(
     (item: NavItem) => (
       <ListItem key={item.path} disablePadding>
-        <Link href={item.path} passHref style={{ width: '100%', textDecoration: 'none' }}>
-          <ListItemButton
-            selected={isActivePath(item.path)}
-            onClick={closeDrawerIfMobile}
-            sx={{
-              py: 0.5,
-              minHeight: 36,
-              '&.Mui-selected': {
-                '& .MuiListItemIcon-root': {
-                  color: 'primary.main',
-                },
-                '& .MuiListItemText-primary': {
-                  color: 'text.primary',
-                  fontWeight: 600,
-                },
+        <ListItemButton
+          component={Link}
+          href={item.path}
+          aria-label={item.label}
+          selected={isActivePath(item.path)}
+          onClick={closeDrawerIfMobile}
+          sx={{
+            width: '100%',
+            textDecoration: 'none',
+            py: 0.5,
+            minHeight: 36,
+            '&.Mui-selected': {
+              '& .MuiListItemIcon-root': {
+                color: 'primary.main',
               },
+              '& .MuiListItemText-primary': {
+                color: 'text.primary',
+                fontWeight: 600,
+              },
+            },
+          }}
+        >
+          <ListItemIcon aria-hidden="true" sx={{ minWidth: 36 }}>
+            {item.icon}
+          </ListItemIcon>
+          <ListItemText
+            primary={item.label}
+            primaryTypographyProps={{
+              fontSize: '0.85rem',
+              fontWeight: 500,
             }}
-          >
-            <ListItemIcon sx={{ minWidth: 36 }}>{item.icon}</ListItemIcon>
-            <ListItemText
-              primary={item.label}
-              primaryTypographyProps={{
-                fontSize: '0.85rem',
-                fontWeight: 500,
-              }}
-            />
-          </ListItemButton>
-        </Link>
+          />
+        </ListItemButton>
       </ListItem>
     ),
     [isActivePath, closeDrawerIfMobile]
@@ -245,56 +250,57 @@ const SidebarLayout = ({ children }: SidebarLayoutProps) => {
 
       {/* Upload Sermon - Primary Action */}
       <Box sx={{ px: 0.5, pt: 1 }}>
-        <Link href="/" passHref style={{ width: '100%', textDecoration: 'none' }}>
-          <ListItemButton
-            selected={isActivePath('/')}
-            onClick={() => sidebarCollapsed && setMobileOpen(false)}
-            sx={{
-              background: isActivePath('/')
-                ? `linear-gradient(135deg, ${alpha(muiTheme.palette.primary.main, 0.2)} 0%, ${alpha(
-                    muiTheme.palette.primary.light,
-                    0.15
-                  )} 100%)`
-                : `linear-gradient(135deg, ${alpha(muiTheme.palette.primary.main, 0.1)} 0%, ${alpha(
-                    muiTheme.palette.primary.light,
-                    0.05
-                  )} 100%)`,
-              border: '1px solid',
-              borderColor: isActivePath('/') ? 'primary.main' : alpha(muiTheme.palette.primary.main, 0.2),
-              borderRadius: 1.5,
-              mx: 0.5,
-              py: 0.75,
-              '&:hover': {
-                background: `linear-gradient(135deg, ${alpha(muiTheme.palette.primary.main, 0.2)} 0%, ${alpha(
+        <ListItemButton
+          component={Link}
+          href="/"
+          aria-label="Upload Sermon"
+          selected={isActivePath('/')}
+          onClick={closeDrawerIfMobile}
+          sx={{
+            background: isActivePath('/')
+              ? `linear-gradient(135deg, ${alpha(muiTheme.palette.primary.main, 0.2)} 0%, ${alpha(
                   muiTheme.palette.primary.light,
                   0.15
+                )} 100%)`
+              : `linear-gradient(135deg, ${alpha(muiTheme.palette.primary.main, 0.1)} 0%, ${alpha(
+                  muiTheme.palette.primary.light,
+                  0.05
                 )} 100%)`,
-                borderColor: 'primary.main',
+            border: '1px solid',
+            borderColor: isActivePath('/') ? 'primary.main' : alpha(muiTheme.palette.primary.main, 0.2),
+            borderRadius: 1.5,
+            mx: 0.5,
+            py: 0.75,
+            '&:hover': {
+              background: `linear-gradient(135deg, ${alpha(muiTheme.palette.primary.main, 0.2)} 0%, ${alpha(
+                muiTheme.palette.primary.light,
+                0.15
+              )} 100%)`,
+              borderColor: 'primary.main',
+            },
+            '&.Mui-selected': {
+              '& .MuiListItemIcon-root': {
+                color: 'primary.main',
               },
-              '&.Mui-selected': {
-                '& .MuiListItemIcon-root': {
-                  color: 'primary.main',
-                },
-                '& .MuiListItemText-primary': {
-                  color: 'primary.main',
-                  fontWeight: 600,
-                },
-              },
-            }}
-          >
-            <ListItemIcon sx={{ color: isActivePath('/') ? 'primary.main' : 'primary.light' }}>
-              <CloudUploadIcon />
-            </ListItemIcon>
-            <ListItemText
-              primary="Upload Sermon"
-              primaryTypographyProps={{
-                fontSize: '0.9rem',
+              '& .MuiListItemText-primary': {
+                color: 'primary.main',
                 fontWeight: 600,
-                color: isActivePath('/') ? 'primary.main' : 'text.primary',
-              }}
-            />
-          </ListItemButton>
-        </Link>
+              },
+            },
+          }}
+        >
+          <ListItemIcon aria-hidden="true" sx={{ color: isActivePath('/') ? 'primary.main' : 'primary.light' }}>
+            <CloudUploadIcon />
+          </ListItemIcon>
+          <ListItemText
+            primary="Upload Sermon"
+            primaryTypographyProps={{
+              fontSize: '0.9rem',
+              fontWeight: 600,
+              color: isActivePath('/') ? 'primary.main' : 'text.primary',
+            }}
+          />
+        </ListItemButton>
       </Box>
 
       <Divider sx={{ mx: 1.5, my: 1 }} />

@@ -370,6 +370,8 @@ test.describe('Bounded optional waveform lifetime', () => {
     });
     const activityLink = page.getByRole('link', { name: 'Activity', exact: true });
     if (!(await activityLink.isVisible())) await page.getByRole('button', { name: 'open drawer', exact: true }).click();
+    await expect(activityLink).toHaveCount(1);
+    await expect(activityLink).toBeVisible();
     await activityLink.click();
     await expect(page.getByRole('heading', { name: 'Activity', exact: true })).toBeVisible();
     expect(

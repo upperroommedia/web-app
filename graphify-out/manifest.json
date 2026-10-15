@@ -735,8 +735,8 @@
     "semantic_hash": ""
   },
   "apps/web/layout/SidebarLayout.tsx": {
-    "mtime": 1791961998.266329,
-    "ast_hash": "6ba93e38f5ba4e05480dfa72d1be7589",
+    "mtime": 1792024634.3299387,
+    "ast_hash": "96ea39024a6cbc237a9f45b792dabac6",
     "semantic_hash": ""
   },
   "apps/web/loader.js": {
@@ -920,13 +920,13 @@
     "semantic_hash": ""
   },
   "apps/web/tests/audio-player.spec.ts": {
-    "mtime": 1792019980.5554168,
-    "ast_hash": "86b22f5c3d9fdda6a3d1282fad673b6c",
+    "mtime": 1792024479.7365856,
+    "ast_hash": "b4bc175a8e0155be9eaa87f1b33d682a",
     "semantic_hash": ""
   },
   "apps/web/tests/audio-trimmer.spec.ts": {
-    "mtime": 1792020197.7227798,
-    "ast_hash": "1c2ca33308a4e4d35de8f69ec68804dd",
+    "mtime": 1792024718.6502643,
+    "ast_hash": "8ba21bdf82b1e01c1a3e0b11efdc5a4f",
     "semantic_hash": ""
   },
   "apps/web/tests/helpers/seedPlayableSermon.ts": {
@@ -8010,13 +8010,13 @@
     "semantic_hash": ""
   },
   "apps/web/tests/helpers/ownedAudioFixture.ts": {
-    "mtime": 1792020386.841006,
-    "ast_hash": "78451f8c42ff8dc24979eb562fa681e6",
+    "mtime": 1792024613.4597566,
+    "ast_hash": "f9d65c77a4df664965e467888d387427",
     "semantic_hash": ""
   },
   "apps/web/tests/utils/mediaBackendFixture.test.ts": {
-    "mtime": 1792022675.3437,
-    "ast_hash": "37dc31dcc2d13cbc17ffd51004dc75d0",
+    "mtime": 1792024613.509101,
+    "ast_hash": "c4224ac42d12d7209f10db8994351590",
     "semantic_hash": ""
   },
   "apps/web/utils/uploaderCatalog.test.ts": {
@@ -8032,6 +8032,11 @@
   "apps/web/tests/helpers/mediaFixtureIdentity.ts": {
     "mtime": 1792022634.0770347,
     "ast_hash": "12c1a618b4bf6c6bfa2b5b9280e4f045",
+    "semantic_hash": ""
+  },
+  "apps/web/utils/sidebarNavigation.render.test.tsx": {
+    "mtime": 1792024634.349345,
+    "ast_hash": "ab0944e59cff675076fa38b8b6fd7cfc",
     "semantic_hash": ""
   }
 }
