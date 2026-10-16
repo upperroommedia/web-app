@@ -2,7 +2,7 @@ import { assertSynchronousProviderMutationCompleted } from './providerMutationCo
 import { preparePublishingAllocationReplacement } from './allocationBarrier';
 import axios from '../../providerSandbox/http';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
-import { getDownloadURL } from 'firebase-admin/storage';
+import { readFirebaseDownloadUrl } from '../../storageDownloadUrl';
 import { FieldValue, type Transaction } from 'firebase-admin/firestore';
 import { isSubsplashAudioPlayable, isSoundCloudTrackEncoded } from './providerReadiness';
 import { executeProviderCreate, providerReceiptId } from './providerReceipts';
@@ -108,7 +108,7 @@ export async function replacePublishedSubsplashAudio(
       tx.set(ledger, { oldSubsplashAudioId: previousAudioId }, { merge: true });
     });
     await store.leaseAudio(ref, intent.sermonId, path);
-    const audioUrl = await getDownloadURL(firebaseAdmin.storage().bucket().file(path));
+    const audioUrl = await readFirebaseDownloadUrl(firebaseAdmin.storage().bucket().file(path));
     const title = (intent.payload.sermon as Sermon).title;
     const payload = { audioTitle: title, audioUrl, sourcePath: path };
     const op = operationKey(ref, intent);

@@ -10,8 +10,8 @@ jest.mock('@upperroom/shared/firebase/firebaseAdmin', () => ({
     storage: jest.fn(),
   },
 }));
-jest.mock('firebase-admin/storage', () => ({
-  getDownloadURL: jest.fn().mockResolvedValue('https://trusted.invalid/audio'),
+jest.mock('../../storageDownloadUrl', () => ({
+  readFirebaseDownloadUrl: jest.fn().mockResolvedValue('https://trusted.invalid/audio'),
 }));
 jest.mock('axios', () => ({ __esModule: true, default: Object.assign(jest.fn(), { get: jest.fn() }) }));
 jest.mock('../../subsplashUtils', () => ({

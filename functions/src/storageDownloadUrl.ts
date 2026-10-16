@@ -12,16 +12,22 @@ const getExistingDownloadToken = (fileMetadata: StorageObjectMetadata): string |
     return null;
   }
 
-  return rawTokens
-    .split(',')
-    .map((token: string) => token.trim())
-    .find((token: string) => token.length > 0) ?? null;
+  return (
+    rawTokens
+      .split(',')
+      .map((token: string) => token.trim())
+      .find((token: string) => token.length > 0) ?? null
+  );
 };
 
-const buildEmulatorDownloadUrl = (bucketName: string, objectPath: string, token: string, emulatorHost: string): string => {
-  const normalizedHost = emulatorHost.startsWith('http://') || emulatorHost.startsWith('https://')
-    ? emulatorHost
-    : `http://${emulatorHost}`;
+const buildEmulatorDownloadUrl = (
+  bucketName: string,
+  objectPath: string,
+  token: string,
+  emulatorHost: string
+): string => {
+  const normalizedHost =
+    emulatorHost.startsWith('http://') || emulatorHost.startsWith('https://') ? emulatorHost : `http://${emulatorHost}`;
   const url = new URL(`/v0/b/${encodeURIComponent(bucketName)}/o/${encodeURIComponent(objectPath)}`, normalizedHost);
   url.searchParams.set('alt', 'media');
   url.searchParams.set('token', token);
@@ -35,6 +41,20 @@ const buildStorageDownloadUrl = (bucketName: string, objectPath: string, token: 
   }
 
   return buildFirebaseStorageDownloadUrl(bucketName, objectPath, token);
+};
+
+/** Read an already-published object's URL using its bucket-scoped GCS permission.
+ * Unlike ensureFirebaseDownloadUrl, publishing must not mint or rotate source tokens.
+ */
+export const readFirebaseDownloadUrl = async (file: File): Promise<string> => {
+  const [fileMetadata] = await file.getMetadata();
+  const token = getExistingDownloadToken(fileMetadata as StorageObjectMetadata);
+  if (!token) {
+    throw Object.assign(new Error('The source audio has no existing download token.'), {
+      code: 'PUBLISHING_SOURCE_DOWNLOAD_TOKEN_MISSING',
+    });
+  }
+  return buildStorageDownloadUrl(file.bucket.name, file.name, token);
 };
 
 export const ensureFirebaseDownloadUrl = async (file: File): Promise<string> => {

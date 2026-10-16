@@ -150,7 +150,9 @@ import { editSubsplashSermonDomain } from '../../editSubsplashSermon';
 import { editSoundCloudSermonDomain } from '../../editSoundCloudSermon';
 import { beginProviderMutationPlan, prepareAcknowledgedProjectionPlan } from './durableOperationContext';
 import { providerReceiptId } from './providerReceipts';
-jest.mock('firebase-admin/storage', () => ({ getDownloadURL: jest.fn(async () => 'https://synthetic.invalid/audio') }));
+jest.mock('../../storageDownloadUrl', () => ({
+  readFirebaseDownloadUrl: jest.fn(async () => 'https://synthetic.invalid/audio'),
+}));
 const ref = { projectId: 'project', jobId: 'list-job' },
   editRef = { projectId: 'project', jobId: 'edit-job' };
 function source() {

@@ -105,6 +105,10 @@ Manual renewal follows this sequence:
 
 Each role imports the shared runtime before constructing its selected activity factory. Create the namespaced Kubernetes Secret `temporal-worker-ROLE-runtime` for every enabled role, including an empty Secret for a role with no additional settings. The renderer uses that exact Secret through `envFrom`; it does not populate provider values. The role is one of `orchestration`, `controls`, `media`, `email`, `images`, or an explicitly enabled `search`. Supply credentials only to the role that consumes them. All roles on the selected VM share its attached GCP identity; separate runtime Secrets do not create separate GCP IAM identities.
 
+The orchestration role invokes the publishing domain's operational alerts. Its runtime Secret must also include the same project's `RUNTIME_ALERT_RECIPIENTS` and `ADMIN_BASE_URL` configuration; Cloud Functions secret declarations do not inject those values into workers. Copy the approved values through the operator's secret provisioning path without printing them. Staging still queues these notifications into the private email capture transport, never SMTP. Verify an actual captured alert before declaring the notification path ready.
+
+Publishing reads existing audio download tokens through GCS object metadata using the bucket-scoped object permission above. It does not call the separate Firebase metadata endpoint, mint source tokens, change Storage rules, or require a broader project role. Missing source tokens stop publishing for review.
+
 The common runtime configuration is:
 
 | Setting                                                                         | Required value or source                                                                                                 |
