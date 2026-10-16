@@ -23,6 +23,9 @@ import {
   validateReplay,
   parseArgs,
   recover,
+  boundedRecoveryObservation,
+  assertBoundedRecoveryIntent,
+  RECOVERY_INTENT_MAX_BYTES,
 } from './temporal-recover-pinned-search.mjs';
 import { nativeSnapshotProof, proofDigest } from './temporal-release-runtime.mjs';
 const S = 'a'.repeat(40),
@@ -377,12 +380,14 @@ function fixture(t) {
           'createdAt',
         ].map((k) => [k, a.job[k]])
       ),
-      intentDigest: 'intent',
-      entityDigest: 'entity',
+      intentDigest: 'c'.repeat(64),
+      entityDigest: 'e'.repeat(64),
       heads: [h],
       drains: [drain(h)],
       history: { events: [] },
       historySha256: replay.historySha256,
+      historyBytes: Buffer.byteLength(JSON.stringify({ events: [] })),
+      jobRevision: a.job.revision,
     };
   let current = structuredClone(observation),
     calls = 0,
@@ -665,4 +670,75 @@ test('report-only final transaction refuses changed original audit and newer can
     assert.equal(f.values.has('_control/temporalPinnedSearchRecovery-' + first.auditId + '-reported'), false);
     assert.equal(f.calls(), 1);
   }
+});
+
+function largeHistoryFixture(t) {
+  const f = fixture(t);
+  f.observation.history = {
+    events: Array.from({ length: 2540 }, (_, i) => ({ eventId: String(i + 1), fixturePayload: 'x'.repeat(720) })),
+  };
+  const encoded = JSON.stringify(f.observation.history);
+  f.observation.historySha256 = hash(encoded);
+  f.observation.historyBytes = Buffer.byteLength(encoded);
+  f.replay.historySha256 = f.observation.historySha256;
+  writeFileSync(f.entry.replay.path, JSON.stringify(f.replay));
+  f.entry.replay.sha256 = hash(readFileSync(f.entry.replay.path));
+  const m = JSON.parse(readFileSync(f.manifestPath));
+  m.runs = [f.entry];
+  writeFileSync(f.manifestPath, JSON.stringify(m));
+  f.plan.manifestSha256 = hash(readFileSync(f.manifestPath));
+  writeFileSync(f.args['--plan'], JSON.stringify(f.plan));
+  f.args['--plan-sha'] = hash(readFileSync(f.args['--plan']));
+  f.setObservation(structuredClone(f.observation));
+  return f;
+}
+test('default override records a bounded honest summary of a >1MiB 2540-event history before one native call', async (t) => {
+  const f = largeHistoryFixture(t);
+  assert.ok(Buffer.byteLength(JSON.stringify(f.observation)) > 1024 * 1024);
+  const result = await recover(f.args, f.deps);
+  const audit = f.values.get('_control/temporalPinnedSearchRecovery-' + result.auditId);
+  assert.ok(Buffer.byteLength(JSON.stringify(audit)) <= RECOVERY_INTENT_MAX_BYTES);
+  assert.deepEqual(audit.before, boundedRecoveryObservation(f.observation));
+  assert.equal(audit.before.historyEventCount, 2540);
+  assert.equal(audit.before.historyBytes, f.observation.historyBytes);
+  assert.equal(audit.before.observationDigest, proofDigest(f.observation));
+  for (const key of ['history', 'heads', 'drains', 'pendingActivities']) assert.equal(key in audit.before, false);
+  assert.equal(audit.planSha256, f.args['--plan-sha']);
+  assert.equal(f.calls(), 1);
+  assert.equal(f.values.has('_control/temporalReleaseOperation'), false);
+});
+test('whole intent overflow rejects before audit/operation writes or native call, never truncates', async (t) => {
+  const f = largeHistoryFixture(t);
+  f.deps.operator = { oversized: 'x'.repeat(RECOVERY_INTENT_MAX_BYTES) };
+  const before = structuredClone([...f.values.entries()]);
+  await assert.rejects(recover(f.args, f.deps), /RECOVERY_INTENT_TOO_LARGE/);
+  assert.deepEqual([...f.values.entries()], before);
+  assert.equal(f.calls(), 0);
+  assert.throws(
+    () => assertBoundedRecoveryIntent({ x: 'x'.repeat(RECOVERY_INTENT_MAX_BYTES) }),
+    /RECOVERY_INTENT_TOO_LARGE/
+  );
+});
+test('summary rejects missing native history size/digest and still bounds oversized identities', () => {
+  const o = {
+    history: { events: [] },
+    historyBytes: 13,
+    historySha256: 'a'.repeat(64),
+    jobIdentity: { jobId: 'x' },
+    jobRevision: 1,
+    intentDigest: 'b'.repeat(64),
+    entityDigest: 'c'.repeat(64),
+  };
+  assert.throws(
+    () => boundedRecoveryObservation({ ...o, historyBytes: undefined }),
+    /NATIVE_HISTORY_SIZE_AND_DIGEST_REQUIRED/
+  );
+  assert.throws(
+    () => boundedRecoveryObservation({ ...o, historySha256: 'unknown' }),
+    /NATIVE_HISTORY_SIZE_AND_DIGEST_REQUIRED/
+  );
+  assert.throws(
+    () => boundedRecoveryObservation({ ...o, jobIdentity: { oversized: 'x'.repeat(RECOVERY_INTENT_MAX_BYTES) } }),
+    /RECOVERY_INTENT_TOO_LARGE/
+  );
 });
