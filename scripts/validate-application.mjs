@@ -117,6 +117,20 @@ export function applicationStages(root = ROOT) {
           '../firebase.test.json',
           'node ../scripts/tests/temporal-bundle-bootstrap-recovery.firestore.test.mjs'
         ),
+        pnpm(
+          '--dir',
+          'functions',
+          'exec',
+          'firebase',
+          'emulators:exec',
+          '--project',
+          'demo-pinned-search-audit',
+          '--only',
+          'auth,firestore,database,storage',
+          '--config',
+          '../firebase.test.json',
+          'node --test ../scripts/integration/temporal-pinned-search-audit.firestore.integration.mjs'
+        ),
       ],
       { RELEASE_RUNTIME_TEST_ROOT: root, BUNDLE_RECOVERY_TEST_RUNTIME_ROOT: root }
     ),

@@ -52,6 +52,79 @@ function json(file, expected) {
 function output(file, value) {
   writeFileSync(file, JSON.stringify(canonical(value), null, 2) + '\n', { flag: 'wx', mode: 0o600 });
 }
+
+export const ORIGINAL_PARENT_PLAN_SHA256 = 'e65cf385824b100adb7dcfa422db31a12505c556a8e0d515e782e74fdc588537';
+export const ORIGINAL_PARENT_RUNS = Object.freeze(
+  [
+    {
+      workflowId: 'search:urm-app-staging:job-29aa6072f401d2f87137226c1d7ecb723e8a78662ffb75a0',
+      runId: '01a14238-6867-724c-bd9f-4a2fa321de38',
+      jobId: 'job-29aa6072f401d2f87137226c1d7ecb723e8a78662ffb75a0',
+    },
+    {
+      workflowId: 'search:urm-app-staging:job-bfd970da7f7a77d3785f67be3e1cd7fa97602c27399828b1',
+      runId: '01a14238-59aa-7060-89cc-baf9fa74847f',
+      jobId: 'job-bfd970da7f7a77d3785f67be3e1cd7fa97602c27399828b1',
+    },
+    {
+      workflowId: 'search:urm-app-staging:job-edeb56a70e8fa9b79d57af814c34b1801f26c74a1200dc87',
+      runId: '01a14238-5083-7517-9efe-921f760b908e',
+      jobId: 'job-edeb56a70e8fa9b79d57af814c34b1801f26c74a1200dc87',
+    },
+    {
+      workflowId: 'search:urm-app-staging:job-f5a6aa570f4b5384bf38af6d0d62fa838016f1caea4b2977',
+      runId: '01a14238-5100-7401-a9d9-a8796f24ed04',
+      jobId: 'job-f5a6aa570f4b5384bf38af6d0d62fa838016f1caea4b2977',
+    },
+  ].map(Object.freeze)
+);
+export const RECOVERY_INTENT_MAX_BYTES = 64 * 1024;
+export function assertPinnedParentRequest(o) {
+  need(
+    o.action === 'override' &&
+      o.apply === true &&
+      o['--plan-sha'] === ORIGINAL_PARENT_PLAN_SHA256 &&
+      ORIGINAL_PARENT_RUNS.some((r) => r.workflowId === o['--workflow-id'] && r.runId === o['--run-id']),
+    'EXACT_FOUR_ORIGINAL_PARENT_OVERRIDE_REQUIRED'
+  );
+}
+export function boundedRecoveryObservation(observation) {
+  need(
+    observation.jobIdentity &&
+      typeof observation.jobIdentity === 'object' &&
+      Number.isSafeInteger(observation.jobRevision) &&
+      observation.jobRevision > 0 &&
+      /^[a-f0-9]{64}$/.test(observation.intentDigest ?? '') &&
+      /^[a-f0-9]{64}$/.test(observation.entityDigest ?? '') &&
+      Array.isArray(observation.history?.events) &&
+      Number.isSafeInteger(observation.historyBytes) &&
+      observation.historyBytes > 0 &&
+      typeof observation.historySha256 === 'string' &&
+      /^[a-f0-9]{64}$/.test(observation.historySha256),
+    'NATIVE_HISTORY_SIZE_AND_DIGEST_REQUIRED'
+  );
+  const summary = canonical({
+    schemaVersion: 1,
+    scope: 'bounded-native-observation-summary',
+    jobIdentity: observation.jobIdentity,
+    jobRevision: observation.jobRevision,
+    intentDigest: observation.intentDigest,
+    entityDigest: observation.entityDigest,
+    historySha256: observation.historySha256,
+    historyBytes: observation.historyBytes,
+    historyEventCount: observation.history.events.length,
+    observationDigest: proofDigest(observation),
+  });
+  need(Buffer.byteLength(JSON.stringify(summary), 'utf8') <= RECOVERY_INTENT_MAX_BYTES, 'RECOVERY_INTENT_TOO_LARGE');
+  return summary;
+}
+export function assertBoundedRecoveryIntent(intent) {
+  need(
+    Buffer.byteLength(JSON.stringify(canonical(intent)), 'utf8') <= RECOVERY_INTENT_MAX_BYTES,
+    'RECOVERY_INTENT_TOO_LARGE'
+  );
+  return intent;
+}
 export function validateDescriptors(old, target, config) {
   validateReleaseConfig(old);
   validateReleaseConfig(target);
@@ -384,8 +457,16 @@ export function parseArgs(args) {
   if (action === 'report') need(uuid(o['--audit-id']), 'EXACT_AUDIT_REQUIRED');
   return o;
 }
-export async function createPinnedSearchRecoveryDependencies(o, { originOperatorRoot, reportOnly = false } = {}) {
-  need(!originOperatorRoot || reportOnly, 'ORIGIN_OPERATOR_OVERRIDE_REPORT_ONLY');
+export async function createPinnedSearchRecoveryDependencies(
+  o,
+  { originOperatorRoot, reportOnly = false, parentOverrideOnly = false } = {}
+) {
+  need(!reportOnly || !parentOverrideOnly, 'CONFLICTING_RECOVERY_CAPABILITIES');
+  need(!originOperatorRoot || reportOnly || parentOverrideOnly, 'ORIGIN_OPERATOR_OVERRIDE_REPORT_ONLY');
+  if (parentOverrideOnly) {
+    assertPinnedParentRequest(o);
+    json(o['--plan'], ORIGINAL_PARENT_PLAN_SHA256);
+  }
   need(!reportOnly || o.action === 'report', 'REPORT_ONLY_ACTION_REQUIRED');
   const root = realpathSync(originOperatorRoot ?? resolve(dirname(fileURLToPath(import.meta.url)), '..'));
   const oldBytes = bytes(o['--old-release']),
@@ -590,6 +671,7 @@ export async function createPinnedSearchRecoveryDependencies(o, { originOperator
         drains: ds.docs.map((d) => d.data()),
         history: JSON.parse(rawHistory),
         historySha256: sha(rawHistory),
+        historyBytes: Buffer.byteLength(rawHistory, 'utf8'),
       };
     };
     return {
@@ -628,7 +710,18 @@ export async function createPinnedSearchRecoveryDependencies(o, { originOperator
     throw error;
   }
 }
-export async function recover(o, deps, reportOptions = {}) {
+export async function recover(o, deps, reportOptions = {}, overrideOptions = {}) {
+  need(
+    Object.keys(overrideOptions).every((k) => k === 'nativeOperatorBinding'),
+    'UNKNOWN_OVERRIDE_OPTION'
+  );
+  if (Object.keys(overrideOptions).length) {
+    need(
+      o.action === 'override' && overrideOptions.nativeOperatorBinding && !Object.keys(reportOptions).length,
+      'OVERRIDE_OPTIONS_REQUIRE_OVERRIDE_ACTION'
+    );
+    assertPinnedParentRequest(o);
+  }
   need(
     Object.keys(reportOptions).every((k) => ['proveMigration', 'operatorBinding'].includes(k)),
     'UNKNOWN_REPORT_OPTION'
@@ -697,6 +790,17 @@ export async function recover(o, deps, reportOptions = {}) {
     row && (o.action !== 'report' || existing?.get('planSha256') === o['--plan-sha']),
     'EXACT_REVIEWED_RUN_OR_AUDIT_REQUIRED'
   );
+  if (overrideOptions.nativeOperatorBinding)
+    need(
+      row.workflowType === 'SearchBackfill' &&
+        same(
+          reviewedManifest.runs
+            .filter((r) => r.workflowType === 'SearchBackfill')
+            .map(({ workflowId, runId, jobId }) => ({ workflowId, runId, jobId })),
+          ORIGINAL_PARENT_RUNS
+        ),
+      'EXACT_ORIGINAL_PARENT_MANIFEST_REQUIRED'
+    );
   if (existing) {
     const native = nativeSnapshotProof(existing);
     need(same(native.createTime, native.updateTime), 'RECOVERY_INTENT_WAS_MODIFIED');
@@ -842,7 +946,7 @@ export async function recover(o, deps, reportOptions = {}) {
       !operation.exists && same(identity(job.data()), row.observation.jobIdentity),
       'AUTHORITY_OR_JOB_CHANGED_BEFORE_INTENT'
     );
-    tx.create(ref, {
+    const audit = assertBoundedRecoveryIntent({
       action: ACTION,
       planSha256: o['--plan-sha'],
       workflowId: row.workflowId,
@@ -851,10 +955,14 @@ export async function recover(o, deps, reportOptions = {}) {
       targetCommit: deps.config.workerBuildId,
       targetImage: deps.config.workerImage,
       args,
-      before: canonical(observation),
+      before: boundedRecoveryObservation(observation),
+      ...(overrideOptions.nativeOperatorBinding
+        ? { nativeOperatorBinding: overrideOptions.nativeOperatorBinding }
+        : {}),
       operator: deps.operator,
       createdAt: deps.stamp(),
     });
+    tx.create(ref, audit);
     tx.create(lock, {
       action: ACTION,
       operationId: auditId,
