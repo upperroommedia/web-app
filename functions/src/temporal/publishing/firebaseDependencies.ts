@@ -50,7 +50,7 @@ import {
   runDurableTransaction,
 } from './durableOperationContext';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
-import { getDownloadURL } from 'firebase-admin/storage';
+import { readFirebaseDownloadUrl } from '../../storageDownloadUrl';
 import { FieldValue, type Transaction } from 'firebase-admin/firestore';
 import { HttpsError } from 'firebase-functions/v2/https';
 import type { CallableRequest } from 'firebase-functions/v2/https';
@@ -222,7 +222,7 @@ export function createFirebasePublishingDependencies(store: Store): PublishingDo
       await authorizedRequest(intent, {});
       const { source: allocationSource, audioPath } = await publishingAllocationInput(ref, intent, sermon);
       await store.leaseAudio(ref, intent.sermonId, audioPath);
-      const audioUrl = await getDownloadURL(firebaseAdmin.storage().bucket().file(audioPath));
+      const audioUrl = await readFirebaseDownloadUrl(firebaseAdmin.storage().bucket().file(audioPath));
       const result = (await uploadToSubsplashDomain(
         {
           operationKey: key(ref, `${intent.sermonId}:subsplash-create`),
