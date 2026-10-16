@@ -595,3 +595,57 @@ test('failed production compilation leaves no completed artifact receipt and is 
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test('Firebase test preload disables actual metadata discovery before SDK import without network probes', async () => {
+  const { spawnSync } = await import('node:child_process');
+  const { createRequire } = await import('node:module');
+  const { fileURLToPath } = await import('node:url');
+  const functionsRequire = createRequire(new URL('../../functions/package.json', import.meta.url));
+  const adminRequire = createRequire(functionsRequire.resolve('firebase-admin/app'));
+  const authRequire = createRequire(adminRequire.resolve('google-auth-library'));
+  const metadataPath = authRequire.resolve('gcp-metadata');
+  const preload = fileURLToPath(new URL('../firebase-test-isolation.cjs', import.meta.url));
+  const emulatorNames = [
+    'FIRESTORE_EMULATOR_HOST',
+    'FIREBASE_AUTH_EMULATOR_HOST',
+    'FIREBASE_DATABASE_EMULATOR_HOST',
+    'FIREBASE_STORAGE_EMULATOR_HOST',
+  ];
+  const program = `
+    const assert = require('node:assert/strict');
+    assert.equal(process.env.METADATA_SERVER_DETECTION, 'none');
+    let requests = 0;
+    for (const name of ['node:http', 'node:https']) require(name).request = () => {
+      requests++; throw new Error('Metadata network probe forbidden');
+    };
+    globalThis.fetch = async () => {requests++; throw new Error('Metadata fetch forbidden');};
+    // Import the installed SDK only after the real preload's environment check.
+    require(${JSON.stringify(metadataPath)}).isAvailable().then(available => {
+      assert.equal(available, false); assert.equal(requests, 0);
+      console.log(JSON.stringify({available, requests, mode: process.env.METADATA_SERVER_DETECTION}));
+    }).catch(() => {process.exitCode = 1;});
+  `;
+  for (const endpoints of [{}, Object.fromEntries(emulatorNames.map((name) => [name, '127.0.0.1:18081']))]) {
+    const child = spawnSync(process.execPath, ['--require', preload, '-e', program], {
+      encoding: 'utf8',
+      timeout: 10000,
+      maxBuffer: 65536,
+      env: { PATH: process.env.PATH, METADATA_SERVER_DETECTION: 'assume-present', ...endpoints },
+    });
+    assert.equal(child.error, undefined);
+    assert.equal(child.status, 0, child.stderr);
+    assert.deepEqual(JSON.parse(child.stdout), { available: false, requests: 0, mode: 'none' });
+  }
+  for (const name of emulatorNames) {
+    const child = spawnSync(process.execPath, ['--require', preload, '-e', "console.log('SDK_DISCOVERY_REACHED')"], {
+      encoding: 'utf8',
+      timeout: 10000,
+      maxBuffer: 65536,
+      env: { PATH: process.env.PATH, METADATA_SERVER_DETECTION: 'assume-present', [name]: 'production.example:443' },
+    });
+    assert.equal(child.error, undefined);
+    assert.notEqual(child.status, 0);
+    assert.match(child.stderr, /Refusing non-loopback Firebase test endpoint/);
+    assert.equal(child.stdout, '');
+  }
+});

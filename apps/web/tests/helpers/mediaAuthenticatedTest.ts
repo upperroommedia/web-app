@@ -36,7 +36,10 @@ export const mediaAuthenticatedTest = base.extend<{}, { mediaWorkerStorageState:
         const page = await context.newPage();
         await installMediaBackendFixtures(page);
         await loginAsMediaBrowserAdmin(page, '/');
-        await expect(page.getByRole('switch', { name: 'Upload from Youtube Url', exact: true })).toBeVisible();
+        // Readiness shares the worker fixture's bounded 30s login budget.
+        await expect(page.getByRole('switch', { name: 'Upload from Youtube Url', exact: true })).toBeVisible({
+          timeout: 0,
+        });
         state = withoutMediaCatalogCache(await context.storageState({ indexedDB: true }));
         authenticated = true;
         console.info(`[media-auth] real UI login completed in ${Math.round(performance.now() - started)}ms`);
