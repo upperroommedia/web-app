@@ -1,8 +1,17 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { Context, heartbeat } from '@temporalio/activity';
 import { ApplicationFailure } from '@temporalio/common';
-import { FieldPath, type Firestore } from 'firebase-admin/firestore';
-import { algoliasearch } from 'algoliasearch';
+import { FieldPath, type Firestore, type Transaction } from 'firebase-admin/firestore';
+import { createSearchProviderSession, classifyProviderError, SearchProviderError } from './provider-session';
+import {
+  searchDigest,
+  sourceVersion,
+  readSearchTask,
+  readConfirmedSearchSave,
+  singleSearchTaskId,
+  type SearchTaskReceipt,
+  type ConfirmedSearchSave,
+} from './checkpoint';
 import type { DurableJobRef } from '../../../../../packages/contracts/temporal';
 import { converge } from '../../../../../function-kits/firestore-algolia-search/src/sync';
 import {
@@ -25,6 +34,7 @@ export interface SearchIntent {
 export interface SearchDependencies {
   firestore: Firestore;
   assertCurrent(ref: DurableJobRef): Promise<void>;
+  assertCurrentInTransaction(tx: Transaction, ref: DurableJobRef): Promise<unknown>;
   loadIntent(ref: DurableJobRef): Promise<{ payload: SearchIntent }>;
   configurations: Record<string, SearchConfig & { writeKey: string }>;
   project(
@@ -68,81 +78,188 @@ export function createSearchActivities(deps: SearchDependencies): SearchActiviti
     return {
       intent: payload,
       config,
-      client: algoliasearch(config.appId, config.writeKey, { timeouts: { connect: 5000, read: 15000, write: 15000 } }),
     };
   }
   return {
     async syncSearchDocument(ref) {
-      const { intent, config, client } = await configuration(ref);
+      const { intent, config } = await configuration(ref);
       if (config.recordPolicy === 'empty-private') {
         await deps.project(ref, { state: 'succeeded' });
         return;
       }
       if (!intent.documentPath)
         throw ApplicationFailure.nonRetryable('Search source is missing', 'SearchSourceInvalid');
+      const targetDigest = searchDigest([
+        ref.projectId,
+        config.appId,
+        config.indexName,
+        intent.instanceId,
+        intent.documentPath,
+        config.collectionPath,
+        config.fields,
+        config.altObjectId,
+        config.transformFunction,
+        config.recordPolicy ?? null,
+      ]);
       const lock = deps.firestore
         .collection('_algoliaSyncLocks')
         .doc(createHash('sha256').update(`${intent.instanceId}:${intent.documentPath}`).digest('hex'));
       const owner = randomUUID();
-      let lastObjectId: string | undefined;
-      let pendingObjectId: string | undefined;
+      let state: Record<string, unknown> = {};
       await deps.firestore.runTransaction(async (tx) => {
-        const saved = (await tx.get(lock)).data();
-        if (saved?.leaseUntil > Date.now())
+        await deps.assertCurrentInTransaction(tx, ref);
+        const saved = (await tx.get(lock)).data() ?? {};
+        if (saved.leaseUntil > Date.now())
           throw ApplicationFailure.retryable('Search document is already being synchronized', 'SearchLeaseBusy');
-        lastObjectId = saved?.lastObjectId;
-        pendingObjectId = saved?.pendingObjectId;
+        state = saved;
         tx.set(lock, { owner, leaseUntil: Date.now() + 600000 }, { merge: true });
       });
       const timer = setInterval(() => heartbeat({ documentPath: intent.documentPath }), 5000);
+      let session: ReturnType<typeof createSearchProviderSession> | undefined;
+      const mutateOwned = async (patch: (saved: Record<string, unknown>) => Record<string, unknown>) => {
+        state = await deps.firestore.runTransaction(async (tx) => {
+          await deps.assertCurrentInTransaction(tx, ref);
+          const saved = (await tx.get(lock)).data() ?? {};
+          if (saved.owner !== owner || !Number.isFinite(saved.leaseUntil) || saved.leaseUntil <= Date.now())
+            throw ApplicationFailure.nonRetryable('Search lease is no longer current', 'SearchLeaseLost');
+          const next = patch(saved);
+          tx.set(lock, next, { merge: true });
+          return { ...saved, ...next };
+        });
+      };
       try {
+        // This session owns all provider I/O for the attempt. The deadline never resets per object/poll.
+        session = createSearchProviderSession({
+          appId: config.appId,
+          writeKey: config.writeKey,
+          cancellation: Context.current().cancellationSignal,
+        });
+        const activeSession = session;
+        const deleted = new Set<string>();
+        const settle = async (receipt: SearchTaskReceipt) => {
+          await authorizeSearch(ref);
+          await activeSession.waitPublished(config.indexName, receipt.taskID);
+          activeSession.check();
+          await mutateOwned((saved) => {
+            const pending = readSearchTask(saved.pendingAlgoliaTask, targetDigest);
+            if (!pending || searchDigest(pending) !== searchDigest(receipt))
+              throw new SearchProviderError('SearchTaskReceiptChanged', true);
+            const next: Record<string, unknown> = { pendingAlgoliaTask: null };
+            if (receipt.action === 'addObject') {
+              next.lastObjectId = receipt.objectId;
+              if (saved.pendingObjectId === receipt.objectId) next.pendingObjectId = null;
+              next.confirmedSearchSave = {
+                schemaVersion: 1,
+                confirmedForJobId: ref.jobId,
+                targetDigest,
+                objectId: receipt.objectId,
+                sourceVersion: receipt.sourceVersion,
+                recordDigest: receipt.recordDigest!,
+              } satisfies ConfirmedSearchSave;
+            } else {
+              if (saved.lastObjectId === receipt.objectId) next.lastObjectId = null;
+              if (saved.pendingObjectId === receipt.objectId) next.pendingObjectId = null;
+              if ((saved.confirmedSearchSave as ConfirmedSearchSave | undefined)?.objectId === receipt.objectId)
+                next.confirmedSearchSave = null;
+            }
+            return next;
+          });
+          if (receipt.action === 'deleteObject') deleted.add(receipt.objectId);
+        };
         await deps.project(ref, { state: Context.current().info.attempt > 1 ? 'retrying' : 'running' });
-        const started = Date.now();
+        const pending = readSearchTask(state.pendingAlgoliaTask, targetDigest);
+        if (pending) await settle(pending); // Never POST again while the previous task's outcome is known but pending.
+        const write = async (
+          action: SearchTaskReceipt['action'],
+          id: string,
+          version: string,
+          record?: Record<string, unknown>
+        ) => {
+          activeSession.check();
+          await authorizeSearch(ref);
+          await mutateOwned((saved) => {
+            if (readSearchTask(saved.pendingAlgoliaTask, targetDigest))
+              throw new SearchProviderError('SearchTaskReceiptChanged', true);
+            // This survives the unavoidable ACK-lost-before-taskID window, preserving old-ID cleanup.
+            return action === 'addObject' ? { pendingObjectId: id } : {};
+          });
+          await authorizeSearch(ref);
+          activeSession.check();
+          const result =
+            action === 'addObject'
+              ? await activeSession.client.saveObjects({
+                  indexName: config.indexName,
+                  objects: [record!],
+                  waitForTasks: false,
+                })
+              : await activeSession.client.deleteObjects({
+                  indexName: config.indexName,
+                  objectIDs: [id],
+                  waitForTasks: false,
+                });
+          const receipt: SearchTaskReceipt = {
+            schemaVersion: 1,
+            targetDigest,
+            action,
+            objectId: id,
+            taskID: singleSearchTaskId(result),
+            sourceVersion: version,
+            requestedByJobId: ref.jobId,
+            ...(record ? { recordDigest: searchDigest(record) } : {}),
+          };
+          // Persist the actual ACK before polling; no taskID guessed from request correlation IDs.
+          await mutateOwned((saved) => {
+            if (readSearchTask(saved.pendingAlgoliaTask, targetDigest))
+              throw new SearchProviderError('SearchTaskReceiptChanged', true);
+            return { pendingAlgoliaTask: receipt };
+          });
+          await settle(receipt);
+        };
         await converge(
           () => deps.firestore.doc(intent.documentPath!).get(),
           async (snapshot) => {
-            Context.current().cancellationSignal.throwIfAborted();
-            if (Date.now() - started > 180000) throw new Error('Search lease budget exhausted');
-            // A bounded lease and shared legacy lock serialize old and new owners during drain.
+            activeSession.check();
+            const version = sourceVersion(snapshot);
             const currentId = snapshot.exists ? objectId(snapshot, config.altObjectId) : undefined;
-            for (const oldId of new Set([lastObjectId, pendingObjectId, intent.previousObjectId])) {
-              if (oldId && oldId !== currentId) {
-                await authorizeSearch(ref);
-                await client.deleteObjects({
-                  indexName: config.indexName,
-                  objectIDs: [oldId],
-                  waitForTasks: true,
-                  maxRetries: 2,
-                });
-              }
+            for (const oldId of new Set([state.lastObjectId, state.pendingObjectId, intent.previousObjectId])) {
+              if (oldId !== undefined && oldId !== null && (typeof oldId !== 'string' || !oldId))
+                throw new SearchProviderError('SearchLockIdentityInvalid', true);
+              if (typeof oldId === 'string' && oldId !== currentId && !deleted.has(oldId))
+                await write('deleteObject', oldId, version);
             }
             if (snapshot.exists) {
               const record = await extract(snapshot, config);
-              await lock.set({ pendingObjectId: currentId }, { merge: true });
-              pendingObjectId = currentId;
-              await authorizeSearch(ref);
-              await client.saveObjects({
-                indexName: config.indexName,
-                objects: [record],
-                waitForTasks: true,
-                maxRetries: 2,
-              });
+              const confirmed = readConfirmedSearchSave(state.confirmedSearchSave, targetDigest);
+              if (
+                !confirmed ||
+                confirmed.confirmedForJobId !== ref.jobId ||
+                confirmed.objectId !== currentId ||
+                confirmed.sourceVersion !== version ||
+                confirmed.recordDigest !== searchDigest(record)
+              )
+                await write('addObject', currentId!, version, record);
             }
-            lastObjectId = currentId;
-            await lock.set({ lastObjectId: currentId ?? null, pendingObjectId: null }, { merge: true });
-            pendingObjectId = undefined;
+            await mutateOwned(() => ({ lastObjectId: currentId ?? null, pendingObjectId: null }));
           }
         );
+        activeSession.check();
         await deps.project(ref, { state: 'succeeded' });
       } catch (error) {
-        if (error instanceof ApplicationFailure && error.type === 'SearchPermissionChanged') throw error;
         if ((error as { code?: string })?.code === 'STALE_GENERATION') {
           await deps.project(ref, { state: 'superseded' });
           return;
         }
         if (Context.current().cancellationSignal.aborted) throw error;
-        throw ApplicationFailure.retryable('Search synchronization could not be confirmed', 'SearchProviderFailure');
+        if (error instanceof ApplicationFailure) throw error;
+        const failure = classifyProviderError(error);
+        throw ApplicationFailure.create({
+          message: 'Search synchronization could not be confirmed',
+          type: failure.code,
+          nonRetryable: failure.nonRetryable,
+        });
       } finally {
+        // No Promise.race: every provider promise settled before close and lock release.
+        session?.close();
         clearInterval(timer);
         await deps.firestore.runTransaction(async (tx) => {
           const saved = (await tx.get(lock)).data();
@@ -152,6 +269,7 @@ export function createSearchActivities(deps: SearchDependencies): SearchActiviti
     },
     async searchBackfillPage(ref, cursor) {
       const { intent, config } = await configuration(ref);
+      await deps.project(ref, { state: Context.current().info.attempt > 1 ? 'retrying' : 'running' });
       const group = /\{[^}]+\}/.test(config.collectionPath);
       let query = (
         group
