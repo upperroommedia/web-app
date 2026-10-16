@@ -978,6 +978,45 @@ function vmConfig(environment = 'staging') {
   };
   return c;
 }
+test('Simple Cloud accepts only the reviewed four/eight CPU shapes and verifies the actual matching machine', () => {
+  for (const machineType of ['e2-standard-4', 'e2-standard-8']) {
+    const c = vmConfig();
+    c.gce.machineType = machineType;
+    assert.equal(validateConfig(c, vmConfig('production')), c);
+    const instance = {
+      id: c.gce.instanceId,
+      name: c.gce.instanceName,
+      status: 'RUNNING',
+      selfLink: `https://compute.googleapis.com/compute/v1/projects/${c.firebaseProjectId}/zones/us-central1-a/instances/${c.gce.instanceName}`,
+      zone: 'zones/us-central1-a',
+      machineType: `machineTypes/${machineType}`,
+      serviceAccounts: [{ email: c.gce.serviceAccount, scopes: [...GCE_FIREBASE_ADC_SCOPES] }],
+      networkInterfaces: [{ networkIP: c.gce.privateIp }],
+    };
+    assert.equal(validateGceInstance(c, instance), instance);
+    const otherMachine = machineType === 'e2-standard-4' ? 'e2-standard-8' : 'e2-standard-4';
+    assert.throws(() => validateGceInstance(c, { ...instance, machineType: `machineTypes/${otherMachine}` }));
+  }
+  for (const machineType of ['e2-custom-8-16384', 'e2-standard-16', 'n2-standard-8', '', undefined]) {
+    const c = vmConfig();
+    c.gce.machineType = machineType;
+    assert.throws(() => validateConfig(c, vmConfig('production')));
+  }
+});
+test('Both GCE examples select the supported eight CPU shape used by the creation guide', async () => {
+  for (const environment of ['staging', 'production']) {
+    const example = JSON.parse(
+      await readFile(new URL(`../ops/temporal/environments/${environment}.cloud.example.json`, import.meta.url), 'utf8')
+    );
+    assert.equal(example.workerHosting, 'gce-k3s');
+    assert.equal(example.gce.machineType, 'e2-standard-8');
+    // Example identity placeholders are not live evidence. Only copy its reviewed
+    // shape into the concrete fixture; actual machine matching is tested above.
+    const c = vmConfig(environment);
+    c.gce.machineType = example.gce.machineType;
+    assert.equal(validateConfig(c, vmConfig(environment === 'staging' ? 'production' : 'staging')), c);
+  }
+});
 test('Simple Cloud uses one actual VM/node and attached ADC with bounded media, no GKE WIF/CSI or Firebase keys', () => {
   const c = vmConfig();
   assert.equal(validateConfig(c, vmConfig('production')), c);
@@ -1114,6 +1153,38 @@ test('Single-host upgrade checks actual retained CPU/memory demand and never del
       status: { phase: 'Running' },
     }));
   assert.equal(validateSingleHostCapacity(c, node, same, worker).cpu, 2100);
+});
+test('Eight CPU single-host overlap retains actual six-role requests and still rejects insufficient allocatable capacity', () => {
+  const c = vmConfig();
+  c.gce.machineType = 'e2-standard-8';
+  const worker = renderPlatform(c).worker;
+  const retained = worker.items
+    .filter((item) => item.kind === 'Deployment')
+    .map((deployment) => ({
+      metadata: { labels: { ...deployment.metadata.labels, 'app.kubernetes.io/version': 'a'.repeat(40) } },
+      spec: deployment.spec.template.spec,
+      status: { phase: 'Running' },
+    }));
+  assert.equal(retained.length, 6);
+  const node = { status: { allocatable: { cpu: '8', memory: '31Gi' } } };
+  const demand = validateSingleHostCapacity(c, node, retained, worker);
+  assert.equal(demand.cpu, 4200);
+  assert.equal(demand.memory, 8.5 * 1024 ** 3);
+  assert.throws(() =>
+    validateSingleHostCapacity(c, { status: { allocatable: { cpu: '4', memory: '31Gi' } } }, retained, worker)
+  );
+  assert.throws(() =>
+    validateSingleHostCapacity(c, { status: { allocatable: { cpu: '8', memory: '8Gi' } } }, retained, worker)
+  );
+  const busy = [
+    ...retained,
+    {
+      metadata: { labels: { app: 'system-work' } },
+      spec: { containers: [{ resources: { requests: { cpu: '4', memory: '1Gi' } } }] },
+      status: { phase: 'Pending' },
+    },
+  ];
+  assert.throws(() => validateSingleHostCapacity(c, node, busy, worker));
 });
 test('Single-host dedicated scratch proof rejects an unmounted root filesystem, small GB disk, stale identity or missing mount', () => {
   const c = vmConfig(),

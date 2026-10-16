@@ -18,6 +18,9 @@ export async function withDurableLifecycle<T>(
   ref: DurableJobRef,
   operation: () => Promise<T>,
   options: {
+    /** Only a validated, workflow-internal attention checkpoint may skip the
+     * initial running projection. Cancellation/finish handling still applies. */
+    continuingAttention?: boolean;
     reviewedDesiredResume?: () => boolean;
     reviewOnly?: boolean;
     cleanupOnly?: boolean;
@@ -50,7 +53,7 @@ export async function withDurableLifecycle<T>(
         await CancellationScope.nonCancellable(reportRepairFailure);
       }
     } else if (options.cleanupOnly) await lifecycle.beginDurableCleanup(ref);
-    else await lifecycle.beginDurableJob(ref);
+    else if (!options.continuingAttention) await lifecycle.beginDurableJob(ref);
     const result = await operation();
     await lifecycle.finishDurableJob(
       ref,

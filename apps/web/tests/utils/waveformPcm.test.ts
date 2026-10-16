@@ -89,7 +89,11 @@ it('reads data only through bounded slices', async () => {
   const input = wav({ frames: 300_000 });
   const source = blob(input.buffer),
     slice = jest.spyOn(source, 'slice');
-  expect((await buildPcmWaveform(source, input.duration)).status).toBe('ready');
+  expect((await buildPcmWaveform(source, input.duration, { now: () => 0 })).status).toBe('ready');
+  const dataSlices = slice.mock.calls.filter(([start = 0]) => start >= 44);
+  expect(dataSlices.length).toBeGreaterThan(1);
+  expect(dataSlices[0]).toEqual([44, 44 + WAVEFORM_BUDGET.chunkBytes]);
+  expect(dataSlices.at(-1)?.[1]).toBe(source.size);
   expect(slice.mock.calls.every(([start = 0, end = source.size]) => end - start <= WAVEFORM_BUDGET.chunkBytes)).toBe(
     true
   );
@@ -107,14 +111,24 @@ it('stops on cancellation and elapsed CPU budget, including after an asynchronou
     reason: 'cancelled',
   });
   let time = 0;
-  expect(
-    await buildPcmWaveform(blob(input.buffer), input.duration, {
-      now: () => {
-        time += 6000;
-        return time;
-      },
-    })
-  ).toMatchObject({ reason: 'budget' });
+  const timedSource = blob(input.buffer),
+    originalTimedSlice = timedSource.slice.bind(timedSource);
+  const timedSlice = jest.spyOn(timedSource, 'slice').mockImplementation((start, end) => {
+    const part = originalTimedSlice(start, end);
+    const originalArrayBuffer = part.arrayBuffer.bind(part);
+    jest.spyOn(part, 'arrayBuffer').mockImplementation(async () => {
+      const buffer = await originalArrayBuffer();
+      time = 5001; // Advance only after the genuine asynchronous read completes.
+      return buffer;
+    });
+    return part;
+  });
+  expect(await buildPcmWaveform(timedSource, input.duration, { now: () => time })).toEqual({
+    status: 'unavailable',
+    reason: 'budget',
+  });
+  expect(timedSlice).toHaveBeenCalledTimes(1);
+  expect(timedSlice).toHaveBeenCalledWith(0, 12);
 });
 it('rejects duplicate data chunks and caps header traversal', async () => {
   const input = wav();

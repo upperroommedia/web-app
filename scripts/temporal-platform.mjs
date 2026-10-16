@@ -463,7 +463,7 @@ export function validateConfig(config, peer) {
         vm.instanceName !== `urm-temporal-${config.environment}` ||
         !/^\d+$/.test(vm.instanceId ?? '') ||
         vm.zone !== 'us-central1-a' ||
-        vm.machineType !== 'e2-standard-4' ||
+        !['e2-standard-4', 'e2-standard-8'].includes(vm.machineType) ||
         vm.serviceAccount !== `temporal-worker@${config.firebaseProjectId}.iam.gserviceaccount.com` ||
         !/^10\./.test(vm.privateIp ?? '') ||
         !isIP(vm.privateIp) ||
