@@ -1,6 +1,13 @@
 /** Finite maintenance operation. Never changes release state, queues, jobs, or provider data. */
 import { validateControl, RELEASE_DOMAINS } from './temporal-release-lib.mjs';
 import { nativeSnapshotProof, assertNativeSnapshot, proofDigest } from './temporal-release-runtime.mjs';
+import { readFileSync } from 'node:fs';
+const historicalExclusions = JSON.parse(
+  readFileSync(new URL('../ops/temporal/search-lifecycle-historical-exclusions.staging.json', import.meta.url), 'utf8')
+);
+
+export const HISTORICAL_TASK_EXCLUSIONS = Object.freeze(historicalExclusions.names);
+export const HISTORICAL_WITNESS_SHA256S = Object.freeze(historicalExclusions.witnessSHA256s);
 
 export const RETIREMENT_ACTION = 'retire-undispatched-search-lifecycle-tasks';
 const CONTROL = '_control/temporalRelease';
@@ -60,6 +67,7 @@ export function validateRetirementManifest(manifest, release) {
     Array.isArray(manifest.exclusions) &&
       manifest.exclusions.length >= 16 &&
       new Set(manifest.exclusions).size === manifest.exclusions.length &&
+      HISTORICAL_TASK_EXCLUSIONS.every((name) => manifest.exclusions.includes(name)) &&
       manifest.exclusions.every((v) => typeof v === 'string' && v.startsWith(taskPrefix)),
     'EXCLUSIONS_INVALID'
   );
@@ -281,7 +289,7 @@ export async function retireSearchLifecycleTasks({
   const intentRefs = manifest.tasks.map((_, i) =>
     db.doc(`_control/temporalSearchLifecycleRetirement-${operationId}-${i}`)
   );
-  let authority, operation;
+  let authority, operation, operationData;
   const assertAuthority = (c, s) => assertRetirementAuthority(c.data(), s.data(), release, manifest.revision);
   const protect = async (tx) => {
     await assertProtectedSet(tx, manifest);
@@ -317,9 +325,10 @@ export async function retireSearchLifecycleTasks({
           same(lock.data().authority, authority),
         'RESUME_IDENTITY_CHANGED'
       );
+      operationData = lock.data();
     } else {
       requireThat(!lock.exists && intents.every((i) => !i.exists), 'OPERATION_HELD');
-      tx.create(lockRef, {
+      operationData = {
         schemaVersion: 1,
         operationId,
         action: RETIREMENT_ACTION,
@@ -328,10 +337,13 @@ export async function retireSearchLifecycleTasks({
         authority,
         evidence,
         createdAtMillis: now(),
-      });
+      };
+      tx.create(lockRef, operationData);
     }
   });
-  operation = nativeSnapshotProof(await lockRef.get());
+  const acquired = await lockRef.get();
+  requireThat(acquired.exists && same(acquired.data(), operationData), 'OPERATION_CHANGED');
+  operation = nativeSnapshotProof(acquired);
   const owned = async (tx) => {
     const [c, s, lock] = await Promise.all([tx.get(controlRef), tx.get(stateRef), tx.get(lockRef)]);
     assertAuthority(c, s);

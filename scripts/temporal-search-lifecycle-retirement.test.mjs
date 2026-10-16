@@ -5,6 +5,7 @@ import {
   validateRetirementInventory,
   assertRetirementAuthority,
   retireSearchLifecycleTasks,
+  HISTORICAL_TASK_EXCLUSIONS,
 } from './temporal-search-lifecycle-retirement.mjs';
 import { nativeSnapshotProof } from './temporal-release-runtime.mjs';
 
@@ -127,7 +128,7 @@ function fixture() {
     exclusionsSHA256: 'c'.repeat(64),
     parents,
     queuedSearchJobPaths,
-    exclusions: Array.from({ length: 16 }, (_, i) => prefix + 'historical/tasks/' + i),
+    exclusions: [...HISTORICAL_TASK_EXCLUSIONS],
     protectedDocuments,
     tasks: instances.map((instance, i) => {
       const name = `${prefix}kit-${instance}-index-executeFullIndexOperation/tasks/${i}`;
@@ -352,6 +353,25 @@ test('a preexisting operation cannot be borrowed and no delete occurs', async ()
   assert.equal(f.deletions.length, 0);
 });
 
+test('a lock replaced between acquisition and native pinning cannot become owned authority', async () => {
+  const f = fixture(),
+    originalDoc = f.input.db.doc;
+  f.input.db.doc = (path) => {
+    const ref = originalDoc(path);
+    if (path !== '_control/temporalReleaseOperation') return ref;
+    return {
+      ...ref,
+      get: async () => {
+        f.put(path, { operationId: 'replacement', action: 'other' });
+        return ref.get();
+      },
+    };
+  };
+  await assert.rejects(retireSearchLifecycleTasks(f.input), /OPERATION_CHANGED/);
+  assert.equal(f.deletions.length, 0);
+  assert(f.rows.has('_control/temporalReleaseOperation'));
+});
+
 test('a changed queued search document prevents deletion even when task metadata still matches', async () => {
   const f = fixture();
   f.put(f.manifest.protectedDocuments[6].path, { changed: true });
@@ -436,4 +456,11 @@ test('completed operation cannot run again or silently claim another completion'
   await retireSearchLifecycleTasks(f.input);
   await assert.rejects(retireSearchLifecycleTasks(f.input), /ALREADY_COMPLETED/);
   assert.equal(f.deletions.length, 5);
+});
+
+test('sixteen substituted exclusions cannot omit even one preserved historical task', () => {
+  const f = fixture();
+  f.manifest.exclusions[0] = prefix + 'historical/tasks/substituted';
+  assert.equal(f.manifest.exclusions.length, 16);
+  assert.throws(() => validateRetirementManifest(f.manifest, release), /EXCLUSIONS_INVALID/);
 });

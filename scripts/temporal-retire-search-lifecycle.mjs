@@ -21,6 +21,7 @@ import {
   validateRetirementManifest,
   validateRetirementInventory,
   retireSearchLifecycleTasks,
+  HISTORICAL_WITNESS_SHA256S,
 } from './temporal-search-lifecycle-retirement.mjs';
 
 const requireThat = (test, code) => {
@@ -244,6 +245,17 @@ export async function main(args = process.argv.slice(2)) {
         'SEARCH_LIFECYCLE_CANDIDATE_CHANGED'
       );
       sourceArtifacts = [descriptor.proof, candidate.proof, exclusions.proof, parents.proof];
+      const historicalWitnesses = [
+        exclusions.data.firstSixHistoricalSource,
+        ...(exclusions.data.actualRetirementWitnesses ?? []),
+      ];
+      requireThat(
+        historicalWitnesses.length === HISTORICAL_WITNESS_SHA256S.length &&
+          same(historicalWitnesses.map((w) => w?.sha256).sort(), [...HISTORICAL_WITNESS_SHA256S].sort()),
+        'SEARCH_LIFECYCLE_HISTORICAL_WITNESS_CHANGED'
+      );
+      assertArtifacts(historicalWitnesses);
+      sourceArtifacts.push(...historicalWitnesses);
       const protectedDocuments = [],
         protectedParents = [];
       for (const parent of parents.data.parents) {
