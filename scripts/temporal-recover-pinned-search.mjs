@@ -384,8 +384,10 @@ export function parseArgs(args) {
   if (action === 'report') need(uuid(o['--audit-id']), 'EXACT_AUDIT_REQUIRED');
   return o;
 }
-async function live(o) {
-  const root = realpathSync(resolve(dirname(fileURLToPath(import.meta.url)), '..'));
+export async function createPinnedSearchRecoveryDependencies(o, { originOperatorRoot, reportOnly = false } = {}) {
+  need(!originOperatorRoot || reportOnly, 'ORIGIN_OPERATOR_OVERRIDE_REPORT_ONLY');
+  need(!reportOnly || o.action === 'report', 'REPORT_ONLY_ACTION_REQUIRED');
+  const root = realpathSync(originOperatorRoot ?? resolve(dirname(fileURLToPath(import.meta.url)), '..'));
   const oldBytes = bytes(o['--old-release']),
     targetBytes = bytes(o['--target-release']);
   const old = JSON.parse(oldBytes),
@@ -529,6 +531,12 @@ async function live(o) {
         podUid: p.metadata.uid,
         containerId: p.status.containerStatuses[0].containerID,
         image: p.status.containerStatuses[0].imageID,
+        ...(reportOnly
+          ? {
+              containerStartedAt: p.status.containerStatuses[0].state?.running?.startedAt,
+              restartCount: p.status.containerStatuses[0].restartCount,
+            }
+          : {}),
       }));
       return { control: nativeSnapshotProof(docs[0]), state: nativeSnapshotProof(docs[1]), resourceIdentity, inputs };
     };
@@ -563,6 +571,7 @@ async function live(o) {
         workflowId: row.workflowId,
         runId: row.runId,
         workflowType: row.workflowType,
+        ...(reportOnly ? { observedAt: new Date().toISOString() } : {}),
         status: description.status.name,
         override: description.raw.workflowExecutionInfo?.versioningInfo?.versioningOverride ?? null,
         versioningInfo: canonical(description.raw.workflowExecutionInfo?.versioningInfo),
@@ -594,7 +603,7 @@ async function live(o) {
       inputs,
       guard,
       observe,
-      cli,
+      ...(reportOnly ? {} : { cli }),
       workers: () => targetWorkers,
       close: async () => {
         const result = await Promise.allSettled([
@@ -619,7 +628,17 @@ async function live(o) {
     throw error;
   }
 }
-export async function recover(o, deps) {
+export async function recover(o, deps, reportOptions = {}) {
+  need(
+    Object.keys(reportOptions).every((k) => ['proveMigration', 'operatorBinding'].includes(k)),
+    'UNKNOWN_REPORT_OPTION'
+  );
+  need(
+    !Object.keys(reportOptions).length ||
+      (typeof reportOptions.proveMigration === 'function' && reportOptions.operatorBinding),
+    'COMPLETE_REPORT_OPTIONS_REQUIRED'
+  );
+  if (Object.keys(reportOptions).length && o.action !== 'report') throw fail('REPORT_OPTIONS_REQUIRE_REPORT_ACTION');
   if (o.action === 'inspect') {
     const m = json(o['--manifest'], o['--manifest-sha']);
     validateManifest(m, deps.target, deps.config);
@@ -701,17 +720,79 @@ export async function recover(o, deps) {
     'ADMISSION_IDENTITY_CHANGED'
   );
   if (o.action === 'report') {
-    const migration = assertMigration(row, observation, deps.config, row.observation.heads, deps.workers());
+    if (reportOptions.operatorBinding) {
+      need(same(authority, await deps.guard(owned)), 'REPORT_AUTHORITY_CHANGED');
+      need(
+        existing.get('action') === ACTION &&
+          existing.get('jobId') === row.jobId &&
+          existing.get('targetCommit') === deps.config.workerBuildId &&
+          existing.get('targetImage') === deps.config.workerImage &&
+          same(existing.get('args'), overrideArgs(row, deps.config)) &&
+          same(existing.get('before')?.jobIdentity, row.observation.jobIdentity) &&
+          existing.get('before')?.intentDigest === row.observation.intentDigest &&
+          existing.get('before')?.entityDigest === row.observation.entityDigest &&
+          existing.get('before')?.historySha256 === row.observation.historySha256,
+        'ORIGINAL_AUDIT_CHANGED'
+      );
+    }
+    const migration = (reportOptions.proveMigration ?? assertMigration)(
+      row,
+      observation,
+      deps.config,
+      row.observation.heads,
+      deps.workers()
+    );
     await deps.db.runTransaction(async (tx) => {
-      const [op, intent, control, state] = await Promise.all([
+      const entityKey = sha(
+        JSON.stringify([
+          PROJECT,
+          row.observation.jobIdentity.entity.type,
+          row.observation.jobIdentity.entity.id,
+          'search',
+        ])
+      );
+      const [op, intent, control, state, previousReport, job, jobIntent, entity] = await Promise.all([
         tx.get(lock),
         tx.get(ref),
         tx.get(deps.db.doc(CONTROL)),
         tx.get(deps.db.doc(STATE)),
+        reportOptions.operatorBinding ? tx.get(deps.db.doc(`${ref.path}-reported`)) : undefined,
+        reportOptions.operatorBinding ? tx.get(deps.db.doc(`durableJobs/${row.jobId}`)) : undefined,
+        reportOptions.operatorBinding ? tx.get(deps.db.doc(`durableJobIntents/${row.jobId}`)) : undefined,
+        reportOptions.operatorBinding ? tx.get(deps.db.doc(`durableJobEntities/${entityKey}`)) : undefined,
       ]);
       assertNativeSnapshot(plan.authority.control, control);
       assertNativeSnapshot(plan.authority.state, state);
       need(intent.exists && intent.get('planSha256') === o['--plan-sha'], 'IMMUTABLE_INTENT_CHANGED');
+      if (reportOptions.operatorBinding) {
+        assertNativeSnapshot(nativeSnapshotProof(existing), intent);
+        validateJob(row, job.data(), jobIntent.data(), entity.data(), true);
+        need(
+          same(identity(job.data()), row.observation.jobIdentity) &&
+            proofDigest(jobIntent.data()) === observation.intentDigest &&
+            proofDigest({
+              projectId: entity.get('projectId'),
+              entity: entity.get('entity'),
+              scope: entity.get('scope'),
+              activeJobId: entity.get('activeJobId'),
+              generation: entity.get('generation'),
+            }) === observation.entityDigest,
+          'REPORT_ADMISSION_CHANGED'
+        );
+        if (previousReport.exists) {
+          const native = nativeSnapshotProof(previousReport),
+            saved = previousReport.data();
+          need(same(native.createTime, native.updateTime), 'REPORTED_AUDIT_WAS_MODIFIED');
+          const { observedAt, operator, ...facts } = saved;
+          need(
+            same(facts, { ...migration, reportOperatorBinding: reportOptions.operatorBinding }) &&
+              same(operator, deps.operator) &&
+              !op.exists,
+            'EXISTING_REPORT_CHANGED'
+          );
+          return;
+        }
+      }
       if (op.exists) {
         need(
           op.get('operationId') === auditId &&
@@ -724,6 +805,7 @@ export async function recover(o, deps) {
       }
       tx.create(deps.db.doc(`${ref.path}-reported`), {
         ...migration,
+        ...(reportOptions.operatorBinding ? { reportOperatorBinding: reportOptions.operatorBinding } : {}),
         operator: deps.operator,
         observedAt: deps.stamp(),
       });
@@ -800,15 +882,13 @@ export async function recover(o, deps) {
   }
   // Always reread once, never issue a second override on an uncertain acknowledgement.
   const after = await deps.observe(row, { allowSucceeded: true });
-  await deps.db
-    .doc(`${ref.path}-ack`)
-    .create({
-      cliExitedZero: !cliError,
-      stdoutSha256: stdout === undefined ? null : sha(stdout),
-      observedOverride: canonical(after.override),
-      planSha256: o['--plan-sha'],
-      observedAt: deps.stamp(),
-    });
+  await deps.db.doc(`${ref.path}-ack`).create({
+    cliExitedZero: !cliError,
+    stdoutSha256: stdout === undefined ? null : sha(stdout),
+    observedOverride: canonical(after.override),
+    planSha256: o['--plan-sha'],
+    observedAt: deps.stamp(),
+  });
   need(!cliError && targetOverride(after.override, deps.config), 'UNKNOWN_OVERRIDE_ACK_STOP_AND_REPORT_NO_RECALL');
   await deps.db.runTransaction(async (tx) => {
     const op = await tx.get(lock);
@@ -841,7 +921,7 @@ export async function main(args) {
   } catch (error) {
     if (error.code !== 'ENOENT') throw error;
   }
-  const deps = await live(o);
+  const deps = await createPinnedSearchRecoveryDependencies(o);
   let failed;
   let result;
   try {

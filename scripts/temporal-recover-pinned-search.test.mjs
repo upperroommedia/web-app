@@ -576,3 +576,93 @@ test('actual captured native pinned wire fields and scheduled retry are accepted
     },
   ]);
 });
+
+// The report-only extension reuses the real immutable-intent/CAS protocol. Native role proof
+// itself is exercised against minimal captured wire shapes in the separate report suite.
+function reportFixture(t) {
+  const f = fixture(t);
+  const entityKey = [...f.values.keys()].find((k) => k.startsWith('durableJobEntities/'));
+  const e = f.values.get(entityKey);
+  f.observation.intentDigest = proofDigest(f.values.get('durableJobIntents/' + row.jobId));
+  f.observation.entityDigest = proofDigest({
+    projectId: e.projectId,
+    entity: e.entity,
+    scope: e.scope,
+    activeJobId: e.activeJobId,
+    generation: e.generation,
+  });
+  writeFileSync(f.args['--plan'], JSON.stringify(f.plan));
+  f.args['--plan-sha'] = hash(readFileSync(f.args['--plan']));
+  f.setObservation(structuredClone(f.observation));
+  f.deps.workers = () => [];
+  return f;
+}
+test('report-only extension reconciles committed report lost ACK without native write or duplicate report', async (t) => {
+  const f = reportFixture(t);
+  f.setUnknown();
+  await assert.rejects(recover(f.args, f.deps), /UNKNOWN_OVERRIDE_ACK/);
+  const auditId = f.values.get('_control/temporalReleaseOperation').operationId;
+  const options = { ...f.args, action: 'report', '--audit-id': auditId };
+  const migration = {
+    workflowId: row.workflowId,
+    runId: row.runId,
+    targetCommit: S,
+    workerWitnesses: [{ instanceId: 'actual-minimal', buildId: S }],
+    noJobIdentityMutation: true,
+  };
+  const extension = {
+    proveMigration: () => migration,
+    operatorBinding: {
+      operatorCommit: 'c'.repeat(40),
+      originalOperatorCommit: S,
+      originalOperatorClosureDigest: 'd'.repeat(64),
+    },
+  };
+  const tx = f.deps.db.runTransaction;
+  let commits = 0;
+  f.deps.db.runTransaction = async (fn) => {
+    const result = await tx(fn);
+    commits++;
+    if (commits === 1) throw Error('report commit ACK lost');
+    return result;
+  };
+  await assert.rejects(recover(options, f.deps, extension), /report commit ACK lost/);
+  assert.equal(f.values.has('_control/temporalReleaseOperation'), false);
+  const before = structuredClone([...f.values.entries()]);
+  const result = await recover(options, f.deps, extension);
+  assert.equal(result.result, 'actual-original-run-migration-observed');
+  assert.deepEqual([...f.values.entries()], before);
+  assert.equal(f.calls(), 1);
+  const saved = f.values.get('_control/temporalPinnedSearchRecovery-' + auditId + '-reported');
+  assert.deepEqual(saved.reportOperatorBinding, extension.operatorBinding);
+  await assert.rejects(
+    recover(options, f.deps, {
+      ...extension,
+      operatorBinding: { ...extension.operatorBinding, operatorCommit: 'e'.repeat(40) },
+    }),
+    /EXISTING_REPORT_CHANGED/
+  );
+  saved.targetCommit = 'foreign';
+  await assert.rejects(recover(options, f.deps, extension), /EXISTING_REPORT_CHANGED/);
+});
+test('report-only final transaction refuses changed original audit and newer canonical admission', async (t) => {
+  for (const drift of ['audit', 'generation', 'intent']) {
+    const f = reportFixture(t);
+    const first = await recover(f.args, f.deps);
+    const options = { ...f.args, action: 'report', '--audit-id': first.auditId };
+    const extension = {
+      proveMigration: () => ({ workflowId: row.workflowId, runId: row.runId }),
+      operatorBinding: { operatorCommit: 'c'.repeat(40) },
+    };
+    if (drift === 'audit')
+      f.values.get('_control/temporalPinnedSearchRecovery-' + first.auditId).targetImage = 'foreign';
+    if (drift === 'generation') {
+      const key = [...f.values.keys()].find((k) => k.startsWith('durableJobEntities/'));
+      f.values.get(key).generation++;
+    }
+    if (drift === 'intent') f.values.get('durableJobIntents/' + row.jobId).extra = 'changed';
+    await assert.rejects(recover(options, f.deps, extension));
+    assert.equal(f.values.has('_control/temporalPinnedSearchRecovery-' + first.auditId + '-reported'), false);
+    assert.equal(f.calls(), 1);
+  }
+});
