@@ -33,7 +33,7 @@ jobs:
           sha256sum -c helm.sha256
           tar -xzf helm-v4.3.0-linux-amd64.tar.gz
       - name: Validate fail-closed platform contracts
-        run: node --test scripts/temporal-platform.test.mjs scripts/temporal-release.test.mjs scripts/temporal-backup.test.mjs scripts/temporal-apphosting-rollout.test.mjs scripts/temporal-restore-witness.test.mjs scripts/temporal-backfill-provider-usage.test.mjs
+        run: node --test scripts/temporal-platform.test.mjs scripts/temporal-release.test.mjs scripts/temporal-backup.test.mjs scripts/temporal-apphosting-rollout.test.mjs scripts/temporal-restore-witness.test.mjs scripts/temporal-backfill-provider-usage.test.mjs scripts/temporal-search-lifecycle-retirement.test.mjs scripts/temporal-retire-search-lifecycle.test.mjs
       - name: Validate pinned chart render and database CRDs
         env:
           HELM_BIN: /tmp/linux-amd64/helm
