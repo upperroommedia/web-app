@@ -1,15 +1,17 @@
 import {
   ActivityCancellationType,
   CancellationScope,
-  condition,
   defineSignal,
   isCancellation,
   proxyActivities,
   setHandler,
   sleep,
   continueAsNew,
+  makeContinueAsNewFunc,
+  patched,
   workflowInfo,
 } from '@temporalio/workflow';
+import { assertAttentionContinuation, waitForAttentionResume } from '../attention';
 import type { DurableJobRef } from '../../../../../packages/contracts/temporal';
 import type { ImageActivities } from '../../../../../functions/src/temporal/images/types';
 
@@ -25,12 +27,46 @@ const controls = proxyActivities<Pick<ImageActivities, 'finishImage' | 'getImage
   cancellationType: ActivityCancellationType.WAIT_CANCELLATION_COMPLETED,
 });
 export const imageResume = defineSignal('image.resume');
-export async function ImageIngest(ref: DurableJobRef): Promise<void> {
-  let resumed = false;
+interface ImageAttentionContinuation {
+  schemaVersion: 1;
+  waiting: true;
+  resumeRequested: boolean;
+}
+export async function ImageIngest(ref: DurableJobRef, attention?: ImageAttentionContinuation): Promise<void> {
+  assertAttentionContinuation(attention);
+  let resumed = attention?.resumeRequested ?? false;
   setHandler(imageResume, () => {
     resumed = true;
   });
+  const wait = async (): Promise<boolean> => {
+    try {
+      await waitForAttentionResume(
+        () => resumed,
+        () =>
+          makeContinueAsNewFunc<typeof ImageIngest>({ initialVersioningBehavior: 'AUTO_UPGRADE' })(ref, {
+            schemaVersion: 1,
+            waiting: true,
+            resumeRequested: resumed,
+          })
+      );
+    } catch (error) {
+      if (isCancellation(error)) {
+        await CancellationScope.nonCancellable(() => activities.cancelImage(ref));
+        throw error;
+      }
+      throw error;
+    }
+    return true;
+  };
+  if (attention?.waiting) {
+    if (!(await wait())) return;
+    resumed = false;
+  }
   while (true) {
+    // The additional-allocation review loop already wakes every minute and only
+    // reads durable disposition here; it needs no artificial resume signal.
+    if (patched('image-review-target-upgrade-v1') && workflowInfo().targetWorkerDeploymentVersionChanged)
+      await makeContinueAsNewFunc<typeof ImageIngest>({ initialVersioningBehavior: 'AUTO_UPGRADE' })(ref);
     if (workflowInfo().continueAsNewSuggested) await continueAsNew<typeof ImageIngest>(ref);
     try {
       const disposition = await controls.getImageDisposition(ref);
@@ -59,16 +95,44 @@ export async function ImageIngest(ref: DurableJobRef): Promise<void> {
         throw error;
       }
       await controls.finishImage(ref, 'needs_attention', (error as { cause?: { type?: string } })?.cause?.type);
-      await condition(() => resumed);
+      if (!(await wait())) return;
       resumed = false;
     }
   }
 }
-export async function ImageDelete(ref: DurableJobRef): Promise<void> {
-  let resumed = false;
+export async function ImageDelete(ref: DurableJobRef, attention?: ImageAttentionContinuation): Promise<void> {
+  assertAttentionContinuation(attention);
+  let resumed = attention?.resumeRequested ?? false;
   setHandler(imageResume, () => {
     resumed = true;
   });
+  const wait = async (): Promise<boolean> => {
+    try {
+      await waitForAttentionResume(
+        () => resumed,
+        () =>
+          makeContinueAsNewFunc<typeof ImageDelete>({ initialVersioningBehavior: 'AUTO_UPGRADE' })(ref, {
+            schemaVersion: 1,
+            waiting: true,
+            resumeRequested: resumed,
+          })
+      );
+    } catch (error) {
+      if (isCancellation(error)) {
+        await CancellationScope.nonCancellable(async () => {
+          await activities.deleteImageProviders(ref);
+          await controls.finishImage(ref, 'succeeded');
+        });
+        return false;
+      }
+      throw error;
+    }
+    return true;
+  };
+  if (attention?.waiting) {
+    if (!(await wait())) return;
+    resumed = false;
+  }
   while (true) {
     try {
       await activities.deleteImageProviders(ref);
@@ -88,17 +152,48 @@ export async function ImageDelete(ref: DurableJobRef): Promise<void> {
         return;
       }
       await controls.finishImage(ref, 'needs_attention', (error as { cause?: { type?: string } })?.cause?.type);
-      await condition(() => resumed);
+      if (!(await wait())) return;
       resumed = false;
     }
   }
 }
 
-export async function ImageReceiptReconciliation(ref: DurableJobRef): Promise<void> {
-  let resumed = false;
+export async function ImageReceiptReconciliation(
+  ref: DurableJobRef,
+  attention?: ImageAttentionContinuation
+): Promise<void> {
+  assertAttentionContinuation(attention);
+  let resumed = attention?.resumeRequested ?? false;
   setHandler(imageResume, () => {
     resumed = true;
   });
+  const wait = async (): Promise<boolean> => {
+    try {
+      await waitForAttentionResume(
+        () => resumed,
+        () =>
+          makeContinueAsNewFunc<typeof ImageReceiptReconciliation>({ initialVersioningBehavior: 'AUTO_UPGRADE' })(ref, {
+            schemaVersion: 1,
+            waiting: true,
+            resumeRequested: resumed,
+          })
+      );
+    } catch (error) {
+      if (isCancellation(error)) {
+        await CancellationScope.nonCancellable(async () => {
+          if ((await activities.reconcileImageReceipt(ref)) !== 'complete')
+            await controls.finishImage(ref, 'needs_attention', (error as { cause?: { type?: string } })?.cause?.type);
+        });
+        return false;
+      }
+      throw error;
+    }
+    return true;
+  };
+  if (attention?.waiting) {
+    if (!(await wait())) return;
+    resumed = false;
+  }
   while (true) {
     try {
       if ((await activities.reconcileImageReceipt(ref)) === 'complete') return;
@@ -112,7 +207,7 @@ export async function ImageReceiptReconciliation(ref: DurableJobRef): Promise<vo
       }
       await controls.finishImage(ref, 'needs_attention', (error as { cause?: { type?: string } })?.cause?.type);
     }
-    await condition(() => resumed);
+    if (!(await wait())) return;
     resumed = false;
   }
 }

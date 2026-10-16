@@ -262,17 +262,20 @@ async function processWrite(
     }
   }
 
-  const shouldAttemptDelivery = await db.runTransaction<boolean>(
+  const decision = await db.runTransaction<{
+    attemptDelivery: boolean;
+    publish?: () => Promise<unknown>;
+  }>(
     async (transaction) => {
       const snapshot = await transaction.get(ref);
       // Record no longer exists, so no need to attempt delivery.
       if (!snapshot.exists) {
-        return false;
+        return {attemptDelivery: false};
       }
 
       await assertLegacyEmailRelease(transaction, db);
       const payload = snapshot.data() as QueuePayload;
-      if ((payload.delivery as Delivery & {orchestrator?: string})?.orchestrator === "temporal") return false;
+      if ((payload.delivery as Delivery & {orchestrator?: string})?.orchestrator === "temporal") return {attemptDelivery: false};
 
       // We expect the payload to contain a message object describing the email
       // to be sent, or a template, or a SendGrid template.
@@ -283,7 +286,7 @@ async function processWrite(
         typeof payload.sendGrid !== "object"
       ) {
         logs.invalidMessage(payload.message);
-        return false;
+        return {attemptDelivery: false};
       }
 
       // The record has most likely just been created by a client, so we need to
@@ -304,29 +307,23 @@ async function processWrite(
         // don't want to do it in this transaction. Since the transaction will
         // update the record again the cloud function will be triggered again
         // and delivery will be attempted at that point.
-        return false;
+        return {attemptDelivery: false};
       }
 
       const state = payload.delivery.state;
       // The email has already been delivered, so we don't need to do anything.
       if (state === "SUCCESS") {
-        await events.recordSuccessEvent(change);
-        return false;
+        return {attemptDelivery: false, publish: () => events.recordSuccessEvent(change)};
       }
 
       // The email has previously failed to be delivered, so we can't do anything.
       if (state === "ERROR") {
-        await events.recordErrorEvent(change, payload, payload.delivery.error);
-        return false;
+        return {attemptDelivery: false, publish: () => events.recordErrorEvent(change, payload, payload.delivery.error)};
       }
 
       if (state === "PROCESSING") {
-        await events.recordProcessingEvent(change);
-        if ((!payload.delivery.leaseExpireTime || payload.delivery.leaseExpireTime.toMillis() < Date.now())) {
-          const error = "Message processing lease expired.";
-
-          /** Send error event */
-          await events.recordErrorEvent(change, payload, error);
+        const expired = !payload.delivery.leaseExpireTime || payload.delivery.leaseExpireTime.toMillis() < Date.now();
+        if (expired) {
 
           // The lease has expired, so we should not attempt to deliver the email again,
           // but we set the state to ERROR so clients can see that the email failed.
@@ -338,8 +335,11 @@ async function processWrite(
             "delivery.smtpSubmissionState": (payload.delivery as Delivery & {smtpSubmissionState?: string}).smtpSubmissionState === "not_submitted" ? "not_submitted" : "unknown",
           });
         }
-        // Already being processed, so we don't need to do anything.
-        return false;
+        // Return only the winning attempt's event plan; retries publish nothing.
+        return {attemptDelivery: false, publish: async () => {
+          await events.recordProcessingEvent(change);
+          if (expired) await events.recordErrorEvent(change, payload, "Message processing lease expired.");
+        }};
       }
 
       if (state === "PENDING" || state === "RETRY") {
@@ -351,7 +351,6 @@ async function processWrite(
           state === "PENDING"
             ? events.recordPendingEvent
             : events.recordRetryEvent;
-        await eventFn(change, payload);
 
         // We can attempt to deliver the email in these states, so we set the state to PROCESSING
         // and set a lease time to prevent delivery from being attempted forever.
@@ -361,17 +360,33 @@ async function processWrite(
           "delivery.smtpSubmissionState": "not_submitted",
           "delivery.leaseExpireTime": Timestamp.fromMillis(Date.now() + deliveryLeaseMillis),
         });
-        return true;
+        return {attemptDelivery: true, publish: () => eventFn(change, payload)};
       }
 
       // We don't know what the state is, so we can't do anything. This should never happen.
-      return false;
+      return {attemptDelivery: false};
     }
   );
 
-  if (shouldAttemptDelivery) {
-    await deliver(ref);
+  // Firestore can rerun the callback. Only its committed result may publish.
+  // Handler retries can still lose or duplicate publications; SMTP is not atomic with Eventarc.
+  let publicationFailed = false;
+  let publicationError: unknown;
+  try {
+    await decision.publish?.();
+  } catch (error) {
+    publicationFailed = true;
+    publicationError = error;
   }
+  try {
+    // A failed event must not strand a newly committed PROCESSING claim unsent.
+    if (decision.attemptDelivery) await deliver(ref);
+  } catch (deliveryError) {
+    if (publicationFailed)
+      throw Object.assign(new Error("Email publication and delivery both failed"), {errors: [publicationError, deliveryError]});
+    throw deliveryError;
+  }
+  if (publicationFailed) throw publicationError;
 }
 
 export const processQueue = onDocumentWritten(

@@ -1,15 +1,16 @@
 import {
   ActivityCancellationType,
   CancellationScope,
-  condition,
   defineSignal,
   isCancellation,
   setHandler,
   continueAsNew,
+  makeContinueAsNewFunc,
   proxyActivities,
   sleep,
   workflowInfo,
 } from '@temporalio/workflow';
+import { assertAttentionContinuation, waitForAttentionResume } from '../attention';
 import type { DurableJobRef } from '../../../../../packages/contracts/temporal';
 import type { SearchActivities, SearchControlActivities } from '../../activities/search';
 const activities = proxyActivities<Pick<SearchActivities, 'syncSearchDocument' | 'searchBackfillPage'>>({
@@ -25,11 +26,37 @@ const controls = proxyActivities<SearchControlActivities>({
   cancellationType: ActivityCancellationType.WAIT_CANCELLATION_COMPLETED,
 });
 export const searchResume = defineSignal('search.resume');
-export async function SearchDocument(ref: DurableJobRef): Promise<void> {
-  let resumed = false;
+interface SearchAttentionContinuation {
+  schemaVersion: 1;
+  waiting: true;
+  resumeRequested: boolean;
+}
+export async function SearchDocument(ref: DurableJobRef, attention?: SearchAttentionContinuation): Promise<void> {
+  assertAttentionContinuation(attention);
+  let resumed = attention?.resumeRequested ?? false;
   setHandler(searchResume, () => {
     resumed = true;
   });
+  const wait = async () => {
+    try {
+      await waitForAttentionResume(
+        () => resumed,
+        () =>
+          makeContinueAsNewFunc<typeof SearchDocument>({ initialVersioningBehavior: 'AUTO_UPGRADE' })(ref, {
+            schemaVersion: 1,
+            waiting: true,
+            resumeRequested: resumed,
+          })
+      );
+    } catch (error) {
+      if (isCancellation(error)) await CancellationScope.nonCancellable(() => controls.finishSearch(ref, 'cancelled'));
+      throw error;
+    }
+  };
+  if (attention?.waiting) {
+    await wait();
+    resumed = false;
+  }
   while (true) {
     try {
       await activities.syncSearchDocument(ref);
@@ -40,19 +67,53 @@ export async function SearchDocument(ref: DurableJobRef): Promise<void> {
         throw error;
       }
       await controls.finishSearch(ref, 'needs_attention');
-      await condition(() => resumed);
+      await wait();
       resumed = false;
     }
   }
 }
-export async function SearchBackfill(input: { ref: DurableJobRef; cursor?: string; count?: number }): Promise<void> {
-  let resumed = false;
+export async function SearchBackfill(input: {
+  ref: DurableJobRef;
+  cursor?: string;
+  count?: number;
+  attention?: SearchAttentionContinuation;
+}): Promise<void> {
+  assertAttentionContinuation(input.attention);
+  if (
+    input.attention &&
+    ((input.cursor !== undefined && typeof input.cursor !== 'string') ||
+      (input.count !== undefined && (!Number.isSafeInteger(input.count) || input.count < 0)))
+  )
+    throw new Error('Invalid search backfill attention cursor');
+  let resumed = input.attention?.resumeRequested ?? false;
   setHandler(searchResume, () => {
     resumed = true;
   });
   let cursor = input.cursor;
   let count = input.count ?? 0;
   let pages = 0;
+  const wait = async () => {
+    try {
+      await waitForAttentionResume(
+        () => resumed,
+        () =>
+          makeContinueAsNewFunc<typeof SearchBackfill>({ initialVersioningBehavior: 'AUTO_UPGRADE' })({
+            ref: input.ref,
+            cursor,
+            count,
+            attention: { schemaVersion: 1, waiting: true, resumeRequested: resumed },
+          })
+      );
+    } catch (error) {
+      if (isCancellation(error))
+        await CancellationScope.nonCancellable(() => controls.finishSearch(input.ref, 'cancelled'));
+      throw error;
+    }
+  };
+  if (input.attention?.waiting) {
+    await wait();
+    resumed = false;
+  }
   while (true) {
     try {
       const page = await activities.searchBackfillPage(input.ref, cursor);
@@ -74,7 +135,7 @@ export async function SearchBackfill(input: { ref: DurableJobRef; cursor?: strin
         throw error;
       }
       await controls.finishSearch(input.ref, 'needs_attention');
-      await condition(() => resumed);
+      await wait();
       resumed = false;
     }
     if (pages >= 100 || workflowInfo().continueAsNewSuggested)

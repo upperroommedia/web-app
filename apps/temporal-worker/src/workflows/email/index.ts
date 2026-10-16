@@ -1,4 +1,12 @@
-import { condition, defineQuery, defineSignal, proxyActivities, setHandler } from '@temporalio/workflow';
+import {
+  condition,
+  defineQuery,
+  defineSignal,
+  proxyActivities,
+  setHandler,
+  makeContinueAsNewFunc,
+} from '@temporalio/workflow';
+import { assertAttentionContinuation, waitForAttentionResume } from '../attention';
 import type { DurableJobRef } from '@upperroom/contracts/temporal';
 import type { EmailActivities } from '../../activities/email';
 import type { EmailOutcome } from '@upperroom/function-kit-firestore-send-email/lib/temporal/delivery';
@@ -16,14 +24,53 @@ const controls = proxyActivities<Pick<EmailActivities, 'exhaustEmailRetries' | '
 export const emailResume = defineSignal('emailResume');
 export const emailStatus = defineQuery<{ state: string; attempt: number }>('emailStatus');
 /** SMTP lacks provider idempotency; an ambiguous receipt never causes a blind resend. */
-export async function emailDeliveryWorkflow(ref: DurableJobRef): Promise<void> {
-  let resume = 0;
-  let status = { state: 'queued', attempt: 0 };
+interface EmailAttentionContinuation {
+  schemaVersion: 1;
+  waiting: true;
+  resumeRequested: boolean;
+  safeAttempts: number;
+  status: { state: string; attempt: number };
+}
+export async function emailDeliveryWorkflow(ref: DurableJobRef, attention?: EmailAttentionContinuation): Promise<void> {
+  assertAttentionContinuation(attention);
+  if (
+    attention &&
+    (!Number.isSafeInteger(attention.safeAttempts) ||
+      attention.safeAttempts < 0 ||
+      attention.safeAttempts > 12 ||
+      !attention.status ||
+      !['unknown', 'partial', 'needs_attention'].includes(attention.status.state) ||
+      !Number.isSafeInteger(attention.status.attempt) ||
+      attention.status.attempt < 1)
+  )
+    throw new Error('Invalid email attention continuation');
+  let resume = attention?.resumeRequested ? 1 : 0;
+  let status = attention?.status ?? { state: 'queued', attempt: 0 };
   setHandler(emailResume, () => {
     resume += 1;
   });
   setHandler(emailStatus, () => status);
-  let safeAttempts = 0;
+  let safeAttempts = attention?.safeAttempts ?? 0;
+  const reconcileAfterResume = async (observedResume: number) => {
+    await waitForAttentionResume(
+      () => resume > observedResume,
+      () =>
+        makeContinueAsNewFunc<typeof emailDeliveryWorkflow>({ initialVersioningBehavior: 'AUTO_UPGRADE' })(ref, {
+          schemaVersion: 1,
+          waiting: true,
+          resumeRequested: resume > observedResume,
+          safeAttempts,
+          status,
+        })
+    );
+    // The original uncertainty fence survives rotation. Only an actual user signal
+    // authorizes this receipt check; deploying a new worker never sends email.
+    const receiptState = await controls.getEmailReceiptState(ref);
+    if (receiptState === 'confirmed' || receiptState === 'rejected') return true;
+    if (receiptState === 'prepared') safeAttempts = 0;
+    return false;
+  };
+  if (attention?.waiting && (await reconcileAfterResume(0))) return;
   for (;;) {
     const observedResume = resume;
     status = { state: 'running', attempt: safeAttempts + 1 };
@@ -41,9 +88,6 @@ export async function emailDeliveryWorkflow(ref: DurableJobRef): Promise<void> {
     }
     // The server validates a resume command against the private receipt. Signals
     // cannot clear its uncertainty fence. An externally reconciled receipt may finish.
-    await condition(() => resume > observedResume);
-    const receiptState = await controls.getEmailReceiptState(ref);
-    if (receiptState === 'confirmed' || receiptState === 'rejected') return;
-    if (receiptState === 'prepared') safeAttempts = 0;
+    if (await reconcileAfterResume(observedResume)) return;
   }
 }

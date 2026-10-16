@@ -406,6 +406,12 @@ importers:
 
   apps/temporal-worker:
     dependencies:
+      '@algolia/client-common':
+        specifier: 5.59.0
+        version: 5.59.0
+      '@algolia/requester-node-http':
+        specifier: 5.59.0
+        version: 5.59.0
       '@google-cloud/functions-framework':
         specifier: 'catalog:'
         version: 3.5.1(supports-color@10.2.2)

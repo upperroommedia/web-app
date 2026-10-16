@@ -13,3 +13,8 @@ for (const name of [
   }
   if (!host) process.env[name] = '127.0.0.1:9';
 }
+
+// Emulator-only tests do not run on GCE. google-gax still checks the auth universe
+// for insecure emulator clients; skip documented metadata discovery instead of
+// probing metadata IP/DNS or supplying synthetic production credentials.
+process.env.METADATA_SERVER_DETECTION = 'none';

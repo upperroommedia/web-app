@@ -32,6 +32,23 @@ the previous release's legacy cutoff. `compatibility-ready` stamps a new native
 server cutoff and full reviewed grace for search. The previous cutoff remains in
 archived predecessor evidence; it cannot shorten the new grace.
 
+## Recovering a paused search source
+
+If a corrected worker must finish an already admitted search bootstrap, follow
+[Search source recovery](SEARCH_SOURCE_RECOVERY.md). Preserve the original jobs,
+workflow/run identities, descriptor and cutoff. First rerun the original normal
+bootstrap to reach actual `search-ready` while admission and UI rollout remain
+paused. A timeout or a terminal-looking job alone is not that proof.
+
+Only then may the separately reviewed
+`scripts/temporal-supersede-search-source.mjs` inspect and supersede that source.
+It archives the predecessor as **SUPERSEDED**, preserves its legacy fencing and
+provider-index provenance, and enters a distinct immutable successor at
+`ownership-changed` with admission paused. It does not certify the successor's
+backends, search bootstrap or UI as deployed. Those normal gates, including five
+fresh successor backfills, still run before opening staging. This is a supported
+future recovery procedure, not a receipt that any recovery has occurred.
+
 ## Private credentials
 
 Use the official signed-in Algolia CLI with explicit `--application-id 2VZFOFLFHE`

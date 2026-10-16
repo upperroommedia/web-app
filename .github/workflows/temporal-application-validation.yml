@@ -31,7 +31,9 @@ concurrency:
 jobs:
   durable-application:
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    # The native upgrade check deliberately waits for the production five-minute
+    # timer; allow headroom for the full application run and tool installation.
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-node@v7.1.0

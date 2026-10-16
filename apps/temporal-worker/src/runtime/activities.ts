@@ -449,6 +449,7 @@ export function createRuntimeActivities(
     configurations,
     loadIntent: store.loadIntent,
     assertCurrent,
+    assertCurrentInTransaction,
     project,
     enqueueDocument: async (input) => {
       const jobId = createHash('sha256')

@@ -18,11 +18,15 @@ const runtime: Runtime = {
     await page.goto(callbackPath);
   },
   ready: async (page, callbackPath) => {
+    // The enclosing 30s fixture owns readiness, including Auth restoration.
+    // A separate matcher deadline would prematurely cut that same setup budget.
     if (callbackPath === '/')
-      await expect(page.getByRole('switch', { name: 'Upload from Youtube Url', exact: true })).toBeVisible();
+      await expect(page.getByRole('switch', { name: 'Upload from Youtube Url', exact: true })).toBeVisible({
+        timeout: 0,
+      });
     else {
-      await expect(page.getByRole('heading', { name: 'Sermons', exact: true })).toBeVisible();
-      await expect(page.getByRole('searchbox').first()).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Sermons', exact: true })).toBeVisible({ timeout: 0 });
+      await expect(page.getByRole('searchbox').first()).toBeVisible({ timeout: 0 });
     }
   },
 };
