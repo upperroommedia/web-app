@@ -2,7 +2,7 @@
 
 This document specifies a maintenance operator, not permission to alter the running release. The application fix is PR252, commit9094f5a27165a080c288f01975215975f0e3347e. The live application remains99c until a normal durable upgrade actually installs the fix. A source fix prevents recurrence but does not heal existing reference edges or finish the failed email projection.
 
-The current implementation is limited to the pure incident planner and an atomic index **component** which requires an already owned operation. It has no CLI, authentication, acquisition, final release, complete incident/protected-set collector or email real-store adapter. Its component tests and component reviews do not approve an executable recovery. Those remaining boundaries and their tests/reviews/CI must be completed before any live invocation.
+The current implementation has a pure incident planner and atomic index and email projection **components** which require an already owned operation. The email component wraps the actual fixed job store transaction, limits it to one exact public projection, records an atomic audit, retains the original native failure and reconciles unknown acknowledgements without repeating the projection. These components have no CLI, authentication, acquisition, final release or complete private-provenance/incident/protected-set collector. Their component tests and component reviews do not approve an executable recovery. Those remaining boundaries and their tests/reviews/CI must be completed before any live invocation.
 
 ## Scope and lifecycle
 
