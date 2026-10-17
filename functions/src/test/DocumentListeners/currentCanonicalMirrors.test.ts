@@ -106,7 +106,10 @@ describe('bounded current canonical mirror reconciliation', () => {
   it('updates 1001 mirrors with bounded transactional pages and preserves placement fields', async () => {
     const f = fixture(1001);
     await f.run();
-    expect(f.committed.map((page) => page.length)).toEqual([200, 200, 200, 200, 200, 1]);
+    expect(f.committed.map((page) => page.length)).toEqual([
+      ...Array(Math.floor(1001 / MIRROR_PAGE_SIZE)).fill(MIRROR_PAGE_SIZE),
+      1001 % MIRROR_PAGE_SIZE,
+    ]);
     expect(f.documents.get('sermons/0000/sermonLists/list-1')?.data).toMatchObject({
       name: 'Current name',
       uploadStatus: { status: 'UPLOADED' },
@@ -159,8 +162,10 @@ describe('bounded current canonical mirror reconciliation', () => {
       f.documents.delete('lists/list-1');
     });
     await f.run();
-    expect(f.committed.flat()).toHaveLength(200);
-    expect(f.documents.get('sermons/0200/sermonLists/list-1')?.data.name).toBe('Old');
+    expect(f.committed.flat()).toHaveLength(MIRROR_PAGE_SIZE);
+    expect(f.documents.get(`sermons/${String(MIRROR_PAGE_SIZE).padStart(4, '0')}/sermonLists/list-1`)?.data.name).toBe(
+      'Old'
+    );
   });
 });
 
