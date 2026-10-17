@@ -83,6 +83,7 @@ export function applicationStages(root = ROOT) {
     stage('contracts', 'Validate release, bootstrap and migration contracts', [
       pnpm('run', 'test:temporal:contracts'),
       node('--test', 'scripts/temporal-owned-smoke-email-evidence.test.mjs'),
+      node('--test', 'scripts/temporal-owned-smoke-publication-evidence.test.mjs'),
       node('--test', 'scripts/temporal-recover-initial-compatibility.test.mjs'),
       node('--test', 'scripts/provider-http-inventory.test.mjs'),
     ]),
@@ -173,6 +174,20 @@ export function applicationStages(root = ROOT) {
           '--config',
           '../firebase.test.json',
           'node ../scripts/tests/temporal-owned-smoke-operation.firestore.test.mjs'
+        ),
+        pnpm(
+          '--dir',
+          'functions',
+          'exec',
+          'firebase',
+          'emulators:exec',
+          '--project',
+          'demo-owned-smoke-publication',
+          '--only',
+          'auth,firestore,database,storage',
+          '--config',
+          '../firebase.test.json',
+          'node ../scripts/tests/temporal-owned-smoke-publication-evidence.firestore.test.mjs && node ../scripts/tests/temporal-owned-smoke-publication-receipts.firestore.test.mjs'
         ),
       ],
       { RELEASE_RUNTIME_TEST_ROOT: root, BUNDLE_RECOVERY_TEST_RUNTIME_ROOT: root }

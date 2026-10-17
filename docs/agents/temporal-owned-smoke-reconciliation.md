@@ -33,3 +33,10 @@ Persist each stage's immutable audit in the same transaction as its effects. Nev
 ## Required verification before any apply
 
 Test production functions through a real Firestore seam where transactional behavior matters. Cover wrong project/release/phase/source/manifest, incomplete pagination, stale native snapshots, unrelated references, reservations, count mismatch, extra/missing/duplicate target edges, pending/new native email execution, wrong capture/hash/profile, generation changes, critical marker, unexpected provider intent, foreign operation, audit conflicts, unknown ACK before/after each atomic commit, and lost final ACK. Assert exact write paths and field deltas, no double increments or resend, and preserved jobs/canonical/queue/control data. Run the documented dedicated Firebase test harness serially. Obtain independent source-only Standards and Spec reviews, address findings, commit and wait for required CI before using the operator. This document and pure planning tests alone are not an executable or applied recovery.
+
+
+## Read-only publication evidence boundary
+
+The inactive publication reader uses an inert, bounded SDK view for the pinned production certificate, source catalog, frozen projection, session/original acknowledgement and provider receipt readers. Document/query tokens contain no SDK mutation handles; proof output contains native pins and query digests, while private payloads remain in memory. The allocation closure requires all four original confirmed upload/create steps and joins every optional late acknowledgement to an original receipt. Normal first acknowledgements need not create late-acknowledgement facts. Extra, unresolved or unrelated effects stop inspection.
+
+Dedicated SDK view tests and the actual production receipt reader pagination tests verify these boundaries, including 401-row complete paging. They do not establish a passing complete publication collector with all production certificate/catalog/projection validators. That positive integration, the complete protected/search/queue/source collectors, executable CLI and whole-operator review/CI remain required before any live use.
