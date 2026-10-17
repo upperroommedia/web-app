@@ -41,5 +41,8 @@
     "urm-temporal-99c76a6e-owned-publish-certificate-readonly-r1.json": "c1ccfa2c371afa668d59367304e8c5001c30c45f3053117b2fe20e70b9639221",
     "urm-temporal-99c76a6e-private-alert-capture-join-inspect-r4.json": "35bd3989f6efd2b3a61457980617ce1c7e05ea11d63e6385ae97397374c58316",
     "urm-temporal-99c76a6e-owned-alert-email-native-readonly-r2.json": "7ddd9a078d3a5b70aff882e9634dbd28750fee2b69c7ad1d9e21d30f4b499b11"
-  }
+  },
+  "emailHistoryDigest": "9d0d7c0d91aadef72e4321aa2260fc8785d7c61911470a5c345ba877c6482a96",
+  "emailEventCount": 11,
+  "temporalNamespace": "urm-app-staging.qwejt"
 }
