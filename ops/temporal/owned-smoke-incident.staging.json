@@ -34,6 +34,7 @@
   "emailWorkflowId": "email:urm-app-staging:email-75650f479907eb6658172425e45e3b99595636bb07d325c596b0a82ddae5d9cf",
   "emailRunId": "01a14765-bf14-7546-af2f-288831da7067",
   "captureId": "ff7574d96d0837a1226babd18034c148d6c425de1b8698e3fff6ac0ee17100f6",
+  "capturedAtIso": "2026-10-17T01:06:54.110Z",
   "payloadSha256": "7b653ff5b991319c662e348fd750a6f2b418405a7abad3066ee888d776aeb62f",
   "originalEvidenceSHA256": {
     "urm-temporal-99c76a6e-provider-edge-mismatch-readonly-r1.json": "9f3f539f8feed688b824ace4930b2e56c8fc0c3a052eeecc8e937b39f001e955",
