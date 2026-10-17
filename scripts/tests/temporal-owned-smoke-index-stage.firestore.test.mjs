@@ -1,3 +1,4 @@
+import { ownedBindingFixture } from './fixtures/temporal-owned-smoke-binding.mjs';
 // Real Firestore transactions in a dedicated DEMO project. No ADC, live SDK or provider transport.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -10,6 +11,7 @@ import {
   OWNED_SMOKE_INCIDENT as incident,
   ownedMirrorPaths,
   planOwnedMirrorEdges,
+  ownedIndexSourcePath,
 } from '../temporal-owned-smoke-plan.mjs';
 import { applyOwnedIndexStage, OWNED_SMOKE_ACTION } from '../temporal-owned-smoke-index-stage.mjs';
 for (const name of [
@@ -63,7 +65,7 @@ async function collectIndexPlan(tx) {
       aggregate = row(await get(db.doc(path)));
     const edges = await get(db.collection(path + '/edges').limit(201));
     assert(edges.size < 201);
-    const paths = [...new Set([...edges.docs.map((d) => d.get('canonicalPath')), ...ownedMirrorPaths()])];
+    const paths = [...new Set([...edges.docs.map((d) => ownedIndexSourcePath(row(d))), ...ownedMirrorPaths()])];
     groups.push({
       resource,
       aggregate,
@@ -74,7 +76,14 @@ async function collectIndexPlan(tx) {
   return planOwnedMirrorEdges({ marker, groups, extractResources: extractProviderResources });
 }
 async function fixture() {
-  for (const collection of ['_control', 'temporalProviderUsage', 'sermons', 'lists', 'durableJobs'])
+  for (const collection of [
+    '_control',
+    'temporalProviderUsage',
+    'sermons',
+    'lists',
+    'durableJobs',
+    'temporalPublishingProviderBindings',
+  ])
     await db.recursiveDelete(db.collection(collection));
   const release = {
     environment: 'staging',
@@ -112,12 +121,20 @@ async function fixture() {
   for (const path of ownedMirrorPaths()) batch.set(db.doc(path), canonical);
   for (const resource of incident.resources) {
     const path = aggregatePath(resource);
-    batch.set(db.doc(path), { ...resource, epoch: incident.originalEpoch, state: 'active', referenceCount: 1 });
+    batch.set(db.doc(path), {
+      ...resource,
+      epoch: incident.originalEpoch,
+      state: 'active',
+      referenceCount: 1 + Number(resource.provider === 'subsplash'),
+    });
     batch.set(db.doc(path + '/edges/' + providerEdgeKey(publicationPath)), {
       canonicalPath: publicationPath,
       projectId: incident.projectId,
     });
   }
+  const binding = ownedBindingFixture(incident);
+  batch.set(db.doc(binding.actual), binding.data);
+  batch.set(db.doc(aggregatePath(incident.resources[1]) + '/edges/' + providerEdgeKey(binding.virtual)), binding.edge);
   batch.set(db.doc('durableJobs/fixture-protected-search'), {
     kind: 'search.sync',
     state: 'queued',
@@ -173,8 +190,14 @@ const apply = (f, options = {}) =>
 async function assertCounts(expected) {
   for (const resource of incident.resources) {
     const path = aggregatePath(resource);
-    assert.equal((await db.doc(path).get()).get('referenceCount'), expected);
-    assert.equal((await db.collection(path + '/edges').get()).size, expected);
+    assert.equal(
+      (await db.doc(path).get()).get('referenceCount'),
+      expected + Number(resource.provider === 'subsplash')
+    );
+    assert.equal(
+      (await db.collection(path + '/edges').get()).size,
+      expected + Number(resource.provider === 'subsplash')
+    );
   }
 }
 try {
@@ -236,6 +259,17 @@ try {
     await assert.rejects(apply(f, { resume: true }), /NATIVE_AUTHORITY_CHANGED/);
     await assertCounts(4);
   });
+  await test('preserved binding change then restoration after commit breaks native resume proof', async () => {
+    const f = await fixture();
+    await apply(f);
+    const ref = db.doc(ownedBindingFixture(incident).actual),
+      original = await ref.get();
+    await ref.update({ smokeProofTouch: 1 });
+    await ref.set(original.data());
+    assert.notDeepEqual(nativeSnapshotProof(await ref.get()), nativeSnapshotProof(original));
+    await assert.rejects(apply(f, { resume: true }), /NATIVE_AUTHORITY_CHANGED/);
+    await assertCounts(4);
+  });
   await test('changed protected search work rejects before any edge creation', async () => {
     const f = await fixture();
     await db.doc('durableJobs/fixture-protected-search').update({ state: 'succeeded' });
@@ -250,7 +284,7 @@ try {
     f = await fixture();
     await db.doc(aggregatePath(incident.resources[0])).update({ referenceCount: 2 });
     await assert.rejects(apply(f), /FULL_EDGE_COUNT_REQUIRED/);
-    assert.equal((await db.doc(aggregatePath(incident.resources[1])).get()).get('referenceCount'), 1);
+    assert.equal((await db.doc(aggregatePath(incident.resources[1])).get()).get('referenceCount'), 2);
   });
 } finally {
   await deleteApp(app);

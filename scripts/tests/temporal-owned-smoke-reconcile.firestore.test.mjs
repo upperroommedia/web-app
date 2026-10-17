@@ -1,3 +1,4 @@
+import { ownedBindingFixture } from './fixtures/temporal-owned-smoke-binding.mjs';
 // Dedicated DEMO SDK tests of bounded publication read-only SDK views. No ADC, real mail or workflow transport.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -623,12 +624,27 @@ async function wholeFixture() {
     const path = `temporalProviderUsage/${actualRuntime.providerResourceKey(resource)}/epochs/${
       testCase.originalEpoch
     }`;
-    batch.set(db.doc(path), { ...resource, epoch: testCase.originalEpoch, state: 'active', referenceCount: 1 });
+    batch.set(db.doc(path), {
+      ...resource,
+      epoch: testCase.originalEpoch,
+      state: 'active',
+      referenceCount: 1 + Number(resource.provider === 'subsplash'),
+    });
     batch.set(db.doc(path + '/edges/' + actualRuntime.providerEdgeKey(sermonPath)), {
       canonicalPath: sermonPath,
       projectId: testCase.projectId,
     });
   }
+  const binding = ownedBindingFixture(testCase);
+  batch.set(db.doc(binding.actual), binding.data);
+  batch.set(
+    db.doc(
+      `temporalProviderUsage/${actualRuntime.providerResourceKey(testCase.resources[1])}/epochs/${
+        testCase.originalEpoch
+      }/edges/${actualRuntime.providerEdgeKey(binding.virtual)}`
+    ),
+    binding.edge
+  );
   release = {
     environment: 'staging',
     projectId: testCase.projectId,
@@ -783,13 +799,15 @@ try {
       const path = `temporalProviderUsage/${actualRuntime.providerResourceKey(resource)}/epochs/${
         testCase.originalEpoch
       }`;
-      assert.equal((await db.doc(path).get()).get('referenceCount'), 4);
-      assert.equal((await db.collection(path + '/edges').get()).size, 4);
+      assert.equal((await db.doc(path).get()).get('referenceCount'), 4 + Number(resource.provider === 'subsplash'));
+      assert.equal((await db.collection(path + '/edges').get()).size, 4 + Number(resource.provider === 'subsplash'));
     }
   });
   for (const stage of ['index', 'email', 'complete'])
     await test(`whole lost ${stage} commit ACK resumes identical bytes without repeated writes`, async () => {
       await wholeFixture();
+      const bindingPath = ownedBindingFixture(testCase).actual,
+        bindingBefore = nativeSnapshotProof(await db.doc(bindingPath).get());
       const m = await coordinator().inspect(),
         r = receipt(m),
         before = (await db.doc('durableJobs/' + testCase.emailJobId).get()).get('revision');
@@ -807,10 +825,11 @@ try {
         const path = `temporalProviderUsage/${actualRuntime.providerResourceKey(resource)}/epochs/${
           testCase.originalEpoch
         }`;
-        assert.equal((await db.doc(path).get()).get('referenceCount'), 4);
-        assert.equal((await db.collection(path + '/edges').get()).size, 4);
+        assert.equal((await db.doc(path).get()).get('referenceCount'), 4 + Number(resource.provider === 'subsplash'));
+        assert.equal((await db.collection(path + '/edges').get()).size, 4 + Number(resource.provider === 'subsplash'));
       }
       assert.equal(native.status, 'FAILED');
+      assert.deepEqual(nativeSnapshotProof(await db.doc(bindingPath).get()), bindingBefore);
     });
   await test('whole precommit unknown ACK retains operation and resumes once; malformed inspect receipts reject', async () => {
     await wholeFixture();
@@ -872,8 +891,8 @@ try {
       const path = `temporalProviderUsage/${actualRuntime.providerResourceKey(resource)}/epochs/${
         testCase.originalEpoch
       }`;
-      assert.equal((await db.doc(path).get()).get('referenceCount'), 1);
-      assert.equal((await db.collection(path + '/edges').get()).size, 1);
+      assert.equal((await db.doc(path).get()).get('referenceCount'), 1 + Number(resource.provider === 'subsplash'));
+      assert.equal((await db.collection(path + '/edges').get()).size, 1 + Number(resource.provider === 'subsplash'));
     }
   });
 } finally {

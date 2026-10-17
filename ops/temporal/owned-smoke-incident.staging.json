@@ -40,9 +40,14 @@
     "urm-temporal-99c76a6e-provider-edge-mismatch-readonly-r1.json": "9f3f539f8feed688b824ace4930b2e56c8fc0c3a052eeecc8e937b39f001e955",
     "urm-temporal-99c76a6e-owned-publish-certificate-readonly-r1.json": "c1ccfa2c371afa668d59367304e8c5001c30c45f3053117b2fe20e70b9639221",
     "urm-temporal-99c76a6e-private-alert-capture-join-inspect-r4.json": "35bd3989f6efd2b3a61457980617ce1c7e05ea11d63e6385ae97397374c58316",
-    "urm-temporal-99c76a6e-owned-alert-email-native-readonly-r2.json": "7ddd9a078d3a5b70aff882e9634dbd28750fee2b69c7ad1d9e21d30f4b499b11"
+    "urm-temporal-99c76a6e-owned-alert-email-native-readonly-r2.json": "7ddd9a078d3a5b70aff882e9634dbd28750fee2b69c7ad1d9e21d30f4b499b11",
+    "urm-temporal-9094f5a2-index-binding-source-readonly-r1.json": "898298e8f4b11b2a3101cbb18b7e8fb010c692dcfcf2a7e8607ec5cf1d4acd51"
   },
   "emailHistoryDigest": "9d0d7c0d91aadef72e4321aa2260fc8785d7c61911470a5c345ba877c6482a96",
   "emailEventCount": 11,
-  "temporalNamespace": "urm-app-staging.qwejt"
+  "temporalNamespace": "urm-app-staging.qwejt",
+  "preservedProviderBinding": {
+    "bindingId": "79325fc8d4017bb182fd841e2f80e572ab92cbcbd3a093331aa9f434587af192",
+    "dataDigest": "98935e77d2f0bbff596a969dc87a02cf4a1d83860853f872df3c0f8af15b80cb"
+  }
 }

@@ -47,6 +47,33 @@ function assertDocument(row, path) {
 
 export const ownedMirrorPaths = () => incident.listIds.map((id) => `lists/${id}/listItems/${incident.sermonId}`);
 
+/** Virtual association edges retain a real, immutable owned binding source; they are not document paths. */
+export function ownedIndexSourcePath(edge) {
+  const path = edge?.data?.canonicalPath;
+  if (typeof path === 'string' && path.startsWith('providerBindings/')) {
+    const id = incident.preservedProviderBinding.bindingId;
+    requireThat(
+      path === `providerBindings/${incident.publicationJobId}/${id}` &&
+        onlyKeys(edge.data, ['canonicalPath', 'projectId', 'jobId', 'bindingId', 'state']) &&
+        edge.data.projectId === incident.projectId &&
+        edge.data.jobId === incident.publicationJobId &&
+        edge.data.bindingId === id &&
+        edge.data.state === 'pending_effect',
+      'EXISTING_BINDING_EDGE_INVALID'
+    );
+    return `temporalPublishingProviderBindings/${incident.publicationJobId}/bindings/${id}`;
+  }
+  requireThat(
+    typeof path === 'string' &&
+      path.length <= 2048 &&
+      /^(sermons|lists|series|speakers|images|durableJobIntents|temporalProviderPendingReferences)\//.test(path) &&
+      path.split('/').length % 2 === 0 &&
+      !path.split('/').some((v) => !v || v === '.' || v === '..'),
+    'INDEX_CANONICAL_PATH_INVALID'
+  );
+  return path;
+}
+
 /**
  * Produce a finite write plan from freshly read RAM-only documents. The caller MUST supply the
  * pinned runtime's actual extractProviderResources function, not resource lists from a manifest.
@@ -109,21 +136,39 @@ export function planOwnedMirrorEdges({ marker, groups, extractResources }) {
     };
     for (const edge of group.edges.rows) {
       const path = edge?.data?.canonicalPath;
-      requireThat(
-        typeof path === 'string' &&
-          path.length <= 2048 &&
-          /^(sermons|lists|series|speakers|images|durableJobIntents|temporalProviderPendingReferences)\//.test(path) &&
-          path.split('/').length % 2 === 0 &&
-          !path.split('/').some((v) => !v || v === '.' || v === '..') &&
-          onlyKeys(edge.data, ['canonicalPath', 'projectId']) &&
-          edge.data.projectId === incident.projectId &&
-          !existing.has(path),
-        'EXISTING_EDGE_INVALID'
-      );
+      const sourcePath = ownedIndexSourcePath(edge);
+      requireThat(edge.data.projectId === incident.projectId && !existing.has(sourcePath), 'EXISTING_EDGE_INVALID');
       assertDocument(edge, `${aggregatePath}/edges/${key(path)}`);
-      hasResource(canonical.get(path));
-      existing.add(path);
+      if (sourcePath !== path) {
+        const row = canonical.get(sourcePath);
+        assertDocument(row, sourcePath);
+        requireThat(
+          row.native.dataDigest === incident.preservedProviderBinding.dataDigest &&
+            same(
+              {
+                projectId: row.data.projectId,
+                provider: row.data.provider,
+                account: row.data.account,
+                remoteId: row.data.remoteId,
+              },
+              resource
+            ) &&
+            row.data.state === 'reserved' &&
+            row.data.jobId === incident.publicationJobId &&
+            row.data.bindingId === incident.preservedProviderBinding.bindingId,
+          'PRESERVED_BINDING_SOURCE_CHANGED'
+        );
+      } else {
+        requireThat(onlyKeys(edge.data, ['canonicalPath', 'projectId']), 'EXISTING_EDGE_INVALID');
+        hasResource(canonical.get(sourcePath));
+      }
+      existing.add(sourcePath);
     }
+    const bindingSource = `temporalPublishingProviderBindings/${incident.publicationJobId}/bindings/${incident.preservedProviderBinding.bindingId}`;
+    requireThat(
+      resource.provider === 'subsplash' ? existing.has(bindingSource) : !existing.has(bindingSource),
+      'ORIGINAL_BINDING_EDGE_REQUIRED'
+    );
     const targets = ownedMirrorPaths();
     for (const path of targets) {
       requireThat(!existing.has(path), 'TARGET_EDGE_ALREADY_PRESENT');

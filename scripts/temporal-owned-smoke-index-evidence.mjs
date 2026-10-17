@@ -4,6 +4,7 @@ import {
   OWNED_SMOKE_INCIDENT as incident,
   ownedMirrorPaths,
   planOwnedMirrorEdges,
+  ownedIndexSourcePath,
 } from './temporal-owned-smoke-plan.mjs';
 const need = (ok, code) => {
   if (!ok) throw Object.assign(new Error('OWNED_SMOKE_' + code), { code: 'OWNED_SMOKE_' + code });
@@ -57,16 +58,8 @@ export async function collectOwnedMirrorIndexPlan({ db, tx, runtime }) {
     }
     const canonicals = [];
     // Validate paths before dereferencing arbitrary persisted edge strings.
-    const paths = [...new Set([...rows.map((r) => r.data.canonicalPath), ...ownedMirrorPaths()])];
+    const paths = [...new Set([...rows.map(ownedIndexSourcePath), ...ownedMirrorPaths()])];
     for (const path of paths) {
-      need(
-        typeof path === 'string' &&
-          path.length <= 2048 &&
-          /^(sermons|lists|series|speakers|images|durableJobIntents|temporalProviderPendingReferences)\//.test(path) &&
-          path.split('/').length % 2 === 0 &&
-          !path.split('/').some((s) => !s || s === '.' || s === '..'),
-        'INDEX_CANONICAL_PATH_INVALID'
-      );
       canonicals.push(await read(path));
     }
     groups.push({ resource, aggregate, edges: { allPages: true, rows }, canonicals });

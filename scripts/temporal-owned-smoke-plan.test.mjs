@@ -1,3 +1,4 @@
+import { ownedBindingFixture } from './tests/fixtures/temporal-owned-smoke-binding.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
@@ -52,6 +53,12 @@ function fixture() {
       canonicals: [canonicalPath, ...ownedMirrorPaths()].map((p) => row(p, { resources: [resource] })),
     };
   });
+  const binding = ownedBindingFixture(incident),
+    group = groups[1];
+  group.aggregate.data.referenceCount++;
+  repin(group.aggregate);
+  group.edges.rows.push(row(`${group.aggregate.path}/edges/${key(binding.virtual)}`, binding.edge));
+  group.canonicals.push(row(binding.actual, binding.data));
   return { marker, groups, extractResources: (_project, _path, data) => data.resources };
 }
 test('plans exactly six edges and two count fields without mutating input or exposing canonical payload', () => {
@@ -64,8 +71,8 @@ test('plans exactly six edges and two count fields without mutating input or exp
   assert.equal(plan.canonicalWrites, 0);
   assert.equal(proofDigest({ marker: f.marker, groups: f.groups }), before);
   for (const group of plan.aggregates) {
-    assert.equal(group.beforeCount, 1);
-    assert.equal(group.afterCount, 4);
+    assert.equal(group.beforeCount, group === plan.aggregates[1] ? 2 : 1);
+    assert.equal(group.afterCount, group === plan.aggregates[1] ? 5 : 4);
     assert.equal(group.creates.length, 3);
     assert(group.creates.every((create) => Object.keys(create.data).sort().join(',') === 'canonicalPath,projectId'));
     assert(group.canonicals.every((d) => !Object.hasOwn(d, 'data')));
