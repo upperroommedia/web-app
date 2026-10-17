@@ -131,6 +131,20 @@ export function applicationStages(root = ROOT) {
           '../firebase.test.json',
           'node --test ../scripts/integration/temporal-pinned-search-audit.firestore.integration.mjs'
         ),
+        pnpm(
+          '--dir',
+          'functions',
+          'exec',
+          'firebase',
+          'emulators:exec',
+          '--project',
+          'demo-owned-smoke-stage',
+          '--only',
+          'auth,firestore,database,storage',
+          '--config',
+          '../firebase.test.json',
+          'node ../scripts/tests/temporal-owned-smoke-index-stage.firestore.test.mjs'
+        ),
       ],
       { RELEASE_RUNTIME_TEST_ROOT: root, BUNDLE_RECOVERY_TEST_RUNTIME_ROOT: root }
     ),

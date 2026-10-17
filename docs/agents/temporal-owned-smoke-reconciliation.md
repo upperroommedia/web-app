@@ -2,6 +2,8 @@
 
 This document specifies a maintenance operator, not permission to alter the running release. The application fix is PR252, commit9094f5a27165a080c288f01975215975f0e3347e. The live application remains99c until a normal durable upgrade actually installs the fix. A source fix prevents recurrence but does not heal existing reference edges or finish the failed email projection.
 
+The current implementation is limited to the pure incident planner and an atomic index **component** which requires an already owned operation. It has no CLI, authentication, acquisition, final release, complete incident/protected-set collector or email real-store adapter. Its component tests and component reviews do not approve an executable recovery. Those remaining boundaries and their tests/reviews/CI must be completed before any live invocation.
+
 ## Scope and lifecycle
 
 The incident identity is committed in `ops/temporal/owned-smoke-incident.staging.json`. It fixes one owned publication, its immutable critical-repair certificate and acknowledged list session, two already acknowledged sandbox allocations, three exact canonical mirrors, and one already captured email. An inspect-only command must collect a fresh manifest without mutations. Apply must require the exact manifest file SHA256, an explicit operator commit, an explicit immutable application runtime, and a new UUID. A changed input requires investigation and a new inspect; it must never silently broaden this case.

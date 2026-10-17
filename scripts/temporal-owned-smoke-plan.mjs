@@ -135,6 +135,7 @@ export function planOwnedMirrorEdges({ marker, groups, extractResources }) {
       beforeCount: aggregate.referenceCount,
       afterCount: aggregate.referenceCount + 3,
       aggregateNative: group.aggregate.native,
+      aggregateAfterDataDigest: proofDigest({ ...aggregate, referenceCount: aggregate.referenceCount + 3 }),
       existingEdges: group.edges.rows.map((row) => ({ path: row.path, native: row.native })),
       canonicals: group.canonicals.map((row) => ({ path: row.path, native: row.native })),
       creates: targets.map((path) => ({

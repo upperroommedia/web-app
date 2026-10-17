@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import vm from 'node:vm';
+import { validateOwnedIndexPlan, assertOwnedSmokeAuthority } from './temporal-owned-smoke-index-stage.mjs';
 import { proofDigest } from './temporal-release-runtime.mjs';
 import {
   OWNED_SMOKE_INCIDENT as incident,
@@ -441,4 +442,103 @@ test('incident scope is recursively immutable', () => {
   assert.throws(() => {
     incident.listIds.push('other');
   }, TypeError);
+});
+test('the index stage rejects a forged aggregate delta or creation path', () => {
+  const original = planOwnedMirrorEdges(fixture());
+  assert.equal(validateOwnedIndexPlan(original), original);
+  for (const alter of [
+    (p) => {
+      p.aggregates[0].afterCount++;
+    },
+    (p) => {
+      p.aggregates[0].creates[0].path = 'sermons/unrelated';
+    },
+    (p) => {
+      p.aggregates[0].creates[0].data.projectId = 'urm-app';
+    },
+    (p) => {
+      p.aggregates[0].creates.push(p.aggregates[0].creates[0]);
+    },
+    (p) => {
+      p.aggregates[0].aggregatePath = 'temporalProviderUsage/unrelated/epochs/other';
+    },
+    (p) => {
+      p.aggregates[0].aggregateAfterDataDigest = '';
+    },
+    (p) => {
+      p.aggregates[0].existingEdges.push(p.aggregates[0].existingEdges[0]);
+    },
+    (p) => {
+      p.aggregates[1] = p.aggregates[0];
+    },
+  ]) {
+    const p = structuredClone(original);
+    alter(p);
+    assert.throws(() => validateOwnedIndexPlan(p), /OWNED_SMOKE_/);
+  }
+});
+function authorityFixture() {
+  const release = {
+    environment: 'staging',
+    projectId: incident.projectId,
+    mode: 'durable-upgrade',
+    compatibilityCommit: incident.runtimeCommit,
+    uiCommit: incident.runtimeCommit,
+    releaseId: '939dd424-7473-4cae-a7a8-ea8e2dcc9977',
+    domains: ['publishing', 'emails', 'search'],
+  };
+  const control = {
+    schemaVersion: 1,
+    releaseId: release.releaseId,
+    revision: 55,
+    admission: 'paused',
+    domains: Object.fromEntries(
+      ['media', 'publishing', 'images', 'emails', 'accounts', 'bundles', 'search'].map((domain) => [
+        domain,
+        { owner: 'temporal', admission: release.domains.includes(domain) ? 'paused' : 'open' },
+      ])
+    ),
+  };
+  const state = { ...release, controlRevision: 55, phase: 'ownership-changed' };
+  return { release, control, state };
+}
+test('apply authority requires a new fixed-source normal ownership-changed paused checkpoint', () => {
+  const f = authorityFixture();
+  assertOwnedSmokeAuthority(f.control, f.state, f.release, 55);
+  for (const alter of [
+    (f) => {
+      f.control.admission = 'open';
+    },
+    (f) => {
+      f.state.phase = 'complete';
+    },
+    (f) => {
+      f.state.phase = 'ui-frozen';
+    },
+    (f) => {
+      f.release.compatibilityCommit = '99c76a6eee820d347c06752573e45224665687ed';
+    },
+    (f) => {
+      f.release.projectId = 'urm-app';
+    },
+    (f) => {
+      f.release.releaseId = '09e0d630-f119-4da4-8f20-3db27ff08d17';
+    },
+    (f) => {
+      f.release.domains = ['publishing', 'search'];
+    },
+    (f) => {
+      f.control.domains.emails.admission = 'open';
+    },
+    (f) => {
+      f.control.domains.media.owner = 'legacy';
+    },
+    (f) => {
+      f.state.controlRevision = 54;
+    },
+  ]) {
+    const changed = structuredClone(f);
+    alter(changed);
+    assert.throws(() => assertOwnedSmokeAuthority(changed.control, changed.state, changed.release, 55));
+  }
 });
