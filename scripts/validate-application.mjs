@@ -187,7 +187,7 @@ export function applicationStages(root = ROOT) {
           'auth,firestore,database,storage',
           '--config',
           '../firebase.test.json',
-          'node ../scripts/tests/temporal-owned-smoke-publication-evidence.firestore.test.mjs && node ../scripts/tests/temporal-owned-smoke-publication-receipts.firestore.test.mjs'
+          'node ../scripts/tests/temporal-owned-smoke-publication-evidence.firestore.test.mjs && node ../scripts/tests/temporal-owned-smoke-publication-receipts.firestore.test.mjs && node ../scripts/tests/temporal-owned-smoke-publication-collector.firestore.test.mjs && node ../scripts/tests/temporal-owned-smoke-preservation.firestore.test.mjs'
         ),
       ],
       { RELEASE_RUNTIME_TEST_ROOT: root, BUNDLE_RECOVERY_TEST_RUNTIME_ROOT: root }

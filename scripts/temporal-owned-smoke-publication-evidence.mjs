@@ -131,6 +131,12 @@ export function publicationReadonlyView(db, transaction, allowed) {
       'PUBLICATION_QUERY_MEMBERSHIP_CHANGED'
     );
     queries.set(handle.digest, proof);
+    if (handle.kind === 'count') {
+      // The production candidate validator counts its request set. Enumerate the same bounded
+      // set instead, so every counted member is native-pinned and truncation always stops.
+      need(docs.length < 101, 'PUBLICATION_COUNT_BOUND');
+      return Object.freeze({ data: () => Object.freeze({ count: docs.length }) });
+    }
     return Object.freeze({ docs: Object.freeze(docs), size: docs.length, empty: docs.length === 0 });
   };
   const query = (path, ref, shape = [], limit) => {
@@ -153,6 +159,17 @@ export function publicationReadonlyView(db, transaction, allowed) {
     token.startAfter = (snapshot) => {
       need(snapshots.has(snapshot), 'PUBLICATION_CURSOR_REQUIRED');
       return query(path, ref.startAfter(snapshots.get(snapshot)), [...shape, ['after', snapshot.ref.path]], limit);
+    };
+    token.count = () => {
+      need(limit === undefined, 'PUBLICATION_COUNT_QUERY_SHAPE');
+      const count = {};
+      handles.set(count, {
+        ref: ref.limit(101),
+        kind: 'count',
+        limit: 101,
+        digest: proofDigest([path, shape, ['complete-count-bounded', 100]]),
+      });
+      return Object.freeze(count);
     };
     handles.set(token, { ref, kind: 'query', limit, digest: proofDigest([path, shape]) });
     return Object.freeze(token);
@@ -221,6 +238,7 @@ export async function collectOwnedPublicationEvidence({ db, tx, runtime }) {
     'temporalPublishingCriticalRepairSourceCatalogs',
     'temporalPublishingCriticalRepairCatalogs',
     'temporalPublishingAcknowledgedProjections',
+    'temporalPublishingAcknowledgedRepairCandidates',
     'temporalPublishingEffectPlans',
     'temporalPublishingDeletionReceipts',
     'temporalProviderMutationSessions',
@@ -307,8 +325,11 @@ export async function collectOwnedPublicationEvidence({ db, tx, runtime }) {
     need(page.nextCursor === null || page.nextCursor === cursor + 1, 'PUBLICATION_CURSOR_CHANGED');
     cursor = page.nextCursor;
   }
-  need(same(operations, certificate.operations), 'PUBLICATION_CATALOG_OPERATION_CHANGED');
-  await runtime.validateCertifiedCriticalRepairOperation(view.tx, view.db, ref, catalog, operation, 'claim');
+  // The source catalog describes original provider reads/deletes. The certificate's acknowledged
+  // projection comes from a separate sealed session/candidate; it is not a catalog member.
+  need(operations.length === catalog.operationCount, 'PUBLICATION_CATALOG_OPERATION_CHANGED');
+  for (const catalogOperation of operations)
+    await runtime.validateCertifiedCriticalRepairOperation(view.tx, view.db, ref, catalog, catalogOperation, 'claim');
   const rootPath = 'temporalPublishingAcknowledgedProjections/' + incident.sessionId;
   const plan = (await read(rootPath)).data();
   need(
