@@ -84,6 +84,7 @@ export function applicationStages(root = ROOT) {
       pnpm('run', 'test:temporal:contracts'),
       node('--test', 'scripts/temporal-owned-smoke-email-evidence.test.mjs'),
       node('--test', 'scripts/temporal-owned-smoke-native.test.mjs'),
+      node('--test', 'scripts/temporal-current-search-lifecycle.test.mjs'),
       node('--test', 'scripts/temporal-owned-smoke-publication-evidence.test.mjs'),
       node('--test', 'scripts/temporal-recover-initial-compatibility.test.mjs'),
       node('--test', 'scripts/provider-http-inventory.test.mjs'),
@@ -188,7 +189,7 @@ export function applicationStages(root = ROOT) {
           'auth,firestore,database,storage',
           '--config',
           '../firebase.test.json',
-          'node ../scripts/tests/temporal-owned-smoke-publication-evidence.firestore.test.mjs && node ../scripts/tests/temporal-owned-smoke-publication-receipts.firestore.test.mjs && node ../scripts/tests/temporal-owned-smoke-publication-collector.firestore.test.mjs && node ../scripts/tests/temporal-owned-smoke-preservation.firestore.test.mjs && node --experimental-vm-modules ../scripts/tests/temporal-owned-smoke-reconcile.firestore.test.mjs'
+          'node ../scripts/tests/temporal-owned-smoke-publication-evidence.firestore.test.mjs && node ../scripts/tests/temporal-owned-smoke-publication-receipts.firestore.test.mjs && node ../scripts/tests/temporal-owned-smoke-publication-collector.firestore.test.mjs && node ../scripts/tests/temporal-owned-smoke-preservation.firestore.test.mjs && node --experimental-vm-modules ../scripts/tests/temporal-owned-smoke-reconcile.firestore.test.mjs && node ../scripts/tests/temporal-current-search-lifecycle.firestore.test.mjs'
         ),
       ],
       { RELEASE_RUNTIME_TEST_ROOT: root, BUNDLE_RECOVERY_TEST_RUNTIME_ROOT: root }
