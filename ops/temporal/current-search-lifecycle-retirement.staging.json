@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "applicationCommit": "9094f5a27165a080c288f01975215975f0e3347e",
+  "previousRetirement": {
+    "filename": "urm-temporal-fa8bf437-lifecycle-retirement-apply-r1.json",
+    "sha256": "b8b6817b47da612e92bcfc038c8ffdf8b25ba23bbc170abb7b9542487e1454c1",
+    "operationId": "38123b07-c033-43ba-b405-d6d29b7547fc",
+    "names": [
+      "projects/urm-app-staging/locations/us-central1/queues/kit-images-index-executeFullIndexOperation/tasks/6103807756992312544",
+      "projects/urm-app-staging/locations/us-central1/queues/kit-lists-index-executeFullIndexOperation/tasks/63059877201016546131",
+      "projects/urm-app-staging/locations/us-central1/queues/kit-sermons-index-executeFullIndexOperation/tasks/42131845838468660131",
+      "projects/urm-app-staging/locations/us-central1/queues/kit-speakers-index-executeFullIndexOperation/tasks/06639138578187010401",
+      "projects/urm-app-staging/locations/us-central1/queues/kit-users-index-executeFullIndexOperation/tasks/43441305799477762811"
+    ]
+  },
+  "originalInspection": {
+    "filename": "urm-temporal-fa8bf437-lifecycle-retirement-inspect-r2.json",
+    "sha256": "9d972d986ac3cd86fa0ecc28010964f4bcabeb1f1809e8468b8b90ea0d630adb"
+  }
+}
