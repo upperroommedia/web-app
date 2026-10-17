@@ -19,7 +19,7 @@ function fixture(change = () => {}) {
       oidcToken: { serviceAccountEmail: 'firebase-fn-123@urm-app-staging.iam.gserviceaccount.com', audience: url },
     },
     source = {
-      bucket: 'gcf-v2-sources-123-us-central1',
+      bucket: 'gcf-v2-sources-251680231116-us-central1',
       object: 'kit-users-index-executeFullIndexOperation/function-source.zip',
       generation: '123456',
     };
@@ -45,7 +45,7 @@ function fixture(change = () => {}) {
     buildConfig: {
       source: { storageSource: source },
       sourceProvenance: { resolvedStorageSource: source },
-      build: 'projects/123/locations/us-central1/builds/aabbcc',
+      build: 'projects/251680231116/locations/us-central1/builds/aabbcc',
     },
   };
   const request = {
@@ -55,20 +55,41 @@ function fixture(change = () => {}) {
   };
   const row = {
     name: queue + '/tasks/1234567',
-    requestLine: 3,
-    responseLine: 5,
+    requestLine: 5,
+    responseLine: 7,
     request: { task: { httpRequest } },
     response: { name: queue + '/tasks/1234567', view: 'BASIC', httpRequest },
     actualTask: { httpRequest },
   };
-  const input = { fn, request, row, done: true, complete: true };
+  const operationName = parent + '/operations/operation-fixture';
+  const input = {
+    fn,
+    request,
+    row,
+    done: true,
+    complete: true,
+    operationName,
+    acknowledgedOperation: operationName,
+    returnedOperation: operationName,
+    metadataRequest: structuredClone(fn),
+    patchStatus: 200,
+  };
   change(input);
   const lines = [
     `[actual] >>> [apiv2][body] PATCH https://cloudfunctions.googleapis.com/v2/${functionName} ${JSON.stringify(
       request
     )}`,
+    `[actual] <<< [apiv2][status] PATCH https://cloudfunctions.googleapis.com/v2/${functionName} ${input.patchStatus}`,
+    `[actual] <<< [apiv2][body] PATCH https://cloudfunctions.googleapis.com/v2/${functionName} ${JSON.stringify({
+      name: input.acknowledgedOperation,
+    })}`,
     `[actual] <<< [apiv2][body] GET https://cloudfunctions.googleapis.com/v2/${parent}/operations/operation-fixture ${JSON.stringify(
-      { done: input.done, response: fn }
+      {
+        name: input.returnedOperation,
+        done: input.done,
+        metadata: { requestResource: input.metadataRequest },
+        response: fn,
+      }
     )}`,
     `[actual] >>> [apiv2][body] POST https://cloudtasks.googleapis.com/v2/${queue}/tasks ${JSON.stringify(
       row.request
@@ -88,7 +109,7 @@ test('same actual log joins source PATCH, successful9094 operation and task Crea
     r = verifyCurrentDeploymentLog(f.row, f.bytes);
   assert.equal(r.deployment.applicationCommit, contract.applicationCommit);
   assert.equal(r.deployment.patchLine, 1);
-  assert.equal(r.deployment.completionLine, 2);
+  assert.equal(r.deployment.completionLine, 4);
 });
 for (const [label, change] of Object.entries({
   oldSource: (x) => {
@@ -99,6 +120,27 @@ for (const [label, change] of Object.entries({
   },
   generation: (x) => {
     x.request.buildConfig.source.storageSource.generation = '999';
+  },
+  wrongUploadBucket: (x) => {
+    x.request.buildConfig.source.storageSource = {
+      bucket: 'foreign-bucket',
+      object: 'aaee4070-0103-4ed1-b49a-12697d66e028.zip',
+    };
+  },
+  wrongOperation: (x) => {
+    x.acknowledgedOperation = x.operationName + '-other';
+  },
+  wrongReturnedOperation: (x) => {
+    x.returnedOperation = x.operationName + '-other';
+  },
+  wrongNormalizedSource: (x) => {
+    x.metadataRequest.buildConfig.source.storageSource.generation = '999';
+  },
+  wrongNormalizedRuntime: (x) => {
+    x.metadataRequest.serviceConfig.environmentVariables.TEMPORAL_RELEASE_COMMIT = '0'.repeat(40);
+  },
+  patchFailed: (x) => {
+    x.patchStatus = 500;
   },
   notDone: (x) => {
     x.done = false;
@@ -129,4 +171,19 @@ test('apply arguments require exact original receipt identity and reject partial
     /CLEAN_INSPECT/
   );
   assert.throws(() => parseCurrentLifecycleArgs(['--apply']), /ARGUMENTS/);
+});
+
+test('managed upload source joins through the exact acknowledged update operation', () => {
+  const f = fixture((x) => {
+    x.request.buildConfig.source.storageSource = {
+      bucket: 'gcf-v2-uploads-251680231116.us-central1.cloudfunctions.appspot.com',
+      object: 'aaee4070-0103-4ed1-b49a-12697d66e028.zip',
+    };
+  });
+  const r = verifyCurrentDeploymentLog(f.row, f.bytes);
+  assert.equal(r.deployment.requestSourceKind, 'managed-upload');
+  assert.equal(
+    r.deployment.operationName,
+    'projects/urm-app-staging/locations/us-central1/operations/operation-fixture'
+  );
 });

@@ -99,54 +99,88 @@ export function verifyCurrentDeploymentLog(row, bytes) {
   const instance = match[1],
     functionName = `projects/urm-app-staging/locations/us-central1/functions/kit-${instance}-index-executeFullIndexOperation`,
     patchMarker = `>>> [apiv2][body] PATCH https://cloudfunctions.googleapis.com/v2/${functionName} `;
-  let patch, finished;
+  const endpoint = `https://cloudfunctions.googleapis.com/v2/${functionName}`;
+  let patch, acknowledged, finished, patchStatus;
   for (let i = 0; i < row.requestLine - 1; i++) {
     const line = lines[i],
       patchAt = line.indexOf(patchMarker);
     if (patchAt > 0) {
       const value = JSON.parse(line.slice(patchAt + patchMarker.length));
-      if (value.name === functionName) patch = { value, line: i + 1 };
-    }
-    const operationMarker =
-      '<<< [apiv2][body] GET https://cloudfunctions.googleapis.com/v2/projects/urm-app-staging/locations/us-central1/operations/';
-    const offset = line.indexOf(operationMarker);
-    if (offset > 0) {
-      const bodyAt = line.indexOf(' ', offset + operationMarker.length);
-      if (bodyAt > 0) {
-        const value = JSON.parse(line.slice(bodyAt + 1));
-        if (value.done === true && !value.error && value.response?.name === functionName)
-          finished = { value: value.response, line: i + 1 };
+      if (value.name === functionName) {
+        patch = { value, line: i + 1 };
+        acknowledged = finished = patchStatus = undefined;
       }
+    }
+    if (patch && line.endsWith(`<<< [apiv2][status] PATCH ${endpoint} 200`)) patchStatus = i + 1;
+    const ackMarker = `<<< [apiv2][body] PATCH ${endpoint} `,
+      ackAt = line.indexOf(ackMarker);
+    if (patch && patchStatus && ackAt > 0) {
+      const value = JSON.parse(line.slice(ackAt + ackMarker.length));
+      need(
+        /^projects\/urm-app-staging\/locations\/us-central1\/operations\/operation-[A-Za-z0-9-]+$/.test(
+          value.name ?? ''
+        ) &&
+          patch.line < patchStatus &&
+          patchStatus < i + 1,
+        'SUCCESSFUL_DEPLOYMENT_REQUIRED'
+      );
+      need(!acknowledged, 'DEPLOYMENT_ACK_DUPLICATED');
+      acknowledged = { name: value.name, line: i + 1 };
+    }
+    if (!acknowledged) continue;
+    const marker = `<<< [apiv2][body] GET https://cloudfunctions.googleapis.com/v2/${acknowledged.name} `;
+    const offset = line.indexOf(marker);
+    if (offset > 0) {
+      const value = JSON.parse(line.slice(offset + marker.length));
+      need(value.name === acknowledged.name, 'DEPLOYMENT_OPERATION_CHANGED');
+      if (value.done === true && !value.error && value.response?.name === functionName)
+        finished = { value: value.response, request: value.metadata?.requestResource, line: i + 1 };
     }
   }
   need(
     patch &&
+      acknowledged &&
       finished &&
-      patch.line < finished.line &&
+      patch.line < acknowledged.line &&
+      acknowledged.line < finished.line &&
       finished.line < row.requestLine &&
       lines.slice(row.responseLine).some((line) => line.includes('Deploy complete!')),
     'SUCCESSFUL_DEPLOYMENT_REQUIRED'
   );
   const current = finished.value,
     request = patch.value,
+    normalizedRequest = finished.request,
     source = current.buildConfig?.source?.storageSource,
+    requestedSource = request.buildConfig?.source?.storageSource,
     env = current.serviceConfig?.environmentVariables;
+  const runtimeMatches = (value) =>
+    value?.TEMPORAL_RELEASE_COMMIT === contract.applicationCommit &&
+    value.STAGING_PROVIDER_MODE === 'sandbox' &&
+    ['MEDIA', 'PUBLISHING', 'IMAGES', 'EMAILS', 'ACCOUNTS', 'BUNDLES', 'SEARCH'].every(
+      (d) => value['TASK_ORCHESTRATOR_' + d] === 'temporal'
+    );
+  // The API resolves its temporary upload object into the immutable function-source object.
+  // Only the operation ACK returned for this exact PATCH may attest that transformation.
+  const managedUpload =
+    exact(requestedSource, ['bucket', 'object']) &&
+    requestedSource.bucket === 'gcf-v2-uploads-251680231116.us-central1.cloudfunctions.appspot.com' &&
+    /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\.zip$/.test(requestedSource.object);
+  const directSource = same(source, requestedSource);
   need(
     current.state === 'ACTIVE' &&
-      env?.TEMPORAL_RELEASE_COMMIT === contract.applicationCommit &&
-      request.serviceConfig?.environmentVariables?.TEMPORAL_RELEASE_COMMIT === contract.applicationCommit &&
-      env.STAGING_PROVIDER_MODE === 'sandbox' &&
-      ['MEDIA', 'PUBLISHING', 'IMAGES', 'EMAILS', 'ACCOUNTS', 'BUNDLES', 'SEARCH'].every(
-        (d) => env['TASK_ORCHESTRATOR_' + d] === 'temporal'
-      ) &&
-      same(source, request.buildConfig?.source?.storageSource) &&
+      runtimeMatches(env) &&
+      runtimeMatches(request.serviceConfig?.environmentVariables) &&
+      normalizedRequest?.name === functionName &&
+      runtimeMatches(normalizedRequest.serviceConfig?.environmentVariables) &&
+      same(source, normalizedRequest.buildConfig?.source?.storageSource) &&
       same(source, current.buildConfig?.sourceProvenance?.resolvedStorageSource) &&
-      typeof source?.bucket === 'string' &&
-      source.bucket.startsWith('gcf-v2-sources-') &&
-      typeof source.object === 'string' &&
-      source.object.endsWith('/function-source.zip') &&
-      /^[0-9]+$/.test(String(source.generation)) &&
-      typeof current.buildConfig?.build === 'string' &&
+      (managedUpload || directSource) &&
+      source?.bucket === 'gcf-v2-sources-251680231116-us-central1' &&
+      source.object === `kit-${instance}-index-executeFullIndexOperation/function-source.zip` &&
+      /^[1-9][0-9]*$/.test(String(source.generation)) &&
+      /^projects\/(251680231116|urm-app-staging)\/locations\/us-central1\/builds\/[a-f0-9-]+$/.test(
+        current.buildConfig?.build ?? ''
+      ) &&
       current.serviceConfig?.uri?.replace(/\/$/, '') === row.actualTask.httpRequest.url.replace(/\/$/, '') &&
       current.serviceConfig.serviceAccountEmail === row.actualTask.httpRequest.oidcToken.serviceAccountEmail &&
       typeof current.serviceConfig.revision === 'string',
@@ -158,6 +192,10 @@ export function verifyCurrentDeploymentLog(row, bytes) {
       functionName,
       applicationCommit: contract.applicationCommit,
       patchLine: patch.line,
+      patchAcknowledgementLine: acknowledged.line,
+      operationName: acknowledged.name,
+      requestedSourceDigest: proofDigest(requestedSource),
+      requestSourceKind: managedUpload ? 'managed-upload' : 'immutable-source',
       completionLine: finished.line,
       sourceDigest: proofDigest(source),
       build: current.buildConfig.build,

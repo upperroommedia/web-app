@@ -134,6 +134,10 @@ export function validateCurrentLifecycleManifest(m, release) {
         'applicationCommit',
         'patchLine',
         'completionLine',
+        'patchAcknowledgementLine',
+        'operationName',
+        'requestedSourceDigest',
+        'requestSourceKind',
         'sourceDigest',
         'build',
         'revision',
@@ -144,7 +148,14 @@ export function validateCurrentLifecycleManifest(m, release) {
         Number.isSafeInteger(row.deployment.patchLine) &&
         row.deployment.patchLine > 0 &&
         Number.isSafeInteger(row.deployment.completionLine) &&
-        row.deployment.patchLine < row.deployment.completionLine &&
+        Number.isSafeInteger(row.deployment.patchAcknowledgementLine) &&
+        row.deployment.patchLine < row.deployment.patchAcknowledgementLine &&
+        row.deployment.patchAcknowledgementLine < row.deployment.completionLine &&
+        /^projects\/urm-app-staging\/locations\/us-central1\/operations\/operation-[A-Za-z0-9-]+$/.test(
+          row.deployment.operationName
+        ) &&
+        sha(row.deployment.requestedSourceDigest) &&
+        ['managed-upload', 'immutable-source'].includes(row.deployment.requestSourceKind) &&
         row.deployment.completionLine < row.requestLine &&
         sha(row.deployment.sourceDigest) &&
         /^projects\/[0-9]+\/locations\/us-central1\/builds\/[a-f0-9-]+$/.test(row.deployment.build) &&
