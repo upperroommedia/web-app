@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "scope": "Exact historical exclusions for staging compatibility-ready lifecycle retirement; original evidence is preserved",
+  "names": [
+    "projects/urm-app-staging/locations/us-central1/queues/kit-images-index-executeFullIndexOperation/tasks/41262866453180902201",
+    "projects/urm-app-staging/locations/us-central1/queues/kit-images-index-executeFullIndexOperation/tasks/94114593186815186351",
+    "projects/urm-app-staging/locations/us-central1/queues/kit-lists-index-executeFullIndexOperation/tasks/5494464774466471403",
+    "projects/urm-app-staging/locations/us-central1/queues/kit-sermons-index-executeFullIndexOperation/tasks/7198865067194366961",
+    "projects/urm-app-staging/locations/us-central1/queues/kit-speakers-index-executeFullIndexOperation/tasks/0439145663091101843",
+    "projects/urm-app-staging/locations/us-central1/queues/kit-users-index-executeFullIndexOperation/tasks/37060637677818897711",
+    "projects/urm-app-staging/locations/us-central1/queues/kit-images-index-executeFullIndexOperation/tasks/25253122122640446861",
+    "projects/urm-app-staging/locations/us-central1/queues/kit-lists-index-executeFullIndexOperation/tasks/2936310928890688142",
+    "projects/urm-app-staging/locations/us-central1/queues/kit-sermons-index-executeFullIndexOperation/tasks/2619732140545146953",
+    "projects/urm-app-staging/locations/us-central1/queues/kit-speakers-index-executeFullIndexOperation/tasks/62617549531955576751",
+    "projects/urm-app-staging/locations/us-central1/queues/kit-users-index-executeFullIndexOperation/tasks/88699646431251530361",
+    "projects/urm-app-staging/locations/us-central1/queues/kit-images-index-executeFullIndexOperation/tasks/2236729315805386425",
+    "projects/urm-app-staging/locations/us-central1/queues/kit-lists-index-executeFullIndexOperation/tasks/02189623442682140461",
+    "projects/urm-app-staging/locations/us-central1/queues/kit-sermons-index-executeFullIndexOperation/tasks/40938892454922080071",
+    "projects/urm-app-staging/locations/us-central1/queues/kit-speakers-index-executeFullIndexOperation/tasks/4874087751907066917",
+    "projects/urm-app-staging/locations/us-central1/queues/kit-users-index-executeFullIndexOperation/tasks/0264600717990314608"
+  ],
+  "witnessSHA256s": [
+    "62884b184d98311e9695f9198d2ee7e5db4ad6da53527e91c4cdfde971c19eb9",
+    "d2cd33a0f6228bb19ee69d696e00594313c6c80787a3fd3ab7f9c18fa6de804a",
+    "e4f26f3cebb8e8ec0372225f7cd3997a1334fbf4a79eabef9762ee747d784cf7"
+  ]
+}
