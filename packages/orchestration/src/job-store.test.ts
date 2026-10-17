@@ -925,3 +925,106 @@ describe('server-authored provider simulation projection', () => {
     ).rejects.toThrow('provenance');
   });
 });
+
+describe('private staging email capture projection through the real store validator', () => {
+  const captureRef = { projectId: 'urm-app-staging', jobId: 'email-capture-fixture' };
+  const transport = {
+    schemaVersion: 1,
+    mode: 'capture',
+    projectId: 'urm-app-staging',
+    profileId: 'urm-app-staging-mail-capture-v1',
+    version: 1,
+    captureId: 'a'.repeat(64),
+    payloadSha256: 'b'.repeat(64),
+  };
+  async function captureStore(projectId = captureRef.projectId, kind: CreateDurableJobInput['kind'] = 'email.deliver') {
+    const target = { ...captureRef, projectId };
+    const { firestore } = memoryFirestore();
+    const store = createDurableJobStore({ firestore, projectId: target.projectId });
+    await firestore.runTransaction(async (tx) => {
+      store.createInTransaction(
+        tx,
+        admission({
+          ref: target,
+          kind,
+          entity: { type: 'mail', id: 'mail-fixture' },
+          payload: {},
+          dispatch: {
+            workflowType: 'emailDeliveryWorkflow',
+            workflowId: 'email:fixture',
+            taskQueue: 'urm-email',
+            ref: target,
+          },
+        })
+      );
+    });
+    return { store, target };
+  }
+  test('projects the acknowledged private capture without treating its safe provenance as a stale email job', async () => {
+    const { store } = await captureStore();
+    await expect(
+      store.project(captureRef, {
+        state: 'succeeded',
+        actions: [],
+        result: { deliveryTransport: transport, externalDelivery: false },
+        destinations: [
+          {
+            destination: 'email',
+            state: 'confirmed',
+            message: 'Staging simulation: captured privately; no external email sent.',
+          },
+        ],
+      })
+    ).resolves.toMatchObject({ state: 'succeeded', result: { deliveryTransport: transport, externalDelivery: false } });
+  });
+  test.each([
+    { label: 'external delivery', result: { deliveryTransport: transport, externalDelivery: true } },
+    { label: 'missing no-delivery marker', result: { deliveryTransport: transport } },
+    { label: 'missing transport', result: { externalDelivery: false } },
+    {
+      label: 'recipient leakage',
+      result: { deliveryTransport: { ...transport, to: 'private@example.test' }, externalDelivery: false },
+    },
+    {
+      label: 'invalid capture hash',
+      result: { deliveryTransport: { ...transport, captureId: 'bad' }, externalDelivery: false },
+    },
+    {
+      label: 'wrong profile',
+      result: { deliveryTransport: { ...transport, profileId: 'other' }, externalDelivery: false },
+    },
+    {
+      label: 'wrong project',
+      result: { deliveryTransport: { ...transport, projectId: 'urm-app' }, externalDelivery: false },
+    },
+    {
+      label: 'missing payload proof',
+      result: { deliveryTransport: { ...transport, payloadSha256: undefined }, externalDelivery: false },
+    },
+  ])('rejects $label without committing a successful task', async ({ result }) => {
+    const { store } = await captureStore();
+    await expect(store.project(captureRef, { state: 'succeeded', result })).rejects.toThrow('capture');
+    expect((await store.loadJob(captureRef)).state).toBe('queued');
+  });
+  test.each([
+    { projectId: 'urm-app', kind: 'email.deliver' as const },
+    { projectId: 'urm-app-staging', kind: 'sermon.publish' as const },
+  ])('refuses capture results for $projectId / $kind', async ({ projectId, kind }) => {
+    const { store, target } = await captureStore(projectId, kind);
+    await expect(
+      store.project(target, { state: 'succeeded', result: { deliveryTransport: transport, externalDelivery: false } })
+    ).rejects.toThrow('capture');
+  });
+  test('allows a profile-only non-success marker but requires complete proof for success', async () => {
+    const { store } = await captureStore();
+    const profile = Object.fromEntries(
+      Object.entries(transport).filter(([key]) => !['captureId', 'payloadSha256'].includes(key))
+    );
+    const result = { deliveryTransport: profile, externalDelivery: false };
+    await expect(store.project(captureRef, { state: 'retrying', result })).resolves.toMatchObject({
+      state: 'retrying',
+    });
+    await expect(store.project(captureRef, { state: 'succeeded', result })).rejects.toThrow('provenance');
+    await expect(store.project(captureRef, { state: 'succeeded' })).rejects.toThrow('provenance');
+  });
+});
