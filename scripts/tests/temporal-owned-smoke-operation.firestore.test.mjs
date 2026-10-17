@@ -97,6 +97,7 @@ async function fixture() {
     release,
     manifest,
     operationId,
+    manifestSHA256: 'f'.repeat(64),
     evidence: {
       descriptorSHA256: manifest.descriptorSHA256,
       operatorCommit: 'b'.repeat(40),

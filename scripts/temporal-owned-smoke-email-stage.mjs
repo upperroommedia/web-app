@@ -82,7 +82,7 @@ function expectedJob(before, patch, time) {
   };
 }
 
-async function verifyPoststate(tx, db, audit, expected) {
+export async function verifyOwnedEmailStagePoststate(tx, db, audit, expected) {
   need(audit.exists, 'EMAIL_AUDIT_REQUIRED');
   const data = audit.data();
   need(
@@ -104,6 +104,52 @@ async function verifyPoststate(tx, db, audit, expected) {
     'EMAIL_POSTSTATE_CHANGED'
   );
   return nativeSnapshotProof(job);
+}
+
+export function validateOwnedEmailPlan(plan) {
+  need(plan?.schemaVersion === 1 && plan.patch?.expectedRevision > 0, 'EMAIL_PLAN_REQUIRED');
+  need(keysExactly(plan, ['schemaVersion', 'jobNative', 'patch', 'native', 'acceptedCapture']), 'EMAIL_PLAN_REQUIRED');
+  assertSafeEmailProofs(plan.jobNative, plan.native, plan.acceptedCapture);
+  // Revalidate fixed identity, native failure and safe capture facts, even on audit resume.
+  need(
+    same(
+      plan.patch,
+      capturedEmailProjection({
+        job: {
+          projectId: incident.projectId,
+          jobId: incident.emailJobId,
+          kind: 'email.deliver',
+          state: 'running',
+          revision: plan.patch.expectedRevision,
+          generation: incident.emailGeneration,
+          workflowId: incident.emailWorkflowId,
+          entity: { type: 'mail', id: `mail/${incident.mailId}` },
+        },
+        native: plan.native,
+        acceptedCapture: plan.acceptedCapture,
+      })
+    ),
+    'EMAIL_PATCH_CHANGED'
+  );
+  return plan;
+}
+
+export function ownedEmailAuditIdentity(release, manifest, operation) {
+  return {
+    schemaVersion: 1,
+    stage: 'email',
+    operationId: operation.operationId,
+    releaseId: release.releaseId,
+    manifestDigest: proofDigest(manifest),
+    manifestSHA256: operation.manifestSHA256,
+    planDigest: proofDigest(manifest.emailPlan),
+    originalNativeStatus: 'FAILED',
+    originalRunId: incident.emailRunId,
+    historyDigest: manifest.emailPlan.native.historyDigest,
+    publicJobWrites: 1,
+    emailSends: 0,
+    providerWrites: 0,
+  };
 }
 
 /**
@@ -130,55 +176,18 @@ export async function applyOwnedEmailStage({
     ),
     'TRUSTED_EMAIL_READERS_REQUIRED'
   );
-  const plan = manifest.emailPlan;
-  need(plan?.schemaVersion === 1 && plan.patch?.expectedRevision > 0, 'EMAIL_PLAN_REQUIRED');
-  need(keysExactly(plan, ['schemaVersion', 'jobNative', 'patch', 'native', 'acceptedCapture']), 'EMAIL_PLAN_REQUIRED');
-  assertSafeEmailProofs(plan.jobNative, plan.native, plan.acceptedCapture);
-  // Revalidate fixed identity, native failure and safe capture facts, even on audit resume.
-  need(
-    same(
-      plan.patch,
-      capturedEmailProjection({
-        job: {
-          projectId: incident.projectId,
-          jobId: incident.emailJobId,
-          kind: 'email.deliver',
-          state: 'running',
-          revision: plan.patch.expectedRevision,
-          generation: incident.emailGeneration,
-          workflowId: incident.emailWorkflowId,
-          entity: { type: 'mail', id: `mail/${incident.mailId}` },
-        },
-        native: plan.native,
-        acceptedCapture: plan.acceptedCapture,
-      })
-    ),
-    'EMAIL_PATCH_CHANGED'
-  );
+  const plan = validateOwnedEmailPlan(manifest.emailPlan);
   need(!manifest.protectedDocuments?.some((row) => row.path === jobPath), 'MUTABLE_EMAIL_JOB_CANNOT_BE_PROTECTED');
   await assertSourceAndInventories();
   need(same(await describeOriginalEmail(), plan.native), 'EMAIL_NATIVE_CHANGED');
   const auditRef = db.doc(`_control/temporalOwnedSmoke-${operation.operationId}-email`);
-  const expected = {
-    schemaVersion: 1,
-    stage: 'email',
-    operationId: operation.operationId,
-    releaseId: release.releaseId,
-    manifestDigest: proofDigest(manifest),
-    planDigest: proofDigest(plan),
-    originalNativeStatus: 'FAILED',
-    originalRunId: incident.emailRunId,
-    historyDigest: plan.native.historyDigest,
-    publicJobWrites: 1,
-    emailSends: 0,
-    providerWrites: 0,
-  };
+  const expected = ownedEmailAuditIdentity(release, manifest, operation);
   await db.runTransaction(async (tx) => {
     await assertOwnedSmokeOperation(tx, db, release, manifest, operation);
     const audit = await tx.get(auditRef);
     if (audit.exists) {
       need(resume, 'EMAIL_AUDIT_CONFLICT');
-      await verifyPoststate(tx, db, audit, expected);
+      await verifyOwnedEmailStagePoststate(tx, db, audit, expected);
       return;
     }
     need(same(await collectEmailPlan(tx), plan), 'EMAIL_PRESTATE_CHANGED');
@@ -245,7 +254,7 @@ export async function applyOwnedEmailStage({
   await db.runTransaction(async (tx) => {
     await assertOwnedSmokeOperation(tx, db, release, manifest, operation);
     const audit = await tx.get(auditRef);
-    jobNative = await verifyPoststate(tx, db, audit, expected);
+    jobNative = await verifyOwnedEmailStagePoststate(tx, db, audit, expected);
     auditNative = nativeSnapshotProof(audit);
   });
   return { ...expected, auditPath: auditRef.path, auditNative, jobNative, operationRetained: true };

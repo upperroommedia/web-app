@@ -144,19 +144,19 @@ async function fixture() {
     ],
   };
   const evidence = { syntheticDemoOnly: true, sourceReaders: 'actual-pinned-worktree-source-no-cloud' };
-  await db
-    .doc('_control/temporalReleaseOperation')
-    .create({
-      schemaVersion: 1,
-      operationId,
-      action: OWNED_SMOKE_ACTION,
-      releaseId: release.releaseId,
-      manifestDigest: proofDigest(manifest),
-      authority: manifest.authority,
-      evidence,
-    });
+  await db.doc('_control/temporalReleaseOperation').create({
+    schemaVersion: 1,
+    operationId,
+    action: OWNED_SMOKE_ACTION,
+    releaseId: release.releaseId,
+    manifestDigest: proofDigest(manifest),
+    manifestSHA256: 'f'.repeat(64),
+    authority: manifest.authority,
+    evidence,
+  });
   const operation = {
     operationId,
+    manifestSHA256: 'f'.repeat(64),
     evidence,
     native: nativeSnapshotProof(await db.doc('_control/temporalReleaseOperation').get()),
   };

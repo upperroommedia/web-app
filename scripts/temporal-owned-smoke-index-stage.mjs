@@ -117,6 +117,7 @@ export async function assertOwnedSmokeOperation(tx, db, release, manifest, opera
       manifest.releaseId === release.releaseId &&
       sha(manifest.descriptorSHA256) &&
       uuid(operation?.operationId) &&
+      sha(operation.manifestSHA256) &&
       manifest.authority?.control &&
       manifest.authority?.state &&
       operation.native &&
@@ -135,6 +136,7 @@ export async function assertOwnedSmokeOperation(tx, db, release, manifest, opera
       value.action === OWNED_SMOKE_ACTION &&
       value.releaseId === release.releaseId &&
       value.manifestDigest === proofDigest(manifest) &&
+      value.manifestSHA256 === operation.manifestSHA256 &&
       same(value.authority, manifest.authority) &&
       same(value.evidence, operation.evidence),
     'OWNED_OPERATION_CHANGED'
@@ -222,6 +224,7 @@ export async function applyOwnedIndexStage({
     operationId: operation.operationId,
     releaseId: release.releaseId,
     manifestDigest: proofDigest(manifest),
+    manifestSHA256: operation.manifestSHA256,
     planDigest: proofDigest(manifest.indexPlan),
     edgeCreates: 6,
     countUpdates: 2,

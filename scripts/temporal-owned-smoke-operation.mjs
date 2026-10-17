@@ -30,9 +30,10 @@ function nativeProof(value) {
       'SAFE_NATIVE_PROOF_REQUIRED'
     );
 }
-function identity(release, manifest, operationId, evidence) {
+function identity(release, manifest, operationId, evidence, manifestSHA256) {
   need(
     uuid(operationId) &&
+      /^[a-f0-9]{64}$/.test(manifestSHA256 ?? '') &&
       exactKeys(evidence, [
         'descriptorSHA256',
         'operatorCommit',
@@ -60,6 +61,7 @@ function identity(release, manifest, operationId, evidence) {
     action: OWNED_SMOKE_ACTION,
     releaseId: release.releaseId,
     manifestDigest: proofDigest(manifest),
+    manifestSHA256,
     authority: structuredClone(manifest.authority),
     evidence: structuredClone(evidence),
   };
@@ -93,6 +95,7 @@ export async function acquireOwnedSmokeOperation({
   release,
   manifest,
   operationId,
+  manifestSHA256,
   evidence,
   validateManifest,
   assertSourceAndInventories,
@@ -103,7 +106,7 @@ export async function acquireOwnedSmokeOperation({
   requiredReaders(validateManifest, assertSourceAndInventories, assertProtectedState);
   await validateManifest(manifest);
   await assertSourceAndInventories();
-  const expected = identity(release, manifest, operationId, evidence);
+  const expected = identity(release, manifest, operationId, evidence, manifestSHA256);
   let operationData;
   await db.runTransaction(async (tx) => {
     const lock = await authority(tx, db, release, manifest);
@@ -129,6 +132,7 @@ export async function acquireOwnedSmokeOperation({
   need(acquired.exists && same(acquired.data(), operationData), 'OPERATION_ACQUISITION_CHANGED');
   const operation = {
     operationId,
+    manifestSHA256,
     evidence: structuredClone(expected.evidence),
     native: nativeSnapshotProof(acquired),
   };
@@ -191,7 +195,7 @@ export async function finishOwnedSmokeOperation({
   await validateManifest(manifest);
   await assertSourceAndInventories();
   need(same(await describeOriginalEmail(), manifest.emailPlan.native), 'EMAIL_NATIVE_CHANGED');
-  const expected = identity(release, manifest, operation.operationId, operation.evidence);
+  const expected = identity(release, manifest, operation.operationId, operation.evidence, operation.manifestSHA256);
   const ref = db.doc(auditPath(operation.operationId));
   let committed;
   await db.runTransaction(async (tx) => {

@@ -164,6 +164,7 @@ async function fixture() {
     action: OWNED_SMOKE_ACTION,
     releaseId: release.releaseId,
     manifestDigest: proofDigest(manifest),
+    manifestSHA256: 'f'.repeat(64),
     authority: manifest.authority,
     evidence,
   });
@@ -171,6 +172,7 @@ async function fixture() {
     release,
     manifest,
     operation: {
+      manifestSHA256: 'f'.repeat(64),
       operationId,
       evidence,
       native: nativeSnapshotProof(await db.doc('_control/temporalReleaseOperation').get()),
