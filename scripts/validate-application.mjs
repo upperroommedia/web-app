@@ -160,6 +160,20 @@ export function applicationStages(root = ROOT) {
           '../firebase.test.json',
           'node ../scripts/tests/temporal-owned-smoke-email-stage.firestore.test.mjs'
         ),
+        pnpm(
+          '--dir',
+          'functions',
+          'exec',
+          'firebase',
+          'emulators:exec',
+          '--project',
+          'demo-owned-smoke-operation',
+          '--only',
+          'auth,firestore,database,storage',
+          '--config',
+          '../firebase.test.json',
+          'node ../scripts/tests/temporal-owned-smoke-operation.firestore.test.mjs'
+        ),
       ],
       { RELEASE_RUNTIME_TEST_ROOT: root, BUNDLE_RECOVERY_TEST_RUNTIME_ROOT: root }
     ),
