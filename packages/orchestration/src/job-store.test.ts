@@ -1017,7 +1017,9 @@ describe('private staging email capture projection through the real store valida
   });
   test('allows a profile-only non-success marker but requires complete proof for success', async () => {
     const { store } = await captureStore();
-    const { captureId: _captureId, payloadSha256: _payloadSha256, ...profile } = transport;
+    const profile = Object.fromEntries(
+      Object.entries(transport).filter(([key]) => !['captureId', 'payloadSha256'].includes(key))
+    );
     const result = { deliveryTransport: profile, externalDelivery: false };
     await expect(store.project(captureRef, { state: 'retrying', result })).resolves.toMatchObject({
       state: 'retrying',
