@@ -112,4 +112,63 @@ const enabled =
     await expect(f.run()).rejects.toThrow('PROVIDER_RESOURCE_CLEANUP_RESERVED');
     expect((await db.doc(f.mirror).get()).get('subsplashId')).toBeUndefined();
   });
+  it('splits reference replacement by index fanout instead of only mirror count', async () => {
+    const id = `fanout-${randomUUID()}`,
+      source = `sermons/${id}`;
+    owned.add(source);
+    const refs = (prefix: string) => Array.from({ length: 7 }, (_, n) => `media-${prefix}-${id}-${n}`);
+    const oldIds = refs('old'),
+      newIds = refs('new');
+    const data = (ids: string[]) => ({ id, images: ids.map((subsplashId) => ({ subsplashId })) });
+    await db.doc(source).set(data(newIds));
+    const paths: string[] = [];
+    for (let n = 0; n < 40; n++) {
+      const parent = `lists/fanout-${id}-${n}`;
+      owned.add(parent);
+      await db.doc(parent).set({ name: 'owned list' });
+      paths.push(`${parent}/listItems/${id}`);
+    }
+    for (const remoteId of [...oldIds, ...newIds])
+      owned.add(
+        `temporalProviderUsage/${providerResourceKey({
+          projectId: 'urm-app',
+          provider: 'subsplash',
+          account: 'app:9XTSHD',
+          remoteId,
+        })}`
+      );
+    await db.runTransaction((tx) =>
+      withProviderIndexedTransaction(tx, db, 'urm-app', async (recording) => {
+        for (const path of paths) recording.create(db.doc(path), data(oldIds));
+      })
+    );
+    let evaluations = 0;
+    await reconcileCurrentCanonicalMirrors(db, {
+      sourcePath: source,
+      collectionGroup: 'listItems',
+      id,
+      parentCollection: 'lists',
+      project: (canonical) => {
+        evaluations++;
+        return canonical;
+      },
+    });
+    // Overflow is reconsidered on the next transaction, never skipped by the query cursor.
+    expect(evaluations).toBeGreaterThan(40);
+    for (const [ids, count] of [
+      [oldIds, 0],
+      [newIds, 40],
+    ] as const) {
+      for (const remoteId of ids) {
+        const key = providerResourceKey({
+          projectId: 'urm-app',
+          provider: 'subsplash',
+          account: 'app:9XTSHD',
+          remoteId,
+        });
+        expect((await db.doc(`temporalProviderUsage/${key}/epochs/${epoch}`).get()).get('referenceCount')).toBe(count);
+      }
+    }
+    for (const path of paths) expect((await db.doc(path).get()).get('images')).toEqual(data(newIds).images);
+  });
 });
