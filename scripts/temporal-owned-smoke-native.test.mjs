@@ -135,6 +135,18 @@ for (const [name, change] of [
     },
   ],
   [
+    'nonempty array history cursor',
+    (x) => {
+      if (x.method === 'getWorkflowExecutionHistory') x.response.nextPageToken = [1];
+    },
+  ],
+  [
+    'null history cursor',
+    (x) => {
+      if (x.method === 'getWorkflowExecutionHistory') x.response.nextPageToken = null;
+    },
+  ],
+  [
     'repeated history cursor',
     (x) => {
       if (x.method === 'getWorkflowExecutionHistory') x.response.nextPageToken = Uint8Array.of(1);
@@ -170,4 +182,18 @@ test('wrong namespace is rejected before any service call', async () => {
     /NATIVE_READ_BINDING_REQUIRED/
   );
   assert.equal(calls, 0);
+});
+
+test('native reader accepts actual protobuf terminal-page empty-array cursor', async () => {
+  const Response = temporal.api.workflowservice.v1.GetWorkflowExecutionHistoryResponse;
+  const f = fixture((x) => {
+    if (x.method !== 'getWorkflowExecutionHistory') return;
+    const decoded = Response.decode(Response.encode(Response.fromObject(x.response)).finish());
+    if (x.historiesRead === 2) assert.deepEqual(decoded.nextPageToken, []);
+    x.response.history = decoded.history;
+    x.response.nextPageToken = decoded.nextPageToken;
+  });
+  const proof = await reader()({ ...f, historyToJSON, namespace: binding.temporalNamespace });
+  assert.equal(proof.historyDigest, binding.emailHistoryDigest);
+  assert.equal(f.calls.length, 4);
 });

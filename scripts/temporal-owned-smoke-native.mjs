@@ -35,7 +35,11 @@ export async function readOriginalOwnedEmailNative({ request, historyToJSON, nam
     events.push(...parsed.events);
     need(events.length <= 10000, 'NATIVE_HISTORY_BOUND');
     token = response.nextPageToken;
-    need(token === undefined || token instanceof Uint8Array, 'NATIVE_HISTORY_TOKEN_INVALID');
+    // protobufjs exposes an absent bytes field as its shared empty array after wire decoding.
+    need(
+      token === undefined || token instanceof Uint8Array || (Array.isArray(token) && token.length === 0),
+      'NATIVE_HISTORY_TOKEN_INVALID'
+    );
     if (!token?.length) break;
     const key = Buffer.from(token).toString('base64');
     need(!seen.has(key), 'NATIVE_HISTORY_CURSOR_CHANGED');
