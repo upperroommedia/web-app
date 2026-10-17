@@ -303,6 +303,8 @@ const SAFE_RESULT_KEYS = new Set([
   'mode',
   'providerEffects',
   'contentPreserved',
+  'deliveryTransport',
+  'externalDelivery',
 ]);
 const UNSAFE_KEYS =
   /(?:password|secret|token|credential|cookie|authorization|signed.?url|smtp|private.?key|body|html|plaintext|buffer|bytes|stack|response)/i;
@@ -369,7 +371,47 @@ function validateStep(step: DurableJobStep): void {
     if (step[key] !== undefined) finite(step[key], key);
   validateError(step.error);
 }
-function validatePatch(patch: DurableJobPatch): void {
+function validateEmailCaptureResult(
+  patch: DurableJobPatch,
+  job: DurableJob,
+  result: NonNullable<DurableJob['result']>
+): void {
+  const value = result.deliveryTransport;
+  if (
+    job.kind !== 'email.deliver' ||
+    job.projectId !== 'urm-app-staging' ||
+    result.externalDelivery !== false ||
+    !value ||
+    typeof value !== 'object' ||
+    Array.isArray(value)
+  )
+    invalid('Invalid staging email capture result');
+  const transport = value as Record<string, unknown>;
+  if (
+    transport.schemaVersion !== 1 ||
+    transport.mode !== 'capture' ||
+    transport.projectId !== job.projectId ||
+    transport.profileId !== 'urm-app-staging-mail-capture-v1' ||
+    transport.version !== 1 ||
+    Object.keys(transport).some(
+      (key) =>
+        !['schemaVersion', 'mode', 'projectId', 'profileId', 'version', 'captureId', 'payloadSha256'].includes(key)
+    )
+  )
+    invalid('Invalid staging email capture profile');
+  const hasProof =
+    Object.prototype.hasOwnProperty.call(transport, 'captureId') ||
+    Object.prototype.hasOwnProperty.call(transport, 'payloadSha256');
+  if (
+    ((patch.state ?? job.state) === 'succeeded' || hasProof) &&
+    (typeof transport.captureId !== 'string' ||
+      !/^[a-f0-9]{64}$/.test(transport.captureId) ||
+      typeof transport.payloadSha256 !== 'string' ||
+      !/^[a-f0-9]{64}$/.test(transport.payloadSha256))
+  )
+    invalid('Invalid staging email capture provenance');
+}
+function validatePatch(patch: DurableJobPatch, job: DurableJob): void {
   if (
     Object.keys(patch).some(
       (k) =>
@@ -510,6 +552,12 @@ function validatePatch(patch: DurableJobPatch): void {
         invalid('Unexpected destination detail');
     }
   }
+  const effectiveResult = patch.result ?? job.result;
+  if (
+    effectiveResult &&
+    ['deliveryTransport', 'externalDelivery'].some((key) => Object.prototype.hasOwnProperty.call(effectiveResult, key))
+  )
+    validateEmailCaptureResult(patch, job, effectiveResult);
   if (patch.result) {
     if (
       ['mode', 'providerEffects', 'contentPreserved'].some((key) =>
@@ -538,7 +586,9 @@ function validatePatch(patch: DurableJobPatch): void {
         invalid('Invalid provider mutation session id');
       if (key === 'acknowledgementId' && (typeof value !== 'string' || !/^[a-f0-9]{64}$/.test(value)))
         invalid('Invalid provider acknowledgement id');
-      if (key === 'resolutionPurpose') {
+      if (key === 'deliveryTransport') {
+        // Validated above as a fixed, body-free staging capture descriptor.
+      } else if (key === 'resolutionPurpose') {
         if (value !== 'cleanup') invalid('Invalid resolution purpose');
       } else if (key === 'sourceUpload') validateSourceUpload(value);
       else if (key === 'mediaJobRef') validateReference(value);
@@ -1107,7 +1157,7 @@ export function createDurableJobStore(options: {
         const certified = Boolean(prepared) || job.attention?.resolutionKind === 'critical_repair';
         patch.actions = needsReview && (certified || cleanupReview) ? ['resolve'] : [];
       }
-      validatePatch(patch);
+      validatePatch(patch, job);
       if (patch.expectedRevision !== undefined && patch.expectedRevision !== job.revision)
         throw new DurableJobStoreError('STALE_REVISION', 'The job changed; refresh before issuing a command');
       if (patch.state !== 'superseded')
