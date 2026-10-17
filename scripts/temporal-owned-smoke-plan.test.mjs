@@ -1,0 +1,399 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { proofDigest } from './temporal-release-runtime.mjs';
+import {
+  OWNED_SMOKE_INCIDENT as incident,
+  ownedMirrorPaths,
+  planOwnedMirrorEdges,
+  capturedEmailProjection,
+} from './temporal-owned-smoke-plan.mjs';
+
+// Synthetic, pure planner tests only: no SDK initialization, authentication or cloud effects.
+const key = (v) => createHash('sha256').update(JSON.stringify(v)).digest('hex');
+const row = (path, data) => ({
+  path,
+  data,
+  native: {
+    dataDigest: proofDigest(data),
+    createTime: { seconds: 100, nanoseconds: 1 },
+    updateTime: { seconds: 101, nanoseconds: 2 },
+  },
+});
+const repin = (document) => {
+  document.native.dataDigest = proofDigest(document.data);
+};
+function fixture() {
+  const marker = row('_control/temporalProviderUsage', {
+    schemaVersion: 1,
+    projectId: incident.projectId,
+    status: 'ready',
+    epoch: incident.originalEpoch,
+  });
+  const groups = incident.resources.map((resource) => {
+    const path = `temporalProviderUsage/${key([
+      resource.projectId,
+      resource.provider,
+      resource.account,
+      resource.remoteId,
+    ])}/epochs/${incident.originalEpoch}`;
+    const canonicalPath = `sermons/${incident.sermonId}`;
+    return {
+      resource: structuredClone(resource),
+      aggregate: row(path, { ...resource, epoch: incident.originalEpoch, state: 'active', referenceCount: 1 }),
+      edges: {
+        allPages: true,
+        rows: [row(`${path}/edges/${key(canonicalPath)}`, { canonicalPath, projectId: incident.projectId })],
+      },
+      canonicals: [canonicalPath, ...ownedMirrorPaths()].map((p) => row(p, { resources: [resource] })),
+    };
+  });
+  return { marker, groups, extractResources: (_project, _path, data) => data.resources };
+}
+test('plans exactly six edges and two count fields without mutating input or exposing canonical payload', () => {
+  const f = fixture();
+  const before = proofDigest({ marker: f.marker, groups: f.groups });
+  const plan = planOwnedMirrorEdges(f);
+  assert.equal(plan.edgeCreates, 6);
+  assert.equal(plan.countUpdates, 2);
+  assert.equal(plan.providerWrites, 0);
+  assert.equal(plan.canonicalWrites, 0);
+  assert.equal(proofDigest({ marker: f.marker, groups: f.groups }), before);
+  for (const group of plan.aggregates) {
+    assert.equal(group.beforeCount, 1);
+    assert.equal(group.afterCount, 4);
+    assert.equal(group.creates.length, 3);
+    assert(group.creates.every((create) => Object.keys(create.data).sort().join(',') === 'canonicalPath,projectId'));
+    assert(group.canonicals.every((d) => !Object.hasOwn(d, 'data')));
+  }
+});
+const badIndex = [
+  [
+    'production marker',
+    (f) => {
+      f.marker.data.projectId = 'urm-app';
+      repin(f.marker);
+    },
+  ],
+  [
+    'new epoch',
+    (f) => {
+      f.marker.data.epoch = 'new-epoch';
+      repin(f.marker);
+    },
+  ],
+  [
+    'building marker',
+    (f) => {
+      f.marker.data.status = 'building';
+      repin(f.marker);
+    },
+  ],
+  [
+    'foreign resource',
+    (f) => {
+      f.groups[0].resource.remoteId = 'foreign';
+    },
+  ],
+  [
+    'duplicate group',
+    (f) => {
+      f.groups[1] = structuredClone(f.groups[0]);
+    },
+  ],
+  [
+    'reserved aggregate',
+    (f) => {
+      f.groups[0].aggregate.data.state = 'reserved';
+      repin(f.groups[0].aggregate);
+    },
+  ],
+  [
+    'active with cleanup proof',
+    (f) => {
+      f.groups[0].aggregate.data.cleanupProof = {};
+      repin(f.groups[0].aggregate);
+    },
+  ],
+  [
+    'count differs from full edges',
+    (f) => {
+      f.groups[0].aggregate.data.referenceCount = 2;
+      repin(f.groups[0].aggregate);
+    },
+  ],
+  [
+    'incomplete pages',
+    (f) => {
+      f.groups[0].edges.allPages = false;
+    },
+  ],
+  [
+    'stale native digest',
+    (f) => {
+      f.groups[0].aggregate.data.referenceCount = 0;
+    },
+  ],
+  [
+    'missing native timestamp',
+    (f) => {
+      delete f.groups[0].aggregate.native.updateTime;
+    },
+  ],
+  [
+    'forged edge key',
+    (f) => {
+      f.groups[0].edges.rows[0].path += 'x';
+    },
+  ],
+  [
+    'foreign edge project',
+    (f) => {
+      f.groups[0].edges.rows[0].data.projectId = 'urm-app';
+      repin(f.groups[0].edges.rows[0]);
+    },
+  ],
+  [
+    'existing edge references absent canonical',
+    (f) => {
+      f.groups[0].canonicals.shift();
+    },
+  ],
+  [
+    'target missing reference',
+    (f) => {
+      f.groups[0].canonicals[1].data.resources = [];
+      repin(f.groups[0].canonicals[1]);
+    },
+  ],
+  [
+    'extra canonical',
+    (f) => {
+      f.groups[0].canonicals.push(row('sermons/extra', { resources: [] }));
+    },
+  ],
+  [
+    'duplicate canonical',
+    (f) => {
+      f.groups[0].canonicals.push(f.groups[0].canonicals[0]);
+    },
+  ],
+  [
+    'target already present',
+    (f) => {
+      const g = f.groups[0],
+        path = ownedMirrorPaths()[0];
+      g.edges.rows.push(
+        row(`${g.aggregate.path}/edges/${key(path)}`, { canonicalPath: path, projectId: incident.projectId })
+      );
+      g.aggregate.data.referenceCount++;
+      repin(g.aggregate);
+    },
+  ],
+];
+for (const [label, change] of badIndex)
+  test(`rejects ${label}`, () => {
+    const f = fixture();
+    change(f);
+    assert.throws(() => planOwnedMirrorEdges(f), /OWNED_SMOKE_/);
+  });
+function emailFixture() {
+  return {
+    job: {
+      projectId: incident.projectId,
+      jobId: incident.emailJobId,
+      kind: 'email.deliver',
+      state: 'running',
+      revision: 3,
+      generation: incident.emailGeneration,
+      workflowId: incident.emailWorkflowId,
+      entity: { type: 'mail', id: incident.mailId },
+    },
+    native: {
+      workflowId: incident.emailWorkflowId,
+      runId: incident.emailRunId,
+      latestRunId: incident.emailRunId,
+      status: 'FAILED',
+      failureType: 'EMAIL_STALE_JOB',
+      pendingActivities: 0,
+      terminalEventType: 'WORKFLOW_EXECUTION_FAILED',
+      historyDigest: 'a'.repeat(64),
+    },
+    acceptedCapture: {
+      projectId: incident.projectId,
+      mailId: incident.mailId,
+      mailState: 'SUCCESS',
+      receiptAccepted: true,
+      captureId: incident.captureId,
+      payloadSha256: incident.payloadSha256,
+      payloadHashMatches: true,
+      externalDelivery: false,
+      profileId: 'urm-app-staging-mail-capture-v1',
+      profileVersion: 1,
+    },
+  };
+}
+test('plans only real-store projection fields while preserving explicit native failure', () => {
+  const f = emailFixture(),
+    before = proofDigest(f),
+    patch = capturedEmailProjection(f);
+  assert.equal(patch.expectedRevision, 3);
+  assert.equal(patch.state, 'succeeded');
+  assert.deepEqual(patch.actions, []);
+  assert.deepEqual(patch.destinations, [{ destination: 'email', state: 'confirmed' }]);
+  assert.equal(patch.result.externalDelivery, false);
+  assert.equal(patch.result.deliveryTransport.captureId, incident.captureId);
+  assert.equal(proofDigest(f), before);
+  assert.equal(f.native.status, 'FAILED');
+});
+const badEmail = [
+  [
+    'wrong job',
+    (f) => {
+      f.job.jobId = 'foreign';
+    },
+  ],
+  [
+    'already terminal job',
+    (f) => {
+      f.job.state = 'succeeded';
+    },
+  ],
+  [
+    'wrong kind',
+    (f) => {
+      f.job.kind = 'sermon.publish';
+    },
+  ],
+  [
+    'production job',
+    (f) => {
+      f.job.projectId = 'urm-app';
+    },
+  ],
+  [
+    'wrong mail',
+    (f) => {
+      f.job.entity.id = 'foreign';
+    },
+  ],
+  [
+    'replacement generation',
+    (f) => {
+      f.job.generation++;
+    },
+  ],
+  [
+    'missing workflows',
+    (f) => {
+      delete f.job.workflowId;
+      delete f.native.workflowId;
+    },
+  ],
+  [
+    'empty workflows',
+    (f) => {
+      f.job.workflowId = '';
+      f.native.workflowId = '';
+    },
+  ],
+  [
+    'jointly changed workflows',
+    (f) => {
+      f.job.workflowId = 'other';
+      f.native.workflowId = 'other';
+    },
+  ],
+  [
+    'replacement failed run',
+    (f) => {
+      f.native.runId = f.native.latestRunId = 'aaaaaaaa-2222-4333-8444-555555555555';
+    },
+  ],
+  [
+    'missing run ID',
+    (f) => {
+      delete f.native.runId;
+    },
+  ],
+  [
+    'new current run',
+    (f) => {
+      f.native.latestRunId = 'aaaaaaaa-2222-4333-8444-555555555555';
+    },
+  ],
+  [
+    'running native',
+    (f) => {
+      f.native.status = 'RUNNING';
+    },
+  ],
+  [
+    'pending activity',
+    (f) => {
+      f.native.pendingActivities = 1;
+    },
+  ],
+  [
+    'unrelated native error',
+    (f) => {
+      f.native.failureType = 'OTHER';
+    },
+  ],
+  [
+    'unproven history',
+    (f) => {
+      delete f.native.historyDigest;
+    },
+  ],
+  [
+    'mail not accepted',
+    (f) => {
+      f.acceptedCapture.receiptAccepted = false;
+    },
+  ],
+  [
+    'external delivery',
+    (f) => {
+      f.acceptedCapture.externalDelivery = true;
+    },
+  ],
+  [
+    'wrong capture',
+    (f) => {
+      f.acceptedCapture.captureId = 'b'.repeat(64);
+    },
+  ],
+  [
+    'wrong hash',
+    (f) => {
+      f.acceptedCapture.payloadSha256 = 'b'.repeat(64);
+    },
+  ],
+  [
+    'hash mismatch',
+    (f) => {
+      f.acceptedCapture.payloadHashMatches = false;
+    },
+  ],
+  [
+    'wrong capture profile',
+    (f) => {
+      f.acceptedCapture.profileId = 'other';
+    },
+  ],
+];
+for (const [label, change] of badEmail)
+  test(`email rejects ${label}`, () => {
+    const f = emailFixture();
+    change(f);
+    assert.throws(() => capturedEmailProjection(f), /OWNED_SMOKE_/);
+  });
+test('incident scope is recursively immutable', () => {
+  assert.throws(() => {
+    incident.resources[0].remoteId = 'other';
+  }, TypeError);
+  assert.throws(() => {
+    incident.listIds.push('other');
+  }, TypeError);
+});
