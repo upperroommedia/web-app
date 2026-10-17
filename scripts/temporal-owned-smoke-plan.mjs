@@ -167,7 +167,7 @@ export function capturedEmailProjection({ job, native, acceptedCapture }) {
       job.generation === incident.emailGeneration &&
       job.workflowId === incident.emailWorkflowId &&
       job.entity?.type === 'mail' &&
-      job.entity.id === incident.mailId,
+      job.entity.id === `mail/${incident.mailId}`,
     'EMAIL_JOB_CHANGED'
   );
   requireThat(

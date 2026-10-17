@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import vm from 'node:vm';
 import { proofDigest } from './temporal-release-runtime.mjs';
 import {
   OWNED_SMOKE_INCIDENT as incident,
@@ -207,7 +210,7 @@ function emailFixture() {
       revision: 3,
       generation: incident.emailGeneration,
       workflowId: incident.emailWorkflowId,
-      entity: { type: 'mail', id: incident.mailId },
+      entity: { type: 'mail', id: `mail/${incident.mailId}` },
     },
     native: {
       workflowId: incident.emailWorkflowId,
@@ -245,6 +248,48 @@ test('plans only real-store projection fields while preserving explicit native f
   assert.equal(patch.result.deliveryTransport.captureId, incident.captureId);
   assert.equal(proofDigest(f), before);
   assert.equal(f.native.status, 'FAILED');
+});
+test('uses the actual email admission producer full mail-path entity identity', () => {
+  const require = createRequire(new URL('../functions/package.json', import.meta.url));
+  const ts = require('typescript');
+  const source = readFileSync(
+    new URL('../function-kits/firestore-send-email/src/temporal/ingress.ts', import.meta.url),
+    'utf8'
+  );
+  const compiled = ts.transpileModule(source, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  const module = { exports: {} };
+  vm.runInNewContext(compiled, {
+    exports: module.exports,
+    module,
+    require: (name) => {
+      if (name === 'node:crypto' || name === 'crypto') return require(name);
+      if (name === 'firebase-admin/firestore') return Object.freeze({});
+      // Only the pure real admission producer is exercised. Any release/cloud path must stop.
+      if (name === './release')
+        return {
+          assertTemporalEmailRelease: () => {
+            throw Error('NO_CLOUD_TEST');
+          },
+        };
+      throw Error('UNEXPECTED_PRODUCER_IMPORT');
+    },
+  });
+  const input = emailFixture();
+  const produced = module.exports.buildEmailAdmission(
+    incident.projectId,
+    incident.emailJobId,
+    `mail/${incident.mailId}`,
+    incident.emailGeneration,
+    {},
+    100
+  );
+  input.job = JSON.parse(JSON.stringify({ ...produced.job, state: 'running', revision: 3 }));
+  const patch = capturedEmailProjection(input);
+  assert.equal(patch.expectedRevision, 3);
+  assert.equal(patch.state, 'succeeded');
+  assert.equal(input.job.entity.id, `mail/${incident.mailId}`);
 });
 const badEmail = [
   [
