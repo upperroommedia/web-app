@@ -1,0 +1,121 @@
+{
+  "schemaVersion": 1,
+  "projectId": "urm-app-staging",
+  "originalWitnessSHA256": "9d972d986ac3cd86fa0ecc28010964f4bcabeb1f1809e8468b8b90ea0d630adb",
+  "parents": [
+    {
+      "instanceId": "users-index",
+      "jobPath": "durableJobs/job-d6b7bf743892df23ec1cd36b085a517ccfe3f244d6024e51",
+      "intentPath": "durableJobIntents/job-d6b7bf743892df23ec1cd36b085a517ccfe3f244d6024e51",
+      "entityPath": "durableJobEntities/4c676bde04a586af7cf2205d78d798f10c3d37debe2be33475e0b589bc3bcea3",
+      "entity": {
+        "type": "maintenance",
+        "id": "f3322dfc9dbf02463f6759750514cfea544d2d5264aef655f7097fa2f6a40959"
+      }
+    },
+    {
+      "instanceId": "speakers-index",
+      "jobPath": "durableJobs/job-12e0fee60baa191dbab2c7630eaa73035f560bba11fc59b0",
+      "intentPath": "durableJobIntents/job-12e0fee60baa191dbab2c7630eaa73035f560bba11fc59b0",
+      "entityPath": "durableJobEntities/f86d1e6f93c31b85fbb8135eaf38e6194db921e02641688137008acc6757e085",
+      "entity": {
+        "type": "maintenance",
+        "id": "c03652f148fa6cb64f29954406baa36a2aa7c4d56a020e7d35a980be1e556c93"
+      }
+    },
+    {
+      "instanceId": "sermons-index",
+      "jobPath": "durableJobs/job-a79be259dabe4974deb53807ecd86088224c04bce0e39c8c",
+      "intentPath": "durableJobIntents/job-a79be259dabe4974deb53807ecd86088224c04bce0e39c8c",
+      "entityPath": "durableJobEntities/2140fabfd5eafef210ac28860ed2bf5817f8df8b527ae78fa89415c93589b33e",
+      "entity": {
+        "type": "maintenance",
+        "id": "7319eab5acd7ea09a82e3a54875f04e18b227f67bfbc7f88c4058c40cd665a35"
+      }
+    },
+    {
+      "instanceId": "images-index",
+      "jobPath": "durableJobs/job-b17ef0641302ea7d303dccd9b6621d778e96e245e24540de",
+      "intentPath": "durableJobIntents/job-b17ef0641302ea7d303dccd9b6621d778e96e245e24540de",
+      "entityPath": "durableJobEntities/a3b648a9930f50ae2d36695ee041bb907e13190921f052d4bed96cbdefa15268",
+      "entity": {
+        "type": "maintenance",
+        "id": "fddd3d61000770a51a0a1dc6d69ced81015d067b5d971886ab36e02ae7f989d7"
+      }
+    },
+    {
+      "instanceId": "lists-index",
+      "jobPath": "durableJobs/job-418f9bfb4ab10e9e9d93718bfb0609e112765c119b4e0b08",
+      "intentPath": "durableJobIntents/job-418f9bfb4ab10e9e9d93718bfb0609e112765c119b4e0b08",
+      "entityPath": "durableJobEntities/f51b4e1c5943019403b4f47bc422ceeb8d2331e630c2cc42d18ab2bc3aed9938",
+      "entity": {
+        "type": "maintenance",
+        "id": "9389e0d278708e51cf0c3426faa3ef39155b51c0257023f7c984b072b4b739dd"
+      }
+    }
+  ],
+  "historicalSearchJobPaths": [
+    "durableJobs/01e871fb89400240d0fb12620153deb1b49945385aeae6b5f3caf0f4668d180f",
+    "durableJobs/4609922bf2a532c6d3f34a67227cba0080a870207fc662f1f3c7dd407d0ed439",
+    "durableJobs/576b72b46f1b88464863d7e06d1234eb45ad55e76721e2c6488027c9e9327596",
+    "durableJobs/6e1dc35df337e026904f8ef6b5d5931eecf400cea35151f6740e4c3fc7394117",
+    "durableJobs/718aeb50fab5cabf1d740bc758f82ac82e3199aa9f8dcb7edf491cc4563214b7",
+    "durableJobs/da872793675771d0560cba4889dd646fae99eacb22d0ff4644460377d981da39",
+    "durableJobs/f4787da7a1f385dbaaa6ca9a71ae93a7d1500220c150e4e9a7cb7cababea1464",
+    "durableJobs/fd27f2e2fe803e7e979759d41363738151dc0aa5300f13c87e09717c03a4a74e"
+  ],
+  "queues": [
+    {
+      "name": "projects/urm-app-staging/locations/us-central1/queues/addintrooutrotaskhandler",
+      "state": "RUNNING"
+    },
+    {
+      "name": "projects/urm-app-staging/locations/us-central1/queues/ext-images-index-executeFullIndexOperation",
+      "state": "PAUSED"
+    },
+    {
+      "name": "projects/urm-app-staging/locations/us-central1/queues/ext-lists-index-executeFullIndexOperation",
+      "state": "PAUSED"
+    },
+    {
+      "name": "projects/urm-app-staging/locations/us-central1/queues/ext-sermons-index-executeFullIndexOperation",
+      "state": "PAUSED"
+    },
+    {
+      "name": "projects/urm-app-staging/locations/us-central1/queues/ext-speakers-index-executeFullIndexOperation",
+      "state": "PAUSED"
+    },
+    {
+      "name": "projects/urm-app-staging/locations/us-central1/queues/ext-users-index-executeFullIndexOperation",
+      "state": "PAUSED"
+    },
+    {
+      "name": "projects/urm-app-staging/locations/us-central1/queues/kit-images-index-executeFullIndexOperation",
+      "state": "PAUSED"
+    },
+    {
+      "name": "projects/urm-app-staging/locations/us-central1/queues/kit-lists-index-executeFullIndexOperation",
+      "state": "PAUSED"
+    },
+    {
+      "name": "projects/urm-app-staging/locations/us-central1/queues/kit-sermons-index-executeFullIndexOperation",
+      "state": "PAUSED"
+    },
+    {
+      "name": "projects/urm-app-staging/locations/us-central1/queues/kit-speakers-index-executeFullIndexOperation",
+      "state": "PAUSED"
+    },
+    {
+      "name": "projects/urm-app-staging/locations/us-central1/queues/kit-users-index-executeFullIndexOperation",
+      "state": "PAUSED"
+    },
+    {
+      "name": "projects/urm-app-staging/locations/us-central1/queues/processaudiofiletask",
+      "state": "RUNNING"
+    },
+    {
+      "name": "projects/urm-app-staging/locations/us-central1/queues/processaudioyoutubetask",
+      "state": "RUNNING"
+    }
+  ]
+}
