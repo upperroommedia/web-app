@@ -40,7 +40,7 @@ describe('soundcloudClient', () => {
     const bucket = createBucket();
     let multipartStreams: unknown[] = [];
     mockedAxios.post.mockImplementationOnce(async (_url, body) => {
-      multipartStreams = [...body._streams];
+      multipartStreams = [...(body as { _streams: unknown[] })._streams];
       return {
         data: {
           urn: 'soundcloud:tracks:12345',
@@ -146,7 +146,7 @@ describe('soundcloudClient', () => {
     } as never);
     let multipartStreams: unknown[] = [];
     mockedAxios.post.mockImplementationOnce(async (_url, body) => {
-      multipartStreams = [...body._streams];
+      multipartStreams = [...(body as { _streams: unknown[] })._streams];
       return {
         data: {
           urn: 'soundcloud:tracks:999',
