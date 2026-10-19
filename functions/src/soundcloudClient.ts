@@ -14,6 +14,8 @@ import { getHtmlEdgeBlock } from './helpers/upstreamHttpErrors';
 import { HttpsError } from 'firebase-functions/v2/https';
 import { basename, extname } from 'node:path';
 import { Readable } from 'node:stream';
+import { setTimeout as delay } from 'node:timers/promises';
+import { logger } from 'firebase-functions/v2';
 
 const SOUNDCLOUD_API_BASE = 'https://api.soundcloud.com';
 
@@ -201,51 +203,82 @@ async function createImageSourceStream(bucket: Bucket, source: string): Promise<
  * Upload a track to SoundCloud. Downloads audio (and optional image) from
  * Firebase Storage, then POSTs multipart/form-data to SoundCloud.
  */
-export async function uploadTrack(accessToken: string, params: UploadTrackParams): Promise<SoundCloudTrackResult> {
-  const audioSource = await createBucketStreamSource(
-    params.bucket,
-    params.audioStoragePath,
-    'audio.mp3',
-    'audio/mpeg'
-  );
-  const form = new FormData();
-  form.append('track[title]', params.title);
-  form.append('track[asset_data]', audioSource.stream, {
-    filename: audioSource.filename,
-    contentType: audioSource.contentType,
-    knownLength: audioSource.knownLength,
-  });
-  form.append('track[tag_list]', formatTagList(params.tags));
-  form.append('track[description]', params.description);
+const isTransientUploadRejection = (error: unknown): boolean =>
+  isAxiosError(error) &&
+  error.response?.status === 400 &&
+  typeof error.response.data === 'string' &&
+  /^\s*<(?:!doctype|html)\b/i.test(error.response.data);
 
-  if (params.imageSource) {
-    const imageSource = await createImageSourceStream(params.bucket, params.imageSource);
-    form.append('track[artwork_data]', imageSource.stream, {
-      filename: imageSource.filename,
-      contentType: imageSource.contentType,
-      knownLength: imageSource.knownLength,
+export async function uploadTrack(accessToken: string, params: UploadTrackParams): Promise<SoundCloudTrackResult> {
+  try {
+    return await uploadTrackAttempt(accessToken, params);
+  } catch (error) {
+    // An explicit HTML rejection comes from the edge before a track is accepted.
+    // Rebuild the multipart body; consumed streams cannot be replayed safely.
+    if (!isTransientUploadRejection(error)) throw error;
+    logger.warn('SoundCloud upload edge rejected the request; retrying once', { upstream_status: 400 });
+  }
+
+  await delay(250);
+  try {
+    return await uploadTrackAttempt(accessToken, params);
+  } catch (error) {
+    if (!isTransientUploadRejection(error)) throw error;
+    logger.warn('SoundCloud upload edge rejected both attempts', { upstream_status: 400 });
+    throw new HttpsError('unavailable', 'SoundCloud temporarily rejected the upload. Please retry shortly.', {
+      code: 'SOUNDCLOUD_UPLOAD_EDGE_REJECTED',
+      upstream_status: 400,
     });
   }
+}
 
-  const resp = await axios.post(`${SOUNDCLOUD_API_BASE}/tracks`, form, {
-    headers: {
-      ...authHeaders(accessToken),
-      ...form.getHeaders(),
-    },
-    maxBodyLength: Infinity,
-    maxContentLength: Infinity,
-  });
+async function uploadTrackAttempt(accessToken: string, params: UploadTrackParams): Promise<SoundCloudTrackResult> {
+  const audioSource = await createBucketStreamSource(params.bucket, params.audioStoragePath, 'audio.mp3', 'audio/mpeg');
+  let imageSource: MultipartStreamSource | undefined;
+  const form = new FormData();
+  try {
+    form.append('track[title]', params.title);
+    form.append('track[asset_data]', audioSource.stream, {
+      filename: audioSource.filename,
+      contentType: audioSource.contentType,
+      knownLength: audioSource.knownLength,
+    });
+    form.append('track[tag_list]', formatTagList(params.tags));
+    form.append('track[description]', params.description);
 
-  const trackIdentifier = getTrackIdentifier(resp.data);
-  if (trackIdentifier == null) {
-    throw new Error('SoundCloud upload response missing track identifier');
+    if (params.imageSource) {
+      imageSource = await createImageSourceStream(params.bucket, params.imageSource);
+      form.append('track[artwork_data]', imageSource.stream, {
+        filename: imageSource.filename,
+        contentType: imageSource.contentType,
+        knownLength: imageSource.knownLength,
+      });
+    }
+
+    const resp = await axios.post(`${SOUNDCLOUD_API_BASE}/tracks`, form, {
+      headers: {
+        ...authHeaders(accessToken),
+        ...form.getHeaders(),
+      },
+      maxBodyLength: Infinity,
+      maxContentLength: Infinity,
+    });
+
+    const trackIdentifier = getTrackIdentifier(resp.data);
+    if (trackIdentifier == null) {
+      throw new Error('SoundCloud upload response missing track identifier');
+    }
+    return {
+      trackIdentifier,
+      ...(typeof resp.data?.permalink_url === 'string' && resp.data.permalink_url.trim().length > 0
+        ? { permalinkUrl: resp.data.permalink_url.trim() }
+        : {}),
+    };
+  } finally {
+    audioSource.stream.destroy();
+    imageSource?.stream.destroy();
+    form.destroy();
   }
-  return {
-    trackIdentifier,
-    ...(typeof resp.data?.permalink_url === 'string' && resp.data.permalink_url.trim().length > 0
-      ? { permalinkUrl: resp.data.permalink_url.trim() }
-      : {}),
-  };
 }
 
 export interface UpdateTrackParams {

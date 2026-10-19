@@ -38,11 +38,15 @@ describe('soundcloudClient', () => {
 
   it('prefers the documented urn identifier in upload responses', async () => {
     const bucket = createBucket();
-    mockedAxios.post.mockResolvedValue({
-      data: {
-        urn: 'soundcloud:tracks:12345',
-        id: 12345,
-      },
+    let multipartStreams: unknown[] = [];
+    mockedAxios.post.mockImplementationOnce(async (_url, body) => {
+      multipartStreams = [...body._streams];
+      return {
+        data: {
+          urn: 'soundcloud:tracks:12345',
+          id: 12345,
+        },
+      };
     });
 
     const trackResult = await uploadTrack('access-token', {
@@ -58,32 +62,23 @@ describe('soundcloudClient', () => {
     });
     expect(bucket.__file.getMetadata).toHaveBeenCalled();
     expect(bucket.__file.createReadStream).toHaveBeenCalled();
-    const multipartBody = mockedAxios.post.mock.calls[0]?.[1] as unknown as { _streams?: unknown[] };
     expect(
-      multipartBody._streams?.some(
-        (entry) =>
-          typeof entry === 'string' &&
-          entry.includes('filename="e9a3bcad-4764-4938-a33b-957459d20b8e.mp3"')
+      multipartStreams.some(
+        (entry) => typeof entry === 'string' && entry.includes('filename="e9a3bcad-4764-4938-a33b-957459d20b8e.mp3"')
       )
     ).toBe(true);
   });
 
   it('adds the known audio extension to extensionless production storage paths', () => {
-    expect(
-      inferMultipartFilename(
-        'intro-outro-sermons/e9a3bcad-4764-4938-a33b-957459d20b8e',
-        'audio.mp3'
-      )
-    ).toBe('e9a3bcad-4764-4938-a33b-957459d20b8e.mp3');
+    expect(inferMultipartFilename('intro-outro-sermons/e9a3bcad-4764-4938-a33b-957459d20b8e', 'audio.mp3')).toBe(
+      'e9a3bcad-4764-4938-a33b-957459d20b8e.mp3'
+    );
   });
 
   it('adds the known artwork extension to extensionless storage paths', () => {
-    expect(
-      inferMultipartFilename(
-        '/v0/b/urm-app.appspot.com/o/sermon-images/square-artwork-id',
-        'artwork.jpg'
-      )
-    ).toBe('square-artwork-id.jpg');
+    expect(inferMultipartFilename('/v0/b/urm-app.appspot.com/o/sermon-images/square-artwork-id', 'artwork.jpg')).toBe(
+      'square-artwork-id.jpg'
+    );
   });
 
   it('preserves a source filename that already declares its format', () => {
@@ -133,9 +128,11 @@ describe('soundcloudClient', () => {
   });
 
   it('reports an HTML edge block as temporary rather than a permission failure', () => {
-    expect(() => normalizeSoundCloudApiError({
-      response: { status: 403, data: '<html><title>403 Forbidden</title></html>' },
-    })).toThrow('SoundCloud temporarily blocked the track request from our server. Please retry shortly.');
+    expect(() =>
+      normalizeSoundCloudApiError({
+        response: { status: 403, data: '<html><title>403 Forbidden</title></html>' },
+      })
+    ).toThrow('SoundCloud temporarily blocked the track request from our server. Please retry shortly.');
   });
 
   it('streams remote artwork instead of buffering it before upload', async () => {
@@ -147,10 +144,14 @@ describe('soundcloudClient', () => {
         'content-length': '10',
       },
     } as never);
-    mockedAxios.post.mockResolvedValue({
-      data: {
-        urn: 'soundcloud:tracks:999',
-      },
+    let multipartStreams: unknown[] = [];
+    mockedAxios.post.mockImplementationOnce(async (_url, body) => {
+      multipartStreams = [...body._streams];
+      return {
+        data: {
+          urn: 'soundcloud:tracks:999',
+        },
+      };
     });
 
     const extensionlessArtworkUrl =
@@ -167,11 +168,8 @@ describe('soundcloudClient', () => {
     expect(mockedAxios.get).toHaveBeenCalledWith(extensionlessArtworkUrl, {
       responseType: 'stream',
     });
-    const multipartBody = mockedAxios.post.mock.calls[0]?.[1] as unknown as { _streams?: unknown[] };
     expect(
-      multipartBody._streams?.some(
-        (entry) => typeof entry === 'string' && entry.includes('filename="square-artwork-id.jpg"')
-      )
+      multipartStreams.some((entry) => typeof entry === 'string' && entry.includes('filename="square-artwork-id.jpg"'))
     ).toBe(true);
   });
 
