@@ -199,21 +199,22 @@ async function createImageSourceStream(bucket: Bucket, source: string): Promise<
   return createBucketStreamSource(bucket, source, 'artwork.jpg', inferImageContentTypeFromFilename(source));
 }
 
-/**
- * Upload a track to SoundCloud. Downloads audio (and optional image) from
- * Firebase Storage, then POSTs multipart/form-data to SoundCloud.
- */
 const isTransientUploadRejection = (error: unknown): boolean =>
   isAxiosError(error) &&
+  error.config?.method === 'post' &&
   error.response?.status === 400 &&
   typeof error.response.data === 'string' &&
   /^\s*<(?:!doctype|html)\b/i.test(error.response.data);
 
+/**
+ * Upload a track to SoundCloud. Downloads audio (and optional image) from
+ * Firebase Storage, then POSTs multipart/form-data to SoundCloud.
+ */
 export async function uploadTrack(accessToken: string, params: UploadTrackParams): Promise<SoundCloudTrackResult> {
   try {
     return await uploadTrackAttempt(accessToken, params);
   } catch (error) {
-    // An explicit HTML rejection comes from the edge before a track is accepted.
+    // Retry only an explicit rejection, never an ambiguous transport failure.
     // Rebuild the multipart body; consumed streams cannot be replayed safely.
     if (!isTransientUploadRejection(error)) throw error;
     logger.warn('SoundCloud upload edge rejected the request; retrying once', { upstream_status: 400 });

@@ -48,7 +48,9 @@ describe('SoundCloud upload recovery', () => {
     const address = server.address();
     if (!address || typeof address === 'string') throw new Error('Missing test port');
     interceptor = axios.interceptors.request.use((config) => {
-      if (config.url === 'https://api.soundcloud.com/tracks') config.url = `http://127.0.0.1:${address.port}/tracks`;
+      if (config.url === 'https://api.soundcloud.com/tracks' || config.url === 'https://example.test/artwork.jpg') {
+        config.url = `http://127.0.0.1:${address.port}/tracks`;
+      }
       return config;
     });
   });
@@ -113,5 +115,15 @@ describe('SoundCloud upload recovery', () => {
     replies.push('disconnect', accepted);
     await expect(uploadTrack('synthetic-token', params())).rejects.toThrow();
     expect(bodies).toHaveLength(1);
+  });
+
+  it('does not mistake an artwork download rejection for a rejected track upload', async () => {
+    replies.push(edgeRejection, accepted);
+    await expect(
+      uploadTrack('synthetic-token', { ...params(), imageSource: 'https://example.test/artwork.jpg' })
+    ).rejects.toMatchObject({ response: { status: 400 }, config: { method: 'get' } });
+    expect(bodies).toEqual(['']);
+    expect(streams).toHaveLength(1);
+    expect(streams[0].destroyed).toBe(true);
   });
 });
