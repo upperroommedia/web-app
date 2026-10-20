@@ -1,12 +1,13 @@
 #!/usr/bin/env node
+import { collectCloudRunReleaseWorkers, readCloudRunNamespaceEvidence } from './temporal-release-cloud-run.mjs';
 // Every step is explicit, revision-fenced, resumable, and leaves admissions paused on failure.
-import { readFile, writeFile, mkdtemp, rm } from 'node:fs/promises';
+import { readFile, writeFile, mkdtemp, rm, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { verifyTemporalCallableTransport } from './temporal-callable-access.mjs';
-import { verifyFirebaseRtdbReadiness } from './temporal-platform.mjs';
+import { verifyFirebaseRtdbReadiness, validateCloudEvidence } from './temporal-platform.mjs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -159,6 +160,7 @@ await runWithCleanup(
     const operationId = resumeOperation ?? randomUUID();
     let operationAcquired = false,
       transitionPending = false,
+      cloudWorkerProbePending = false,
       expectedAuthority,
       resourceIdentity,
       ownedOperation,
@@ -242,6 +244,36 @@ await runWithCleanup(
           return result;
         }
         async function verifyReleaseWorkers() {
+          const configuredPlatform = JSON.parse(await readFile(config.platformConfig, 'utf8'));
+          if (configuredPlatform.workerHosting === 'cloud-run') {
+            validateWorkerCoverage(config, configuredPlatform);
+            validateCloudEvidence(configuredPlatform, await readCloudRunNamespaceEvidence(configuredPlatform), { requireRecovery: false });
+            const prior = (await lockRef.get()).data()?.cloudWorkerIntent;
+            if (prior) {
+              cloudWorkerProbePending = true;
+              throw new Error('CLOUD_RUN_SAVED_PROBE_RECONCILIATION_REQUIRED');
+            }
+            const directory = await realpath(await mkdtemp(join(tmpdir(), 'urm-temporal-cloud-ready-')));
+            await collectCloudRunReleaseWorkers({ binding, config, platform: configuredPlatform, firestore,
+              artifactDirectory: directory,
+              recordIntent: async (intent) => {
+                // From this point a lost transaction acknowledgement is uncertain.
+                cloudWorkerProbePending = true;
+                await firestore.runTransaction(async (tx) => {
+                  const current = await tx.get(lockRef);
+                  assertNativeSnapshot(ownedOperation, current);
+                  if (current.get('cloudWorkerIntent')) throw new Error('CLOUD_RUN_PROBE_INTENT_ALREADY_EXISTS');
+                  tx.update(lockRef, { cloudWorkerIntent: { ...intent, artifactDirectory: directory } });
+                });
+                ownedOperation = nativeSnapshotProof(await lockRef.get());
+              },
+            });
+            cloudWorkerProbePending = false;
+            // Never substitute role execution for the remaining native guards.
+            // This hosting branch cannot advance a release until their actual
+            // implementations are connected; no descriptor boolean can bypass it.
+            throw new Error('CLOUD_RUN_RECOVERY_DISPATCH_AND_DATA_ACCESS_GATES_REQUIRED');
+          }
           // Read-only preflight verifies actual host/access and original-run worker restart evidence in Cloud mode.
           // Database backup/restore evidence applies only to the separate self-hosted mode.
           execFileSync(
@@ -1309,7 +1341,7 @@ await runWithCleanup(
         console.log(`Temporal release ${action} checkpoint saved. Existing jobs and worker versions are retained.`);
       },
       async () => {
-        if (!operationAcquired || transitionPending) return;
+        if (!operationAcquired || transitionPending || cloudWorkerProbePending) return;
         await firestore.runTransaction(async (tx) => {
           const lock = await tx.get(lockRef);
           if (lock.data()?.operationId === operationId) {

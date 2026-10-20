@@ -1,3 +1,4 @@
+import { validateReleasePlatformConfig } from './temporal-release-cloud-run.mjs';
 /** Operator policy is committed independently of the application being released. */
 import { readFileSync, lstatSync, realpathSync } from 'node:fs';
 import { resolve, relative } from 'node:path';
@@ -7,7 +8,7 @@ import { pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
 import { Agent as HttpsAgent } from 'node:https';
 import { join, dirname } from 'node:path';
-import { validateConfig, firebaseResourceEnvironment } from './temporal-platform.mjs';
+import { firebaseResourceEnvironment } from './temporal-platform.mjs';
 
 export const hash = (value) => createHash('sha256').update(value).digest('hex');
 export const canonical = (value) => {
@@ -228,7 +229,7 @@ export async function loadVerifiedRuntimeApplication(binding, config, db, load) 
   await assertReleaseRuntimeSource(binding, config, control);
   return load();
 }
-export function loadReleaseResourceBinding(config, { read = readFileSync, validate = validateConfig } = {}) {
+export function loadReleaseResourceBinding(config, { read = readFileSync, validate = validateReleasePlatformConfig } = {}) {
   const platformBytes = read(config.platformConfig),
     peerBytes = read(config.platformPeerConfig);
   const platform = JSON.parse(platformBytes),

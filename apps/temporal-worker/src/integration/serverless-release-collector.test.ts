@@ -6,7 +6,7 @@ import { resolve, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { initializeApp, deleteApp } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
-import { Client } from '@temporalio/client';
+import { Client, WorkflowNotFoundError } from '@temporalio/client';
 import { Worker } from '@temporalio/worker';
 import { createLocalTestEnvironment } from '../test-support/local-test-environment';
 import {
@@ -150,15 +150,32 @@ test('collector joins actual version routing, native activity history and privat
       });
     }
     await expect(
-      collectServerlessRoleReadiness({ client, firestore: db, bindings, artifactDirectory: directory })
+      collectServerlessRoleReadiness({
+        client,
+        firestore: db,
+        bindings,
+        artifactDirectory: directory,
+        onStartIntent: async () => {
+          throw new Error('Native entry must reject local transport before intent');
+        },
+      })
     ).rejects.toThrow('SERVERLESS_NATIVE_READINESS_UNCONFIRMED');
+    let persistedIntentId: string | undefined;
     proof = await collectServerlessReadinessObservations({
       client,
       firestore: db,
       bindings,
       artifactDirectory: directory,
       readResource: async (name) => resources.get(name),
+      onStartIntent: async (intent) => {
+        // Real SDK read proves persistence runs before the execution exists.
+        await expect(client.workflow.getHandle(intent.workflowId).describe()).rejects.toBeInstanceOf(
+          WorkflowNotFoundError
+        );
+        persistedIntentId = intent.workflowId;
+      },
     });
+    expect(persistedIntentId).toBe(proof.workflowId);
     expect(proof.roles.map((r) => r.role)).toEqual(['orchestration', 'controls']);
     expect(proof.roles[0].poolGeneration).toBe('9007199254740993');
     for (const role of proof.roles) {

@@ -1,3 +1,4 @@
+import { validateCloudRunReleasePlatform } from './temporal-release-cloud-run.mjs';
 import { PROVIDER_USAGE_SCAN_GROUPS } from './temporal-backfill-provider-usage.mjs';
 import { createRequire } from 'node:module';
 import { createReleaseFirebaseResources } from './temporal-release-resources.mjs';
@@ -301,7 +302,8 @@ export function firebaseAdmin(projectId, databaseURL) {
 }
 
 export function validateWorkerCoverage(release, platform) {
-  if (platform.dispatcherEnabled === false)
+  if (platform.workerHosting === 'cloud-run') validateCloudRunReleasePlatform(platform);
+  if (platform.workerHosting !== 'cloud-run' && platform.dispatcherEnabled === false)
     throw new Error(
       'Application cutover requires the orchestration dispatcher enabled; a restart-probe-only deployment cannot own admissions'
     );

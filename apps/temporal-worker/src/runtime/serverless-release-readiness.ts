@@ -196,6 +196,13 @@ export async function collectServerlessReadinessObservations(options: {
   bindings: ServerlessRoleBinding[];
   artifactDirectory: string;
   readResource?: typeof readServerlessResource;
+  onStartIntent?: (intent: {
+    schemaVersion: number;
+    workflowId: string;
+    nonce: string;
+    bindings: ServerlessRoleBinding[];
+    createdAt: string;
+  }) => Promise<void>;
 }) {
   const bindings = structuredClone(options.bindings);
   if (
@@ -225,6 +232,7 @@ export async function collectServerlessReadinessObservations(options: {
     workflowId = `serverless-readiness-${nonce}`;
   const intent = { schemaVersion: 1, workflowId, nonce, bindings, createdAt: new Date().toISOString() };
   await writeExclusiveReceipt(options.artifactDirectory, 'readiness-start-intent.json', intent);
+  await options.onStartIntent?.(intent);
   const read = options.readResource ?? readServerlessResource;
   const service = options.client.connection.workflowService;
   const routing = async (binding: ServerlessRoleBinding) => {
@@ -272,6 +280,8 @@ export async function collectServerlessReadinessObservations(options: {
           { projectId: 'urm-app-staging', buildId: bindings[0].buildId, nonce, roles: bindings.map((b) => b.role) },
         ],
         workflowExecutionTimeout: '10 minutes',
+        workflowIdReusePolicy: 'REJECT_DUPLICATE',
+        workflowIdConflictPolicy: 'FAIL',
       })
     );
     await writeExclusiveReceipt(options.artifactDirectory, 'readiness-start-ack.json', {
@@ -395,8 +405,11 @@ export async function collectServerlessReadinessObservations(options: {
 /** Guarded native entry: transport overrides and injected API readers are not
  * accepted here. Observations still cannot replace the other release gates. */
 export async function collectServerlessRoleReadiness(
-  options: Omit<Parameters<typeof collectServerlessReadinessObservations>[0], 'readResource'>
+  options: Omit<Parameters<typeof collectServerlessReadinessObservations>[0], 'readResource' | 'onStartIntent'> & {
+    onStartIntent: NonNullable<Parameters<typeof collectServerlessReadinessObservations>[0]['onStartIntent']>;
+  }
 ) {
+  if (typeof options.onStartIntent !== 'function') fail();
   const native = options.client.connection;
   const connection = native instanceof Connection ? native.options : fail();
   // The pinned SDK normalizes tls into native gRPC ChannelCredentials and
