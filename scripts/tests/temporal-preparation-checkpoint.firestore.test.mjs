@@ -267,14 +267,14 @@ test('controls bootstrap uses native authority checkpoints, immutable activation
  }finally{await deleteApp(app);}
 });
 
-for(const role of ['controls','orchestration','search'])for(const mode of ['cycle','retain','abort'])test(`${role} ${mode} native checkpoints retain exact origin, deny rollback/drift and distinguish immutable outcomes`,async()=>{
- const {savePoolBootstrapCycleCheckpoint,saveControlsActivationCheckpoint,saveControlsActivationStopCheckpoint,saveOrchestrationBootstrapCycleCheckpoint,saveOrchestrationActivationCheckpoint,saveOrchestrationActivationStopCheckpoint,saveSearchBootstrapCycleCheckpoint,saveSearchActivationCheckpoint,saveSearchActivationStopCheckpoint}=await import('../temporal-preparation-checkpoint.mjs');
- const {bootstrapStopCloudRunControlsPool,activateCloudRunControlsPool,stopCloudRunControlsActivation,bootstrapStopCloudRunOrchestrationPool,activateCloudRunOrchestrationPool,stopCloudRunOrchestrationActivation,bootstrapStopCloudRunSearchPool,activateCloudRunSearchPool,stopCloudRunSearchActivation}=await import('../temporal-bootstrap-pool.mjs');
+for(const role of ['controls','orchestration','search','email'])for(const mode of ['cycle','retain','abort'])test(`${role} ${mode} native checkpoints retain exact origin, deny rollback/drift and distinguish immutable outcomes`,async()=>{
+ const {savePoolBootstrapCycleCheckpoint,saveControlsActivationCheckpoint,saveControlsActivationStopCheckpoint,saveOrchestrationBootstrapCycleCheckpoint,saveOrchestrationActivationCheckpoint,saveOrchestrationActivationStopCheckpoint,saveSearchBootstrapCycleCheckpoint,saveSearchActivationCheckpoint,saveSearchActivationStopCheckpoint,saveEmailBootstrapCycleCheckpoint,saveEmailActivationCheckpoint,saveEmailActivationStopCheckpoint}=await import('../temporal-preparation-checkpoint.mjs');
+ const {bootstrapStopCloudRunControlsPool,activateCloudRunControlsPool,stopCloudRunControlsActivation,bootstrapStopCloudRunOrchestrationPool,activateCloudRunOrchestrationPool,stopCloudRunOrchestrationActivation,bootstrapStopCloudRunSearchPool,activateCloudRunSearchPool,stopCloudRunSearchActivation,bootstrapStopCloudRunEmailPool,activateCloudRunEmailPool,stopCloudRunEmailActivation}=await import('../temporal-bootstrap-pool.mjs');
  const {controlsBootstrapFixture}=await import('./fixtures/controls-bootstrap.mjs');
  const app=initializeApp({projectId:'demo-preparation-checkpoint'},randomUUID()),db=getFirestore(app);
  try{
   for(const drift of ['control','state','credential-control','credential-state','none']){
-   const runs=role==='search'?{cycle:bootstrapStopCloudRunSearchPool,retain:activateCloudRunSearchPool,abort:stopCloudRunSearchActivation}:role==='controls'?{cycle:bootstrapStopCloudRunControlsPool,retain:activateCloudRunControlsPool,abort:stopCloudRunControlsActivation}:
+   const runs=role==='email'?{cycle:bootstrapStopCloudRunEmailPool,retain:activateCloudRunEmailPool,abort:stopCloudRunEmailActivation}:role==='search'?{cycle:bootstrapStopCloudRunSearchPool,retain:activateCloudRunSearchPool,abort:stopCloudRunSearchActivation}:role==='controls'?{cycle:bootstrapStopCloudRunControlsPool,retain:activateCloudRunControlsPool,abort:stopCloudRunControlsActivation}:
      {cycle:bootstrapStopCloudRunOrchestrationPool,retain:activateCloudRunOrchestrationPool,abort:stopCloudRunOrchestrationActivation};
    const f=controlsBootstrapFixture(role);
    if(mode!=='cycle'){
@@ -296,7 +296,7 @@ for(const role of ['controls','orchestration','search'])for(const mode of ['cycl
    let ownedOperation=nativeSnapshotProof(await lockRef.get());
    const expectedAuthority={control:nativeSnapshotProof(await controlRef.get()),state:nativeSnapshotProof(await stateRef.get())},save=f.options.save;
    const options={firestore:db,lockRef,controlRef,stateRef,immutableReceipt,creationReceipt,config,operationId,bindingDigest,operatorPrincipal,expectedAuthority};
-   const checkpoint=(role==='search'?{cycle:saveSearchBootstrapCycleCheckpoint,retain:saveSearchActivationCheckpoint,abort:saveSearchActivationStopCheckpoint}:role==='controls'?{cycle:savePoolBootstrapCycleCheckpoint,retain:saveControlsActivationCheckpoint,abort:saveControlsActivationStopCheckpoint}:
+   const checkpoint=(role==='email'?{cycle:saveEmailBootstrapCycleCheckpoint,retain:saveEmailActivationCheckpoint,abort:saveEmailActivationStopCheckpoint}:role==='search'?{cycle:saveSearchBootstrapCycleCheckpoint,retain:saveSearchActivationCheckpoint,abort:saveSearchActivationStopCheckpoint}:role==='controls'?{cycle:savePoolBootstrapCycleCheckpoint,retain:saveControlsActivationCheckpoint,abort:saveControlsActivationStopCheckpoint}:
      {cycle:saveOrchestrationBootstrapCycleCheckpoint,retain:saveOrchestrationActivationCheckpoint,abort:saveOrchestrationActivationStopCheckpoint})[mode];
    const guard=f.options.observeProtection,api=f.options.api;
    f.options.observeProtection=async()=>{

@@ -124,7 +124,7 @@ test('native bootstrap protection recognizes original old pinned wait and reject
     const options = {
       client,
       firestore: db,
-      platform: { temporalNamespace: namespace, roleBindings: [{ role: 'controls', buildId, deploymentName },{role:'orchestration',buildId,deploymentName:'urm-worker-staging'},{role:'search',buildId,deploymentName:'urm-worker-search-staging'}] },
+      platform: { temporalNamespace: namespace, roleBindings: [{ role: 'controls', buildId, deploymentName },{role:'orchestration',buildId,deploymentName:'urm-worker-staging'},{role:'search',buildId,deploymentName:'urm-worker-search-staging'},{role:'email',buildId,deploymentName:'urm-worker-email-staging'}] },
       role: 'controls',
       operationId,
       releaseId,
@@ -154,8 +154,9 @@ test('native bootstrap protection recognizes original old pinned wait and reject
     assert.equal((await observeBootstrapProtection(options)).protectedRunCount, 1);
     await launch('urm-orchestration',true,{deploymentName:'urm-worker-staging',buildId});
     await launch('urm-search',queuePollsWorkflows('cloud-run','urm-search'),{deploymentName:'urm-worker-search-staging',buildId});
+    await launch('urm-email',queuePollsWorkflows('cloud-run','urm-email'),{deploymentName:'urm-worker-email-staging',buildId});
     const selectRole=async role=>{options.role=role;await operation.update({action:`stop-cloud-run-${role}-activation`});};
-    for(const role of ['controls','orchestration','search']){
+    for(const role of ['controls','orchestration','search','email']){
       const actions=[`bootstrap-stop-cloud-run-${role}`,`activate-cloud-run-${role}-pool`,`stop-cloud-run-${role}-activation`];
       options.role=role;
       for(const action of actions){
@@ -180,7 +181,7 @@ test('native bootstrap protection recognizes original old pinned wait and reject
     );
     handles.push(candidate);
     await rpc(() => candidate.query('workerRestartProbe.status'));
-    for(const role of ['controls','orchestration','search']){await selectRole(role);await assert.rejects(observeBootstrapProtection(options),/CLOUD_RUN_BOOTSTRAP_PROTECTION_UNCONFIRMED/);}
+    for(const role of ['controls','orchestration','search','email']){await selectRole(role);await assert.rejects(observeBootstrapProtection(options),/CLOUD_RUN_BOOTSTRAP_PROTECTION_UNCONFIRMED/);}
     for (const handle of handles) {
       await rpc(() => handle.signal('workerRestartProbe.release'));
       await rpc(() => handle.result());

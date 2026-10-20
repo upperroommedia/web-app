@@ -307,30 +307,31 @@ test('the same signal owner remains installed until deferred Sentry flush actual
   expect(remove.mock.calls.filter(([signal]) => signal === 'SIGTERM')).toHaveLength(1);
 });
 
-for (const hosting of ['cloud-run', 'traditional'] as const)
-  test(`actual search Worker.create preserves ${hosting} queue ownership`, async () => {
-    mockWorkerQueue = 'urm-search';
-    mockHosting = hosting;
-    const { Worker } = await import('@temporalio/worker');
-    const run = track(startWorkerProcess());
-    await tick();
-    expect(mockWorkers).toHaveLength(1);
-    expect(jest.mocked(Worker.create).mock.calls[0][0].workflowBundle).toEqual(
-      hosting === 'cloud-run' ? undefined : { codePath: '/fixture/workflows.js' }
-    );
-    let status = 0;
-    mockRequestHandler?.(
-      { url: '/readyz' },
-      {
-        writeHead(code) {
-          status = code;
-          return this;
-        },
-        end() {},
-      }
-    );
-    expect(status).toBe(200);
-    mockSignals.get('SIGTERM')?.();
-    mockWorkers[0].stop();
-    await run;
-  });
+for (const queue of ['urm-search', 'urm-email'])
+  for (const hosting of ['cloud-run', 'traditional'] as const)
+    test(`actual ${queue} Worker.create preserves ${hosting} queue ownership`, async () => {
+      mockWorkerQueue = queue;
+      mockHosting = hosting;
+      const { Worker } = await import('@temporalio/worker');
+      const run = track(startWorkerProcess());
+      await tick();
+      expect(mockWorkers).toHaveLength(1);
+      expect(jest.mocked(Worker.create).mock.calls[0][0].workflowBundle).toEqual(
+        hosting === 'cloud-run' ? undefined : { codePath: '/fixture/workflows.js' }
+      );
+      let status = 0;
+      mockRequestHandler?.(
+        { url: '/readyz' },
+        {
+          writeHead(code) {
+            status = code;
+            return this;
+          },
+          end() {},
+        }
+      );
+      expect(status).toBe(200);
+      mockSignals.get('SIGTERM')?.();
+      mockWorkers[0].stop();
+      await run;
+    });

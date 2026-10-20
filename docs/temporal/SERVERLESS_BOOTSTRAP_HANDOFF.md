@@ -1,13 +1,13 @@
 # Serverless bootstrap and process recovery boundary
 
-The guarded controller now has a controls, orchestration and search **bootstrap and stop cycles** in
+The guarded controller now has a controls, orchestration, search and email **bootstrap and stop cycles** in
 source. It joins the owned zero-pool/account/grant receipts, starts desired manual
 count one, observes the exact native non-current role queues, then stops the same
 owned pool under the original parent. Observation failure also enters owned stop;
 uncertain authority, protected work or an unknown result retains the fence.
-The source also connects a kept-running controls, orchestration or search activation and a separate stop of
+The source also connects a kept-running controls, orchestration, search or email activation and a separate stop of
 that exact unused activation. None of these operations has been applied to Cloud Run.
-Media, images and email activation and guarded promotion remain unimplemented.
+Media and images activation and guarded promotion remain unimplemented.
 
 The final native role-readiness collector still requires candidate versions current,
 with no ramp, on the real role queues. The cycle cannot replace that collector.
@@ -31,7 +31,7 @@ The existing integration CI includes two additional real SDK tests:
 
 The serial release-recovery CI also runs
 `scripts/integration/temporal-controls-bootstrap.native.mjs`: actual local SDK
-old pinned waiting-run inventory, non-current controls/search Activity and orchestration Workflow/Activity registration,
+old pinned waiting-run inventory, non-current controls/search/email Activity and orchestration Workflow/Activity registration,
 provider-lock preservation, and explicit candidate-run denial against the dedicated
 Firestore emulator. Controlled Cloud API tests cover the scale/stop protocol;
 the actual Firestore checkpoint regression checks paused authority, immutable
@@ -88,6 +88,23 @@ entrypoint would have registered an extra Workflow queue and failed the new gate
 The actual entrypoint test checks Worker options and readiness for both hosting
 modes; native metadata confirms only the tested local SDK registration.
 
+Email has its own fixed `bootstrap-stop-cloud-run-email`,
+`activate-cloud-run-email-pool` and `stop-cloud-run-email-activation` actions and
+separate checkpoint/creation/retained receipt namespaces. Like search, its exact
+nine/ten/eleven receipt manifests reject Storage authority. Its project role is
+Auth read only, with the same conditional Firestore prerequisite.
+
+Email bootstrap rederives the source template including
+`EMAIL_EGRESS_DESCRIPTOR_PATH=/run/email/egress.json`, the mounted numeric version
+of `TEMPORAL_EMAIL_EGRESS_DESCRIPTOR`, and any approved numeric runtime secret
+bindings. Each referenced version must be enabled with the owned runner accessor.
+This reads metadata only. Staging `createEmailRuntime` selects private capture;
+startup and registration therefore do not validate descriptor contents or exercise
+provider transport. The existing bounded no-send TLS/auth verification remains a
+separate readiness gate. Bootstrap never calls delivery or infers SMTP permission.
+The Cloud Run email entrypoint and readiness now share Activity-only ownership;
+traditional email Workflow/Activity behavior remains unchanged.
+
 Both stable work scans and the final refreshed namespace compute inventory must
 remain within five seconds; a long scan is a denial, not renewed freshness. Every
 open execution must be pinned to a different registered version, without pending
@@ -125,7 +142,7 @@ protection before its sole saved conditional stop. A current or working candidat
 cannot be forced to zero. Cleanup has no authorization-expiry shortcut. Desired
 zero still proves neither process termination nor drain. After this stop, the
 original cycle origin cannot authorize another activation; a new origin requires a
-separately reviewed contract. Media, images and email activation, media
+separately reviewed contract. Media and images activation, media
 capacity and guarded promotion remain out of scope.
 
 Any extension to other roles and the later handoff must retain these requirements:

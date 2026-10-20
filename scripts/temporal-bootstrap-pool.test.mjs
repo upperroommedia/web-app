@@ -444,3 +444,31 @@ test('search unknown start ACK resumes GET-only; current/working retained candid
  f.options.observeProtection=async()=>{throw new Error('working');};await assert.rejects(searchAbort(f.options));assert.equal(f.pool.scaling.manualInstanceCount,1);
 });
 for(const run of [cycle,orchestrationCycle])test('search cannot select another fixed role wrapper',async()=>{const f=fixture('search');await assert.rejects(run(f.options));assert.equal(f.calls.filter(c=>c.method==='PATCH').length,0);});
+
+const {bootstrapStopCloudRunEmailPool:emailCycle,activateCloudRunEmailPool:emailRetain,stopCloudRunEmailActivation:emailAbort}=await import('./temporal-bootstrap-pool.mjs');
+async function emailAfterCycle(){const f=fixture('email'),r=await emailCycle(f.options);f.options.receipts.bootstrapCycle={operationId:f.options.operationId,releaseId:f.options.releaseId,identityState:structuredClone(r)};f.options.operationId=randomUUID();return f;}
+test('email nine own receipts include enabled numeric mounted egress metadata and no storage authority or transport call',async()=>{
+ const f=await emailAfterCycle(),kept=await emailRetain(f.options);
+ assert.equal(kept.disposition,'retained');assert.equal(Object.keys(f.options.receipts).length,10);
+ assert.deepEqual(f.options.receipts.projectRole.identityState.nativeRole.includedPermissions,['firebaseauth.users.get']);
+ const body=f.options.receipts.pool.identityState.plan.body;
+ assert.deepEqual(body.template.volumes.find(v=>v.name==='email-egress').secret.items,[{version:'2',path:'egress.json'}]);
+ assert.equal(body.template.containers[0].env.find(v=>v.name==='EMAIL_EGRESS_DESCRIPTOR_PATH').value,'/run/email/egress.json');
+ assert.ok(f.calls.some(c=>c.url.includes('TEMPORAL_EMAIL_EGRESS_DESCRIPTOR/versions/2')));
+ assert.equal(f.calls.some(c=>/storage.googleapis.com|:access|smtp|nodemailer/.test(c.url)),false);
+ f.options.receipts.activation={operationId:f.options.operationId,releaseId:f.options.releaseId,identityState:structuredClone(kept)};f.options.operationId=randomUUID();
+ await emailAbort(f.options);assert.deepEqual(f.calls.filter(c=>c.method==='PATCH').map(c=>c.request.scaling.manualInstanceCount),[1,0,1,0]);
+});
+for(const bad of ['storage','projectRole','settings','egress-disabled','egress-accessor'])test(`email ${bad} denies before another start`,async()=>{
+ const f=await emailAfterCycle(),control=fixture(),api=f.options.api;
+ if(bad==='storage')f.options.receipts.storageAccess=control.options.receipts.storageAccess;
+ if(bad==='projectRole')f.options.receipts.projectRole=control.options.receipts.projectRole;
+ if(bad==='settings')f.options.settings.emailEgressVersion='latest';
+ f.options.api=async(...args)=>{const r=await api(...args);if(args[0].includes('TEMPORAL_EMAIL_EGRESS_DESCRIPTOR')){if(bad==='egress-disabled'&&args[0].includes('/versions/'))r.state='DISABLED';if(bad==='egress-accessor'&&args[0].includes(':getIamPolicy'))r.bindings=[];}return r;};
+ await assert.rejects(emailRetain(f.options));assert.equal(f.calls.filter(c=>c.method==='PATCH').length,2);
+});
+test('email observer failure stops same parent but uncertain/working retained activation stays fenced',async()=>{
+ const f=await emailAfterCycle();f.options.observeRegistration=async()=>{throw new Error('unknown');};await assert.rejects(emailRetain(f.options));assert.equal(f.pool.scaling.manualInstanceCount,0);assert.equal(f.saved.disposition,'stopped');
+ const g=await emailAfterCycle(),kept=await emailRetain(g.options);g.options.receipts.activation={operationId:g.options.operationId,releaseId:g.options.releaseId,identityState:structuredClone(kept)};g.options.operationId=randomUUID();g.options.observeProtection=async()=>{throw new Error('working');};await assert.rejects(emailAbort(g.options));assert.equal(g.pool.scaling.manualInstanceCount,1);
+});
+for(const run of [cycle,orchestrationCycle,searchCycle])test('email cannot choose another source role wrapper',async()=>{const f=fixture('email');await assert.rejects(run(f.options));assert.equal(f.calls.filter(c=>c.method==='PATCH').length,0);});

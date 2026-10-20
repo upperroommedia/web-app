@@ -153,3 +153,11 @@ test('search accepts exactly its Activity queue; Workflow/shared queues deny pro
  assert.deepEqual((await observeBootstrapRegistration(f.options)).queues,queues);await observeBootstrapProtection(f.options);
  queues.push({name:'urm-search',type:1});await assert.rejects(observeBootstrapRegistration(f.options));await assert.rejects(observeBootstrapProtection(f.options));
 });
+
+test('email requires exactly its Activity queue; an extra Workflow or foreign queue denies unused stop',async()=>{
+ const f=fixture();f.options.role='email';f.options.platform.roleBindings[0].role='email';
+ const get=f.options.firestore.getAll;f.options.firestore.getAll=async()=>{const d=await get();d[0].data().action='activate-cloud-run-email-pool';return d;};
+ const queues=[{name:'urm-email',type:2}];f.service.describeWorkerDeploymentVersion=async()=>({workerDeploymentVersionInfo:{deploymentVersion:{deploymentName:'candidate',buildId:'a'.repeat(40)},taskQueueInfos:queues}});
+ assert.deepEqual((await observeBootstrapRegistration(f.options)).queues,queues);await observeBootstrapProtection(f.options);
+ queues.push({name:'urm-email',type:1});await assert.rejects(observeBootstrapRegistration(f.options));await assert.rejects(observeBootstrapProtection(f.options));
+});
