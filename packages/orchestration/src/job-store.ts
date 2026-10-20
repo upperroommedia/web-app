@@ -27,6 +27,16 @@ export const DURABLE_COLLECTIONS = {
   drains: 'durableActivityDrains',
 } as const;
 
+export interface DurableCloudRunWorkerIdentity {
+  projectId: string;
+  region: string;
+  pool: string;
+  revision: string;
+  revisionUid: string;
+  imageDigest: string;
+  serviceAccount: string;
+  instanceId: string;
+}
 export interface DurableWorkerWitness {
   instanceId: string;
   buildId: string;
@@ -37,6 +47,7 @@ export interface DurableWorkerWitness {
   nodeUid?: string;
   nodeName?: string;
   containerIds?: string[];
+  cloudRun?: DurableCloudRunWorkerIdentity;
 }
 /** Trusted Temporal metadata, never caller payload or a local wall-clock epoch. */
 export interface DurableActivityExecution {
@@ -91,7 +102,7 @@ function compareExecution(next: DurableActivityExecution, previous: DurableActiv
     'Execution order is ambiguous; verify the Temporal workflow run before proceeding'
   );
 }
-function validateExecution(value: DurableActivityExecution): void {
+function validateExecution(value: DurableActivityExecution, projectId: string): void {
   for (const key of ['workflowId', 'runId', 'activityId', 'activityType'] as const)
     boundedString(value[key], key, 1024);
   finite(value.scheduledAt, 'Temporal schedule timestamp');
@@ -107,6 +118,39 @@ function validateExecution(value: DurableActivityExecution): void {
         value.worker.containerIds.some((id) => typeof id !== 'string' || !id || id.length > 512))
     )
       invalid('Invalid worker container identities');
+    if (value.worker.cloudRun) {
+      const cloud = value.worker.cloudRun;
+      const fields = [
+        'projectId',
+        'region',
+        'pool',
+        'revision',
+        'revisionUid',
+        'imageDigest',
+        'serviceAccount',
+        'instanceId',
+      ] as const;
+      if (
+        Object.keys(cloud).length !== fields.length ||
+        Object.keys(cloud).some((key) => !fields.includes(key as (typeof fields)[number]))
+      )
+        invalid('Unexpected Cloud Run worker identity detail');
+      for (const key of fields) boundedString(cloud[key], key);
+      if (
+        cloud.projectId !== projectId ||
+        !['urm-app-staging', 'urm-app'].includes(cloud.projectId) ||
+        cloud.region !== 'us-central1' ||
+        !/^[a-z][a-z0-9-]{1,61}[a-z0-9]$/.test(cloud.pool) ||
+        !cloud.revision.startsWith(`${cloud.pool}-`) ||
+        !/^[a-z0-9-]{1,63}$/.test(cloud.revision) ||
+        !/^sha256:[a-f0-9]{64}$/.test(cloud.imageDigest) ||
+        !cloud.serviceAccount.endsWith(`@${cloud.projectId}.iam.gserviceaccount.com`) ||
+        ['podUid', 'podName', 'namespace', 'clusterId', 'nodeUid', 'nodeName', 'containerIds'].some(
+          (key) => value.worker![key as keyof DurableWorkerWitness] !== undefined
+        )
+      )
+        invalid('Invalid or mixed Cloud Run worker identity');
+    }
     if (
       Object.keys(value.worker).some(
         (key) =>
@@ -120,6 +164,7 @@ function validateExecution(value: DurableActivityExecution): void {
             'nodeUid',
             'nodeName',
             'containerIds',
+            'cloudRun',
           ].includes(key)
       )
     )
@@ -744,7 +789,7 @@ export function createDurableJobStore(options: {
     );
   function currentExecution(): DurableActivityExecution | undefined {
     const value = options.getExecution?.();
-    if (value) validateExecution(value);
+    if (value) validateExecution(value, projectId);
     return value;
   }
   function checkExecution(execution: DurableActivityExecution, head: DurableExecutionHead | undefined): void {
@@ -812,7 +857,7 @@ export function createDurableJobStore(options: {
     execution: DurableActivityExecution,
     registration: { stepIds?: readonly string[]; countsAttempt?: boolean } = {}
   ): Promise<{ executionId: string; epoch: number }> {
-    validateExecution(execution);
+    validateExecution(execution, projectId);
     const requested = [...new Set(registration.stepIds ?? [execution.activityType])];
     if (requested.length > 64) invalid('Too many activity step bindings');
     requested.forEach((step) => boundedString(step, 'activity step binding', 128));
@@ -872,7 +917,7 @@ export function createDurableJobStore(options: {
     ref: DurableJobRef,
     execution: DurableActivityExecution
   ): Promise<void> {
-    validateExecution(execution);
+    validateExecution(execution, projectId);
     const target = firestore
       .collection(DURABLE_COLLECTIONS.drains)
       .doc(durableActivityDrainKey(projectId, ref.jobId, execution));

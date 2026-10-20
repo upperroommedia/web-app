@@ -354,3 +354,18 @@ test('a new coalesced fact arriving while signaling remains pending after old le
     nextAttemptAt: 0,
   });
 });
+
+test('an interrupted pass leaves ambiguous leases and does not claim its next record', async () => {
+  const records = { 'durableJobOutbox/a': pending(), 'durableJobOutbox/b': pending() };
+  const { dispatcher, workflow } = harness(records);
+  const abort = new AbortController();
+  workflow.start.mockImplementationOnce(async () => {
+    abort.abort();
+    return {};
+  });
+  await dispatcher.tick(abort.signal);
+  expect(workflow.start).toHaveBeenCalledTimes(1);
+  expect(records['durableJobOutbox/a'].state).toBe('dispatching');
+  expect(records['durableJobOutbox/b'].state).toBe('pending');
+  expect(dispatcher.healthy).toBe(false);
+});

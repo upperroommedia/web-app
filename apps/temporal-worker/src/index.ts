@@ -159,7 +159,7 @@ export async function runWorkerProcess(bindShutdown?: (shutdown: () => Promise<v
             : 10,
         maxHeartbeatThrottleInterval: '1 second',
         defaultHeartbeatThrottleInterval: '1 second',
-        shutdownGraceTime: '2 minutes',
+        shutdownGraceTime: config.shutdownGraceTimeMs,
       });
       lifecycle.workers.push(worker);
       if (lifecycle.draining) return;

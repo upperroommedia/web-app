@@ -51,12 +51,14 @@ export class OutboxDispatcher {
     this.owner = options.owner ?? randomUUID();
     this.now = options.now ?? Date.now;
   }
-  private async claim(ref: DocumentReference): Promise<Lease | undefined> {
+  private async claim(ref: DocumentReference, signal?: AbortSignal): Promise<Lease | undefined> {
     return this.options.db.runTransaction(async (tx) => {
       const snapshot = await tx.get(ref);
       const value = snapshot.data() as OutboxRecord | undefined;
       const now = this.now();
       if (
+        this.stopped ||
+        signal?.aborted ||
         !value ||
         value.state === 'dispatched' ||
         (value.nextAttemptAt ?? 0) > now ||
@@ -101,7 +103,7 @@ export class OutboxDispatcher {
       );
     });
   }
-  private async send(value: OutboxRecord): Promise<void> {
+  private async send(value: OutboxRecord, signal?: AbortSignal): Promise<void> {
     const dispatch = value.dispatch;
     if (dispatch) {
       if (
@@ -121,6 +123,7 @@ export class OutboxDispatcher {
           : WorkflowIdReusePolicy.REJECT_DUPLICATE,
         workflowIdConflictPolicy: WorkflowIdConflictPolicy.USE_EXISTING,
       };
+      if (this.stopped || signal?.aborted) throw new Error('DISPATCH_INTERRUPTED');
       if (dispatch.signal) {
         await this.options.client.workflow.signalWithStart(dispatch.workflowType, {
           ...options,
@@ -214,14 +217,17 @@ export class OutboxDispatcher {
       )
         return;
     }
+    if (this.stopped || signal?.aborted) throw new Error('DISPATCH_INTERRUPTED');
     const handle = this.options.client.workflow.getHandle(value.workflowId);
     if (value.signal) await handle.signal(value.signal.name, ...args(value.signal.args));
     else if (value.action === 'cancel') await handle.cancel();
     else throw new Error('COMMAND_SIGNAL_REQUIRED');
   }
-  async tick(): Promise<void> {
+  async tick(signal?: AbortSignal): Promise<void> {
+    this.healthy = false;
     let successful = true;
     for (const collection of ['durableJobOutbox', 'durableJobCommands']) {
+      if (this.stopped || signal?.aborted) return;
       // Both pending and expired dispatching leases are scanned. No query depends on
       // an acknowledgement having been written by the previous process.
       const [pending, expired] = await Promise.all([
@@ -241,13 +247,15 @@ export class OutboxDispatcher {
           .get(),
       ]);
       for (const snapshot of [...pending.docs, ...expired.docs]) {
-        if (this.stopped) return;
-        const lease = await this.claim(snapshot.ref);
+        if (this.stopped || signal?.aborted) return;
+        const lease = await this.claim(snapshot.ref, signal);
         if (!lease) continue;
         try {
-          await this.send(lease.value);
+          await this.send(lease.value, signal);
+          if (this.stopped || signal?.aborted) return;
           await this.settle(lease);
         } catch (error) {
+          if (this.stopped || signal?.aborted) return;
           await this.settle(lease, error);
           successful = false;
         }

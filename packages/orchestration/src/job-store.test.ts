@@ -76,11 +76,14 @@ function admission(overrides: Partial<CreateDurableJobInput> = {}): CreateDurabl
     ...overrides,
   };
 }
-async function setup() {
+async function setup(projectId = 'staging') {
   const memory = memoryFirestore();
-  const store = createDurableJobStore({ firestore: memory.firestore, projectId: 'staging', now: () => 200 });
+  const store = createDurableJobStore({ firestore: memory.firestore, projectId, now: () => 200 });
   await memory.firestore.runTransaction(async (tx) => {
-    store.createInTransaction(tx, admission());
+    store.createInTransaction(
+      tx,
+      admission({ ref: { ...ref, projectId }, dispatch: { ...admission().dispatch, ref: { ...ref, projectId } } })
+    );
   });
   return { ...memory, store };
 }
@@ -302,9 +305,51 @@ describe('durable job store', () => {
       ...overrides,
     };
   }
-  function executableStore(firestore: Firestore, identity: DurableActivityExecution) {
-    return createDurableJobStore({ firestore, projectId: 'staging', getExecution: () => identity, now: () => 2000 });
+  function executableStore(firestore: Firestore, identity: DurableActivityExecution, projectId = 'staging') {
+    return createDurableJobStore({ firestore, projectId, getExecution: () => identity, now: () => 2000 });
   }
+  test('Cloud Run execution receipts retain immutable hosting identity privately', async () => {
+    const projectId = 'urm-app-staging';
+    const ref = { jobId: 'job1', projectId };
+    const { firestore, docs } = await setup(projectId);
+    const identity = execution({
+      worker: {
+        instanceId: 'process-1',
+        buildId: 'a'.repeat(40),
+        cloudRun: {
+          projectId: 'urm-app-staging',
+          region: 'us-central1',
+          pool: 'urm-worker-a',
+          revision: 'urm-worker-a-00001',
+          revisionUid: 'revision-1',
+          imageDigest: `sha256:${'b'.repeat(64)}`,
+          serviceAccount: 'temporal-worker@urm-app-staging.iam.gserviceaccount.com',
+          instanceId: 'cloud-instance-1',
+        },
+      },
+    });
+    const store = executableStore(firestore, identity, projectId);
+    await store.registerActivityExecution(ref, identity);
+    await expect(store.assertCurrent(ref)).resolves.toMatchObject({ jobId: ref.jobId, generation: 1 });
+    expect(JSON.stringify([...docs.values()])).toContain('cloud-instance-1');
+    expect(JSON.stringify(await store.loadJob(ref))).not.toContain('cloud-instance-1');
+    await expect(
+      store.registerActivityExecution(ref, {
+        ...identity,
+        worker: {
+          ...identity.worker!,
+          cloudRun: {
+            ...identity.worker!.cloudRun!,
+            projectId: 'urm-app',
+            serviceAccount: 'temporal-worker@urm-app.iam.gserviceaccount.com',
+          },
+        },
+      })
+    ).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
+    await expect(
+      store.registerActivityExecution(ref, { ...identity, worker: { ...identity.worker!, podUid: 'old-pod' } })
+    ).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
+  });
   test('resumed SDK attempt one becomes cumulative attempt thirteen and fences old execution', async () => {
     const { firestore } = await setup();
     const oldIdentity = execution({ attempt: 12 });

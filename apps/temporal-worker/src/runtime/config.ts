@@ -18,6 +18,8 @@ export const TASK_QUEUES = [
   'urm-search',
 ] as const;
 export interface RuntimeConfig {
+  hosting: 'traditional' | 'cloud-run';
+  shutdownGraceTimeMs: number;
   connectionMode: 'self-hosted' | 'temporal-cloud';
   readonly cloudAccountId?: string;
   readonly cloudProvider?: 'gcp';
@@ -50,6 +52,22 @@ export function loadRuntimeConfig(env: NodeJS.ProcessEnv = process.env): Runtime
   if (connectionMode !== 'self-hosted' && connectionMode !== 'temporal-cloud')
     throw new Error('Invalid Temporal connection mode');
   const cloud = connectionMode === 'temporal-cloud';
+  const hosting = env.TEMPORAL_WORKER_HOSTING || 'traditional';
+  if (hosting !== 'traditional' && hosting !== 'cloud-run') throw new Error('Invalid worker hosting mode');
+  if (hosting === 'cloud-run') {
+    if (!cloud || env.TEMPORAL_DISPATCHER_ENABLED !== 'false')
+      throw new Error('Cloud Run workers require Cloud mode and independent event dispatch');
+    if (
+      [
+        env.TEMPORAL_WORKER_POD_UID,
+        env.TEMPORAL_WORKER_POD_NAME,
+        env.TEMPORAL_WORKER_POD_NAMESPACE,
+        env.TEMPORAL_WORKER_NODE_NAME,
+        env.TEMPORAL_CLUSTER_ID,
+      ].some(Boolean)
+    )
+      throw new Error('Mixed worker hosting identities');
+  }
   if (!cloud && namespace !== projectId) throw new Error('Temporal namespace must equal Firebase project ID');
   const production = env.NODE_ENV === 'production';
   const cert = env.TEMPORAL_TLS_CERT_FILE;
@@ -108,9 +126,14 @@ export function loadRuntimeConfig(env: NodeJS.ProcessEnv = process.env): Runtime
   const mediaConcurrency = Number(env.TEMPORAL_MEDIA_CONCURRENCY || 2);
   if (!Number.isInteger(mediaConcurrency) || mediaConcurrency < 1 || mediaConcurrency > 16)
     throw new Error('Invalid media concurrency');
+  if (hosting === 'cloud-run' && queues.includes('urm-media') && mediaConcurrency !== 1)
+    throw new Error('Cloud Run media requires one workspace reservation per instance');
   const port = Number(env.PORT || 8080);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Invalid health port');
   return Object.freeze({
+    hosting,
+    // Leave time for process cleanup before Cloud Run's ten-second termination deadline.
+    shutdownGraceTimeMs: hosting === 'cloud-run' ? 8000 : 120000,
     connectionMode,
     ...(cloud
       ? { cloudAccountId: CLOUD_ACCOUNT_ID, cloudProvider: 'gcp' as const, cloudRegion: 'us-central1' as const, apiKey }
