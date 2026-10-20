@@ -1,3 +1,4 @@
+import { verifyDispatchManagedAgents } from './temporal-dispatch-managed-agents.mjs';
 import { isDeepStrictEqual } from 'node:util';
 import { proofDigest } from './temporal-release-runtime.mjs';
 import { readOwnedPreparationRunner, renderPreparationWorkload, normalizeStagingResourceName as normalize } from './temporal-preparation-resources.mjs';
@@ -8,7 +9,7 @@ function operationName(value) {
   if (!/^projects\/urm-app-staging\/locations\/us-central1\/operations\/[A-Za-z0-9_-]{1,200}$/.test(name ?? '')) fail();
   return name;
 }
-async function prerequisites(plan, identityReceipt, api) {
+async function prerequisites(plan, identityReceipt, api, platform) {
   const runner = await readOwnedPreparationRunner(plan, identityReceipt, api);
   const secret = 'projects/urm-app-staging/secrets/TEMPORAL_DISPATCH_API_KEY';
   const version = await api(`https://secretmanager.googleapis.com/v1/${secret}/versions/${plan.apiKeyVersion}`);
@@ -16,7 +17,8 @@ async function prerequisites(plan, identityReceipt, api) {
   const policy = await api(`https://secretmanager.googleapis.com/v1/${secret}:getIamPolicy?options.requestedPolicyVersion=3`);
   if (!policy.etag || !policy.bindings?.some(b => b.role === 'roles/secretmanager.secretAccessor' && !b.condition &&
     b.members?.includes(`serviceAccount:${plan.runner}`))) fail();
-  return { runnerUniqueId: runner.uniqueId, secretVersion: normalize(version.name) };
+  const managedAgents = await verifyDispatchManagedAgents(platform, api, 'managed-only');
+  return { runnerUniqueId: runner.uniqueId, secretVersion: normalize(version.name), managedAgents };
 }
 export function preparedDispatchServiceIdentity(observation, plan) {
   const { service, revision } = observation;
@@ -44,10 +46,10 @@ export async function prepareCloudRunDispatchService({ platform, role, settings,
     if (state === undefined) { state = { plan, stage: 'planned' }; await save(state); }
     if (state.stage === 'attempted' || state.stage === 'failed') fail();
     if (state.stage === 'planned') {
-      const before = await prerequisites(plan, identityReceipt, api);
+      const before = await prerequisites(plan, identityReceipt, api, platform);
       try { await api(`https://run.googleapis.com/v2/${body.name}`); fail(); }
       catch (error) { if (error?.status !== 404) throw error; }
-      const fresh = await prerequisites(plan, identityReceipt, api);
+      const fresh = await prerequisites(plan, identityReceipt, api, platform);
       if (!isDeepStrictEqual(before, fresh)) fail();
       state = { plan, stage: 'attempted', attemptedAt: new Date().toISOString(), prerequisites: fresh };
       await save(state);
@@ -59,7 +61,7 @@ export async function prepareCloudRunDispatchService({ platform, role, settings,
     if (state.stage === 'completed') {
       const current = preparedDispatchServiceIdentity(await observeCloudRunDispatchService(platform, api, 'disabled'), plan);
       if (!isDeepStrictEqual(state.service, current)) fail();
-      const fresh = await prerequisites(plan, identityReceipt, api);
+      const fresh = await prerequisites(plan, identityReceipt, api, platform);
       if (!isDeepStrictEqual(fresh, state.prerequisites)) fail();
       const policy = await api(`https://run.googleapis.com/v2/${body.name}:getIamPolicy?options.requestedPolicyVersion=3`);
       if (!policy || (policy.bindings !== undefined && (!Array.isArray(policy.bindings) || policy.bindings.length))) fail();
@@ -83,7 +85,7 @@ export async function prepareCloudRunDispatchService({ platform, role, settings,
     if (!isDeepStrictEqual(acknowledged, current)) fail();
     const policy = await api(`https://run.googleapis.com/v2/${body.name}:getIamPolicy?options.requestedPolicyVersion=3`);
     if (!policy || (policy.bindings !== undefined && (!Array.isArray(policy.bindings) || policy.bindings.length))) fail();
-    const fresh = await prerequisites(plan, identityReceipt, api);
+    const fresh = await prerequisites(plan, identityReceipt, api, platform);
     if (!isDeepStrictEqual(fresh, state.prerequisites)) fail();
     state = { ...state, stage: 'completed', service: current, verifiedAt: new Date().toISOString(),
       scope: 'inert admission-disabled min0 configuration only; no dispatch, delivery, effective access or zero-live-instance proof' };

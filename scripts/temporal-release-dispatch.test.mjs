@@ -98,9 +98,12 @@ function fixture() {
     etag: 'policy-etag',
     bindings: [{ role: wake.serviceInvokerGrant.role, members: wake.serviceInvokerGrant.members }],
   };
+  const managedPolicy = { version: 3, etag: 'native-project', bindings: ['eventarc','cloudscheduler','pubsub'].map(s => ({ role: `roles/${s}.serviceAgent`, members: [`serviceAccount:service-251680231116@gcp-sa-${s}.iam.gserviceaccount.com`] })) };
+  managedPolicy.bindings.push({role:'roles/eventarc.eventReceiver',members:[`serviceAccount:${platform.dispatch.eventServiceAccount}`]});
   const calls = [];
   const api = async (url, method = 'GET', body) => {
     calls.push({ url, method, body });
+    if (url.startsWith('https://cloudresourcemanager.')) { assert.equal(method,'POST'); assert.deepEqual(body,{options:{requestedPolicyVersion:3}}); return managedPolicy; }
     assert.equal(method, 'GET');
     assert.equal(body, undefined);
     if (url.includes(':getIamPolicy')) return policy;
@@ -110,7 +113,7 @@ function fixture() {
     if (url.endsWith(scheduler.name)) return scheduler;
     throw new Error('Unexpected native endpoint');
   };
-  return { platform, service, revision, triggers, scheduler, policy, api, calls };
+  return { platform, service, revision, triggers, scheduler, policy, managedPolicy, api, calls };
 }
 test('joins private dispatch serving revision, zero-minimum settings, native wake configuration and direct IAM', async () => {
   const f = fixture();
@@ -118,7 +121,7 @@ test('joins private dispatch serving revision, zero-minimum settings, native wak
   assert.equal(proof.buildId, buildId);
   assert.equal(proof.triggers.length, 2);
   assert.equal(proof.service.revisionUid, 'revision-uid');
-  assert.equal(f.calls.length, 6);
+  assert.equal(f.calls.length, 7);
   assert.match(proof.scope, /delivery and effective access unproved/);
   assert.equal(JSON.stringify(proof).includes('SMTP'), false);
 });
@@ -202,9 +205,14 @@ test('normalizes native numeric project resource names and omitted zero/false sc
     trigger.transport.pubsub.subscription = numeric(trigger.transport.pubsub.subscription);
   }
   f.scheduler.name = numeric(f.scheduler.name);
-  const values = [f.service, f.revision, ...f.triggers, f.scheduler, f.policy];
+  const values = [f.service, f.revision, ...f.triggers, f.scheduler, f.policy, f.managedPolicy];
   let index = 0;
   const proof = await verifyCloudRunDispatchConfiguration(f.platform, async () => values[index++]);
-  assert.equal(index, 6);
+  assert.equal(index, 7);
   assert.equal(proof.service.name, f.platform.dispatch.service);
+});
+
+test('final dispatch configuration requires event-receiver role and managed agents, not only invocation grants',async()=>{
+ for(const index of [0,1,2,3]){const f=fixture();f.managedPolicy.bindings.splice(index,1);
+ await assert.rejects(verifyCloudRunDispatchConfiguration(f.platform,f.api));}
 });

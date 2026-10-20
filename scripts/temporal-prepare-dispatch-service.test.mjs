@@ -56,6 +56,7 @@ function fixture() {
  identityReceipt:{releaseId,identityState:{stage:'completed',plan:{kind:'runner',role:'dispatch',buildId,email:runner,evidenceDigest},account:{email:runner,uniqueId:'12345678901234567890',description:'owned'}}},
  save:async value=>{saved=structuredClone(value);},api:async(url,method='GET',body)=>{
  calls.push([url,method]);
+ if(url.startsWith('https://cloudresourcemanager.')) { assert.equal(method,'POST'); assert.deepEqual(body,{options:{requestedPolicyVersion:3}}); return { version: 3, etag: 'native-project', bindings: ['eventarc','cloudscheduler','pubsub'].map(s => ({ role: `roles/${s}.serviceAgent`, members: [`serviceAccount:service-251680231116@gcp-sa-${s}.iam.gserviceaccount.com`] })) }; }
  if(url.includes('iam.googleapis.com/'))return {projectId:'urm-app-staging',email:runner,uniqueId:'12345678901234567890',description:'owned'};
  if(url.includes('secretmanager')&&url.includes(':getIamPolicy'))return{etag:'secret',bindings:[{role:'roles/secretmanager.secretAccessor',members:[`serviceAccount:${runner}`]}]};
  if(url.includes('secretmanager'))return{name:'projects/urm-app-staging/secrets/TEMPORAL_DISPATCH_API_KEY/versions/7',state:'ENABLED'};
@@ -86,7 +87,7 @@ test('single native-LRO create produces an inert disabled service; completed res
 });
 test('lost create ACK stays fenced without name adoption or resend',async()=>{
  const f=fixture(),api=f.options.api;
- f.options.api=async(...args)=>{const result=await api(...args);if(args[1]==='POST')throw new Error('lost');return result;};
+ f.options.api=async(...args)=>{const result=await api(...args);if(args[1]==='POST' && args[0].startsWith('https://run.'))throw new Error('lost');return result;};
  await assert.rejects(prepareCloudRunDispatchService(f.options));const count=f.calls.length;
  await assert.rejects(prepareCloudRunDispatchService({...f.options,saved:f.saved}));
  assert.equal(f.posts,1);assert.equal(f.calls.length,count);
@@ -113,7 +114,7 @@ for(const bad of ['enabled','revision-enabled','marker','uid-change','operation'
  const f=fixture(),api=f.options.api;
  f.options.api=async(...args)=>{
  const value=await api(...args);
- if(args[1]==='POST'){
+ if(args[1]==='POST' && args[0].startsWith('https://run.')){
  if(bad==='enabled')f.service.template.containers[0].env.find(x=>x.name==='TEMPORAL_DISPATCH_ADMISSION').value='enabled';
  if(bad==='revision-enabled')f.revision.containers[0].env.find(x=>x.name==='TEMPORAL_DISPATCH_ADMISSION').value='enabled';
  if(bad==='marker')f.service.annotations={};
@@ -135,4 +136,15 @@ test('completed readback requires the original enabled runner, secret permission
  if(bad==='invokers'&&args[0].startsWith('https://run.')&&args[0].includes('getIamPolicy'))value.bindings=[{role:'roles/run.invoker',members:['allUsers']}];return value;};
  await assert.rejects(prepareCloudRunDispatchService({...f.options,saved:f.saved}));assert.equal(f.posts,1);
  }
+});
+
+for(const bad of ['missing-role','app-service-agent','conditional-agent','foreign-project'])test(`managed-agent ${bad} denies inert service create`,async()=>{
+ const f=fixture(),api=f.options.api;f.options.api=async(...args)=>{const value=await api(...args);
+ if(args[0].startsWith('https://cloudresourcemanager.')){
+ if(bad==='missing-role')value.bindings.pop();
+ if(bad==='app-service-agent')value.bindings[0].members=[`serviceAccount:${f.options.platform.dispatch.eventServiceAccount}`];
+ if(bad==='conditional-agent')value.bindings[0].condition={title:'restricted',expression:'true'};
+ if(bad==='foreign-project')value.bindings[0].members=['serviceAccount:service-123@gcp-sa-eventarc.iam.gserviceaccount.com'];
+ }return value;};
+ await assert.rejects(prepareCloudRunDispatchService(f.options));assert.equal(f.posts,0);
 });

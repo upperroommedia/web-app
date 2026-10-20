@@ -1,3 +1,4 @@
+import { verifyDispatchManagedAgents } from './temporal-dispatch-managed-agents.mjs';
 import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { validateCloudRunReleasePlatform } from './temporal-release-cloud-run.mjs';
@@ -207,6 +208,7 @@ export async function verifyCloudRunDispatchConfiguration(platform, api) {
       !wakeups.serviceInvokerGrant.members.every((member) => grant.members.includes(member))
     )
       fail();
+    const managedAgents = await verifyDispatchManagedAgents(platform, api, 'dispatch-caller');
     return {
       schemaVersion: 1,
       projectId: project,
@@ -224,6 +226,7 @@ export async function verifyCloudRunDispatchConfiguration(platform, api) {
       triggers,
       scheduler: { name: scheduler.name, configurationSHA256: digest(nativeScheduler) },
       directInvokerPolicySHA256: digest(policy),
+      managedAgents,
       scope: 'native configuration and direct invocation policy only; delivery and effective access unproved',
     };
   } catch {
