@@ -8,12 +8,13 @@ import { prepareCloudRunRuntimeAccess } from './temporal-prepare-runtime-access.
 import { prepareCloudRunRuntimeRole } from './temporal-prepare-runtime-role.mjs';
 import { prepareCloudRunFirestoreAccess } from './temporal-prepare-firestore-access.mjs';
 import { prepareCloudRunSecretAccess } from './temporal-prepare-secret-access.mjs';
+import { prepareCloudRunEventarcAudit } from './temporal-prepare-eventarc-audit.mjs';
 import { stopCloudRunDispatchWake } from './temporal-stop-dispatch-wake.mjs';
 import { prepareCloudRunDispatchAccess } from './temporal-prepare-dispatch-access.mjs';
 import { prepareCloudRunDispatchService } from './temporal-prepare-dispatch-service.mjs';
 import { prepareCloudRunZeroPool } from './temporal-prepare-cloud-pool.mjs';
 import { readPreparationReceipt } from './temporal-preparation-evidence.mjs';
-import { saveDispatchWakeStopCheckpoint, saveDispatchAccessPreparationCheckpoint, saveDispatchServicePreparationCheckpoint, saveIdentityPreparationCheckpoint, savePoolPreparationCheckpoint, saveSecretAccessPreparationCheckpoint, saveScalerAccessPreparationCheckpoint, saveFirestoreAccessPreparationCheckpoint, saveRuntimeRolePreparationCheckpoint, saveRuntimeAccessPreparationCheckpoint } from './temporal-preparation-checkpoint.mjs';
+import { saveEventarcAuditPreparationCheckpoint, saveDispatchWakeStopCheckpoint, saveDispatchAccessPreparationCheckpoint, saveDispatchServicePreparationCheckpoint, saveIdentityPreparationCheckpoint, savePoolPreparationCheckpoint, saveSecretAccessPreparationCheckpoint, saveScalerAccessPreparationCheckpoint, saveFirestoreAccessPreparationCheckpoint, saveRuntimeRolePreparationCheckpoint, saveRuntimeAccessPreparationCheckpoint } from './temporal-preparation-checkpoint.mjs';
 // Every step is explicit, revision-fenced, resumable, and leaves admissions paused on failure.
 import { readFile, writeFile, mkdtemp, rm, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -111,6 +112,7 @@ if (
     'prepare-cloud-run-firestore-access',
     'prepare-cloud-run-runtime-role',
     'prepare-cloud-run-runtime-access',
+    'prepare-cloud-run-eventarc-audit',
     'provider-usage-ready',
     'take-ownership',
     'backend-ready',
@@ -154,7 +156,7 @@ const operatorIdentity = {
   runtimePins: binding.runtimePins,
   resourceBinding,
 };
-const preparationArguments = ['prepare-cloud-run-identity', 'prepare-cloud-run-dispatch-service', 'prepare-cloud-run-dispatch-access', 'stop-cloud-run-dispatch-wake', 'prepare-cloud-run-pool', 'prepare-cloud-run-secret-access', 'prepare-cloud-run-scaler-access', 'prepare-cloud-run-firestore-access', 'prepare-cloud-run-runtime-role', 'prepare-cloud-run-runtime-access'].includes(action) ? {
+const preparationArguments = ['prepare-cloud-run-identity', 'prepare-cloud-run-dispatch-service', 'prepare-cloud-run-dispatch-access', 'stop-cloud-run-dispatch-wake', 'prepare-cloud-run-pool', 'prepare-cloud-run-secret-access', 'prepare-cloud-run-scaler-access', 'prepare-cloud-run-firestore-access', 'prepare-cloud-run-runtime-role', 'prepare-cloud-run-runtime-access', 'prepare-cloud-run-eventarc-audit'].includes(action) ? {
   role: args[args.indexOf('--identity-role') + 1],
   kind: args[args.indexOf('--identity-kind') + 1],
   proof: args[args.indexOf('--preparation-proof') + 1],
@@ -165,7 +167,7 @@ if (preparationArguments) {
   if (!required.every(flag => args.includes(flag)) ||
     !/^[a-f0-9]{64}$/.test(preparationArguments.digest ?? ''))
     throw new Error('Explicit immutable identity preparation inputs required');
-  if (['prepare-cloud-run-dispatch-service', 'prepare-cloud-run-dispatch-access', 'stop-cloud-run-dispatch-wake', 'prepare-cloud-run-pool', 'prepare-cloud-run-secret-access', 'prepare-cloud-run-scaler-access', 'prepare-cloud-run-firestore-access', 'prepare-cloud-run-runtime-role', 'prepare-cloud-run-runtime-access'].includes(action)) {
+  if (['prepare-cloud-run-dispatch-service', 'prepare-cloud-run-dispatch-access', 'stop-cloud-run-dispatch-wake', 'prepare-cloud-run-pool', 'prepare-cloud-run-secret-access', 'prepare-cloud-run-scaler-access', 'prepare-cloud-run-firestore-access', 'prepare-cloud-run-runtime-role', 'prepare-cloud-run-runtime-access', 'prepare-cloud-run-eventarc-audit'].includes(action)) {
     delete preparationArguments.kind;
     preparationArguments.settings = args[args.indexOf('--pool-settings') + 1];
     preparationArguments.settingsDigest = args[args.indexOf('--pool-settings-sha256') + 1];
@@ -1187,8 +1189,9 @@ await runWithCleanup(
               throw new Error('DISPATCH_SERVICE_PREPARATION_RECEIPT_UNCONFIRMED');
             cloudIdentityPending = false;
             console.log(`Inert admission-disabled dispatch service configuration recorded at ${immutableReceipt.path}; no activation or readiness claim.`);
-          } else if (['prepare-cloud-run-secret-access', 'prepare-cloud-run-firestore-access', 'prepare-cloud-run-runtime-role', 'prepare-cloud-run-runtime-access'].includes(action)) {
+          } else if (['prepare-cloud-run-secret-access', 'prepare-cloud-run-firestore-access', 'prepare-cloud-run-runtime-role', 'prepare-cloud-run-runtime-access', 'prepare-cloud-run-eventarc-audit'].includes(action)) {
             const accessPreparation = {
+              'prepare-cloud-run-eventarc-audit': { field: 'cloudEventarcAuditPreparation', prefix: 'temporalCloudEventarcAuditPreparation', prepare: prepareCloudRunEventarcAudit, save: saveEventarcAuditPreparationCheckpoint, etagField: 'identityState.observedEtag' },
               'prepare-cloud-run-secret-access': { field: 'cloudSecretAccessPreparation', prefix: 'temporalCloudSecretAccessPreparation', prepare: prepareCloudRunSecretAccess, save: saveSecretAccessPreparationCheckpoint, etagField: 'identityState.observedEtag' },
               'prepare-cloud-run-firestore-access': { field: 'cloudFirestoreAccessPreparation', prefix: 'temporalCloudFirestoreAccessPreparation', prepare: prepareCloudRunFirestoreAccess, save: saveFirestoreAccessPreparationCheckpoint, etagField: 'identityState.observedEtag' },
               'prepare-cloud-run-runtime-access': { field: 'cloudRuntimeAccessPreparation', prefix: 'temporalCloudRuntimeAccessPreparation', prepare: prepareCloudRunRuntimeAccess, save: saveRuntimeAccessPreparationCheckpoint, etagField: 'identityState.observedEtag' },

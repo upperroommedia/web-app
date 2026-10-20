@@ -6,6 +6,7 @@ import { assertNativeSnapshot, nativeSnapshotProof, proofDigest } from './tempor
 async function saveCheckpoint({ firestore, lockRef, controlRef, stateRef,
   immutableReceipt, ownedOperation, expectedAuthority, config, operationId, bindingDigest, operatorPrincipal, identityState, kind }) {
   const [field, action] = { identity: ['cloudIdentityPreparation', 'prepare-cloud-run-identity'],
+    eventarcAudit: ['cloudEventarcAuditPreparation', 'prepare-cloud-run-eventarc-audit'],
     wakeStop: ['cloudDispatchWakeStop', 'stop-cloud-run-dispatch-wake'],
     dispatchAccess: ['cloudDispatchAccessPreparation', 'prepare-cloud-run-dispatch-access'],
     service: ['cloudDispatchServicePreparation', 'prepare-cloud-run-dispatch-service'],
@@ -57,3 +58,5 @@ export const saveDispatchServicePreparationCheckpoint = options => saveCheckpoin
 export const saveDispatchAccessPreparationCheckpoint = options => saveCheckpoint({ ...options, kind: 'dispatchAccess' });
 
 export const saveDispatchWakeStopCheckpoint = options => saveCheckpoint({ ...options, kind: 'wakeStop' });
+
+export const saveEventarcAuditPreparationCheckpoint = options => saveCheckpoint({ ...options, kind: 'eventarcAudit' });

@@ -1,3 +1,4 @@
+import { addEventarcWriteAudit } from './temporal-eventarc-audit-policy.mjs';
 import { isDeepStrictEqual } from 'node:util';
 import { proofDigest } from './temporal-release-runtime.mjs';
 const fail = () => { throw new Error('CLOUD_RUN_FENCED_POLICY_GRANT_UNCONFIRMED'); };
@@ -51,9 +52,8 @@ const samePolicy = (a, b, resource) => proofDigest(policyValue(a, resource)) ===
 /** Internal frozen-source IAM protocol. Public release actions derive every
  * resource, role, member and native callback; descriptors cannot supply these.
  */
-export async function prepareFencedPolicyGrant({ plan, readPolicy, setPolicy, verifyPrerequisites, save, saved }) {
-  if (!Array.isArray(plan?.grants) || !plan.grants.length || plan.grants.length > 4 ||
-    [readPolicy, setPolicy, verifyPrerequisites, save].some(value => typeof value !== 'function')) fail();
+async function prepareFencedPolicyChange({ plan, readPolicy, setPolicy, verifyPrerequisites, save, saved, deriveDesired, updateMask }) {
+  if ([readPolicy, setPolicy, verifyPrerequisites, save, deriveDesired].some(value => typeof value !== 'function')) fail();
   let state = saved;
   try {
     if (state !== undefined && (!state || !isDeepStrictEqual(state.plan, plan) ||
@@ -62,7 +62,7 @@ export async function prepareFencedPolicyGrant({ plan, readPolicy, setPolicy, ve
     if (state.stage === 'rejected') fail();
     const observedPrerequisites = await verifyPrerequisites();
     if (state.stage === 'planned') {
-      const before = await readPolicy(), desired = desiredPolicy(before, plan.grants, plan.resource);
+      const before = await readPolicy(), desired = deriveDesired(before);
       if (samePolicy(before, desired, plan.resource)) {
         state = { plan, stage: 'completed', before, desired, prerequisites: observedPrerequisites, outcome: 'observed-existing-direct-policy', scope: 'direct policy observed; no inherited-isolation, effective-access or activation proof', observedEtag: before.etag, verifiedAt: new Date().toISOString() };
         await save(state);
@@ -73,7 +73,7 @@ export async function prepareFencedPolicyGrant({ plan, readPolicy, setPolicy, ve
       await save(state);
       let acknowledgement;
       try {
-        acknowledgement = await setPolicy({ policy: desired, updateMask: 'bindings,etag' });
+        acknowledgement = await setPolicy({ policy: desired, updateMask });
       } catch (error) {
         if (Number.isInteger(error?.status) && error.status >= 400 && error.status < 500 && ![408, 429].includes(error.status)) {
           state = { ...state, stage: 'rejected', rejectedStatus: error.status };
@@ -89,7 +89,7 @@ export async function prepareFencedPolicyGrant({ plan, readPolicy, setPolicy, ve
       }
     }
     // Saved fields never grant authority to widen a future write or adopt drift.
-    if (!state.before || !state.desired || !isDeepStrictEqual(desiredPolicy(state.before, plan.grants, plan.resource), state.desired)) fail();
+    if (!state.before || !state.desired || !isDeepStrictEqual(deriveDesired(state.before), state.desired)) fail();
     const current = await readPolicy();
     if (!samePolicy(current, state.desired, plan.resource)) fail();
     if (state.stage === 'completed') return state;
@@ -99,4 +99,21 @@ export async function prepareFencedPolicyGrant({ plan, readPolicy, setPolicy, ve
     await save(state);
     return state;
   } catch { return fail(); }
+}
+
+
+export async function prepareFencedPolicyGrant(options) {
+  const grants = options.plan?.grants;
+  if (!Array.isArray(grants) || !grants.length || grants.length > 4) fail();
+  return prepareFencedPolicyChange({ ...options, updateMask: 'bindings,etag',
+    deriveDesired: before => desiredPolicy(before, grants, options.plan.resource) });
+}
+
+export async function prepareFencedEventarcAuditPolicy(options) {
+  if (options.plan?.auditService !== 'eventarc.googleapis.com' || options.plan?.auditLogType !== 'DATA_WRITE' ||
+    options.plan.resource !== 'projects/urm-app-staging' || options.plan.grants !== undefined) fail();
+  return prepareFencedPolicyChange({ ...options, updateMask: 'auditConfigs,etag', deriveDesired: before => {
+    policyValue(before, options.plan.resource);
+    return addEventarcWriteAudit(before);
+  } });
 }

@@ -56,7 +56,7 @@ function fixture() {
  identityReceipt:{releaseId,identityState:{stage:'completed',plan:{kind:'runner',role:'dispatch',buildId,email:runner,evidenceDigest},account:{email:runner,uniqueId:'12345678901234567890',description:'owned'}}},
  save:async value=>{saved=structuredClone(value);},api:async(url,method='GET',body)=>{
  calls.push([url,method]);
- if(url.startsWith('https://cloudresourcemanager.')) { assert.equal(method,'POST'); assert.deepEqual(body,{options:{requestedPolicyVersion:3}}); return { version: 3, etag: 'native-project', bindings: ['eventarc','cloudscheduler','pubsub'].map(s => ({ role: `roles/${s}.serviceAgent`, members: [`serviceAccount:service-251680231116@gcp-sa-${s}.iam.gserviceaccount.com`] })) }; }
+ if(url.startsWith('https://cloudresourcemanager.')) { assert.equal(method,'POST'); assert.deepEqual(body,{options:{requestedPolicyVersion:3}}); return { version: 3, etag: 'native-project', auditConfigs: [{service:'eventarc.googleapis.com',auditLogConfigs:[{logType:'DATA_WRITE'}]}], bindings: ['eventarc','cloudscheduler','pubsub'].map(s => ({ role: `roles/${s}.serviceAgent`, members: [`serviceAccount:service-251680231116@gcp-sa-${s}.iam.gserviceaccount.com`] })) }; }
  if(url.includes('iam.googleapis.com/'))return {projectId:'urm-app-staging',email:runner,uniqueId:'12345678901234567890',description:'owned'};
  if(url.includes('secretmanager')&&url.includes(':getIamPolicy'))return{etag:'secret',bindings:[{role:'roles/secretmanager.secretAccessor',members:[`serviceAccount:${runner}`]}]};
  if(url.includes('secretmanager'))return{name:'projects/urm-app-staging/secrets/TEMPORAL_DISPATCH_API_KEY/versions/7',state:'ENABLED'};
@@ -145,6 +145,14 @@ for(const bad of ['missing-role','app-service-agent','conditional-agent','foreig
  if(bad==='app-service-agent')value.bindings[0].members=[`serviceAccount:${f.options.platform.dispatch.eventServiceAccount}`];
  if(bad==='conditional-agent')value.bindings[0].condition={title:'restricted',expression:'true'};
  if(bad==='foreign-project')value.bindings[0].members=['serviceAccount:service-123@gcp-sa-eventarc.iam.gserviceaccount.com'];
+ }return value;};
+ await assert.rejects(prepareCloudRunDispatchService(f.options));assert.equal(f.posts,0);
+});
+for(const bad of ['audit-disabled','applicable-audit-exemption'])test(`${bad} prevents service preparation before any create`,async()=>{
+ const f=fixture(),api=f.options.api;
+ f.options.api=async(...args)=>{const value=await api(...args);if(args[0].startsWith('https://cloudresourcemanager.')){
+ if(bad==='audit-disabled')value.auditConfigs=[];
+ else value.auditConfigs.push({service:'allServices',auditLogConfigs:[{logType:'DATA_WRITE',exemptedMembers:['user:other@example.test']}]});
  }return value;};
  await assert.rejects(prepareCloudRunDispatchService(f.options));assert.equal(f.posts,0);
 });

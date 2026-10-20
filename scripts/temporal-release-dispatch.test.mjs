@@ -98,7 +98,7 @@ function fixture() {
     etag: 'policy-etag',
     bindings: [{ role: wake.serviceInvokerGrant.role, members: wake.serviceInvokerGrant.members }],
   };
-  const managedPolicy = { version: 3, etag: 'native-project', bindings: ['eventarc','cloudscheduler','pubsub'].map(s => ({ role: `roles/${s}.serviceAgent`, members: [`serviceAccount:service-251680231116@gcp-sa-${s}.iam.gserviceaccount.com`] })) };
+  const managedPolicy = { version: 3, etag: 'native-project', auditConfigs: [{service:'eventarc.googleapis.com',auditLogConfigs:[{logType:'DATA_WRITE'}]}], bindings: ['eventarc','cloudscheduler','pubsub'].map(s => ({ role: `roles/${s}.serviceAgent`, members: [`serviceAccount:service-251680231116@gcp-sa-${s}.iam.gserviceaccount.com`] })) };
   managedPolicy.bindings.push({role:'roles/eventarc.eventReceiver',members:[`serviceAccount:${platform.dispatch.eventServiceAccount}`]});
   const calls = [];
   const api = async (url, method = 'GET', body) => {
@@ -214,5 +214,11 @@ test('normalizes native numeric project resource names and omitted zero/false sc
 
 test('final dispatch configuration requires event-receiver role and managed agents, not only invocation grants',async()=>{
  for(const index of [0,1,2,3]){const f=fixture();f.managedPolicy.bindings.splice(index,1);
+ await assert.rejects(verifyCloudRunDispatchConfiguration(f.platform,f.api));}
+});
+test('final enabled dispatch cannot replace missing audit policy or override applicable exemptions',async()=>{
+ for(const bad of ['missing','exemption']){const f=fixture();
+ if(bad==='missing')f.managedPolicy.auditConfigs=[];
+ else f.managedPolicy.auditConfigs.push({service:'allServices',auditLogConfigs:[{logType:'DATA_WRITE',exemptedMembers:['user:other@example.test']}]});
  await assert.rejects(verifyCloudRunDispatchConfiguration(f.platform,f.api));}
 });

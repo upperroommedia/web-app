@@ -1,3 +1,4 @@
+import { requireEventarcWriteAudit } from './temporal-eventarc-audit-policy.mjs';
 import { proofDigest } from './temporal-release-runtime.mjs';
 import { validateCloudRunReleasePlatform } from './temporal-release-cloud-run.mjs';
 const projectNumber = '251680231116';
@@ -13,6 +14,7 @@ export async function verifyDispatchManagedAgents(platform, api, mode) {
       'POST', { options: { requestedPolicyVersion: 3 } });
     if (!policy || typeof policy.etag !== 'string' || !policy.etag || ![1, 3].includes(policy.version ?? 1) ||
       !Array.isArray(policy.bindings)) fail();
+    requireEventarcWriteAudit(policy);
     const expected = ['eventarc', 'cloudscheduler', 'pubsub'].map(service => ({
       role: `roles/${service}.serviceAgent`,
       member: `serviceAccount:service-${projectNumber}@gcp-sa-${service}.iam.gserviceaccount.com`,
@@ -23,7 +25,7 @@ export async function verifyDispatchManagedAgents(platform, api, mode) {
       if (!policy.bindings.some(binding => binding?.role === role && binding.condition === undefined &&
         Array.isArray(binding.members) && binding.members.includes(member))) fail();
     }
-    return { projectId: 'urm-app-staging', projectNumber, policySHA256: proofDigest(policy), mode,
+    return { projectId: 'urm-app-staging', projectNumber, policySHA256: proofDigest(policy), mode, eventarcDataWriteAudit: true,
       scope: 'required unconditional direct bindings only; no inherited isolation, effective permission or delivery proof' };
   } catch { return fail(); }
 }
