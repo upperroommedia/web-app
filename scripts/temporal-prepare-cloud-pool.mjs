@@ -17,22 +17,23 @@ function matches(expected, actual) {
     Object.entries(expected).every(([key, value]) => matches(value, actual[key]));
   return expected === actual;
 }
-export function verifyPreparedPoolMetadata(plan, actual) {
+export function verifyPreparedPoolMetadata(plan, actual, { manualInstanceCount = 0 } = {}) {
+  if (![0, 1].includes(manualInstanceCount)) fail();
   if (!actual || normalize(actual.name) !== plan.body.name || typeof actual.uid !== 'string' || !actual.uid || actual.deleteTime ||
     (actual.reconciling !== undefined && actual.reconciling !== false) ||
     !/^[1-9][0-9]*$/.test(String(actual.generation ?? '')) || String(actual.generation) !== String(actual.observedGeneration) ||
-    (actual.scaling?.manualInstanceCount !== undefined && actual.scaling.manualInstanceCount !== 0) ||
+    (actual.scaling?.manualInstanceCount === undefined ? 0 : actual.scaling.manualInstanceCount) !== manualInstanceCount ||
     !matches(plan.body.annotations, actual.annotations) || !matches(plan.body.template, actual.template) || !matches(plan.body.labels, actual.labels) ||
     actual.template?.containers?.[0]?.command?.length || actual.template?.containers?.[0]?.args?.length ||
     actual.terminalCondition?.state !== 'CONDITION_SUCCEEDED' ||
     !actual.latestReadyRevision || normalize(actual.latestCreatedRevision) !== normalize(actual.latestReadyRevision)) fail();
   return { name: normalize(actual.name), uid: actual.uid, generation: String(actual.generation),
-    revision: normalize(actual.latestReadyRevision), desiredManualInstanceCount: 0 };
+    revision: normalize(actual.latestReadyRevision), desiredManualInstanceCount: manualInstanceCount };
 }
 /** Confirm only metadata and permissions, never read secret payloads. Runner must
  * come from this release's immutable account-creation record and still have its ID.
  */
-async function prerequisites(plan, identityReceipt, api) {
+export async function verifyPoolPreparationPrerequisites(plan, identityReceipt, api) {
   const account = await readOwnedPreparationRunner(plan, identityReceipt, api);
   const refs = poolSecretReferences(plan.body);
   for (const [secret, version] of refs.values()) {
@@ -67,7 +68,7 @@ export async function prepareCloudRunZeroPool({ platform, role, settings, operat
     if (state === undefined) { state = { plan, stage: 'planned' }; await save(state); }
     if (state.stage === 'attempted' || state.stage === 'failed') fail();
     if (state.stage === 'planned') {
-      const prerequisitesProof = await prerequisites(plan, identityReceipt, api);
+      const prerequisitesProof = await verifyPoolPreparationPrerequisites(plan, identityReceipt, api);
       try { await api(`https://run.googleapis.com/v2/${body.name}`); fail(); }
       catch (error) { if (error?.status !== 404) throw error; }
       const isolation = await observeComputeIsolation();

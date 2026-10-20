@@ -5,7 +5,7 @@ import { assertNativeSnapshot, nativeSnapshotProof, proofDigest } from './tempor
  */
 async function saveCheckpoint({ firestore, lockRef, controlRef, stateRef,
   immutableReceipt, creationReceipt, ownedOperation, expectedAuthority, config, operationId, bindingDigest, operatorPrincipal, identityState, kind }) {
-  const [field, action] = { dispatchActivation: ['cloudDispatchActivation', 'activate-cloud-run-dispatch-service'], identity: ['cloudIdentityPreparation', 'prepare-cloud-run-identity'],
+  const [field, action] = { bootstrapCycle: ['cloudPoolBootstrapCycle', 'bootstrap-stop-cloud-run-controls'], dispatchActivation: ['cloudDispatchActivation', 'activate-cloud-run-dispatch-service'], identity: ['cloudIdentityPreparation', 'prepare-cloud-run-identity'],
     eventarcCycle: ['cloudDispatchEventarcCycle', 'prepare-stop-cloud-run-dispatch-eventarc'],
     schedulerCycle: ['cloudDispatchSchedulerCycle', 'prepare-stop-cloud-run-dispatch-scheduler'],
     eventarcAudit: ['cloudEventarcAuditPreparation', 'prepare-cloud-run-eventarc-audit'],
@@ -19,7 +19,11 @@ async function saveCheckpoint({ firestore, lockRef, controlRef, stateRef,
     scaler: ['cloudScalerAccessPreparation', 'prepare-cloud-run-scaler-access'] }[kind] ?? [];
   if (!field) throw new Error('PREPARATION_KIND_REQUIRED');
   await firestore.runTransaction(async tx => {
-    const creationState = ['schedulerCycle', 'eventarcCycle'].includes(kind) ? identityState.creationState : undefined;
+    const creationState = kind === 'bootstrapCycle' ? identityState.activationState : ['schedulerCycle', 'eventarcCycle'].includes(kind) ? identityState.creationState : undefined;
+    if (kind === 'bootstrapCycle' && (['started', 'stopping', 'completed'].includes(identityState.stage) && !creationState ||
+      creationState && (creationState.stage !== 'completed' || creationState.plan?.operationId !== operationId || creationState.plan?.mode !== 'start' || creationState.plan?.target !== 1 ||
+       proofDigest(creationState.plan.origin) !== proofDigest(identityState.plan?.origin) || proofDigest(creationState) !== proofDigest(identityState.start))))
+      throw new Error('BOOTSTRAP_ACTIVATION_RECEIPT_REQUIRED');
     if (['schedulerCycle', 'eventarcCycle'].includes(kind) && (['created', 'stopping', 'completed'].includes(identityState.stage) && !creationState ||
       creationState && (creationState.plan?.operationId !== operationId || proofDigest(creationState.plan) !== proofDigest(identityState.plan?.creation))))
       throw new Error('SCHEDULER_CREATION_PLAN_CHANGED');
@@ -48,6 +52,22 @@ async function saveCheckpoint({ firestore, lockRef, controlRef, stateRef,
       ['proof', 'request', 'attemptedAt', 'prerequisites'].some(key =>
         proofDigest(current.get(field)[key] ?? null) !== proofDigest(identityState[key] ?? null)))
       throw new Error('DISPATCH_ACTIVATION_AUTHORIZATION_CHANGED');
+    if (kind === 'bootstrapCycle') {
+      const previous=current.get(field);
+      if(previous){
+        for(const key of ['activationState','observation']) if(Object.hasOwn(previous,key) &&
+          proofDigest(previous[key])!==proofDigest(identityState[key]??null)) throw new Error('BOOTSTRAP_ORIGINAL_OBSERVATION_CHANGED');
+        for(const key of ['start','stop']) {
+          const before=previous[key],after=identityState[key];
+          if(before && !({planned:['planned','attempted'],attempted:['attempted','acknowledged','completed','rejected'],acknowledged:['acknowledged','completed','failed'],completed:['completed'],rejected:['rejected'],failed:['failed']}[before.stage]??[]).includes(after?.stage)) throw new Error('BOOTSTRAP_SCALE_STAGE_ROLLBACK');
+          if(before && (!after || proofDigest(before.plan)!==proofDigest(after.plan))) throw new Error('BOOTSTRAP_SCALE_PLAN_CHANGED');
+          if(before && before.stage!=='planned' && ['request','attemptedAt','before','access','protection'].some(name=>
+            proofDigest(before[name]??null)!==proofDigest(after?.[name]??null))) throw new Error('BOOTSTRAP_SCALE_AUTHORIZATION_CHANGED');
+          if(before?.stage==='completed' && proofDigest(before)!==proofDigest(after)) throw new Error('BOOTSTRAP_SCALE_RECEIPT_CHANGED');
+          if(before?.nativeOperation && before.nativeOperation!==after?.nativeOperation) throw new Error('BOOTSTRAP_NATIVE_OPERATION_CHANGED');
+        }
+      }
+    }
     const record = { operationId, releaseId: config.releaseId, bindingDigest, identityState, operatorPrincipal };
     if (receipt?.exists && proofDigest(receipt.data()) !== proofDigest(record))
       throw new Error('IDENTITY_PREPARATION_RECEIPT_CHANGED');
@@ -85,3 +105,5 @@ export const saveDispatchSchedulerCycleCheckpoint = options => saveCheckpoint({ 
 export const saveDispatchEventarcCycleCheckpoint = options => saveCheckpoint({ ...options, kind: 'eventarcCycle' });
 
 export const saveDispatchActivationCheckpoint = options => saveCheckpoint({ ...options, kind: 'dispatchActivation' });
+
+export const savePoolBootstrapCycleCheckpoint = options => saveCheckpoint({ ...options, kind: 'bootstrapCycle' });

@@ -228,3 +228,41 @@ test('native diagnostic wake checkpoint/pulse preserve original creation and unk
   await controlRef.update({admission:'open'});await assert.rejects(pulseDiagnosticOutbox(diagnostic));assert.equal((await refs[5].get()).updateTime.isEqual(first.updateTime),true);
  }finally{for(const ref of refs)await ref.delete();await db.terminate();await deleteApp(app);}
 });
+
+test('controls bootstrap uses native authority checkpoints, immutable activation before observation and same-parent stop',async()=>{
+ const {savePoolBootstrapCycleCheckpoint}=await import('../temporal-preparation-checkpoint.mjs');
+ const {bootstrapStopCloudRunControlsPool}=await import('../temporal-bootstrap-pool.mjs');
+ const {controlsBootstrapFixture}=await import('./fixtures/controls-bootstrap.mjs');
+ const app=initializeApp({projectId:'demo-preparation-checkpoint'},randomUUID()),db=getFirestore(app);
+ try{
+  for(const drift of ['control','state','none']){
+   const f=controlsBootstrapFixture(),{operationId,releaseId}=f.options,prefix=`_identityPreparationTests/${randomUUID()}/records`;
+   const lockRef=db.doc(`${prefix}/operation`),controlRef=db.doc(`${prefix}/control`),stateRef=db.doc(`${prefix}/state`),immutableReceipt=db.doc(`${prefix}/receipt`),creationReceipt=db.doc(`${prefix}/activation`);
+   const config={releaseId,domains:['publishing']},bindingDigest='e'.repeat(64),operatorPrincipal={email:'operator@example.test'};
+   await lockRef.create({operationId,releaseId,bindingDigest,action:'bootstrap-stop-cloud-run-controls'});
+   await controlRef.create({releaseId,admission:'paused',domains:{publishing:{admission:'paused'}}});await stateRef.create({releaseId,phase:'provider-usage-ready'});
+   let ownedOperation=nativeSnapshotProof(await lockRef.get());
+   const expectedAuthority={control:nativeSnapshotProof(await controlRef.get()),state:nativeSnapshotProof(await stateRef.get())},save=f.options.save;
+   const options={firestore:db,lockRef,controlRef,stateRef,immutableReceipt,creationReceipt,config,operationId,bindingDigest,operatorPrincipal,expectedAuthority};
+   f.options.save=async identityState=>{
+    if(drift!=='none'&&identityState.start?.stage==='attempted')await (drift==='control'?controlRef:stateRef).update({changed:true});
+    ownedOperation=await savePoolBootstrapCycleCheckpoint({...options,ownedOperation,identityState});await save(identityState);
+    if(drift==='none'&&identityState.start?.stage==='attempted')
+      await assert.rejects(savePoolBootstrapCycleCheckpoint({...options,ownedOperation,identityState:{...identityState,start:{...identityState.start,stage:'planned'}}}));
+   };
+   f.options.observeRegistration=async()=>{
+    assert.equal((await creationReceipt.get()).get('identityState.stage'),'completed');
+    const original=f.saved;
+    await assert.rejects(savePoolBootstrapCycleCheckpoint({...options,ownedOperation,identityState:{...original,activationState:null}}));
+    await assert.rejects(savePoolBootstrapCycleCheckpoint({...options,ownedOperation,identityState:{...original,start:{...original.start,request:{changed:true}}}}));
+    return {role:'controls',buildId:f.options.platform.workerBuildId,observedAt:new Date().toISOString(),registrationSHA256:'f'.repeat(64)};
+   };
+   if(drift==='none'){
+    const result=await bootstrapStopCloudRunControlsPool(f.options);
+    assert.equal(result.stop.pool.desiredManualInstanceCount,0);assert.equal((await immutableReceipt.get()).get('identityState.stage'),'completed');
+    assert.equal(f.calls.filter(c=>c.method==='PATCH').length,2);
+   }else{await assert.rejects(bootstrapStopCloudRunControlsPool(f.options));assert.equal(f.calls.filter(c=>c.method==='PATCH').length,0);assert.equal((await creationReceipt.get()).exists,false);}
+   for(const ref of [lockRef,controlRef,stateRef,immutableReceipt,creationReceipt])await ref.delete();
+  }
+ }finally{await deleteApp(app);}
+});

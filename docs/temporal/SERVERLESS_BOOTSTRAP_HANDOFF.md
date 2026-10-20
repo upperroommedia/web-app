@@ -1,11 +1,15 @@
 # Serverless bootstrap and process recovery boundary
 
-The guarded controller is not yet able to bootstrap candidate worker pools. Its
-preparation operation creates owned pools with desired manual count zero, while
-the final native role-readiness collector requires the candidate versions already
-current, with no ramp, on the real role queues. Neither a completed zero-pool
-receipt nor a role-readiness helper starts a poller or changes routing. Do not
-bypass the final readiness collector to bridge this gap.
+The guarded controller now has a controls-only **bootstrap and stop cycle** in
+source. It joins the owned zero-pool/account/grant receipts, starts desired manual
+count one, observes the native non-current Activity queue, then stops the same
+owned pool under the original parent. Observation failure also enters owned stop;
+uncertain authority, protected work or an unknown result retains the fence.
+This has not been applied to Cloud Run. A handoff activation that keeps a candidate
+running for separately guarded promotion remains unimplemented.
+
+The final native role-readiness collector still requires candidate versions current,
+with no ramp, on the real role queues. The cycle cannot replace that collector.
 
 ## Native local evidence
 
@@ -24,15 +28,45 @@ The existing integration CI includes two additional real SDK tests:
   completes both. An explicitly pinned workflow and Activity do execute on the
   non-current candidate. No current-version mutation occurs in this test.
 
+The serial release-recovery CI also runs
+`scripts/integration/temporal-controls-bootstrap.native.mjs`: actual local SDK
+old pinned waiting-run inventory, non-current controls queue registration,
+provider-lock preservation, and explicit candidate-run denial against the dedicated
+Firestore emulator. Controlled Cloud API tests cover the scale/stop protocol;
+the actual Firestore checkpoint regression checks paused authority, immutable
+activation-before-observer, and post-attempt stage rollback denial.
+
 These observations apply to the tested local Temporal CLI 1.9.1 / Server 1.32.0 /
 TypeScript SDK 1.24.0 configuration. They do not establish general no-work isolation,
 Cloud Run process replacement, native cloud delivery, effective IAM or readiness.
 In particular, non-current is not a fence against explicitly routed tasks.
 
-## Required connected bootstrap operation — not implemented
+## Connected controls-only cycle and remaining handoff activation
 
-The next operation must start one owned candidate role pool manually without
-promoting any version or attaching Worker Compute Infrastructure:
+`bootstrap-stop-cloud-run-controls` uses a SHA-pinned private manifest containing
+exactly eleven distinct completed preparation operation IDs: runner, scaler, pool,
+three scaler grants, Firestore grant, and project/storage role definitions and grants.
+The controller rederives their source plans and checks native identities and policies.
+It persists an immutable activation record before observing registration; each scale
+request and its authorization remain immutable after its saved attempt. Known LROs
+resume; unknown ACKs use GET only and never resend or assert causality.
+
+Both stable work scans and the final refreshed namespace compute inventory must
+remain within five seconds; a long scan is a denial, not renewed freshness. Every
+open execution must be pinned to a different registered version, without pending
+Activities/Nexus operations. Every critical marker/provider lock, active provider
+session, unresolved dispatch record/lease or candidate execution denies the cycle.
+These conservative checks can reject retained old work; do not clear any record to
+make them pass. They are observations, not a cross-API exclusion or drainage proof.
+
+The same-parent cycle always targets desired zero after observation, including
+unconfirmed observation. It refuses a stop after candidate work/routing/authority
+drift. Desired zero does not establish native process termination or drain. A later
+operation must use a newly reviewed origin/generation and keep a candidate running
+for handoff; repeating the original zero-pool receipt cannot authorize that operation.
+Other roles, media capacity and active-candidate promotion remain out of scope.
+
+The remaining handoff activation must retain these requirements:
 
 1. Retain the existing full source/CI/tree/image and paused release-authority
    guards. Join immutable completed runner, zero-pool and scoped-access receipts,
@@ -59,7 +93,8 @@ promoting any version or attaching Worker Compute Infrastructure:
    Media capacity/filesystem and safe Hetzner acquisition guards remain required.
 
 The official Cloud Run API supports a scaling-only worker-pool PATCH and an etag,
-returning a long-running operation. Its desired count and reconciliation metadata
+returning a long-running operation. Changing manual count does not create a new
+revision. Its desired count and reconciliation metadata
 must not be described as actual native instance or restart evidence:
 [manual scaling](https://docs.cloud.google.com/run/docs/configuring/workerpools/manual-scaling),
 [worker-pool REST resource](https://docs.cloud.google.com/run/docs/reference/rest/v2/projects.locations.workerPools).

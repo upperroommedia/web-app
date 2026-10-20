@@ -1,3 +1,4 @@
+import { observeBootstrapProtection, observeBootstrapRegistration } from './temporal-bootstrap-observations.mjs';
 import { createHash } from 'node:crypto';
 import { isAbsolute, resolve } from 'node:path';
 import { realpath, open } from 'node:fs/promises';
@@ -149,13 +150,16 @@ export const temporalCloudScalerPrincipals = Object.freeze([
  * This does not claim inherited-policy isolation or effective runtime data access.
  * Actual scale/wake and native runtime access checks remain separate release gates.
  */
-export async function verifyCloudRunScalerPolicies(platform, api) {
+export async function verifyCloudRunScalerPolicies(platform, api, selectedRoles) {
+  validateCloudRunReleasePlatform(platform);
+  selectedRoles ??= platform.workerRoles;
+  if (!Array.isArray(selectedRoles) || !selectedRoles.length || new Set(selectedRoles).size !== selectedRoles.length || selectedRoles.some(role => !platform.workerRoles?.includes(role))) throw new Error('CLOUD_RUN_SCALER_POLICY_UNCONFIRMED');
   validateCloudRunReleasePlatform(platform);
   if (typeof api !== 'function') throw new Error('CLOUD_RUN_SCALER_POLICY_UNCONFIRMED');
   const receipts = [];
   const identities = new Set();
   try {
-    for (const binding of platform.roleBindings) {
+    for (const binding of platform.roleBindings.filter(binding => selectedRoles.includes(binding.role))) {
       const runner = `serviceAccount:${binding.runnerServiceAccount}`;
       const scaler = `serviceAccount:${binding.invokerServiceAccount}`;
       const observed = {};
@@ -257,4 +261,11 @@ export async function collectCloudRunDispatchDiagnostic(options){
   }
   throw new Error('NATIVE_DIAGNOSTIC_COMPLETION_UNCONFIRMED');
  });
+}
+
+export async function verifyCloudRunBootstrapProtection(options) {
+  return withNativeCloudRunClient(options, client => observeBootstrapProtection({...options, client}));
+}
+export async function verifyCloudRunBootstrapRegistration(options) {
+  return withNativeCloudRunClient(options, client => observeBootstrapRegistration({...options, client}));
 }
