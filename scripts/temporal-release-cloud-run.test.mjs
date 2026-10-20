@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, chmod, symlink, rm, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { validateCloudRunReleasePlatform, readCloudRunOperatorKey, readCloudRunNamespaceEvidence, collectCloudRunReleaseWorkers } from './temporal-release-cloud-run.mjs';
+import { validateCloudRunReleasePlatform, readCloudRunOperatorKey, readCloudRunNamespaceEvidence, collectCloudRunReleaseWorkers, verifyCloudRunScalerPolicies, temporalCloudScalerPrincipals } from './temporal-release-cloud-run.mjs';
 import { serverlessResourceNames } from './temporal-serverless-platform.mjs';
 import { dispatchResourceNames } from './temporal-serverless-dispatch-resources.mjs';
 import { validateWorkerCoverage } from './temporal-release-lib.mjs';
@@ -83,3 +83,95 @@ test('definite pre-intent key failure leaves normal operation cleanup eligible',
     assert.equal(probePending, false);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
+
+
+function policyApi(p, mutate = () => {}) {
+  const calls = [],
+    ids = new Map();
+  const api = async (url, method = 'GET', body) => {
+    calls.push({ url, method, body });
+    const binding = p.roleBindings.find(
+      (b) => url.includes(b.runnerServiceAccount) || url.includes(b.invokerServiceAccount) || url.includes(b.poolName)
+    );
+    assert.ok(binding, 'all resources must bind to an exact role');
+    let result;
+    if (!url.includes(':getIamPolicy')) {
+      const email = url.split('/').at(-1);
+      if (!ids.has(email)) ids.set(email, String(100000000000000000000n + BigInt(ids.size)));
+      result = { email, projectId: 'urm-app-staging', uniqueId: ids.get(email) };
+    } else {
+      assert.equal(body, undefined, 'getIamPolicy has an empty request body');
+      assert.ok(url.endsWith('?options.requestedPolicyVersion=3'));
+      if (url.includes('iam.googleapis.com')) assert.equal(method, 'POST');
+      else assert.equal(method, 'GET');
+      result = {
+        etag: 'synthetic-etag',
+        version: 3,
+        bindings: url.includes(binding.poolName)
+          ? [
+              { role: 'roles/run.viewer', members: [`serviceAccount:${binding.runnerServiceAccount}`] },
+              { role: 'roles/run.developer', members: [`serviceAccount:${binding.invokerServiceAccount}`] },
+            ]
+          : url.includes(binding.runnerServiceAccount)
+          ? [{ role: 'roles/iam.serviceAccountUser', members: [`serviceAccount:${binding.invokerServiceAccount}`] }]
+          : [{ role: 'roles/iam.serviceAccountTokenCreator', members: [...temporalCloudScalerPrincipals] }],
+      };
+    }
+    mutate(result, url);
+    return result;
+  };
+  return { api, calls };
+}
+test('mandatory scaler gate joins native accounts and exact direct trust/pool policies without writes', async () => {
+  const p = profile(),
+    { api, calls } = policyApi(p);
+  const proof = await verifyCloudRunScalerPolicies(p, api);
+  assert.equal(proof.roles.length, p.workerRoles.length);
+  assert.equal(calls.length, p.workerRoles.length * 5);
+  assert.equal(proof.buildId, buildId);
+  assert.match(proof.scope, /inherited and effective access not established/);
+  for (const role of proof.roles) {
+    assert.equal(role.directPolicySHA256.length, 3);
+    assert.ok(role.directPolicySHA256.every((sha) => /^[a-f0-9]{64}$/.test(sha)));
+    assert.notEqual(role.runner.uniqueId, role.scaler.uniqueId);
+  }
+  assert.equal(
+    calls.some((c) => /setIamPolicy|generateAccessToken|create|update/.test(c.url)),
+    false
+  );
+});
+for (const concern of [
+  'disabled',
+  'foreign-project',
+  'missing-principal',
+  'extra-principal',
+  'conditional',
+  'public',
+  'cross-role',
+  'duplicate-member',
+  'missing-etag',
+  'private-error',
+])
+  test(`scaler gate denies ${concern} with a fixed error`, async () => {
+    const p = profile();
+    const { api } = policyApi(p, (result, url) => {
+      if (concern === 'private-error') throw new Error('SYNTHETIC_PRIVATE_API_PAYLOAD');
+      if (!url.includes(':getIamPolicy')) {
+        if (concern === 'disabled') result.disabled = true;
+        if (concern === 'foreign-project') result.projectId = 'urm-app';
+        return;
+      }
+      if (concern === 'missing-principal') result.bindings[0].members.pop();
+      if (concern === 'extra-principal') result.bindings[0].members.push('user:other@example.test');
+      if (concern === 'conditional') result.bindings[0].condition = { expression: 'true' };
+      if (concern === 'public') result.bindings[0].members = ['allUsers'];
+      if (concern === 'cross-role')
+        result.bindings[0].members = [`serviceAccount:${p.roleBindings[1].runnerServiceAccount}`];
+      if (concern === 'duplicate-member') result.bindings[0].members.push(result.bindings[0].members[0]);
+      if (concern === 'missing-etag') delete result.etag;
+    });
+    await assert.rejects(
+      verifyCloudRunScalerPolicies(p, api),
+      (error) => error.message === 'CLOUD_RUN_SCALER_POLICY_UNCONFIRMED'
+    );
+  });

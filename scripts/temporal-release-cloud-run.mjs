@@ -118,3 +118,119 @@ export async function readCloudRunNamespaceEvidence(platform) {
   } catch { throw new Error('CLOUD_RUN_NAMESPACE_EVIDENCE_UNCONFIRMED'); }
   finally { await handle?.close(); }
 }
+
+
+// Native authenticated Temporal Cloud Access template, account qwejt, 2026-10-20.
+// These are Temporal-owned impersonators, not application production identities.
+// Changes require a new native template observation and reviewed source update.
+export const temporalCloudScalerPrincipals = Object.freeze([
+  'serviceAccount:serverless-qwejt@prod-vs4padk9dkczcey6d6st9c58e.iam.gserviceaccount.com',
+  'serviceAccount:serverless-qwejt@prod-sbe56h6wr4sykaw47a6yg4h66.iam.gserviceaccount.com',
+  'serviceAccount:serverless-qwejt@prod-97gr6tp6zkv2t4epubffpz7kt.iam.gserviceaccount.com',
+  'serviceAccount:serverless-qwejt@prod-c4cqaqgbfzy23vpzkbxzrx378.iam.gserviceaccount.com',
+  'serviceAccount:serverless-qwejt@prod-79z2c6d76au6g5fcq768buqf9.iam.gserviceaccount.com',
+]);
+
+/** Mandatory read-only direct-policy gate before native worker probes.
+ * api is the guarded operator's authenticated Google API transport, never descriptor input.
+ * This does not claim inherited-policy isolation or effective runtime data access.
+ * Actual scale/wake and native runtime access checks remain separate release gates.
+ */
+export async function verifyCloudRunScalerPolicies(platform, api) {
+  validateCloudRunReleasePlatform(platform);
+  if (typeof api !== 'function') throw new Error('CLOUD_RUN_SCALER_POLICY_UNCONFIRMED');
+  const receipts = [];
+  const identities = new Set();
+  try {
+    for (const binding of platform.roleBindings) {
+      const runner = `serviceAccount:${binding.runnerServiceAccount}`;
+      const scaler = `serviceAccount:${binding.invokerServiceAccount}`;
+      const observed = {};
+      for (const [kind, email] of [
+        ['runner', binding.runnerServiceAccount],
+        ['scaler', binding.invokerServiceAccount],
+      ]) {
+        const resource = `projects/urm-app-staging/serviceAccounts/${email}`;
+        const account = await api(`https://iam.googleapis.com/v1/${resource}`);
+        if (
+          account.email !== email ||
+          account.projectId !== 'urm-app-staging' ||
+          account.disabled === true ||
+          !/^[0-9]{10,30}$/.test(account.uniqueId ?? '') ||
+          identities.has(account.uniqueId)
+        )
+          throw new Error('invalid account');
+        identities.add(account.uniqueId);
+        observed[kind] = { email, uniqueId: account.uniqueId };
+      }
+      const scalerResource = `projects/urm-app-staging/serviceAccounts/${binding.invokerServiceAccount}`;
+      const runnerResource = `projects/urm-app-staging/serviceAccounts/${binding.runnerServiceAccount}`;
+      const pool = `projects/urm-app-staging/locations/us-central1/workerPools/${binding.poolName}`;
+      const policies = [
+        [
+          await api(
+            `https://iam.googleapis.com/v1/${scalerResource}:getIamPolicy?options.requestedPolicyVersion=3`,
+            'POST'
+          ),
+          [{ role: 'roles/iam.serviceAccountTokenCreator', members: temporalCloudScalerPrincipals }],
+        ],
+        [
+          await api(
+            `https://iam.googleapis.com/v1/${runnerResource}:getIamPolicy?options.requestedPolicyVersion=3`,
+            'POST'
+          ),
+          [{ role: 'roles/iam.serviceAccountUser', members: [scaler] }],
+        ],
+        [
+          await api(`https://run.googleapis.com/v2/${pool}:getIamPolicy?options.requestedPolicyVersion=3`),
+          [
+            { role: 'roles/run.viewer', members: [runner] },
+            { role: 'roles/run.developer', members: [scaler] },
+          ],
+        ],
+      ];
+      for (const [policy, expected] of policies) {
+        if (
+          !policy ||
+          typeof policy.etag !== 'string' ||
+          !policy.etag ||
+          !Array.isArray(policy.bindings) ||
+          policy.bindings.some((b) => b.condition || Object.keys(b).some((k) => !['role', 'members'].includes(k))) ||
+          policy.bindings.length !== expected.length
+        )
+          throw new Error('invalid direct policy');
+        for (const grant of expected) {
+          const matches = policy.bindings.filter((b) => b.role === grant.role);
+          const members = matches[0]?.members;
+          if (
+            matches.length !== 1 ||
+            !Array.isArray(members) ||
+            members.length !== grant.members.length ||
+            new Set(members).size !== members.length ||
+            !grant.members.every((member) => members.includes(member))
+          )
+            throw new Error('invalid direct grant');
+        }
+      }
+      receipts.push({
+        role: binding.role,
+        pool,
+        ...observed,
+        directPolicySHA256: policies.map(([policy]) =>
+          createHash('sha256').update(JSON.stringify(policy)).digest('hex')
+        ),
+      });
+    }
+    return {
+      schemaVersion: 1,
+      projectId: 'urm-app-staging',
+      namespace: platform.temporalNamespace,
+      buildId: platform.workerBuildId,
+      observedAt: new Date().toISOString(),
+      scope: 'resource direct policies only; inherited and effective access not established',
+      roles: receipts,
+    };
+  } catch {
+    throw new Error('CLOUD_RUN_SCALER_POLICY_UNCONFIRMED');
+  }
+}

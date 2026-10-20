@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { collectCloudRunReleaseWorkers, readCloudRunNamespaceEvidence } from './temporal-release-cloud-run.mjs';
+import { collectCloudRunReleaseWorkers, readCloudRunNamespaceEvidence, verifyCloudRunScalerPolicies } from './temporal-release-cloud-run.mjs';
 // Every step is explicit, revision-fenced, resumable, and leaves admissions paused on failure.
 import { readFile, writeFile, mkdtemp, rm, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -258,6 +258,7 @@ await runWithCleanup(
               throw new Error('CLOUD_RUN_SAVED_PROBE_INTENT_INVALID');
             const directory = prior?.artifactDirectory ?? await realpath(await mkdtemp(join(tmpdir(), 'urm-temporal-cloud-ready-')));
             const savedIntent = prior && (({ artifactDirectory, ...intent }) => intent)(prior);
+            const scalerPolicies = await verifyCloudRunScalerPolicies(configuredPlatform, api);
             await collectCloudRunReleaseWorkers({ binding, config, platform: configuredPlatform, firestore,
               artifactDirectory: directory, savedIntent,
               recordIntent: async (intent) => {
@@ -272,6 +273,10 @@ await runWithCleanup(
                 ownedOperation = nativeSnapshotProof(await lockRef.get());
               },
             });
+            // The native collector validates canonical private directory ownership
+            // and the matching saved intent before any additional artifact write.
+            await writeFile(join(directory, `scaler-policy-${randomUUID()}.json`), JSON.stringify(scalerPolicies),
+              { flag: 'wx', mode: 0o600 });
             cloudWorkerProbePending = false;
             // Never substitute role execution for the remaining native guards.
             // This hosting branch cannot advance a release until their actual

@@ -21,7 +21,7 @@ jest.mock('../runtime/cloud-run-rtdb-readiness', () => ({
 }));
 import { msToTs } from '@temporalio/common/lib/time';
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, readFile, rm, realpath, rename, readdir, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, realpath, rename, readdir, writeFile, chmod, symlink, mkdir } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -69,7 +69,10 @@ test('collector joins actual version routing, native activity history and privat
     image,
     poolName: `urm-worker-${role}-${buildId.slice(0, 20)}`,
     deploymentName: i === 0 ? 'urm-worker-staging' : `urm-worker-${role}-staging`,
-    runnerServiceAccount: `tw-${i === 0 ? 'o' : role === 'email' ? 'e' : 'c'}-${buildId.slice(0, 20)}@urm-app-staging.iam.gserviceaccount.com`,
+    runnerServiceAccount: `tw-${i === 0 ? 'o' : role === 'email' ? 'e' : 'c'}-${buildId.slice(
+      0,
+      20
+    )}@urm-app-staging.iam.gserviceaccount.com`,
   }));
   // Official-schema fixtures isolate Cloud Run GETs only. They are NOT real cloud attestations.
   const resources = new Map<string, unknown>();
@@ -264,6 +267,44 @@ test('collector joins actual version routing, native activity history and privat
     const originalAck = await readFile(join(directory, 'readiness-start-ack.json'), 'utf8');
     const originalProof = await readFile(join(directory, 'readiness-proof.json'), 'utf8');
     const savedIntent = JSON.parse(originalIntent);
+    // Additional release artifacts must follow successful collector validation.
+    // A corrupt persisted directory must never gain even a policy-only receipt.
+    for (const invalid of ['symlink', 'nonprivate', 'mismatched-intent']) {
+      const caseRoot = await realpath(await mkdtemp(join(tmpdir(), 'cloud-policy-artifact-denial-')));
+      const invalidDirectory = join(caseRoot, 'saved');
+      try {
+        if (invalid === 'symlink') await symlink(directory, invalidDirectory);
+        else {
+          await mkdir(invalidDirectory, { mode: invalid === 'nonprivate' ? 0o755 : 0o700 });
+          if (invalid === 'nonprivate') await chmod(invalidDirectory, 0o755);
+          await writeFile(
+            join(invalidDirectory, 'readiness-start-intent.json'),
+            JSON.stringify(invalid === 'mismatched-intent' ? { ...savedIntent, nonce: randomUUID() } : savedIntent),
+            { flag: 'wx', mode: 0o600 }
+          );
+        }
+        const retained = await readdir(invalidDirectory);
+        await expect(
+          collectServerlessReadinessObservations({
+            client,
+            firestore: db,
+            bindings,
+            artifactDirectory: invalidDirectory,
+            savedIntent,
+            readResource: async (name) => resources.get(name),
+          }).then(async () => {
+            await writeFile(join(invalidDirectory, 'scaler-policy-must-not-exist.json'), '{}', {
+              flag: 'wx',
+              mode: 0o600,
+            });
+          })
+        ).rejects.toThrow('SERVERLESS_NATIVE_READINESS_UNCONFIRMED');
+        expect(await readdir(invalidDirectory)).toEqual(retained);
+      } finally {
+        await rm(caseRoot, { recursive: true, force: true });
+      }
+    }
+    expect(starts).not.toHaveBeenCalled();
     const reconciled = await collectServerlessReadinessObservations({
       client,
       firestore: db,
