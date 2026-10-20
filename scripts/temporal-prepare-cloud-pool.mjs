@@ -1,10 +1,11 @@
 import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { validateCloudRunReleasePlatform } from './temporal-release-cloud-run.mjs';
+import { readOwnedPreparationRunner, poolSecretReferences, normalizeStagingResourceName as normalize } from './temporal-preparation-resources.mjs';
 import { renderServerlessWorkerPool } from './temporal-serverless-resources.mjs';
 const fail = () => { throw new Error('CLOUD_RUN_ZERO_POOL_PREPARATION_UNCONFIRMED'); };
 const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
-const normalize = value => typeof value === 'string' ? value.replace(/^projects\/251680231116\//, 'projects/urm-app-staging/') : value;
+
 function operationName(value) {
   const result = normalize(value);
   if (!/^projects\/urm-app-staging\/locations\/us-central1\/operations\/[A-Za-z0-9_-]{1,200}$/.test(result ?? '')) fail();
@@ -32,20 +33,8 @@ function preparedPool(plan, actual) {
  * come from this release's immutable account-creation record and still have its ID.
  */
 async function prerequisites(plan, identityReceipt, api) {
-  const state = identityReceipt?.identityState;
-  if (identityReceipt?.releaseId !== plan.releaseId || state?.stage !== 'completed' || state.plan?.kind !== 'runner' ||
-    state.plan.role !== plan.role || state.plan.buildId !== plan.buildId || state.plan.email !== plan.runner ||
-    state.plan.evidenceDigest !== plan.evidenceDigest || state.account?.email !== plan.runner ||
-    !/^[0-9]{10,30}$/.test(state.account?.uniqueId ?? '')) fail();
-  const account = await api(`https://iam.googleapis.com/v1/projects/urm-app-staging/serviceAccounts/${plan.runner}`);
-  if (account.email !== plan.runner || account.projectId !== 'urm-app-staging' || account.disabled === true ||
-    account.uniqueId !== state.account.uniqueId || account.description !== state.account.description) fail();
-  const refs = new Map();
-  for (const volume of plan.body.template.volumes) if (volume.secret)
-    for (const item of volume.secret.items) refs.set(`${volume.secret.secret}/${item.version}`, [volume.secret.secret, item.version]);
-  for (const entry of plan.body.template.containers[0].env) if (entry.valueSource?.secretKeyRef) {
-    const ref = entry.valueSource.secretKeyRef; refs.set(`${ref.secret}/${ref.version}`, [ref.secret, ref.version]);
-  }
+  const account = await readOwnedPreparationRunner(plan, identityReceipt, api);
+  const refs = poolSecretReferences(plan.body);
   for (const [secret, version] of refs.values()) {
     const resource = `projects/urm-app-staging/secrets/${secret}`;
     const metadata = await api(`https://secretmanager.googleapis.com/v1/${resource}/versions/${version}`);

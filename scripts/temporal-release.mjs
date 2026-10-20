@@ -3,9 +3,10 @@ import { collectCloudRunReleaseWorkers, readCloudRunNamespaceEvidence, verifyClo
 import { verifyCloudRunDispatchConfiguration } from './temporal-release-dispatch.mjs';
 import { verifyPreparationEvidence } from './temporal-preparation-evidence.mjs';
 import { prepareCloudRunIdentity } from './temporal-prepare-cloud-identity.mjs';
+import { prepareCloudRunSecretAccess } from './temporal-prepare-secret-access.mjs';
 import { prepareCloudRunZeroPool } from './temporal-prepare-cloud-pool.mjs';
 import { readPreparationReceipt } from './temporal-preparation-evidence.mjs';
-import { saveIdentityPreparationCheckpoint, savePoolPreparationCheckpoint } from './temporal-preparation-checkpoint.mjs';
+import { saveIdentityPreparationCheckpoint, savePoolPreparationCheckpoint, saveSecretAccessPreparationCheckpoint } from './temporal-preparation-checkpoint.mjs';
 // Every step is explicit, revision-fenced, resumable, and leaves admissions paused on failure.
 import { readFile, writeFile, mkdtemp, rm, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -95,6 +96,7 @@ if (
     'workers-ready',
     'prepare-cloud-run-identity',
     'prepare-cloud-run-pool',
+    'prepare-cloud-run-secret-access',
     'provider-usage-ready',
     'take-ownership',
     'backend-ready',
@@ -138,7 +140,7 @@ const operatorIdentity = {
   runtimePins: binding.runtimePins,
   resourceBinding,
 };
-const preparationArguments = ['prepare-cloud-run-identity', 'prepare-cloud-run-pool'].includes(action) ? {
+const preparationArguments = ['prepare-cloud-run-identity', 'prepare-cloud-run-pool', 'prepare-cloud-run-secret-access'].includes(action) ? {
   role: args[args.indexOf('--identity-role') + 1],
   kind: args[args.indexOf('--identity-kind') + 1],
   proof: args[args.indexOf('--preparation-proof') + 1],
@@ -149,7 +151,7 @@ if (preparationArguments) {
   if (!required.every(flag => args.includes(flag)) ||
     !/^[a-f0-9]{64}$/.test(preparationArguments.digest ?? ''))
     throw new Error('Explicit immutable identity preparation inputs required');
-  if (action === 'prepare-cloud-run-pool') {
+  if (['prepare-cloud-run-pool', 'prepare-cloud-run-secret-access'].includes(action)) {
     delete preparationArguments.kind;
     preparationArguments.settings = args[args.indexOf('--pool-settings') + 1];
     preparationArguments.settingsDigest = args[args.indexOf('--pool-settings-sha256') + 1];
@@ -157,6 +159,10 @@ if (preparationArguments) {
     if (!/^[a-f0-9]{64}$/.test(preparationArguments.settingsDigest ?? '') ||
       !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(preparationArguments.runnerOperationId ?? ''))
       throw new Error('Explicit immutable pool preparation inputs required');
+  }
+  if (action === 'prepare-cloud-run-secret-access') {
+    if (!args.includes('--secret-name')) throw new Error('Explicit source-rendered secret required');
+    preparationArguments.secret = args[args.indexOf('--secret-name') + 1];
   }
   operatorIdentity.cloudIdentityPreparation = preparationArguments;
 }
@@ -1100,6 +1106,39 @@ await runWithCleanup(
               throw new Error('POOL_PREPARATION_RECEIPT_UNCONFIRMED');
             cloudIdentityPending = false;
             console.log(`Zero-target pool configuration recorded at ${immutableReceipt.path}; no activation or readiness claim.`);
+          } else if (action === 'prepare-cloud-run-secret-access') {
+            requirePhase(state, ['provider-usage-ready']);
+            if (config.environment !== 'staging' || operatorPrincipal.adcAndGcloudAccountMatch !== true)
+              throw new Error('SECRET_PREPARATION_REQUIRES_MATCHED_STAGING_OPERATOR');
+            const platform = JSON.parse(await readFile(config.platformConfig, 'utf8'));
+            validateWorkerCoverage(config, platform);
+            await verifyPreparationEvidence({ ...preparationArguments, path: preparationArguments.proof,
+              platform, binding, google: api });
+            const settings = await readPreparationReceipt(preparationArguments.settings, preparationArguments.settingsDigest);
+            const runnerReceipt = await firestore.doc(`_control/temporalCloudIdentityPreparation-${preparationArguments.runnerOperationId}`).get();
+            if (!runnerReceipt.exists) throw new Error('SECRET_RUNNER_PREPARATION_REQUIRED');
+            const currentOperation = await lockRef.get();
+            assertNativeSnapshot(ownedOperation, currentOperation);
+            const hasSaved = Object.prototype.hasOwnProperty.call(currentOperation.data(), 'cloudSecretAccessPreparation');
+            if (hasSaved) cloudIdentityPending = true;
+            const immutableReceipt = firestore.doc(`_control/temporalCloudSecretAccessPreparation-${operationId}`);
+            const result = await prepareCloudRunSecretAccess({ platform, role: preparationArguments.role, settings,
+              secret: preparationArguments.secret, operationId, releaseId: config.releaseId,
+              evidenceDigest: preparationArguments.digest, identityReceipt: runnerReceipt.data(), api,
+              saved: hasSaved ? currentOperation.get('cloudSecretAccessPreparation') : undefined,
+              save: async identityState => {
+                cloudIdentityPending = true;
+                ownedOperation = await saveSecretAccessPreparationCheckpoint({ firestore, lockRef, controlRef, stateRef,
+                  immutableReceipt, ownedOperation, expectedAuthority, config, operationId, bindingDigest,
+                  operatorPrincipal, identityState });
+              },
+            });
+            const receipt = await immutableReceipt.get();
+            if (!receipt.exists || receipt.get('bindingDigest') !== bindingDigest ||
+              receipt.get('identityState.observedEtag') !== result.observedEtag)
+              throw new Error('SECRET_PREPARATION_RECEIPT_UNCONFIRMED');
+            cloudIdentityPending = false;
+            console.log(`Scoped secret policy observation recorded at ${immutableReceipt.path}; no effective-access or activation claim.`);
           } else if (action === 'workers-ready') {
             requirePhase(state, ['provider-usage-ready', 'workers-ready']);
             const platform = await verifyReleaseWorkers();

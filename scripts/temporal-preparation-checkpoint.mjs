@@ -4,9 +4,10 @@ import { assertNativeSnapshot, nativeSnapshotProof, proofDigest } from './tempor
  * callback can authorize HTTP until this transaction has acknowledged completion.
  */
 async function saveCheckpoint({ firestore, lockRef, controlRef, stateRef,
-  immutableReceipt, ownedOperation, expectedAuthority, config, operationId, bindingDigest, operatorPrincipal, identityState, pool = false }) {
-  const field = pool ? 'cloudPoolPreparation' : 'cloudIdentityPreparation';
-  const action = pool ? 'prepare-cloud-run-pool' : 'prepare-cloud-run-identity';
+  immutableReceipt, ownedOperation, expectedAuthority, config, operationId, bindingDigest, operatorPrincipal, identityState, kind }) {
+  const [field, action] = { identity: ['cloudIdentityPreparation', 'prepare-cloud-run-identity'],
+    pool: ['cloudPoolPreparation', 'prepare-cloud-run-pool'], secret: ['cloudSecretAccessPreparation', 'prepare-cloud-run-secret-access'] }[kind] ?? [];
+  if (!field) throw new Error('PREPARATION_KIND_REQUIRED');
   await firestore.runTransaction(async tx => {
     const [current, control, state, receipt] = await Promise.all([
       tx.get(lockRef), tx.get(controlRef), tx.get(stateRef),
@@ -33,5 +34,6 @@ async function saveCheckpoint({ firestore, lockRef, controlRef, stateRef,
   return nativeSnapshotProof(await lockRef.get());
 }
 
-export const saveIdentityPreparationCheckpoint = options => saveCheckpoint({ ...options, pool: false });
-export const savePoolPreparationCheckpoint = options => saveCheckpoint({ ...options, pool: true });
+export const saveIdentityPreparationCheckpoint = options => saveCheckpoint({ ...options, kind: 'identity' });
+export const savePoolPreparationCheckpoint = options => saveCheckpoint({ ...options, kind: 'pool' });
+export const saveSecretAccessPreparationCheckpoint = options => saveCheckpoint({ ...options, kind: 'secret' });
