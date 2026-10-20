@@ -1595,6 +1595,25 @@ function put(data: Record<string, unknown>, key: string, value: unknown, remove 
   if (remove) delete cursor[keys[keys.length - 1]];
   else cursor[keys[keys.length - 1]] = value;
 }
+function bindListRowId(
+  patch: Record<string, unknown>,
+  binding: FrozenListRowBinding,
+  value: string,
+  mode: FrozenProjectionWrite['mode']
+): void {
+  if (mode === 'set') {
+    put(patch, binding.field, value);
+    return;
+  }
+  const [parent, child] = binding.field.split('.');
+  if (child && Object.hasOwn(patch, parent)) {
+    const existing = patch[parent];
+    if (!plain(existing) || (existing[child] !== undefined && existing[child] !== value)) fail();
+    // An update cannot contain both a map and a descendant field path. Preserve
+    // the frozen map and bind the confirmed row inside a copy of that map.
+    put(patch, binding.field, value);
+  } else patch[binding.field] = value;
+}
 export interface AcknowledgedRepairExecutionOptions {
   /** Trusted admin certificate + current SDK execution witness; never callable payload. */ observationScope?: string;
   validateSourceCompletion?: (
@@ -2372,8 +2391,7 @@ async function commitReadyCandidate(
     if (!observed || observed.state !== 'present') fail();
     const current = rowId(observed.body, binding);
     if (original !== undefined && original !== current) fail();
-    if (write.mode === 'set') put(patch, binding.field, current);
-    else patch[binding.field] = current;
+    bindListRowId(patch, binding, current, write.mode);
   }
   const snapshotDigest = acknowledgedProjectionDigest({
     exists: snapshot.exists,
@@ -2643,8 +2661,7 @@ export async function commitAcknowledgedRepair(
       if (!observation || observation.state !== 'present') fail();
       const current = rowId(observation?.body, binding);
       if (original !== undefined && current !== original) fail();
-      if (write.mode === 'set') put(patch, binding.field, current);
-      else patch[binding.field] = current;
+      bindListRowId(patch, binding, current, write.mode);
     }
     const equal = (key: string, value: unknown) =>
       snapshot.get(key) !== undefined &&

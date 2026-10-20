@@ -82,9 +82,12 @@ test('a completed accepted job aging out of history does not leave publishing di
     await page.goto(`/login?callbackurl=${encodeURIComponent(target)}`);
     await page.getByRole('button', { name: /Dev Login/i }).click();
     await expect(page).toHaveURL(new RegExp(`/admin/sermons/${sermon.id}$`));
-    const publish = page.getByRole('button', { name: 'Publish everywhere', exact: true });
-    const unpublish = page.getByRole('button', { name: 'Unpublish everywhere', exact: true });
-    const history = page.getByRole('region', { name: 'Recent activity', exact: true }).last();
+    const publish = page.getByRole('button', { name: /^Publish to /, exact: false });
+    const unpublish = page.getByRole('button', { name: 'Unpublish From Everywhere', exact: true });
+    const history = page.getByRole('region', { name: 'Recent activity', exact: true });
+    await expect(history).toHaveCount(0);
+    await page.getByRole('button', { name: 'Advanced activity', exact: true }).click();
+    await expect(history).toHaveCount(1);
     await expect(unpublish).toBeEnabled();
     await unpublish.click();
     await expect(page.getByText('Request accepted.', { exact: false })).toBeVisible();

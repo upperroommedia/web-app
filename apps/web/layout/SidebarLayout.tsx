@@ -58,13 +58,13 @@ interface NavItem {
 
 // Navigation items for publishers/uploaders
 const publisherNavItems: NavItem[] = [
-  { label: 'Activity', path: '/admin/activity', icon: <HistoryIcon /> },
   { label: 'Sermons', path: '/admin/sermons', icon: <MicIcon /> },
   { label: 'Series', path: '/admin/series', icon: <CollectionsIcon /> },
 ];
 
 // Additional navigation items for admins only
 const adminOnlyNavItems: NavItem[] = [
+  { label: 'Activity', path: '/admin/activity', icon: <HistoryIcon /> },
   { label: 'Users', path: '/admin/users', icon: <PeopleIcon /> },
   { label: 'Speakers', path: '/admin/speakers', icon: <RecordVoiceOverIcon /> },
   { label: 'Lists', path: '/admin/lists', icon: <PlaylistPlayIcon /> },
@@ -321,20 +321,7 @@ const SidebarLayout = ({ children }: SidebarLayoutProps) => {
 
       {/* Publisher Nav Items (Sermons, Series) */}
       <List sx={{ py: 0, px: 0.5 }} dense>
-        {publisherNavItems.map((item) =>
-          renderNavItem(
-            item.path === '/admin/activity'
-              ? {
-                  ...item,
-                  icon: (
-                    <Badge badgeContent={activeCount} color="primary">
-                      <HistoryIcon />
-                    </Badge>
-                  ),
-                }
-              : item
-          )
-        )}
+        {publisherNavItems.map(renderNavItem)}
       </List>
 
       {/* Admin Only Section */}
@@ -356,7 +343,20 @@ const SidebarLayout = ({ children }: SidebarLayoutProps) => {
           </Typography>
 
           <List sx={{ py: 0, px: 0.5 }} dense>
-            {adminOnlyNavItems.map(renderNavItem)}
+            {adminOnlyNavItems.map((item) =>
+              renderNavItem(
+                item.path === '/admin/activity'
+                  ? {
+                      ...item,
+                      icon: (
+                        <Badge badgeContent={activeCount} color="primary">
+                          <HistoryIcon />
+                        </Badge>
+                      ),
+                    }
+                  : item
+              )
+            )}
           </List>
         </>
       )}

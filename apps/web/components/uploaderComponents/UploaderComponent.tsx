@@ -76,7 +76,7 @@ import uploadFile, {
   transferAudioSource,
 } from '../../utils/uploadFile';
 import { useDurableJob } from '../../hooks/useDurableJobs';
-import JobStatusPanel from '../jobs/JobStatusPanel';
+import PlainJobStatus from '../jobs/PlainJobStatus';
 import LinearProgress from '@mui/material/LinearProgress';
 import DropZone from '../DropZone';
 import { useOwnedAudioSource } from '../../hooks/useOwnedAudioSource';
@@ -826,7 +826,7 @@ const Uploader = (props: UploaderProps) => {
           message:
             error instanceof Error
               ? error.message
-              : 'The new attempt could not be confirmed. Your source has been kept. Check Activity before trying again.',
+              : 'The new attempt could not be confirmed. Your source has been kept. Check the sermon’s current status before trying again.',
         });
       } finally {
         sourceRetryInFlight.current = false;
@@ -979,7 +979,7 @@ const Uploader = (props: UploaderProps) => {
         {(resumeError || resumeStale) && (
           <Alert severity="info">Reconnecting. Wait for current status before sending the file.</Alert>
         )}
-        {resumeJob && <JobStatusPanel job={resumeJob} stale={resumeStale} />}
+        {resumeJob && <PlainJobStatus job={resumeJob} stale={resumeStale || Boolean(resumeError)} />}
         {resumeJob?.state === 'awaiting_source' && (
           <Stack spacing={2} sx={{ mt: 2 }}>
             <Typography>
@@ -1008,7 +1008,7 @@ const Uploader = (props: UploaderProps) => {
                   setUploadProgress({
                     error: false,
                     percent: 100,
-                    message: 'File received. Follow processing in Activity.',
+                    message: 'File received. Follow processing on the sermon page.',
                   });
                 } catch (error) {
                   setUploadProgress({
@@ -1041,9 +1041,20 @@ const Uploader = (props: UploaderProps) => {
             {uploadProgress.message}
           </Alert>
         )}
-        <Button sx={{ mt: 2 }} onClick={() => void router.push('/admin/activity')}>
-          Open Activity
-        </Button>
+        {resumeJob?.entity.type === 'sermon' && (
+          <Button
+            sx={{ mt: 2 }}
+            disabled={isUploading}
+            onClick={() => void router.push(`/admin/sermons/${encodeURIComponent(resumeJob.entity.id)}`)}
+          >
+            View Sermon
+          </Button>
+        )}
+        {props.user.isAdmin() && (
+          <Button sx={{ mt: 2 }} onClick={() => void router.push('/admin/activity')}>
+            Open Activity
+          </Button>
+        )}
       </Box>
     );
   }
