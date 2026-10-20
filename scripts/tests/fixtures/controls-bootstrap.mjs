@@ -9,7 +9,7 @@ import { proofDigest } from '../../temporal-release-runtime.mjs';
 export function controlsBootstrapFixture(role='controls') {
   const buildId = 'a'.repeat(40),
     image = `us-central1-docker.pkg.dev/urm-app-staging/urm-temporal/worker@sha256:${'b'.repeat(64)}`,
-    workerRoles = ['orchestration', 'controls', 'search', 'email', 'images'];
+    workerRoles = ['orchestration', 'controls', 'search', 'email', 'images', 'media'];
   const platform = {
     schemaVersion: 1,
     environment: 'staging',
@@ -94,6 +94,11 @@ export function controlsBootstrapFixture(role='controls') {
     },
     { pool: original, prerequisites: { runnerUniqueId: receipts.runner.identityState.account.uniqueId } }
   );
+  if(role==='media'){
+    const base='projects/251680231116/locations/global/services/run.googleapis.com/quotaInfos/';
+    const components=[['MaxPerInstanceEphemeralDiskSizePerProjectRegion','run.googleapis.com/max_per_instance_ephemeral_disk'],['EphemeralDiskAllocPerProjectRegion','run.googleapis.com/ephemeral_disk_allocation']].map(([quotaId,metric])=>({name:base+quotaId,quotaId,metric,region:'us-central1',effectiveBytes:'107374182400',observedAt:new Date().toISOString()}));
+    receipts.pool.identityState.prerequisites.mediaDiskQuota={components,quotaSHA256:proofDigest(components.map(({observedAt:_time,...value})=>value)),scope:'controlled effective quota fixture'};
+  }
   const account = (email) => `projects/urm-app-staging/serviceAccounts/${email}`,
     runner = `serviceAccount:${b.runnerServiceAccount}`,
     scaler = `serviceAccount:${b.invokerServiceAccount}`;
@@ -283,6 +288,7 @@ export function controlsBootstrapFixture(role='controls') {
     api: async (url, method = 'GET', request, beforeSend) => {
       if(beforeSend)await beforeSend();
       calls.push({ url, method, request: structuredClone(request) });
+      if(url.includes('cloudquotas.googleapis.com'))return {name:url.split('/v1/')[1],quotaId:url.split('/').at(-1),metric:url.endsWith('MaxPerInstanceEphemeralDiskSizePerProjectRegion')?'run.googleapis.com/max_per_instance_ephemeral_disk':'run.googleapis.com/ephemeral_disk_allocation',service:'run.googleapis.com',metricUnit:'By',dimensions:['region'],dimensionsInfos:[{dimensions:{region:'us-central1'},applicableLocations:['us-central1'],details:{value:'107374182400'}}]};
       if (method === 'PATCH') {
         if (
           saved?.[request.scaling.manualInstanceCount === 1 ? 'start' : 'stop']?.stage !== 'attempted' ||

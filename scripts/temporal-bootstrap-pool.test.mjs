@@ -507,3 +507,33 @@ test('read-only direct-policy verifier cannot turn the baseline public member in
  const grant={role:'roles/storage.objectViewer',members:['allUsers']},policy={version:1,etag:'e',bindings:[grant]};
  assert.throws(()=>verifyPreparedDirectPolicyGrant(policy,grant,'projects/_/buckets/urm-app-staging-images'));
 });
+const {bootstrapStopCloudRunMediaPool:mediaCycle,activateCloudRunMediaPool:mediaRetain,stopCloudRunMediaActivation:mediaAbort}=await import('./temporal-bootstrap-pool.mjs');
+async function mediaAfterCycle(){const f=fixture('media'),r=await mediaCycle(f.options);f.options.receipts.bootstrapCycle={operationId:f.options.operationId,releaseId:f.options.releaseId,identityState:structuredClone(r)};f.options.operationId=randomUUID();return f;}
+test('media quota read loss after start cannot strand same-parent unused cleanup',async()=>{
+ const f=fixture('media'),api=f.options.api,observe=f.options.observeRegistration;let quotaLost=false;
+ f.options.observeRegistration=async()=>{quotaLost=true;return observe();};
+ f.options.api=async(...args)=>{if(quotaLost&&args[0].includes('cloudquotas.googleapis.com'))throw new Error('quota unavailable');return api(...args);};
+ try{await mediaCycle(f.options);}catch{}
+ assert.equal(f.pool.scaling.manualInstanceCount,0);assert.equal(f.saved.stop.stage,'completed');
+});
+
+test('media exact budgets and original quota proof survive cycle/retention/unused stop without quota writes',async()=>{
+ const f=await mediaAfterCycle(),kept=await mediaRetain(f.options),body=f.options.receipts.pool.identityState.plan.body;
+ assert.equal(kept.disposition,'retained');assert.equal(Object.keys(f.options.receipts).length,12);
+ assert.deepEqual(body.template.containers[0].resources.limits,{cpu:'2',memory:'4Gi'});assert.deepEqual(body.template.volumes.find(v=>v.name==='scratch').emptyDir,{medium:'DISK',sizeLimit:'100Gi'});
+ const env=Object.fromEntries(body.template.containers[0].env.map(v=>[v.name,v.value]));assert.equal(env.TEMPORAL_MEDIA_WORKSPACE_MAX_BYTES,String(64*2**30));assert.equal(env.TEMPORAL_MEDIA_DISK_HEADROOM_BYTES,String(16*2**30));
+ assert.equal(kept.start.protection.mediaDiskQuota.components.length,2);
+ f.options.receipts.activation={operationId:f.options.operationId,releaseId:f.options.releaseId,identityState:structuredClone(kept)};f.options.operationId=randomUUID();
+ const api=f.options.api;f.options.api=async(...args)=>{if(args[0].includes('cloudquotas.googleapis.com'))throw new Error('quota unavailable during deallocation');return api(...args);};
+ await mediaAbort(f.options);assert.deepEqual(f.calls.filter(c=>c.method==='PATCH').map(c=>c.request.scaling.manualInstanceCount),[1,0,1,0]);
+ assert.equal(f.calls.some(c=>c.url.includes('cloudquotas')&&c.method!=='GET'),false);
+});
+for(const bad of ['missing-original','quota-small','credential-drift','credential-late'])test(`media allocation ${bad} denies before PATCH`,async()=>{
+ const f=await mediaAfterCycle(),api=f.options.api;let credential=false;const now=Date.now;
+ if(bad==='missing-original')delete f.options.receipts.pool.identityState.prerequisites.mediaDiskQuota;
+ f.options.api=async(...args)=>{if(args[1]==='PATCH'){credential=true;if(bad==='credential-late')Date.now=()=>now()+6000;}const r=await api(...args);if(args[0].includes('cloudquotas')&&(bad==='quota-small'||credential&&bad==='credential-drift'))r.dimensionsInfos[0].details.value=bad==='quota-small'?'10737418240':'214748364800';return r;};
+ try{await assert.rejects(mediaRetain(f.options));assert.equal(f.calls.filter(c=>c.method==='PATCH').length,2);}finally{Date.now=now;}
+});
+test('media active candidate cannot be stopped even when quota reads are unavailable',async()=>{
+ const f=await mediaAfterCycle(),kept=await mediaRetain(f.options);f.options.receipts.activation={operationId:f.options.operationId,releaseId:f.options.releaseId,identityState:structuredClone(kept)};f.options.operationId=randomUUID();f.options.observeProtection=async()=>{throw new Error('working');};await assert.rejects(mediaAbort(f.options));assert.equal(f.pool.scaling.manualInstanceCount,1);
+});

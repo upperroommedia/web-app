@@ -169,3 +169,9 @@ test('images exact Activity queue denies extra Workflow registration and unused 
  assert.deepEqual((await observeBootstrapRegistration(f.options)).queues,queues);await observeBootstrapProtection(f.options);
  queues.push({name:'urm-images',type:1});await assert.rejects(observeBootstrapRegistration(f.options));await assert.rejects(observeBootstrapProtection(f.options));
 });
+
+test('media requires exactly its Activity queue and cannot use a Workflow poller as stop proof',async()=>{
+ const f=fixture();f.options.role='media';f.options.platform.roleBindings[0].role='media';const get=f.options.firestore.getAll;f.options.firestore.getAll=async()=>{const d=await get();d[0].data().action='activate-cloud-run-media-pool';return d;};
+ const queues=[{name:'urm-media',type:2}];f.service.describeWorkerDeploymentVersion=async()=>({workerDeploymentVersionInfo:{deploymentVersion:{deploymentName:'candidate',buildId:'a'.repeat(40)},taskQueueInfos:queues}});
+ assert.deepEqual((await observeBootstrapRegistration(f.options)).queues,queues);await observeBootstrapProtection(f.options);queues.push({name:'urm-media',type:1});await assert.rejects(observeBootstrapRegistration(f.options));await assert.rejects(observeBootstrapProtection(f.options));
+});

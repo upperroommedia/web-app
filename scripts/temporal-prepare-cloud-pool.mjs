@@ -34,7 +34,7 @@ export function verifyPreparedPoolMetadata(plan, actual, { manualInstanceCount =
 /** Confirm only metadata and permissions, never read secret payloads. Runner must
  * come from this release's immutable account-creation record and still have its ID.
  */
-export async function verifyPoolPreparationPrerequisites(plan, identityReceipt, api) {
+export async function verifyPoolPreparationSecretPrerequisites(plan, identityReceipt, api) {
   const account = await readOwnedPreparationRunner(plan, identityReceipt, api);
   const refs = poolSecretReferences(plan.body);
   for (const [secret, version] of refs.values()) {
@@ -46,7 +46,11 @@ export async function verifyPoolPreparationPrerequisites(plan, identityReceipt, 
       binding.role === 'roles/secretmanager.secretAccessor' && !binding.condition &&
       Array.isArray(binding.members) && binding.members.includes(`serviceAccount:${plan.runner}`))) fail();
   }
-  return { runnerUniqueId: account.uniqueId, secretReferences: [...refs.keys()].sort(),...(plan.role==='media'?{mediaDiskQuota:await observeMediaDiskQuota(plan,api)}:{}) };
+  return { runnerUniqueId: account.uniqueId, secretReferences: [...refs.keys()].sort() };
+}
+export async function verifyPoolPreparationPrerequisites(plan,identityReceipt,api){
+  const secrets=await verifyPoolPreparationSecretPrerequisites(plan,identityReceipt,api);
+  return {...secrets,...(plan.role==='media'?{mediaDiskQuota:await observeMediaDiskQuota(plan,api)}:{})};
 }
 /** Create at most once. A lost create ACK remains fenced: no GET/name adoption,
  * inferred LRO or retry. A saved native LRO may be polled on a later resume.

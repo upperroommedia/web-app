@@ -1,3 +1,4 @@
+import {observeMediaDiskQuota,assertMediaDiskQuotaFresh,assertMediaDiskQuotaProof} from './temporal-media-disk-quota.mjs';
 import {verifyPreparedDirectPolicyGrant} from './temporal-preparation-iam.mjs';
 import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
@@ -14,7 +15,7 @@ import {
   renderPreparationWorkload,
 } from './temporal-preparation-resources.mjs';
 import { readOwnedPreparationRuntimeRole } from './temporal-prepare-runtime-role.mjs';
-import { verifyPreparedPoolMetadata, verifyPoolPreparationPrerequisites } from './temporal-prepare-cloud-pool.mjs';
+import { verifyPreparedPoolMetadata, verifyPoolPreparationSecretPrerequisites } from './temporal-prepare-cloud-pool.mjs';
 const fail = () => {
   throw new Error('CLOUD_RUN_ROLE_POOL_BOOTSTRAP_UNCONFIRMED');
 };
@@ -48,11 +49,12 @@ function policyHas(policy,grant,resource){
 async function verifyAccess(o, zeroPlan) {
   const { platform, role, settings, releaseId, evidenceDigest, receipts: r, api } = o,
     b = platform.roleBindings.find((b) => b.role === role);
+  if(role==='media')assertMediaDiskQuotaProof(r.pool.identityState.prerequisites?.mediaDiskQuota);
   const runner = await readOwnedPreparationRunner(zeroPlan, r.runner, api),
     scaler = await readOwnedPreparationScaler({ ...zeroPlan, scaler: b.invokerServiceAccount }, r.scaler, api);
   if (runner.uniqueId === scaler.uniqueId || runner.uniqueId !== r.pool.identityState.prerequisites?.runnerUniqueId)
     fail();
-  await verifyPoolPreparationPrerequisites(zeroPlan, r.runner, api);
+  await verifyPoolPreparationSecretPrerequisites(zeroPlan, r.runner, api);
   const scalerPolicies = await verifyCloudRunScalerPolicies(platform, api, [role]);
   const account = (email) => `projects/urm-app-staging/serviceAccounts/${email}`;
   const scalerGrants = {
@@ -215,7 +217,7 @@ async function verifyAccess(o, zeroPlan) {
     policiesSHA256: proofDigest({ scalerPolicies, projectPolicy, proofs }),
   };
 }
-/** Bootstrap one unused source-bound controls/orchestration/search/email/images pool, observe its non-current native queue,
+/** Bootstrap one unused source-bound role pool, observe its non-current native queue,
  * then stop that same pool under the SAME parent, including observation failure.
  * A later handoff activation needs its own reviewed operation; this cycle does
  * not promote routing, attach WCI, retire workers or prove live instance count.
@@ -238,7 +240,7 @@ async function runReviewedPoolOperation(o, mode, expectedRole) {
   validateCloudRunReleasePlatform(platform);
   if (
     role !== expectedRole ||
-    !['controls','orchestration','search','email','images'].includes(expectedRole) ||
+    !['controls','orchestration','search','email','images','media'].includes(expectedRole) ||
     !['cycle', 'retain', 'abort'].includes(mode) ||
     !uuid.test(operationId ?? '') ||
     !uuid.test(releaseId ?? '') ||
@@ -329,6 +331,7 @@ async function runReviewedPoolOperation(o, mode, expectedRole) {
     cycle;
   if (mode !== 'cycle') {
     cycle = completed(r.bootstrapCycle, releaseId);
+    if(role==='media')assertMediaDiskQuotaProof(cycle.start?.protection?.mediaDiskQuota);
     if (
       !isDeepStrictEqual(cycle.plan, originalCyclePlan(r.bootstrapCycle.operationId)) ||
       (cycle.disposition !== undefined && cycle.disposition !== 'stopped')
@@ -374,6 +377,7 @@ async function runReviewedPoolOperation(o, mode, expectedRole) {
   });
   if (mode === 'abort') {
     const activation = completed(r.activation, releaseId);
+    if(role==='media')assertMediaDiskQuotaProof(activation.start?.protection?.mediaDiskQuota);
     if (
       !isDeepStrictEqual(activation.plan, retentionPlan(r.activation.operationId)) ||
       activation.disposition !== 'retained' ||
@@ -424,7 +428,7 @@ async function runReviewedPoolOperation(o, mode, expectedRole) {
     await save(next);
     state = next;
   };
-  const guard = async () => {
+  const guard = async (allocationRequired=false) => {
     const p = await observeProtection();
     if (
       p?.role !== role ||
@@ -436,7 +440,10 @@ async function runReviewedPoolOperation(o, mode, expectedRole) {
       Math.abs(Date.now() - Date.parse(p.observedAt)) > 5000
     )
       fail();
-    return p;
+    if(role!=='media'||!allocationRequired)return p;
+    const mediaDiskQuota=await observeMediaDiskQuota(zeroPlan,api);
+    if(Math.abs(Date.now()-Date.parse(p.observedAt))>5000)fail();
+    return {...p,mediaDiskQuota};
   };
   const current = async (count) => {
     const resource = await api(url),
@@ -474,7 +481,7 @@ async function runReviewedPoolOperation(o, mode, expectedRole) {
       const { etag, ...projection } = before;
       const { etag: originEtag, ...originProjection } = origin;
       if (!isDeepStrictEqual(projection, originProjection) || (originEtag !== undefined && etag !== originEtag)) fail();
-      const protection = await guard(),
+      const protection = await guard(target===1),
         request = {
           url: `${url}?updateMask=scaling`,
           method: 'PATCH',
@@ -491,7 +498,8 @@ async function runReviewedPoolOperation(o, mode, expectedRole) {
       });
       // Recheck native account/grants and protection AFTER the awaited checkpoint.
       await verifyAccess(o, zeroPlan);
-      const fresh = await guard();
+      const fresh = await guard(target===1);
+      if(role==='media'&&target===1){assertMediaDiskQuotaFresh(protection.mediaDiskQuota);assertMediaDiskQuotaFresh(fresh.mediaDiskQuota);if(fresh.mediaDiskQuota.quotaSHA256!==protection.mediaDiskQuota.quotaSHA256)fail();}
       if (
         fresh.protectionSHA256 !== protection.protectionSHA256 ||
         fresh.computeInventorySHA256 !== protection.computeInventorySHA256 ||
@@ -503,7 +511,9 @@ async function runReviewedPoolOperation(o, mode, expectedRole) {
         ack = await api(request.url, request.method, request.body, async () => {
           // The controller invokes this source-owned fence after obtaining its
           // Google credential. A slow credential refresh cannot renew authority.
-          const atSend = await guard();
+          if(role==='media'&&target===1)assertMediaDiskQuotaFresh(protection.mediaDiskQuota);
+          const atSend = await guard(target===1);
+          if(role==='media'&&target===1){assertMediaDiskQuotaFresh(protection.mediaDiskQuota);assertMediaDiskQuotaFresh(atSend.mediaDiskQuota);if(atSend.mediaDiskQuota.quotaSHA256!==protection.mediaDiskQuota.quotaSHA256)fail();}
           if (
             atSend.protectionSHA256 !== protection.protectionSHA256 ||
             atSend.computeInventorySHA256 !== protection.computeInventorySHA256 ||
@@ -587,6 +597,7 @@ async function runReviewedPoolOperation(o, mode, expectedRole) {
         !['planned', 'starting', 'started', 'stopping', 'completed'].includes(state.stage))
     )
       fail();
+    if(role==='media'&&state?.start&&state.start.stage!=='planned')assertMediaDiskQuotaProof(state.start.protection?.mediaDiskQuota);
     if (!state) await persist({ plan, stage: 'planned' });
     if (state.stage === 'completed') {
       await verifyAccess(o, zeroPlan);
@@ -743,3 +754,7 @@ export const stopCloudRunEmailActivation=o=>execute(o,'abort','email');
 export const bootstrapStopCloudRunImagesPool=o=>execute(o,'cycle','images');
 export const activateCloudRunImagesPool=o=>execute(o,'retain','images');
 export const stopCloudRunImagesActivation=o=>execute(o,'abort','images');
+
+export const bootstrapStopCloudRunMediaPool=o=>execute(o,'cycle','media');
+export const activateCloudRunMediaPool=o=>execute(o,'retain','media');
+export const stopCloudRunMediaActivation=o=>execute(o,'abort','media');

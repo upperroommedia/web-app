@@ -307,7 +307,7 @@ test('the same signal owner remains installed until deferred Sentry flush actual
   expect(remove.mock.calls.filter(([signal]) => signal === 'SIGTERM')).toHaveLength(1);
 });
 
-for (const queue of ['urm-search', 'urm-email', 'urm-images'])
+for (const queue of ['urm-search', 'urm-email', 'urm-images', 'urm-media'])
   for (const hosting of ['cloud-run', 'traditional'] as const)
     test(`actual ${queue} Worker.create preserves ${hosting} queue ownership`, async () => {
       mockWorkerQueue = queue;
@@ -317,7 +317,7 @@ for (const queue of ['urm-search', 'urm-email', 'urm-images'])
       await tick();
       expect(mockWorkers).toHaveLength(1);
       expect(jest.mocked(Worker.create).mock.calls[0][0].workflowBundle).toEqual(
-        hosting === 'cloud-run' ? undefined : { codePath: '/fixture/workflows.js' }
+        hosting === 'cloud-run' || queue === 'urm-media' ? undefined : { codePath: '/fixture/workflows.js' }
       );
       let status = 0;
       mockRequestHandler?.(

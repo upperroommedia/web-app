@@ -1,13 +1,13 @@
 # Serverless bootstrap and process recovery boundary
 
-The guarded controller now has a controls, orchestration, search, email and images **bootstrap and stop cycles** in
+The guarded controller now has a all six role-specific **bootstrap and stop cycles** in
 source. It joins the owned zero-pool/account/grant receipts, starts desired manual
 count one, observes the exact native non-current role queues, then stops the same
 owned pool under the original parent. Observation failure also enters owned stop;
 uncertain authority, protected work or an unknown result retains the fence.
-The source also connects a kept-running controls, orchestration, search, email or images activation and a separate stop of
+The source also connects a kept-running role-specific activation and a separate stop of
 that exact unused activation. None of these operations has been applied to Cloud Run.
-Media activation and guarded promotion remain unimplemented.
+Guarded native promotion remains unimplemented.
 
 The final native role-readiness collector still requires candidate versions current,
 with no ramp, on the real role queues. The cycle cannot replace that collector.
@@ -31,7 +31,7 @@ The existing integration CI includes two additional real SDK tests:
 
 The serial release-recovery CI also runs
 `scripts/integration/temporal-controls-bootstrap.native.mjs`: actual local SDK
-old pinned waiting-run inventory, non-current controls/search/email/images Activity and orchestration Workflow/Activity registration,
+old pinned waiting-run inventory, non-current controls/search/email/images/media Activity and orchestration Workflow/Activity registration,
 provider-lock preservation, and explicit candidate-run denial against the dedicated
 Firestore emulator. Controlled Cloud API tests cover the scale/stop protocol;
 the actual Firestore checkpoint regression checks paused authority, immutable
@@ -165,8 +165,7 @@ protection before its sole saved conditional stop. A current or working candidat
 cannot be forced to zero. Cleanup has no authorization-expiry shortcut. Desired
 zero still proves neither process termination nor drain. After this stop, the
 original cycle origin cannot authorize another activation; a new origin requires a
-separately reviewed contract. Media activation, media
-capacity and guarded promotion remain out of scope.
+separately reviewed contract. Actual media capacity and guarded promotion remain unproved.
 
 Any extension to other roles and the later handoff must retain these requirements:
 
@@ -249,4 +248,32 @@ The quota value is a currently enforced limit, per the
 It is not usage, free disk, a reservation, native filesystem allocation or process
 proof. Actual allocation, existing runtime statfs/reservation guards, a same-host
 canary and application recovery evidence remain necessary before media promotion
-or readiness. Media bootstrap/retention actions remain unsupported in this slice.
+or readiness. Media bootstrap/retention actions are now source-connected as described below; no native Cloud Run activation has been performed.
+
+## Connected media bootstrap, retained activation and unused stop
+
+`bootstrap-stop-cloud-run-media`, `activate-cloud-run-media-pool` and
+`stop-cloud-run-media-activation` have fixed role-specific checkpoint and receipt
+namespaces. Their eleven/twelve/thirteen-ID manifests join the original owned
+pool, runner, scaler and existing narrow project/Storage grants. The media pool
+retains its existing Activity-only `urm-media` ownership in both hosting modes.
+
+Only a zero-to-one allocation reads sufficient fresh native disk quota metadata.
+Both original component timestamps and the quota digest remain in the saved
+attempt and must still agree after the awaited checkpoint and after credential
+acquisition, immediately before PATCH. A later fresh read cannot renew the original
+attempt's clock. The exact source resource template and budgets remain unchanged.
+
+Quota metadata cannot obstruct deallocation of an already allocated, unused pool.
+One-to-zero preserves and validates the original allocation evidence, then requires
+all exact pool identity, paused authority, compute isolation, non-current routing
+and unused-work checks. It does not perform a new quota GET or claim current
+capacity. Thus quota API failure or a lower effective limit cannot strand otherwise
+authorized same-parent cleanup; an active or uncertain candidate still cannot be
+forced to zero. Unknown ACKs remain GET-only, with no automatic resend.
+
+The native local fixture now checks all six exact queue inventories and each
+current-routing denial after a positive zero-open baseline. This demonstrates the
+local SDK routing/metadata guard only. No media processing, disk allocation,
+available filesystem capacity, effective runtime access, Cloud Run process
+recovery, promotion, WCI handoff or staging readiness follows from these tests.
