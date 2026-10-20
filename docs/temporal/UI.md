@@ -50,6 +50,10 @@ Image uploads transfer an immutable source, then observe an `image.ingest` job a
 
 ## Presentation and accessibility
 
+Preserve the user-facing layout and visual design from `main`. Temporal changes task execution and the source of status updates; it is not a redesign of upload or publishing workflows. The upload dialog keeps the existing compact styling and animations, shows measured byte-transfer progress only while transferring, and waits for fresh audio-job success before displaying completion. Normal users do not need workflow IDs, job cards or operational diagnostics to upload a sermon.
+
+The Activity navigation belongs under admin-only Administration. On sermon details, detailed history appears once in the admin-only Advanced activity section, collapsed by default. The publishing panel retains its controls and status without repeating that history. Keep necessary recovery and uncertainty messages clear without turning normal workflows into an operations dashboard.
+
 Activity has a persistent navigation entry, responsive summaries and deep links. Task details show actual steps, attempts, retry times, safe failures and allowed recovery actions. Progress is determinate only when a step reports a measurable completed/total pair. No overall percentage is invented from elapsed time or animation.
 
 Live announcements describe state and step changes, not every byte or elapsed second. Status is readable without color or motion. Commands remain disabled when observations are outdated. Details distinguish **Cancellation requested**, **Checking the destination**, **Needs attention** and terminal outcomes.

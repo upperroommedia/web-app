@@ -29,9 +29,15 @@ interface SermonPublishPanelProps {
   onUpdate?: () => void;
   onRequestAddToSeries?: () => void;
   initialAdvancedOpen?: boolean;
+  showActivityHistory?: boolean;
 }
 
-function SermonPublishPanel({ sermon, initialAdvancedOpen = false, onRequestAddToSeries }: SermonPublishPanelProps) {
+function SermonPublishPanel({
+  sermon,
+  initialAdvancedOpen = false,
+  showActivityHistory = true,
+  onRequestAddToSeries,
+}: SermonPublishPanelProps) {
   const { user } = useAuth();
   const environment = useProviderEnvironment();
   const [scenario, setScenario] = useState<ProviderSimulationScenario>('success');
@@ -349,7 +355,7 @@ function SermonPublishPanel({ sermon, initialAdvancedOpen = false, onRequestAddT
           </Button>
         </Stack>
       </Collapse>
-      <EntityJobHistory entity={entity} activeRefs={sermon.activeDurableJobs} />
+      {showActivityHistory && <EntityJobHistory entity={entity} activeRefs={sermon.activeDurableJobs} />}
     </Stack>
   );
 }

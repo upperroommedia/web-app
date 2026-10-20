@@ -18,7 +18,6 @@ import Button from '@mui/material/Button';
 import Typography from '@mui/material/Typography';
 import Box from '@mui/material/Box';
 import { useAlgoliaSearch } from '../../context/search/AlgoliaSearchContext';
-import SearchAttribution from '../algoliaComponents/SearchAttribution';
 import { browseSpeakers, type BrowsePage } from '../../utils/algolia/browseRecords';
 import { applySpeakerImageDefaults, loadSpeakerImageDefaults } from '../../utils/speakerImageDefaults';
 
@@ -168,7 +167,6 @@ function SpeakerSelector({
 
   return (
     <>
-      {client && <SearchAttribution />}
       <Autocomplete
         fullWidth
         value={sermonSpeakers}

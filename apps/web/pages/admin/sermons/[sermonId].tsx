@@ -894,6 +894,7 @@ const SermonDetailsPage = () => {
                   </Typography>
                   <SermonPublishPanel
                     sermon={sermon}
+                    showActivityHistory={false}
                     onUpdate={() => {
                       if (sermon.seriesId) {
                         void refreshSeriesState(sermon.seriesId);

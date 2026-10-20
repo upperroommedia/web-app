@@ -29,6 +29,7 @@ jest.mock('../utils/durableJobs', () => ({
   submitDurableIntent: jest.fn(),
   DurableAdmissionUnknownError: class extends Error {},
 }));
+jest.mock('../components/AvatarWithDefaultImage', () => ({ __esModule: true, default: () => null }));
 jest.mock('../firebase/firebase', () => ({ isDevelopment: false }));
 jest.mock('../firebase/firestore', () => ({
   __esModule: true,
@@ -139,6 +140,14 @@ beforeEach(() => {
 });
 
 describe('rendered durable job tracking', () => {
+  it('omits embedded history when the details page provides advanced activity separately', () => {
+    const html = renderToStaticMarkup(<SermonPublishPanel sermon={sermon} showActivityHistory={false} />);
+    expect(html).not.toContain('aria-label="Recent activity"');
+    expect(buttonMarkup(html, 'Unpublish everywhere')).toHaveLength(1);
+    const standalone = renderToStaticMarkup(<SermonPublishPanel sermon={sermon} />);
+    expect(standalone).toContain('aria-label="Recent activity"');
+  });
+
   it.each([
     { name: 'loading', status: undefined, loading: true, error: false },
     { name: 'unavailable', status: undefined, loading: false, error: true },
@@ -228,7 +237,7 @@ describe('rendered durable job tracking', () => {
     }
   );
 
-  it('renders one audio child, one cancellation action, and one sermon footer link', () => {
+  it('keeps the familiar upload dialog with one cancellation action and sermon link, without activity cards', () => {
     const upload = job({ result: { mediaJobId: 'audio' } });
     const audio = job({ jobId: 'audio', kind: 'audio.process', state: 'queued', actions: ['cancel'] });
     useDurableJobMock.mockImplementation((id?: string) =>
@@ -244,13 +253,59 @@ describe('rendered durable job tracking', () => {
         onNavigateToSermon={() => undefined}
       />
     );
-    expect((html.match(/aria-label="Process audio status"/g) ?? []).length).toBe(1);
+    expect(html).not.toContain('aria-label="Process audio status"');
+    expect(html).toContain('aria-label="Audio processing"');
     expect(buttonMarkup(html, 'Request cancellation')).toHaveLength(1);
-    expect(buttonMarkup(html, 'View sermon')).toHaveLength(1);
+    expect(buttonMarkup(html, 'View Sermon')).toHaveLength(1);
     expect(html).not.toContain('>Open sermon<');
     expect(html).toContain('Source received');
     expect(html).toContain('Queued');
     expect(html).not.toMatch(/role="status"[^>]*>Complete</);
+  });
+
+  it.each([
+    { state: 'queued' as const, stale: false, complete: false },
+    { state: 'succeeded' as const, stale: true, complete: false },
+    { state: 'succeeded' as const, stale: false, complete: true },
+  ])(
+    'shows completion only for fresh, confirmed audio processing: $state / stale=$stale',
+    ({ state, stale, complete }) => {
+      const upload = job({ result: { mediaJobId: 'audio' } });
+      const audio = job({ jobId: 'audio', kind: 'audio.process', state });
+      useDurableJobMock.mockImplementation((id?: string) => ({
+        ...status(id === 'upload' ? upload : id === 'audio' ? audio : undefined),
+        stale: id === 'audio' && stale,
+      }));
+      const html = renderToStaticMarkup(
+        <UploadProgressComponent
+          isUploading={false}
+          audioSource={undefined}
+          uploadProgress={{ phase: 'admitted', percent: 100, message: '', error: false }}
+          receipt={receipt}
+          sermon={sermon}
+          onNavigateToSermon={() => undefined}
+        />
+      );
+      expect(html.includes('Upload Complete!')).toBe(complete);
+      expect(html).not.toContain('/admin/activity');
+      expect(html).not.toContain('Workflow');
+      if (!complete) expect(html).not.toContain('aria-valuenow="100"');
+    }
+  );
+
+  it('shows measured file transfer without treating 100 percent sent as processing completion', () => {
+    const html = renderToStaticMarkup(
+      <UploadProgressComponent
+        isUploading
+        audioSource={{ type: 'File', source: new File(['audio'], 'sermon.wav') }}
+        uploadProgress={{ phase: 'transferring', percent: 100, message: '', error: false }}
+        sermon={sermon}
+      />
+    );
+    expect(html).toContain('aria-label="Audio file transfer"');
+    expect(html).toContain('aria-valuenow="100"');
+    expect(html).not.toContain('Upload Complete!');
+    expect(buttonMarkup(html, 'View Sermon')).toHaveLength(0);
   });
 
   it('propagates suppressed entity navigation into the single child panel', () => {
