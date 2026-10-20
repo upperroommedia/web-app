@@ -6,6 +6,7 @@ import { assertNativeSnapshot, nativeSnapshotProof, proofDigest } from './tempor
 async function saveCheckpoint({ firestore, lockRef, controlRef, stateRef,
   immutableReceipt, creationReceipt, ownedOperation, expectedAuthority, config, operationId, bindingDigest, operatorPrincipal, identityState, kind }) {
   const [field, action] = { identity: ['cloudIdentityPreparation', 'prepare-cloud-run-identity'],
+    eventarcCycle: ['cloudDispatchEventarcCycle', 'prepare-stop-cloud-run-dispatch-eventarc'],
     schedulerCycle: ['cloudDispatchSchedulerCycle', 'prepare-stop-cloud-run-dispatch-scheduler'],
     eventarcAudit: ['cloudEventarcAuditPreparation', 'prepare-cloud-run-eventarc-audit'],
     wakeStop: ['cloudDispatchWakeStop', 'stop-cloud-run-dispatch-wake'],
@@ -18,8 +19,8 @@ async function saveCheckpoint({ firestore, lockRef, controlRef, stateRef,
     scaler: ['cloudScalerAccessPreparation', 'prepare-cloud-run-scaler-access'] }[kind] ?? [];
   if (!field) throw new Error('PREPARATION_KIND_REQUIRED');
   await firestore.runTransaction(async tx => {
-    const creationState = kind === 'schedulerCycle' ? identityState.creationState : undefined;
-    if (kind === 'schedulerCycle' && (['created', 'stopping', 'completed'].includes(identityState.stage) && !creationState ||
+    const creationState = ['schedulerCycle', 'eventarcCycle'].includes(kind) ? identityState.creationState : undefined;
+    if (['schedulerCycle', 'eventarcCycle'].includes(kind) && (['created', 'stopping', 'completed'].includes(identityState.stage) && !creationState ||
       creationState && (creationState.plan?.operationId !== operationId || proofDigest(creationState.plan) !== proofDigest(identityState.plan?.creation))))
       throw new Error('SCHEDULER_CREATION_PLAN_CHANGED');
     if (creationState && (!creationReceipt || creationState.stage !== 'completed')) throw new Error('SCHEDULER_CREATION_RECEIPT_REQUIRED');
@@ -73,3 +74,5 @@ export const saveDispatchWakeStopCheckpoint = options => saveCheckpoint({ ...opt
 export const saveEventarcAuditPreparationCheckpoint = options => saveCheckpoint({ ...options, kind: 'eventarcAudit' });
 
 export const saveDispatchSchedulerCycleCheckpoint = options => saveCheckpoint({ ...options, kind: 'schedulerCycle' });
+
+export const saveDispatchEventarcCycleCheckpoint = options => saveCheckpoint({ ...options, kind: 'eventarcCycle' });
