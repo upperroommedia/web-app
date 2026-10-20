@@ -10,6 +10,10 @@ import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
 import Box from '@mui/material/Box';
+import Accordion from '@mui/material/Accordion';
+import AccordionSummary from '@mui/material/AccordionSummary';
+import AccordionDetails from '@mui/material/AccordionDetails';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
 import CircularProgress from '@mui/material/CircularProgress';
@@ -623,13 +627,30 @@ const SermonDetailsPage = () => {
                         )}
                       </Stack>
 
-                      <Box sx={{ width: '100%' }}>
-                        <EntityJobHistory
-                          entity={{ type: 'sermon', id: sermon.id }}
-                          activeRefs={sermon.activeDurableJobs}
-                        />
-                        {relatedJob && <JobStatusPanel job={relatedJob} />}
-                      </Box>
+                      {user?.isAdmin() && (
+                        <Accordion
+                          key={sermon.id}
+                          disableGutters
+                          elevation={0}
+                          slotProps={{ transition: { unmountOnExit: true } }}
+                          sx={{ width: '100%', border: 1, borderColor: 'divider', '&:before': { display: 'none' } }}
+                        >
+                          <AccordionSummary
+                            expandIcon={<ExpandMoreIcon />}
+                            id="sermon-advanced-activity-summary"
+                            aria-controls="sermon-advanced-activity-content"
+                          >
+                            <Typography variant="body2">Advanced activity</Typography>
+                          </AccordionSummary>
+                          <AccordionDetails>
+                            <EntityJobHistory
+                              entity={{ type: 'sermon', id: sermon.id }}
+                              activeRefs={sermon.activeDurableJobs}
+                            />
+                            {relatedJob && <JobStatusPanel job={relatedJob} />}
+                          </AccordionDetails>
+                        </Accordion>
+                      )}
                     </Stack>
                   </Stack>
                 </Stack>
