@@ -334,3 +334,31 @@ for(const role of ['controls','orchestration','search','email','images'])for(con
   }
  }finally{await deleteApp(app);}
 });
+
+test('pool readonly native pre-send fence preserves the original operation/control/state snapshots',async()=>{
+ const {assertPoolPreparationAuthority}=await import('../temporal-preparation-checkpoint.mjs');
+ const app=initializeApp({projectId:'demo-pool-presend'},randomUUID()),firestore=getFirestore(app);
+ try{for(const drift of ['operation','control','state']){
+  const prefix=`_poolPreSendTests/${randomUUID()}/records`,lockRef=firestore.doc(`${prefix}/op`),controlRef=firestore.doc(`${prefix}/control`),stateRef=firestore.doc(`${prefix}/state`);
+  const releaseId=randomUUID(),operationId=randomUUID(),bindingDigest='e'.repeat(64),config={releaseId,domains:['publishing']};
+  await lockRef.create({action:'prepare-cloud-run-pool',operationId,releaseId,bindingDigest});await controlRef.create({releaseId,admission:'paused',domains:{publishing:{admission:'paused'}}});await stateRef.create({releaseId,phase:'provider-usage-ready'});
+  const options={firestore,lockRef,controlRef,stateRef,config,operationId,bindingDigest,ownedOperation:nativeSnapshotProof(await lockRef.get()),expectedAuthority:{control:nativeSnapshotProof(await controlRef.get()),state:nativeSnapshotProof(await stateRef.get())}};
+  await assertPoolPreparationAuthority(options);await ({operation:lockRef,control:controlRef,state:stateRef}[drift]).update({changedDuringCredential:true});await assert.rejects(assertPoolPreparationAuthority(options));
+  for(const ref of [lockRef,controlRef,stateRef])await ref.delete();
+ }}finally{await deleteApp(app);}
+});
+
+test('pool quota and isolation original attempt cannot be replaced or rolled back in native checkpoints',async()=>{
+ const app=initializeApp({projectId:'demo-pool-immutable'},randomUUID()),firestore=getFirestore(app);
+ const prefix=`_poolImmutableTests/${randomUUID()}/records`,lockRef=firestore.doc(`${prefix}/op`),controlRef=firestore.doc(`${prefix}/control`),stateRef=firestore.doc(`${prefix}/state`),immutableReceipt=firestore.doc(`${prefix}/receipt`);
+ try{
+ const releaseId=randomUUID(),operationId=randomUUID(),bindingDigest='e'.repeat(64),config={releaseId,domains:['publishing']};
+ await lockRef.create({action:'prepare-cloud-run-pool',operationId,releaseId,bindingDigest});await controlRef.create({releaseId,admission:'paused',domains:{publishing:{admission:'paused'}}});await stateRef.create({releaseId,phase:'provider-usage-ready'});
+ const options={firestore,lockRef,controlRef,stateRef,immutableReceipt,config,operationId,bindingDigest,operatorPrincipal:{email:'operator@example.test'},expectedAuthority:{control:nativeSnapshotProof(await controlRef.get()),state:nativeSnapshotProof(await stateRef.get())}};
+ let ownedOperation=nativeSnapshotProof(await lockRef.get());const planned={stage:'planned',plan:{operationId,role:'media'}};
+ ownedOperation=await savePoolPreparationCheckpoint({...options,ownedOperation,identityState:planned});
+ const attempted={...planned,stage:'attempted',attemptedAt:new Date().toISOString(),prerequisites:{mediaDiskQuota:{quotaSHA256:'a'.repeat(64)}},isolation:{inventorySHA256:'b'.repeat(64)}};
+ ownedOperation=await savePoolPreparationCheckpoint({...options,ownedOperation,identityState:attempted});
+ for(const bad of [{...attempted,stage:'planned'},{...attempted,prerequisites:{mediaDiskQuota:{quotaSHA256:'c'.repeat(64)}}},{...attempted,isolation:{inventorySHA256:'d'.repeat(64)}}])await assert.rejects(savePoolPreparationCheckpoint({...options,ownedOperation,identityState:bad}));
+ }finally{for(const ref of [lockRef,controlRef,stateRef,immutableReceipt])await ref.delete();await deleteApp(app);}
+});

@@ -218,3 +218,35 @@ a desired manual count cannot authorize that claim. Preserve a nonzero active
 candidate during the reviewed transition. WCI stays detached until traditional
 pollers and unknown work are authoritatively drained and retirement is audited.
 The existing recovery/dispatch hard stop remains in place.
+
+## Media disk quota boundary before zero-pool creation
+
+The [worker-pool ephemeral disk guide](https://docs.cloud.google.com/run/docs/configuring/workerpools/ephemeral-disk)
+explicitly documents disk volumes up to 100 GiB, including per-instance and
+regional quota requirements. This clarifies the generic Volume reference's
+ambiguous memory-only field description. Native read-only staging quota metadata
+on 2026-10-20 reports effective 100 GiB for both instance and regional limits in
+us-central1. This is an operator observation, not candidate allocation or available
+capacity. No quota increase was requested.
+
+The canonical `prepare-cloud-run-pool` action now requires exact native Cloud
+Quotas identities, byte units and the explicit us-central1 effective values before
+creating a zero-target media pool. Desired/pending values, ambiguous locations,
+rollouts and malformed responses cannot authorize creation. Both original component
+timestamps and the stable metadata digest survive the saved attempt and are
+checked again after Google credential acquisition immediately before the one POST.
+The source template remains 100 GiB disk, two CPUs and 4 GiB memory; existing
+20 GiB source/output, 64 GiB workspace and 16 GiB headroom budgets are unchanged.
+
+All zero-pool creation also rechecks the original owned operation and paused
+control/state snapshots in a read-only Firestore transaction at that HTTP boundary.
+The original attempted prerequisites, quota evidence, compute isolation, timestamp
+and known native operation cannot be replaced or rolled backward by checkpoints.
+This does not make Firestore and the Cloud API atomic.
+
+The quota value is a currently enforced limit, per the
+[Cloud Quotas resource definition](https://docs.cloud.google.com/docs/quotas/reference/rest/v1beta/folders.locations.services.quotaInfos).
+It is not usage, free disk, a reservation, native filesystem allocation or process
+proof. Actual allocation, existing runtime statfs/reservation guards, a same-host
+canary and application recovery evidence remain necessary before media promotion
+or readiness. Media bootstrap/retention actions remain unsupported in this slice.

@@ -44,7 +44,7 @@ function validateBinding(config) {
     !Number.isInteger(config.maxInstances) ||
     config.maxInstances < 1 ||
     config.maxInstances > 3 ||
-    // Media's reviewed regional disk quota covers only one concurrent workspace.
+    // Source bounds one workspace; fresh native effective disk quotas are a separate mandatory preparation gate.
     (config.role === 'media' && config.maxInstances !== 1) ||
     !Number.isInteger(config.stabilizationSeconds) ||
     config.stabilizationSeconds < 90 ||

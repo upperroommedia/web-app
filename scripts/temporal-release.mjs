@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import {assertPoolPreparationAuthority} from './temporal-preparation-checkpoint.mjs';
 import {bootstrapStopCloudRunImagesPool,activateCloudRunImagesPool,stopCloudRunImagesActivation} from './temporal-bootstrap-pool.mjs';
 import {saveImagesBootstrapCycleCheckpoint,saveImagesActivationCheckpoint,saveImagesActivationStopCheckpoint} from './temporal-preparation-checkpoint.mjs';
 import {bootstrapStopCloudRunEmailPool,activateCloudRunEmailPool,stopCloudRunEmailActivation} from './temporal-bootstrap-pool.mjs';
@@ -1243,6 +1244,7 @@ await runWithCleanup(
             if (hasSaved) cloudIdentityPending = true;
             const immutableReceipt = firestore.doc(`_control/temporalCloudPoolPreparation-${operationId}`);
             const result = await prepareCloudRunZeroPool({ platform, role: preparationArguments.role, settings,
+              authorizeCreate:()=>assertPoolPreparationAuthority({firestore,lockRef,controlRef,stateRef,ownedOperation,expectedAuthority,config,operationId,bindingDigest}),
               operationId, releaseId: config.releaseId, evidenceDigest: preparationArguments.digest,
               identityReceipt: runnerReceipt.data(), api,
               observeComputeIsolation: () => verifyCloudRunComputeIsolation({ binding, config, platform, firestore }),

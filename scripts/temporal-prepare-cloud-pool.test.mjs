@@ -5,7 +5,7 @@ import { serverlessResourceNames } from './temporal-serverless-platform.mjs';
 import { dispatchResourceNames } from './temporal-serverless-dispatch-resources.mjs';
 const buildId = 'a'.repeat(40), image = `us-central1-docker.pkg.dev/urm-app-staging/urm-temporal/worker@sha256:${'b'.repeat(64)}`;
 function platform() {
-  const workerRoles = ['orchestration', 'controls'];
+  const workerRoles = ['orchestration', 'controls','media'];
   return { schemaVersion: 1, environment: 'staging', workerHosting: 'cloud-run', connectionMode: 'temporal-cloud',
     firebaseProjectId: 'urm-app-staging', firebaseResources: { storageBucket: 'urm-app-staging.firebasestorage.app', imagesBucket: 'urm-app-staging-images', databaseUrl: 'https://urm-app-staging-default-rtdb.firebaseio.com/' },
     temporalNamespace: 'urm-app-staging.qwejt', cloudAccountId: 'qwejt', cloudProvider: 'gcp', cloudRegion: 'us-central1', cloudAddress: 'us-central1.gcp.api.temporal.io:7233', cloudReplicaRegions: [], cloudEvidence: '/private/tmp/native-namespace', workerBuildId: buildId, workerImage: image, workerRoles, dispatcherEnabled: false,
@@ -13,17 +13,19 @@ function platform() {
     roleBindings: workerRoles.map(role => ({ projectId: 'urm-app-staging', region: 'us-central1', namespace: 'urm-app-staging.qwejt', buildId, role, ...serverlessResourceNames(buildId, role), image, maxInstances: 1, stabilizationSeconds: 180 })) };
 }
 
-function fixture() {
-  const p = platform(), runner = p.roleBindings[1].runnerServiceAccount;
+function fixture(role='controls') {
+  const p = platform(), runner = p.roleBindings.find(b=>b.role===role).runnerServiceAccount;
   const releaseId = '11111111-2222-4333-8444-555555555555', operationId = '22222222-2222-4333-8444-555555555555';
   const op = 'projects/urm-app-staging/locations/us-central1/operations/native-create';
   let state, pool, postCount = 0;
   const calls = [], states = [];
-  const options = { platform: p, role: 'controls', settings: { apiKeyVersion: '2', runtimeSecrets: [] }, operationId, releaseId, evidenceDigest: 'c'.repeat(64),
-    identityReceipt: { releaseId, identityState: { stage: 'completed', plan: { kind: 'runner', role: 'controls', buildId, email: runner, evidenceDigest: 'c'.repeat(64) }, account: { email: runner, uniqueId: '12345678901234567890', description: 'owned-create' } } },
+  const options = { authorizeCreate:async()=>{}, platform: p, role, settings: { apiKeyVersion: '2', runtimeSecrets: [] }, operationId, releaseId, evidenceDigest: 'c'.repeat(64),
+    identityReceipt: { releaseId, identityState: { stage: 'completed', plan: { kind: 'runner', role, buildId, email: runner, evidenceDigest: 'c'.repeat(64) }, account: { email: runner, uniqueId: '12345678901234567890', description: 'owned-create' } } },
     observeComputeIsolation: async () => ({ namespace: p.temporalNamespace, inventorySHA256: 'd'.repeat(64), observedAt: new Date().toISOString() }),
     save: async next => { state = structuredClone(next); states.push(state.stage); },
-    api: async (url, method = 'GET', body) => {
+    api: async (url, method = 'GET', body,beforeSend) => {
+      if(beforeSend)await beforeSend();
+      if(url.includes('cloudquotas.googleapis.com'))return {name:url.split('/v1/')[1],quotaId:url.split('/').at(-1),metric:url.endsWith('MaxPerInstanceEphemeralDiskSizePerProjectRegion')?'run.googleapis.com/max_per_instance_ephemeral_disk':'run.googleapis.com/ephemeral_disk_allocation',service:'run.googleapis.com',metricUnit:'By',dimensions:['region'],dimensionsInfos:[{dimensions:{region:'us-central1'},applicableLocations:['us-central1'],details:{value:'107374182400'}}]};
       calls.push([method, url]);
       if (url.startsWith('https://iam.googleapis.com/')) return { projectId: 'urm-app-staging', email: runner, uniqueId: '12345678901234567890', description: 'owned-create' };
       if (url.includes('secretmanager') && url.includes(':getIamPolicy')) return { etag: 'native', bindings: [{ role: 'roles/secretmanager.secretAccessor', members: [`serviceAccount:${runner}`] }] };
@@ -105,3 +107,34 @@ for (const bad of ['operation', 'nonzero', 'null-count', 'command', 'marker', 'u
     await assert.rejects(prepareCloudRunZeroPool(f.options)); assert.equal(f.posts, 1);
     assert.notEqual(f.saved.stage, 'completed');
   });
+
+test('media zero preparation saves effective quotas before one POST and checks again after credential acquisition',async()=>{
+ const f=fixture('media');await prepareCloudRunZeroPool(f.options);assert.equal(f.posts,1);assert.equal(f.saved.prerequisites.mediaDiskQuota.components.length,2);
+ await prepareCloudRunZeroPool({...f.options,saved:f.saved});assert.equal(f.posts,1);
+});
+for(const bad of ['instance','regional','desired-only','credential-drift','delayed-checkpoint'])test(`media ${bad} quota cannot authorize create`,async()=>{
+ const f=fixture('media'),api=f.options.api,save=f.options.save;let credential=false;
+ f.options.save=async state=>{await save(state);if(bad==='delayed-checkpoint'&&state.stage==='attempted')state.prerequisites.mediaDiskQuota.components.forEach(c=>c.observedAt=new Date(Date.now()-6000).toISOString());};
+ f.options.api=async(...args)=>{
+  if(args[1]==='POST'&&bad==='credential-drift')credential=true;
+  const result=await api(...args);
+  if(args[0].includes('cloudquotas.googleapis.com')){
+   if(bad==='desired-only'){delete result.dimensionsInfos[0].details.value;result.dimensionsInfos[0].details.desiredValue='107374182400';}
+   if(bad==='instance'&&args[0].includes('MaxPerInstance')||bad==='regional'&&args[0].endsWith('EphemeralDiskAllocPerProjectRegion')||credential)result.dimensionsInfos[0].details.value='10737418240';
+  }return result;
+ };
+ await assert.rejects(prepareCloudRunZeroPool(f.options));assert.equal(f.posts,0);
+});
+
+test('pool create authority is checked after credential acquisition before HTTP',async()=>{
+ const f=fixture(),api=f.options.api;let authorized=true;
+ f.options.authorizeCreate=async()=>{if(!authorized)throw new Error('authority changed');};
+ f.options.api=async(...args)=>{if(args[1]==='POST')authorized=false;return api(...args);};
+ await assert.rejects(prepareCloudRunZeroPool(f.options));assert.equal(f.posts,0);
+});
+for(const finalAwait of [2,4])test(`media final awaited authorizer ${finalAwait} cannot renew expired original quota`,async()=>{
+ const f=fixture('media'),now=Date.now;let calls=0;
+ f.options.authorizeCreate=async()=>{if(++calls===finalAwait)Date.now=()=>now()+6000;};
+ try{await assert.rejects(prepareCloudRunZeroPool(f.options));assert.equal(f.posts,0);}
+ finally{Date.now=now;}
+});

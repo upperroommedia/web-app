@@ -54,6 +54,16 @@ async function saveCheckpoint({ firestore, lockRef, controlRef, stateRef,
     if (current.get(field)?.plan &&
       proofDigest(current.get(field).plan) !== proofDigest(identityState.plan))
       throw new Error('IDENTITY_PREPARATION_MANIFEST_CHANGED');
+    if(kind==='pool'){
+      const before=current.get(field);
+      if(before){
+        const transitions={planned:['planned','attempted'],attempted:['attempted','acknowledged'],acknowledged:['acknowledged','completed','failed'],completed:['completed'],failed:['failed']};
+        if(!(transitions[before.stage]??[]).includes(identityState.stage))throw new Error('POOL_PREPARATION_STAGE_ROLLBACK');
+        if(before.stage!=='planned'&&['prerequisites','isolation','attemptedAt'].some(key=>proofDigest(before[key]??null)!==proofDigest(identityState[key]??null)))throw new Error('POOL_PREPARATION_ORIGINAL_ATTEMPT_CHANGED');
+        if(before.nativeOperation&&before.nativeOperation!==identityState.nativeOperation)throw new Error('POOL_PREPARATION_NATIVE_OPERATION_CHANGED');
+        if(before.stage==='completed'&&proofDigest(before)!==proofDigest(identityState))throw new Error('POOL_PREPARATION_COMPLETED_CHANGED');
+      }
+    }
     if (kind === 'dispatchActivation' && Object.hasOwn(current.get(field) ?? {}, 'workerIntent') &&
       proofDigest(current.get(field).workerIntent) !== proofDigest(identityState.workerIntent ?? null))
       throw new Error('DISPATCH_ACTIVATION_PROBE_INTENT_CHANGED');
@@ -135,3 +145,15 @@ export const saveEmailActivationStopCheckpoint=options=>saveCheckpoint({...optio
 export const saveImagesBootstrapCycleCheckpoint=options=>saveCheckpoint({...options,kind:'imagesCycle'});
 export const saveImagesActivationCheckpoint=options=>saveCheckpoint({...options,kind:'imagesActivation'});
 export const saveImagesActivationStopCheckpoint=options=>saveCheckpoint({...options,kind:'imagesAbort'});
+
+/** Read-only same-operation authority fence immediately before pool-create HTTP.
+ * This does not make Firestore and the Cloud API one atomic transaction.
+ */
+export async function assertPoolPreparationAuthority({firestore,lockRef,controlRef,stateRef,ownedOperation,expectedAuthority,config,operationId,bindingDigest}){
+ await firestore.runTransaction(async tx=>{
+  const [operation,control,state]=await Promise.all([tx.get(lockRef),tx.get(controlRef),tx.get(stateRef)]);
+  assertNativeSnapshot(ownedOperation,operation);assertNativeSnapshot(expectedAuthority.control,control);assertNativeSnapshot(expectedAuthority.state,state);
+  if(operation.get('action')!=='prepare-cloud-run-pool'||operation.get('operationId')!==operationId||operation.get('releaseId')!==config.releaseId||operation.get('bindingDigest')!==bindingDigest||
+   control.get('releaseId')!==config.releaseId||state.get('releaseId')!==config.releaseId||control.get('admission')!=='paused'||state.get('phase')!=='provider-usage-ready'||config.domains.some(domain=>control.get(`domains.${domain}.admission`)!=='paused'))throw new Error('POOL_PREPARATION_AUTHORITY_CHANGED');
+ },{readOnly:true});
+}

@@ -1,3 +1,4 @@
+import {observeMediaDiskQuota,assertMediaDiskQuotaFresh,assertMediaDiskQuotaProof} from './temporal-media-disk-quota.mjs';
 import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { validateCloudRunReleasePlatform } from './temporal-release-cloud-run.mjs';
@@ -45,18 +46,18 @@ export async function verifyPoolPreparationPrerequisites(plan, identityReceipt, 
       binding.role === 'roles/secretmanager.secretAccessor' && !binding.condition &&
       Array.isArray(binding.members) && binding.members.includes(`serviceAccount:${plan.runner}`))) fail();
   }
-  return { runnerUniqueId: account.uniqueId, secretReferences: [...refs.keys()].sort() };
+  return { runnerUniqueId: account.uniqueId, secretReferences: [...refs.keys()].sort(),...(plan.role==='media'?{mediaDiskQuota:await observeMediaDiskQuota(plan,api)}:{}) };
 }
 /** Create at most once. A lost create ACK remains fenced: no GET/name adoption,
  * inferred LRO or retry. A saved native LRO may be polled on a later resume.
  */
 export async function prepareCloudRunZeroPool({ platform, role, settings, operationId, releaseId, evidenceDigest,
-  identityReceipt, api, save, observeComputeIsolation, saved }) {
+  identityReceipt, api, save, observeComputeIsolation, authorizeCreate, saved }) {
   validateCloudRunReleasePlatform(platform);
   const binding = platform.roleBindings.find(binding => binding.role === role);
   if (!binding || !/^[a-f0-9-]{36}$/.test(operationId ?? '') || !/^[a-f0-9-]{36}$/.test(releaseId ?? '') ||
     !/^[a-f0-9]{64}$/.test(evidenceDigest ?? '') || typeof api !== 'function' || typeof save !== 'function' ||
-    typeof observeComputeIsolation !== 'function') fail();
+    typeof observeComputeIsolation !== 'function'||typeof authorizeCreate!=='function') fail();
   const body = renderServerlessWorkerPool(binding, settings);
   body.annotations = { 'urm.upperroom.media/preparation': operationId };
   const plan = { schemaVersion: 1, operationId, releaseId, evidenceDigest, role, buildId: platform.workerBuildId,
@@ -66,6 +67,7 @@ export async function prepareCloudRunZeroPool({ platform, role, settings, operat
     if (state !== undefined && (!state || !isDeepStrictEqual(state.plan, plan) ||
       !['planned', 'attempted', 'acknowledged', 'failed', 'completed'].includes(state.stage))) fail();
     if (state === undefined) { state = { plan, stage: 'planned' }; await save(state); }
+    if(plan.role==='media'&&['attempted','acknowledged','completed'].includes(state.stage))assertMediaDiskQuotaProof(state.prerequisites?.mediaDiskQuota);
     if (state.stage === 'attempted' || state.stage === 'failed') fail();
     if (state.stage === 'planned') {
       const prerequisitesProof = await verifyPoolPreparationPrerequisites(plan, identityReceipt, api);
@@ -77,11 +79,24 @@ export async function prepareCloudRunZeroPool({ platform, role, settings, operat
       state = { plan, stage: 'attempted', attemptedAt: new Date().toISOString(), prerequisites: prerequisitesProof, isolation };
       await save(state);
       // No automatic HTTP retry; this API has no requestId parameter.
-      const response = await api(`https://run.googleapis.com/v2/projects/urm-app-staging/locations/us-central1/workerPools?workerPoolId=${binding.poolName}`, 'POST', body);
+      const quotaFence=async()=>{
+        await authorizeCreate();
+        if(plan.role!=='media')return;
+        assertMediaDiskQuotaFresh(prerequisitesProof.mediaDiskQuota);
+        const fresh=await observeMediaDiskQuota(plan,api);
+        if(fresh.quotaSHA256!==prerequisitesProof.mediaDiskQuota.quotaSHA256)fail();
+        assertMediaDiskQuotaFresh(prerequisitesProof.mediaDiskQuota);
+        await authorizeCreate();
+        assertMediaDiskQuotaFresh(prerequisitesProof.mediaDiskQuota);
+        assertMediaDiskQuotaFresh(fresh);
+      };
+      if(quotaFence)await quotaFence();
+      const response = await api(`https://run.googleapis.com/v2/projects/urm-app-staging/locations/us-central1/workerPools?workerPoolId=${binding.poolName}`, 'POST', body,quotaFence);
       state = { ...state, stage: 'acknowledged', nativeOperation: operationName(response?.name) };
       await save(state);
     }
     if (state.stage === 'completed') {
+      if(plan.role==='media')await verifyPoolPreparationPrerequisites(plan,identityReceipt,api);
       const current = verifyPreparedPoolMetadata(plan, await api(`https://run.googleapis.com/v2/${body.name}`));
       if (!isDeepStrictEqual(state.pool, current)) fail();
       return state;
