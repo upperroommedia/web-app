@@ -17,7 +17,7 @@ function matches(expected, actual) {
     Object.entries(expected).every(([key, value]) => matches(value, actual[key]));
   return expected === actual;
 }
-function preparedPool(plan, actual) {
+export function verifyPreparedPoolMetadata(plan, actual) {
   if (!actual || normalize(actual.name) !== plan.body.name || typeof actual.uid !== 'string' || !actual.uid || actual.deleteTime ||
     (actual.reconciling !== undefined && actual.reconciling !== false) ||
     !/^[1-9][0-9]*$/.test(String(actual.generation ?? '')) || String(actual.generation) !== String(actual.observedGeneration) ||
@@ -81,7 +81,7 @@ export async function prepareCloudRunZeroPool({ platform, role, settings, operat
       await save(state);
     }
     if (state.stage === 'completed') {
-      const current = preparedPool(plan, await api(`https://run.googleapis.com/v2/${body.name}`));
+      const current = verifyPreparedPoolMetadata(plan, await api(`https://run.googleapis.com/v2/${body.name}`));
       if (!isDeepStrictEqual(state.pool, current)) fail();
       return state;
     }
@@ -97,8 +97,8 @@ export async function prepareCloudRunZeroPool({ platform, role, settings, operat
     } while (Date.now() < end);
     if (result?.done !== true) fail();
     if (result.error) { await save({ ...state, stage: 'failed', errorSHA256: hash(result.error) }); fail(); }
-    const completed = preparedPool(plan, result.response);
-    const current = preparedPool(plan, await api(`https://run.googleapis.com/v2/${body.name}`));
+    const completed = verifyPreparedPoolMetadata(plan, result.response);
+    const current = verifyPreparedPoolMetadata(plan, await api(`https://run.googleapis.com/v2/${body.name}`));
     if (!isDeepStrictEqual(completed, current)) fail();
     state = { ...state, stage: 'completed', pool: current, verifiedAt: new Date().toISOString(),
       scope: 'created configuration; desired manual count zero, not observed live instance count or activation readiness' };

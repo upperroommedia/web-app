@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { prepareCloudRunIdentity } from '../temporal-prepare-cloud-identity.mjs';
-import { saveIdentityPreparationCheckpoint, savePoolPreparationCheckpoint, saveSecretAccessPreparationCheckpoint } from '../temporal-preparation-checkpoint.mjs';
+import { saveIdentityPreparationCheckpoint, savePoolPreparationCheckpoint, saveSecretAccessPreparationCheckpoint, saveScalerAccessPreparationCheckpoint } from '../temporal-preparation-checkpoint.mjs';
 import { nativeSnapshotProof } from '../temporal-release-runtime.mjs';
 import { serverlessResourceNames } from '../temporal-serverless-platform.mjs';
 import { dispatchResourceNames } from '../temporal-serverless-dispatch-resources.mjs';
@@ -70,10 +70,10 @@ test('native checkpoint fences control/state drift before create and preserves c
   } finally { await deleteApp(app); }
 });
 
-for (const kind of ['pool', 'secret']) test(`${kind} checkpoint uses its own action and field under real native authority fences`, async () => {
-  const saveResource = kind === 'pool' ? savePoolPreparationCheckpoint : saveSecretAccessPreparationCheckpoint;
-  const field = kind === 'pool' ? 'cloudPoolPreparation' : 'cloudSecretAccessPreparation';
-  const action = kind === 'pool' ? 'prepare-cloud-run-pool' : 'prepare-cloud-run-secret-access';
+for (const kind of ['pool', 'secret', 'scaler']) test(`${kind} checkpoint uses its own action and field under real native authority fences`, async () => {
+  const saveResource = { pool: savePoolPreparationCheckpoint, secret: saveSecretAccessPreparationCheckpoint, scaler: saveScalerAccessPreparationCheckpoint }[kind];
+  const field = { pool: 'cloudPoolPreparation', secret: 'cloudSecretAccessPreparation', scaler: 'cloudScalerAccessPreparation' }[kind];
+  const action = { pool: 'prepare-cloud-run-pool', secret: 'prepare-cloud-run-secret-access', scaler: 'prepare-cloud-run-scaler-access' }[kind];
   const app = initializeApp({ projectId: 'demo-preparation-checkpoint' }, randomUUID()), db = getFirestore(app);
   const prefix = `_identityPreparationTests/${randomUUID()}/records`;
   const lockRef = db.doc(`${prefix}/operation`), controlRef = db.doc(`${prefix}/control`), stateRef = db.doc(`${prefix}/state`), immutableReceipt = db.doc(`${prefix}/receipt`);
