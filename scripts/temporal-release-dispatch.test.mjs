@@ -59,7 +59,7 @@ function fixture() {
     image,
     apiKeyVersion: platform.dispatch.apiKeyVersion,
   };
-  const service = renderServerlessDispatchService(config);
+  const service = renderServerlessDispatchService(config, 'enabled');
   Object.assign(service, {
     uid: 'service-uid',
     etag: 'service-etag',

@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 
 export interface ServerlessDispatchOptions {
   projectId: string;
+  admission: 'disabled' | 'enabled';
   reconcileJob: string;
   /** One bounded pass through the durable outbox. False requests delivery retry. */
   run(signal: AbortSignal): Promise<boolean>;
@@ -13,6 +14,8 @@ export interface ServerlessDispatchOptions {
  * The fixed-project dispatcher reads authoritative records rather than trusting an event snapshot.
  */
 export function createServerlessDispatchHandler(options: ServerlessDispatchOptions) {
+  if (!['disabled', 'enabled'].includes(options.admission)) throw new Error('Explicit dispatch admission required');
+  const admission = options.admission; // Immutable process configuration; callers cannot flip a prepared instance.
   if (!['urm-app-staging', 'urm-app'].includes(options.projectId)) throw new Error('Invalid dispatch project');
   if (
     !new RegExp(`^projects/${options.projectId}/locations/us-central1/jobs/[A-Za-z0-9_-]{1,500}$`).test(
@@ -36,7 +39,7 @@ export function createServerlessDispatchHandler(options: ServerlessDispatchOptio
       end(405);
       return;
     }
-    if (draining) {
+    if (draining || admission !== 'enabled') {
       end(503);
       return;
     }

@@ -54,7 +54,7 @@ function reconciled(resource, service = false) {
  * The guarded release supplies its Google transport. No invocation, IAM mutation,
  * Scheduler run or Firestore probe write occurs here. Remaining wake/recovery gates stay closed.
  */
-export async function verifyCloudRunDispatchConfiguration(platform, api) {
+export async function observeCloudRunDispatchService(platform, api, admission) {
   validateCloudRunReleasePlatform(platform);
   if (typeof api !== 'function') fail();
   const config = {
@@ -64,7 +64,7 @@ export async function verifyCloudRunDispatchConfiguration(platform, api) {
     image: platform.workerImage,
     apiKeyVersion: platform.dispatch.apiKeyVersion,
   };
-  const expected = renderServerlessDispatchService(config);
+  const expected = renderServerlessDispatchService(config, admission);
   try {
     const nativeService = await api(`https://run.googleapis.com/v2/${expected.name}`);
     const service = {
@@ -126,6 +126,15 @@ export async function verifyCloudRunDispatchConfiguration(platform, api) {
       service.trafficStatuses[0].tag
     )
       fail();
+    renderServerlessDispatchWakeups(config, service); // Validate the native service URI without creating wake resources.
+    return { config, expected, service, revision, nativeService };
+  } catch { return fail(); }
+}
+
+export async function verifyCloudRunDispatchConfiguration(platform, api) {
+  try {
+    const { config, expected, service, revision, nativeService } = await observeCloudRunDispatchService(platform, api, 'enabled');
+    const template = service.template;
     const wakeups = renderServerlessDispatchWakeups(config, service);
     const triggers = [];
     for (const wanted of wakeups.triggers) {

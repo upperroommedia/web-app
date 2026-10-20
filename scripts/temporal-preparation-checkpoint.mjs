@@ -6,6 +6,7 @@ import { assertNativeSnapshot, nativeSnapshotProof, proofDigest } from './tempor
 async function saveCheckpoint({ firestore, lockRef, controlRef, stateRef,
   immutableReceipt, ownedOperation, expectedAuthority, config, operationId, bindingDigest, operatorPrincipal, identityState, kind }) {
   const [field, action] = { identity: ['cloudIdentityPreparation', 'prepare-cloud-run-identity'],
+    service: ['cloudDispatchServicePreparation', 'prepare-cloud-run-dispatch-service'],
     pool: ['cloudPoolPreparation', 'prepare-cloud-run-pool'], secret: ['cloudSecretAccessPreparation', 'prepare-cloud-run-secret-access'],
     runtimeAccess: ['cloudRuntimeAccessPreparation', 'prepare-cloud-run-runtime-access'],
     runtimeRole: ['cloudRuntimeRolePreparation', 'prepare-cloud-run-runtime-role'],
@@ -48,3 +49,5 @@ export const saveFirestoreAccessPreparationCheckpoint = options => saveCheckpoin
 export const saveRuntimeRolePreparationCheckpoint = options => saveCheckpoint({ ...options, kind: 'runtimeRole' });
 
 export const saveRuntimeAccessPreparationCheckpoint = options => saveCheckpoint({ ...options, kind: 'runtimeAccess' });
+
+export const saveDispatchServicePreparationCheckpoint = options => saveCheckpoint({ ...options, kind: 'service' });

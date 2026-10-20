@@ -35,6 +35,7 @@ test('a valid outbox event wakes bounded dispatch without starting a polling loo
   const run = jest.fn().mockResolvedValue(true);
   const handler = createServerlessDispatchHandler({
     projectId: 'urm-app-staging',
+    admission: 'enabled' as const,
     reconcileJob: 'projects/urm-app-staging/locations/us-central1/jobs/dispatch-reconcile',
     run,
   });
@@ -46,6 +47,7 @@ test('a valid outbox event wakes bounded dispatch without starting a polling loo
 
 const config = (run = jest.fn().mockResolvedValue(true)) => ({
   projectId: 'urm-app-staging',
+    admission: 'enabled' as const,
   reconcileJob: 'projects/urm-app-staging/locations/us-central1/jobs/dispatch-reconcile',
   run,
 });
@@ -185,4 +187,22 @@ test('a timed-out dependency retains the single-pass slot until it actually sett
   } finally {
     jest.useRealTimers();
   }
+});
+
+
+test('prepared disabled service never acquires dispatch authority, including valid retries and reconciliation', async () => {
+  const run = jest.fn().mockResolvedValue(true);
+  const options = { ...config(run), admission: 'disabled' as const };
+  const handler = createServerlessDispatchHandler(options);
+  // Mutating the caller object cannot activate an already prepared process.
+  Object.assign(options, { admission: 'enabled' });
+  for (const overrides of [{}, { url: '/reconcile', headers: { 'x-cloudscheduler-jobname': options.reconcileJob } }, {}]) {
+    const call = request(handler, overrides); await call.done; expect(call.result().status).toBe(503);
+  }
+  const health = request(handler, { method: 'GET', url: '/healthz' }); await health.done;
+  expect(health.result().status).toBe(200); expect(run).not.toHaveBeenCalled();
+  await handler.drain();
+});
+test.each([undefined, null, 'true', 'ENABLED'])('missing or invalid admission %s fails closed', admission => {
+  expect(() => createServerlessDispatchHandler(Object.assign(config(), { admission }))).toThrow('Explicit dispatch admission required');
 });

@@ -87,6 +87,11 @@ export async function runDispatchService() {
     dispatcher = new OutboxDispatcher({ db: getFirestore(owner.app), client, projectId: config.projectId });
     handler = createServerlessDispatchHandler({
       projectId: config.projectId,
+      admission: (() => {
+        const admission = process.env.TEMPORAL_DISPATCH_ADMISSION;
+        if (admission !== 'enabled' && admission !== 'disabled') throw new Error('Explicit dispatch admission required');
+        return admission;
+      })(),
       reconcileJob,
       run: async (signal) => {
         await connection!.withDeadline(Date.now() + 20000, () => dispatcher!.tick(signal));

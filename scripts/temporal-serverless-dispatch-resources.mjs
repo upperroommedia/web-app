@@ -42,7 +42,8 @@ function validate(config) {
  * delivery; IAM remains mandatory. This body never grants public invocation.
  * The existing image's tini entrypoint is retained, only its node target changes.
  */
-export function renderServerlessDispatchService(config) {
+export function renderServerlessDispatchService(config, admission) {
+  if (!['disabled', 'enabled'].includes(admission)) throw new Error('Explicit dispatch admission required');
   validate(config);
   const names = dispatchResourceNames(config.buildId);
   const env = {
@@ -68,6 +69,7 @@ export function renderServerlessDispatchService(config) {
     TEMPORAL_WORKER_HOSTING: 'traditional',
     TEMPORAL_TASK_QUEUES: 'urm-orchestration',
     TEMPORAL_DISPATCHER_ENABLED: 'false',
+    TEMPORAL_DISPATCH_ADMISSION: admission,
     TEMPORAL_API_KEY_FILE: '/run/temporal-cloud/api-key',
     TEMPORAL_DISPATCH_RECONCILE_JOB: names.reconcileJob,
   };

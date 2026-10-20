@@ -18,7 +18,7 @@ const observed = () => {
 };
 test('private dispatch uses request-billed zero-minimum compute and a separate image entrypoint', () => {
   const c = config();
-  const s = renderServerlessDispatchService(c);
+  const s = renderServerlessDispatchService(c, 'enabled');
   const n = dispatchResourceNames(c.buildId);
   assert.equal(s.name, n.service);
   assert.equal(s.invokerIamDisabled, false);
@@ -89,7 +89,7 @@ for (const patch of [
   { runtimeSecrets: [{ name: 'SUBSPLASH_PASSWORD' }] },
 ])
   test('rejects unreviewed resource configuration', () =>
-    assert.throws(() => renderServerlessDispatchService({ ...config(), ...patch })));
+    assert.throws(() => renderServerlessDispatchService({ ...config(), ...patch }, 'enabled')));
 test('wakeups cannot target another service or arbitrary credential-bearing URL', () => {
   for (const patch of [
     { name: observed().name.replace('urm-app-staging', 'urm-app') },

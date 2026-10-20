@@ -25,7 +25,7 @@ export function renderPreparationWorkload(platform, role, settings) {
       !Array.isArray(settings.runtimeSecrets) || settings.runtimeSecrets.length) fail();
     return { type: 'service', runner: platform.dispatch.runnerServiceAccount,
       body: renderServerlessDispatchService({ projectId: platform.firebaseProjectId, region: platform.cloudRegion,
-        buildId: platform.workerBuildId, image: platform.workerImage, apiKeyVersion: settings.apiKeyVersion }) };
+        buildId: platform.workerBuildId, image: platform.workerImage, apiKeyVersion: settings.apiKeyVersion }, 'disabled') };
   }
   const binding = platform.roleBindings.find(binding => binding.role === role);
   if (!binding) fail();
