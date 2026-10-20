@@ -5,7 +5,7 @@ import { assertNativeSnapshot, nativeSnapshotProof, proofDigest } from './tempor
  */
 async function saveCheckpoint({ firestore, lockRef, controlRef, stateRef,
   immutableReceipt, creationReceipt, ownedOperation, expectedAuthority, config, operationId, bindingDigest, operatorPrincipal, identityState, kind }) {
-  const [field, action] = { emailCycle:['cloudEmailBootstrapCycle','bootstrap-stop-cloud-run-email'],emailActivation:['cloudEmailActivation','activate-cloud-run-email-pool'],emailAbort:['cloudEmailActivationStop','stop-cloud-run-email-activation'], searchCycle:['cloudSearchBootstrapCycle','bootstrap-stop-cloud-run-search'],searchActivation:['cloudSearchActivation','activate-cloud-run-search-pool'],searchAbort:['cloudSearchActivationStop','stop-cloud-run-search-activation'], orchestrationCycle:['cloudOrchestrationBootstrapCycle','bootstrap-stop-cloud-run-orchestration'], orchestrationActivation:['cloudOrchestrationActivation','activate-cloud-run-orchestration-pool'], orchestrationAbort:['cloudOrchestrationActivationStop','stop-cloud-run-orchestration-activation'], poolActivation: ['cloudControlsActivation','activate-cloud-run-controls-pool'], poolAbort: ['cloudControlsActivationStop','stop-cloud-run-controls-activation'], bootstrapCycle: ['cloudPoolBootstrapCycle', 'bootstrap-stop-cloud-run-controls'], dispatchActivation: ['cloudDispatchActivation', 'activate-cloud-run-dispatch-service'], identity: ['cloudIdentityPreparation', 'prepare-cloud-run-identity'],
+  const [field, action] = { imagesCycle:['cloudImagesBootstrapCycle','bootstrap-stop-cloud-run-images'],imagesActivation:['cloudImagesActivation','activate-cloud-run-images-pool'],imagesAbort:['cloudImagesActivationStop','stop-cloud-run-images-activation'], emailCycle:['cloudEmailBootstrapCycle','bootstrap-stop-cloud-run-email'],emailActivation:['cloudEmailActivation','activate-cloud-run-email-pool'],emailAbort:['cloudEmailActivationStop','stop-cloud-run-email-activation'], searchCycle:['cloudSearchBootstrapCycle','bootstrap-stop-cloud-run-search'],searchActivation:['cloudSearchActivation','activate-cloud-run-search-pool'],searchAbort:['cloudSearchActivationStop','stop-cloud-run-search-activation'], orchestrationCycle:['cloudOrchestrationBootstrapCycle','bootstrap-stop-cloud-run-orchestration'], orchestrationActivation:['cloudOrchestrationActivation','activate-cloud-run-orchestration-pool'], orchestrationAbort:['cloudOrchestrationActivationStop','stop-cloud-run-orchestration-activation'], poolActivation: ['cloudControlsActivation','activate-cloud-run-controls-pool'], poolAbort: ['cloudControlsActivationStop','stop-cloud-run-controls-activation'], bootstrapCycle: ['cloudPoolBootstrapCycle', 'bootstrap-stop-cloud-run-controls'], dispatchActivation: ['cloudDispatchActivation', 'activate-cloud-run-dispatch-service'], identity: ['cloudIdentityPreparation', 'prepare-cloud-run-identity'],
     eventarcCycle: ['cloudDispatchEventarcCycle', 'prepare-stop-cloud-run-dispatch-eventarc'],
     schedulerCycle: ['cloudDispatchSchedulerCycle', 'prepare-stop-cloud-run-dispatch-scheduler'],
     eventarcAudit: ['cloudEventarcAuditPreparation', 'prepare-cloud-run-eventarc-audit'],
@@ -18,15 +18,15 @@ async function saveCheckpoint({ firestore, lockRef, controlRef, stateRef,
     firestore: ['cloudFirestoreAccessPreparation', 'prepare-cloud-run-firestore-access'],
     scaler: ['cloudScalerAccessPreparation', 'prepare-cloud-run-scaler-access'] }[kind] ?? [];
   if (!field) throw new Error('PREPARATION_KIND_REQUIRED');
-  const expectedPoolRole={emailCycle:'email',emailActivation:'email',emailAbort:'email',searchCycle:'search',searchActivation:'search',searchAbort:'search',bootstrapCycle:'controls',poolActivation:'controls',poolAbort:'controls',orchestrationCycle:'orchestration',orchestrationActivation:'orchestration',orchestrationAbort:'orchestration'}[kind];
+  const expectedPoolRole={imagesCycle:'images',imagesActivation:'images',imagesAbort:'images',emailCycle:'email',emailActivation:'email',emailAbort:'email',searchCycle:'search',searchActivation:'search',searchAbort:'search',bootstrapCycle:'controls',poolActivation:'controls',poolAbort:'controls',orchestrationCycle:'orchestration',orchestrationActivation:'orchestration',orchestrationAbort:'orchestration'}[kind];
   if(expectedPoolRole&&identityState.plan?.role!==expectedPoolRole)throw new Error('BOOTSTRAP_ROLE_CHANGED');
   await firestore.runTransaction(async tx => {
-    const creationState = ['bootstrapCycle','poolActivation','orchestrationCycle','orchestrationActivation','searchCycle','searchActivation','emailCycle','emailActivation'].includes(kind) ? identityState.activationState : ['schedulerCycle', 'eventarcCycle'].includes(kind) ? identityState.creationState : undefined;
-    if (['bootstrapCycle','poolActivation','orchestrationCycle','orchestrationActivation','searchCycle','searchActivation','emailCycle','emailActivation'].includes(kind) && (['started', 'stopping', 'completed'].includes(identityState.stage) && !creationState ||
+    const creationState = ['bootstrapCycle','poolActivation','orchestrationCycle','orchestrationActivation','searchCycle','searchActivation','emailCycle','emailActivation','imagesCycle','imagesActivation'].includes(kind) ? identityState.activationState : ['schedulerCycle', 'eventarcCycle'].includes(kind) ? identityState.creationState : undefined;
+    if (['bootstrapCycle','poolActivation','orchestrationCycle','orchestrationActivation','searchCycle','searchActivation','emailCycle','emailActivation','imagesCycle','imagesActivation'].includes(kind) && (['started', 'stopping', 'completed'].includes(identityState.stage) && !creationState ||
       creationState && (creationState.stage !== 'completed' || creationState.plan?.operationId !== operationId || creationState.plan?.mode !== 'start' || creationState.plan?.target !== 1 ||
        proofDigest(creationState.plan.origin) !== proofDigest(identityState.plan?.origin) || proofDigest(creationState) !== proofDigest(identityState.start))))
       throw new Error('BOOTSTRAP_ACTIVATION_RECEIPT_REQUIRED');
-    if(['poolActivation','orchestrationActivation','searchActivation','emailActivation'].includes(kind)&&identityState.stage==='completed'){
+    if(['poolActivation','orchestrationActivation','searchActivation','emailActivation','imagesActivation'].includes(kind)&&identityState.stage==='completed'){
       const retained=identityState.retainedRegistration;
       if(identityState.disposition==='retained'?
         identityState.stop!==undefined||identityState.observation?.status!=='confirmed'||retained?.role!==expectedPoolRole||retained.buildId!==identityState.plan?.buildId||
@@ -61,7 +61,7 @@ async function saveCheckpoint({ firestore, lockRef, controlRef, stateRef,
       ['proof', 'request', 'attemptedAt', 'prerequisites'].some(key =>
         proofDigest(current.get(field)[key] ?? null) !== proofDigest(identityState[key] ?? null)))
       throw new Error('DISPATCH_ACTIVATION_AUTHORIZATION_CHANGED');
-    if (['bootstrapCycle','poolActivation','poolAbort','orchestrationCycle','orchestrationActivation','orchestrationAbort','searchCycle','searchActivation','searchAbort','emailCycle','emailActivation','emailAbort'].includes(kind)) {
+    if (['bootstrapCycle','poolActivation','poolAbort','orchestrationCycle','orchestrationActivation','orchestrationAbort','searchCycle','searchActivation','searchAbort','emailCycle','emailActivation','emailAbort','imagesCycle','imagesActivation','imagesAbort'].includes(kind)) {
       const previous=current.get(field);
       if(previous){
         for(const key of ['activationState','observation','retentionFailed','retainedRegistration']) if(Object.hasOwn(previous,key) &&
@@ -131,3 +131,7 @@ export const saveSearchActivationStopCheckpoint=options=>saveCheckpoint({...opti
 export const saveEmailBootstrapCycleCheckpoint=options=>saveCheckpoint({...options,kind:'emailCycle'});
 export const saveEmailActivationCheckpoint=options=>saveCheckpoint({...options,kind:'emailActivation'});
 export const saveEmailActivationStopCheckpoint=options=>saveCheckpoint({...options,kind:'emailAbort'});
+
+export const saveImagesBootstrapCycleCheckpoint=options=>saveCheckpoint({...options,kind:'imagesCycle'});
+export const saveImagesActivationCheckpoint=options=>saveCheckpoint({...options,kind:'imagesActivation'});
+export const saveImagesActivationStopCheckpoint=options=>saveCheckpoint({...options,kind:'imagesAbort'});

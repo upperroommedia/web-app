@@ -472,3 +472,38 @@ test('email observer failure stops same parent but uncertain/working retained ac
  const g=await emailAfterCycle(),kept=await emailRetain(g.options);g.options.receipts.activation={operationId:g.options.operationId,releaseId:g.options.releaseId,identityState:structuredClone(kept)};g.options.operationId=randomUUID();g.options.observeProtection=async()=>{throw new Error('working');};await assert.rejects(emailAbort(g.options));assert.equal(g.pool.scaling.manualInstanceCount,1);
 });
 for(const run of [cycle,orchestrationCycle,searchCycle])test('email cannot choose another source role wrapper',async()=>{const f=fixture('email');await assert.rejects(run(f.options));assert.equal(f.calls.filter(c=>c.method==='PATCH').length,0);});
+
+const {bootstrapStopCloudRunImagesPool:imagesCycle,activateCloudRunImagesPool:imagesRetain,stopCloudRunImagesActivation:imagesAbort}=await import('./temporal-bootstrap-pool.mjs');
+async function imagesAfterCycle(){const f=fixture('images'),r=await imagesCycle(f.options);f.options.receipts.bootstrapCycle={operationId:f.options.operationId,releaseId:f.options.releaseId,identityState:structuredClone(r)};f.options.operationId=randomUUID();return f;}
+test('images joins its own bucket/grants and preserves the exact pre-existing public-read baseline without writes',async()=>{
+ const f=await imagesAfterCycle(),kept=await imagesRetain(f.options);
+ assert.equal(kept.disposition,'retained');assert.equal(Object.keys(f.options.receipts).length,12);
+ assert.equal(f.options.receipts.storageAccess.identityState.plan.resource,'projects/_/buckets/urm-app-staging-images');
+ assert.deepEqual(f.options.receipts.storageRole.identityState.nativeRole.includedPermissions,['storage.objects.delete','storage.objects.get','storage.objects.update']);
+ assert.equal(f.calls.some(c=>c.url.includes('/b/urm-app-staging.firebasestorage.app')),false);
+ assert.equal(f.calls.some(c=>['PUT','POST'].includes(c.method)&&/setIamPolicy|storage.googleapis.com/.test(c.url)),false);
+ f.options.receipts.activation={operationId:f.options.operationId,releaseId:f.options.releaseId,identityState:structuredClone(kept)};f.options.operationId=randomUUID();await imagesAbort(f.options);
+ assert.deepEqual(f.calls.filter(c=>c.method==='PATCH').map(c=>c.request.scaling.manualInstanceCount),[1,0,1,0]);
+});
+for(const bad of ['audio-receipt','bucket-recreated','bucket-project','envelope','public-write','public-authenticated','public-conditional','project-public'])test(`images ${bad} blocks before another PATCH`,async()=>{
+ const f=await imagesAfterCycle(),api=f.options.api;
+ if(bad==='audio-receipt')f.options.receipts.storageAccess=fixture().options.receipts.storageAccess;
+ f.options.api=async(...args)=>{const r=await api(...args);
+  if(args[0].includes('/b/urm-app-staging-images?fields=')){if(bad==='bucket-recreated')r.timeCreated='2026-02-01T00:00:00Z';if(bad==='bucket-project')r.projectNumber='123';}
+  if(args[0].includes('/b/urm-app-staging-images/iam?')){
+   if(bad==='envelope')r.resourceId='projects/_/buckets/urm-app-staging.firebasestorage.app';
+   const baseline=r.bindings.find(b=>b.members.includes('allUsers'));
+   if(bad==='public-write')baseline.role='roles/storage.objectAdmin';
+   if(bad==='public-authenticated')baseline.members=['allAuthenticatedUsers'];
+   if(bad==='public-conditional'){r.version=3;baseline.condition={title:'x',expression:'true'};}
+  }
+  if(bad==='project-public'&&args[0].includes('cloudresourcemanager')&&args[0].includes(':getIamPolicy'))r.bindings.push({role:'roles/storage.objectViewer',members:['allUsers']});
+  return r;
+ };
+ await assert.rejects(imagesRetain(f.options));assert.equal(f.calls.filter(c=>c.method==='PATCH').length,2);
+});
+test('read-only direct-policy verifier cannot turn the baseline public member into a requested grant',async()=>{
+ const {verifyPreparedDirectPolicyGrant}=await import('./temporal-preparation-iam.mjs');
+ const grant={role:'roles/storage.objectViewer',members:['allUsers']},policy={version:1,etag:'e',bindings:[grant]};
+ assert.throws(()=>verifyPreparedDirectPolicyGrant(policy,grant,'projects/_/buckets/urm-app-staging-images'));
+});

@@ -9,7 +9,7 @@ import { proofDigest } from '../../temporal-release-runtime.mjs';
 export function controlsBootstrapFixture(role='controls') {
   const buildId = 'a'.repeat(40),
     image = `us-central1-docker.pkg.dev/urm-app-staging/urm-temporal/worker@sha256:${'b'.repeat(64)}`,
-    workerRoles = ['orchestration', 'controls', 'search', 'email'];
+    workerRoles = ['orchestration', 'controls', 'search', 'email', 'images'];
   const platform = {
     schemaVersion: 1,
     environment: 'staging',
@@ -177,8 +177,8 @@ export function controlsBootstrapFixture(role='controls') {
     { prerequisites: { runnerUniqueId: receipts.runner.identityState.account.uniqueId, database } }
   );
   const bucket = {
-      name: platform.firebaseResources.storageBucket,
-      id: platform.firebaseResources.storageBucket,
+      name: role==='images'?platform.firebaseResources.imagesBucket:platform.firebaseResources.storageBucket,
+      id: role==='images'?platform.firebaseResources.imagesBucket:platform.firebaseResources.storageBucket,
       projectNumber: '251680231116',
       timeCreated: '2026-01-01T00:00:00Z',
     },
@@ -238,7 +238,7 @@ export function controlsBootstrapFixture(role='controls') {
         resourceId: resource,
         etag: 'native-storage',
         version: 1,
-        bindings: grants,
+        bindings: [...grants,...(role==='images'?[{role:'roles/storage.objectViewer',members:['allUsers']}]:[])],
       });
   }
   policies.set('projects/urm-app-staging', { version: 3, etag: 'native-project', bindings: projectGrants });

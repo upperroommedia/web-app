@@ -1,13 +1,13 @@
 # Serverless bootstrap and process recovery boundary
 
-The guarded controller now has a controls, orchestration, search and email **bootstrap and stop cycles** in
+The guarded controller now has a controls, orchestration, search, email and images **bootstrap and stop cycles** in
 source. It joins the owned zero-pool/account/grant receipts, starts desired manual
 count one, observes the exact native non-current role queues, then stops the same
 owned pool under the original parent. Observation failure also enters owned stop;
 uncertain authority, protected work or an unknown result retains the fence.
-The source also connects a kept-running controls, orchestration, search or email activation and a separate stop of
+The source also connects a kept-running controls, orchestration, search, email or images activation and a separate stop of
 that exact unused activation. None of these operations has been applied to Cloud Run.
-Media and images activation and guarded promotion remain unimplemented.
+Media activation and guarded promotion remain unimplemented.
 
 The final native role-readiness collector still requires candidate versions current,
 with no ramp, on the real role queues. The cycle cannot replace that collector.
@@ -31,7 +31,7 @@ The existing integration CI includes two additional real SDK tests:
 
 The serial release-recovery CI also runs
 `scripts/integration/temporal-controls-bootstrap.native.mjs`: actual local SDK
-old pinned waiting-run inventory, non-current controls/search/email Activity and orchestration Workflow/Activity registration,
+old pinned waiting-run inventory, non-current controls/search/email/images Activity and orchestration Workflow/Activity registration,
 provider-lock preservation, and explicit candidate-run denial against the dedicated
 Firestore emulator. Controlled Cloud API tests cover the scale/stop protocol;
 the actual Firestore checkpoint regression checks paused authority, immutable
@@ -105,6 +105,29 @@ separate readiness gate. Bootstrap never calls delivery or infers SMTP permissio
 The Cloud Run email entrypoint and readiness now share Activity-only ownership;
 traditional email Workflow/Activity behavior remains unchanged.
 
+Images has separate fixed `bootstrap-stop-cloud-run-images`,
+`activate-cloud-run-images-pool` and `stop-cloud-run-images-activation` actions,
+with eleven/twelve/thirteen owned receipt manifests. Its rederived Storage grant
+and fresh native bucket identity use only `urm-app-staging-images`; the audio
+bucket cannot substitute. The original bucket creation time, project identity,
+custom-role permissions/etag and runner UID remain bound before writes and resume.
+Its existing narrow role includes object get/delete/update, not object creation;
+project Auth read and RTDB get/update authority remains explicit.
+
+Read-only grant observation shares the preparation IAM parser. It accepts the
+pre-existing unconditional `allUsers` / `roles/storage.objectViewer` baseline only
+on that exact images resource. Public writers, authenticated-user members,
+conditional public reads, or public bindings on another resource are rejected.
+Requested grant members remain owned service accounts. Bootstrap performs no IAM
+write and makes no inherited/effective isolation claim.
+
+The Cloud Run images entrypoint and readiness share Activity-only ownership;
+traditional images behavior is preserved. The source-bound template remains one
+CPU, 2 GiB memory and 256 MiB in-memory scratch. Exact template/queue observations
+are not native API resource acceptance, image-processing capacity or runtime
+Storage access proof. Existing approved-bucket execution guards and legacy records
+are unchanged; bootstrap does not repair or rewrite missing bucket identities.
+
 Both stable work scans and the final refreshed namespace compute inventory must
 remain within five seconds; a long scan is a denial, not renewed freshness. Every
 open execution must be pinned to a different registered version, without pending
@@ -142,7 +165,7 @@ protection before its sole saved conditional stop. A current or working candidat
 cannot be forced to zero. Cleanup has no authorization-expiry shortcut. Desired
 zero still proves neither process termination nor drain. After this stop, the
 original cycle origin cannot authorize another activation; a new origin requires a
-separately reviewed contract. Media and images activation, media
+separately reviewed contract. Media activation, media
 capacity and guarded promotion remain out of scope.
 
 Any extension to other roles and the later handoff must retain these requirements:

@@ -307,7 +307,7 @@ test('the same signal owner remains installed until deferred Sentry flush actual
   expect(remove.mock.calls.filter(([signal]) => signal === 'SIGTERM')).toHaveLength(1);
 });
 
-for (const queue of ['urm-search', 'urm-email'])
+for (const queue of ['urm-search', 'urm-email', 'urm-images'])
   for (const hosting of ['cloud-run', 'traditional'] as const)
     test(`actual ${queue} Worker.create preserves ${hosting} queue ownership`, async () => {
       mockWorkerQueue = queue;

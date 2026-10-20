@@ -161,3 +161,11 @@ test('email requires exactly its Activity queue; an extra Workflow or foreign qu
  assert.deepEqual((await observeBootstrapRegistration(f.options)).queues,queues);await observeBootstrapProtection(f.options);
  queues.push({name:'urm-email',type:1});await assert.rejects(observeBootstrapRegistration(f.options));await assert.rejects(observeBootstrapProtection(f.options));
 });
+
+test('images exact Activity queue denies extra Workflow registration and unused stop',async()=>{
+ const f=fixture();f.options.role='images';f.options.platform.roleBindings[0].role='images';
+ const get=f.options.firestore.getAll;f.options.firestore.getAll=async()=>{const d=await get();d[0].data().action='activate-cloud-run-images-pool';return d;};
+ const queues=[{name:'urm-images',type:2}];f.service.describeWorkerDeploymentVersion=async()=>({workerDeploymentVersionInfo:{deploymentVersion:{deploymentName:'candidate',buildId:'a'.repeat(40)},taskQueueInfos:queues}});
+ assert.deepEqual((await observeBootstrapRegistration(f.options)).queues,queues);await observeBootstrapProtection(f.options);
+ queues.push({name:'urm-images',type:1});await assert.rejects(observeBootstrapRegistration(f.options));await assert.rejects(observeBootstrapProtection(f.options));
+});

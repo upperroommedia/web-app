@@ -1,3 +1,4 @@
+import {verifyPreparedDirectPolicyGrant} from './temporal-preparation-iam.mjs';
 import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { proofDigest } from './temporal-release-runtime.mjs';
@@ -35,20 +36,12 @@ const completed = (r, releaseId) => {
     fail();
   return r.identityState;
 };
-function policyHas(policy, grant) {
-  if (
-    typeof policy?.etag !== 'string' ||
-    !policy.etag ||
-    !Array.isArray(policy.bindings) ||
-    policy.bindings.some(
-      (b) => !Array.isArray(b.members) || b.members.some((m) => m === 'allUsers' || m === 'allAuthenticatedUsers')
-    )
-  )
-    fail();
-  const matches = policy.bindings.filter(
-    (b) => b.role === grant.role && isDeepStrictEqual(b.condition, grant.condition)
-  );
-  if (matches.length !== 1 || !grant.members.every((m) => matches[0].members.includes(m))) fail();
+function policyHas(policy,grant,resource){
+  if(resource.startsWith('projects/_/buckets/')){
+    if(policy?.kind!=='storage#policy'||policy.resourceId!==resource||Object.keys(policy).some(key=>!['kind','resourceId','bindings','version','etag'].includes(key)))fail();
+    const {kind:_kind,resourceId:_id,...value}=policy;policy=value;
+  }
+  verifyPreparedDirectPolicyGrant(policy,grant,resource);
 }
 /** Read the requested source-derived grants, not a frozen whole project policy:
  * later legitimate grants can coexist. No inherited/effective isolation claim. */
@@ -155,7 +148,7 @@ async function verifyAccess(o, zeroPlan) {
     'POST',
     { options: { requestedPolicyVersion: 3 } }
   );
-  policyHas(projectPolicy, expectedFirestore.grants[0]);
+  policyHas(projectPolicy, expectedFirestore.grants[0], 'projects/urm-app-staging');
   const proofs = [];
   for (const surface of ['search','email'].includes(role) ? ['project'] : ['project', 'storage']) {
     const roleReceipt = r[`${surface}Role`],
@@ -171,7 +164,7 @@ async function verifyAccess(o, zeroPlan) {
       roleReceipt,
       api,
     });
-    const bucket = surface === 'storage' ? platform.firebaseResources.storageBucket : undefined;
+    const bucket = surface === 'storage' ? (role==='images'?platform.firebaseResources.imagesBucket:platform.firebaseResources.storageBucket) : undefined;
     const resource = bucket ? `projects/_/buckets/${bucket}` : 'projects/urm-app-staging';
     const expected = {
       schemaVersion: 1,
@@ -213,7 +206,7 @@ async function verifyAccess(o, zeroPlan) {
       policy = await api(`https://storage.googleapis.com/storage/v1/b/${bucket}/iam?optionsRequestedPolicyVersion=3`);
       if (policy.kind !== 'storage#policy' || policy.resourceId !== resource) fail();
     }
-    policyHas(policy, expected.grants[0]);
+    policyHas(policy, expected.grants[0], resource);
     proofs.push(proofDigest({ owned, policy }));
   }
   return {
@@ -222,7 +215,7 @@ async function verifyAccess(o, zeroPlan) {
     policiesSHA256: proofDigest({ scalerPolicies, projectPolicy, proofs }),
   };
 }
-/** Bootstrap one unused source-bound controls/orchestration/search/email pool, observe its non-current native queue,
+/** Bootstrap one unused source-bound controls/orchestration/search/email/images pool, observe its non-current native queue,
  * then stop that same pool under the SAME parent, including observation failure.
  * A later handoff activation needs its own reviewed operation; this cycle does
  * not promote routing, attach WCI, retire workers or prove live instance count.
@@ -245,7 +238,7 @@ async function runReviewedPoolOperation(o, mode, expectedRole) {
   validateCloudRunReleasePlatform(platform);
   if (
     role !== expectedRole ||
-    !['controls','orchestration','search','email'].includes(expectedRole) ||
+    !['controls','orchestration','search','email','images'].includes(expectedRole) ||
     !['cycle', 'retain', 'abort'].includes(mode) ||
     !uuid.test(operationId ?? '') ||
     !uuid.test(releaseId ?? '') ||
@@ -746,3 +739,7 @@ export const stopCloudRunSearchActivation=o=>execute(o,'abort','search');
 export const bootstrapStopCloudRunEmailPool=o=>execute(o,'cycle','email');
 export const activateCloudRunEmailPool=o=>execute(o,'retain','email');
 export const stopCloudRunEmailActivation=o=>execute(o,'abort','email');
+
+export const bootstrapStopCloudRunImagesPool=o=>execute(o,'cycle','images');
+export const activateCloudRunImagesPool=o=>execute(o,'retain','images');
+export const stopCloudRunImagesActivation=o=>execute(o,'abort','images');

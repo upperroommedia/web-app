@@ -117,3 +117,15 @@ export async function prepareFencedEventarcAuditPolicy(options) {
     return addEventarcWriteAudit(before);
   } });
 }
+
+/** Read-only observation of a source-derived direct grant. Shares the exact
+ * policy parser/public-read exception with preparation, and never derives or
+ * writes a policy. The caller must bind resource/member to owned receipts.
+ */
+export function verifyPreparedDirectPolicyGrant(policy,grant,resource){
+  policyValue(policy,resource);
+  policyValue({version:3,etag:policy.etag,bindings:[grant]},resource);
+  if(!Array.isArray(grant.members)||grant.members.some(member=>!/^serviceAccount:[A-Za-z0-9._+-]+@[A-Za-z0-9.-]+\.gserviceaccount\.com$/.test(member)))fail();
+  const matches=(policy.bindings??[]).filter(binding=>binding.role===grant.role&&isDeepStrictEqual(binding.condition,grant.condition));
+  if(matches.length!==1||!grant.members.every(member=>matches[0].members.includes(member)))fail();
+}
