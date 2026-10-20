@@ -51,15 +51,11 @@ function nativeRole(plan, value) {
   return { name: value.name, title: value.title, description: value.description, stage: value.stage,
     includedPermissions: [...value.includedPermissions].sort(), etag: value.etag };
 }
-/** Create-only definition. No IAM binding is installed here. Unknown create ACK
- * remains fenced; a matching role name or body is never creation authority.
- */
-export async function prepareCloudRunRuntimeRole({ platform, role, surface, settings, operationId, releaseId,
-  evidenceDigest, identityReceipt, api, save, saved }) {
+export function runtimeRolePreparationPlan({ platform, role, surface, settings, operationId, releaseId, evidenceDigest, identityReceipt }) {
   validateCloudRunReleasePlatform(platform);
   const binding = platform.roleBindings.find(binding => binding.role === role);
   if (!binding || !uuid.test(operationId ?? '') || !uuid.test(releaseId ?? '') ||
-    !/^[a-f0-9]{64}$/.test(evidenceDigest ?? '') || typeof api !== 'function' || typeof save !== 'function') fail();
+    !/^[a-f0-9]{64}$/.test(evidenceDigest ?? '')) fail();
   const includedPermissions = permissionsFor(role, surface);
   const plan = { schemaVersion: 1, operationId, releaseId, evidenceDigest, role, surface, buildId: platform.workerBuildId,
     runner: binding.runnerServiceAccount, pool: renderServerlessWorkerPool(binding, settings).name,
@@ -68,6 +64,17 @@ export async function prepareCloudRunRuntimeRole({ platform, role, surface, sett
       title: `Temporal staging ${role} ${surface}`, stage: 'GA', includedPermissions,
       description: `urm-runtime-role:${operationId}:${proofDigest({ releaseId, evidenceDigest, build: platform.workerBuildId, role, surface, includedPermissions })}`,
     } } };
+  return plan;
+}
+
+/** Create-only definition. No IAM binding is installed here. Unknown create ACK
+ * remains fenced; a matching role name or body is never creation authority.
+ */
+export async function prepareCloudRunRuntimeRole({ platform, role, surface, settings, operationId, releaseId,
+  evidenceDigest, identityReceipt, api, save, saved }) {
+  if (typeof api !== 'function' || typeof save !== 'function') fail();
+  const plan = runtimeRolePreparationPlan({ platform, role, surface, settings, operationId, releaseId, evidenceDigest, identityReceipt });
+  const includedPermissions = plan.request.role.includedPermissions;
   let state = saved;
   const verify = async fresh => {
     const runner = await readOwnedPreparationRunner(plan, identityReceipt, api);
@@ -111,4 +118,18 @@ export async function prepareCloudRunRuntimeRole({ platform, role, surface, sett
     }
     return state;
   } catch { return fail(); }
+}
+
+/** Native owned definition read for the separately guarded grant operation. */
+export async function readOwnedPreparationRuntimeRole({ platform, role, surface, settings, releaseId, evidenceDigest, identityReceipt, roleReceipt, api }) {
+  const state = roleReceipt?.identityState;
+  if (roleReceipt?.releaseId !== releaseId || state?.stage !== 'completed' ||
+    !uuid.test(roleReceipt.operationId ?? '') || roleReceipt.operationId !== state.plan?.operationId) fail();
+  const plan = runtimeRolePreparationPlan({ platform, role, surface, settings, releaseId, evidenceDigest, identityReceipt, operationId: roleReceipt.operationId });
+  if (!isDeepStrictEqual(state.plan, plan)) fail();
+  const runner = await readOwnedPreparationRunner(plan, identityReceipt, api);
+  if (state.prerequisites?.runnerUniqueId !== runner.uniqueId) fail();
+  const current = nativeRole(plan, await api(`https://iam.googleapis.com/v1/${project}/roles/${plan.request.roleId}`));
+  if (!isDeepStrictEqual(current, state.nativeRole)) fail();
+  return { runnerUniqueId: runner.uniqueId, nativeRole: current };
 }

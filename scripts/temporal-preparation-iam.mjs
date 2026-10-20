@@ -1,7 +1,7 @@
 import { isDeepStrictEqual } from 'node:util';
 import { proofDigest } from './temporal-release-runtime.mjs';
 const fail = () => { throw new Error('CLOUD_RUN_FENCED_POLICY_GRANT_UNCONFIRMED'); };
-function policyValue(policy) {
+function policyValue(policy, resource) {
   if (!policy || typeof policy !== 'object' || Object.keys(policy).some(key => !['version', 'etag', 'bindings', 'auditConfigs'].includes(key)) ||
     typeof policy.etag !== 'string' || !policy.etag || policy.etag.length > 1000 ||
     ![undefined, 1, 3].includes(policy.version) || (policy.bindings !== undefined && !Array.isArray(policy.bindings)) ||
@@ -13,7 +13,9 @@ function policyValue(policy) {
       typeof binding.role !== 'string' || !binding.role || binding.role.includes('_withcond_') ||
       !Array.isArray(binding.members) || !binding.members.length || binding.members.length > 1500 ||
       new Set(binding.members).size !== binding.members.length || binding.members.some(member =>
-        typeof member !== 'string' || !member || member === 'allUsers' || member === 'allAuthenticatedUsers')) fail();
+        typeof member !== 'string' || !member || member === 'allAuthenticatedUsers' ||
+        (member === 'allUsers' && !(resource === 'projects/_/buckets/urm-app-staging-images' &&
+          binding.role === 'roles/storage.objectViewer' && binding.condition === undefined)))) fail();
     if (binding.condition !== undefined && (!binding.condition || typeof binding.condition !== 'object' ||
       Object.keys(binding.condition).some(key => !['title', 'description', 'expression', 'location'].includes(key)) ||
       typeof binding.condition.expression !== 'string' || !binding.condition.expression ||
@@ -26,17 +28,17 @@ function policyValue(policy) {
     .sort((a, b) => proofDigest(a).localeCompare(proofDigest(b))), auditConfigs: structuredClone(policy.auditConfigs ?? []) };
   return value;
 }
-function desiredPolicy(before, grants) {
-  policyValue(before);
+function desiredPolicy(before, grants, resource) {
+  policyValue(before, resource);
   const result = structuredClone(before);
   result.bindings ??= [];
   for (const grant of grants) {
-    if (!grant || !['members,role', 'condition,members,role'].includes(Object.keys(grant).sort().join(',')) || !/^roles\/[A-Za-z0-9.]+$/.test(grant.role ?? '') ||
+    if (!grant || !['members,role', 'condition,members,role'].includes(Object.keys(grant).sort().join(',')) || !(/^(roles\/[A-Za-z0-9.]+|projects\/urm-app-staging\/roles\/tw_(orchestration|controls|media|email|images|search)_(project|storage)_[a-f0-9]{20})$/.test(grant.role ?? '')) ||
       !Array.isArray(grant.members) || !grant.members.length || new Set(grant.members).size !== grant.members.length ||
       grant.members.some(member => !/^serviceAccount:[A-Za-z0-9._+-]+@[A-Za-z0-9.-]+\.gserviceaccount\.com$/.test(member))) fail();
     // Conditions are constructed by the source-bound adapter, never user input.
     // Never merge a conditional grant into an unconditional binding of the role.
-    policyValue({ version: 3, etag: before.etag, bindings: [grant] });
+    policyValue({ version: 3, etag: before.etag, bindings: [grant] }, resource);
     const binding = result.bindings.find(binding => binding.role === grant.role && isDeepStrictEqual(binding.condition, grant.condition));
     if (binding) { for (const member of grant.members) if (!binding.members.includes(member)) binding.members.push(member); }
     else result.bindings.push(structuredClone(grant));
@@ -45,7 +47,7 @@ function desiredPolicy(before, grants) {
   result.version = result.bindings.some(binding => binding.condition !== undefined) ? 3 : (before.version ?? 1);
   return result;
 }
-const samePolicy = (a, b) => proofDigest(policyValue(a)) === proofDigest(policyValue(b));
+const samePolicy = (a, b, resource) => proofDigest(policyValue(a, resource)) === proofDigest(policyValue(b, resource));
 /** Internal frozen-source IAM protocol. Public release actions derive every
  * resource, role, member and native callback; descriptors cannot supply these.
  */
@@ -60,8 +62,8 @@ export async function prepareFencedPolicyGrant({ plan, readPolicy, setPolicy, ve
     if (state.stage === 'rejected') fail();
     const observedPrerequisites = await verifyPrerequisites();
     if (state.stage === 'planned') {
-      const before = await readPolicy(), desired = desiredPolicy(before, plan.grants);
-      if (samePolicy(before, desired)) {
+      const before = await readPolicy(), desired = desiredPolicy(before, plan.grants, plan.resource);
+      if (samePolicy(before, desired, plan.resource)) {
         state = { plan, stage: 'completed', before, desired, prerequisites: observedPrerequisites, outcome: 'observed-existing-direct-policy', scope: 'direct policy observed; no inherited-isolation, effective-access or activation proof', observedEtag: before.etag, verifiedAt: new Date().toISOString() };
         await save(state);
         return state;
@@ -81,15 +83,15 @@ export async function prepareFencedPolicyGrant({ plan, readPolicy, setPolicy, ve
         // Transport/server-unknown remains attempted; only GET observation is allowed.
       }
       if (acknowledgement) {
-        if (!samePolicy(acknowledgement, desired)) fail();
+        if (!samePolicy(acknowledgement, desired, plan.resource)) fail();
         state = { ...state, stage: 'acknowledged', acknowledgedPolicySHA256: proofDigest(acknowledgement) };
         await save(state);
       }
     }
     // Saved fields never grant authority to widen a future write or adopt drift.
-    if (!state.before || !state.desired || !isDeepStrictEqual(desiredPolicy(state.before, plan.grants), state.desired)) fail();
+    if (!state.before || !state.desired || !isDeepStrictEqual(desiredPolicy(state.before, plan.grants, plan.resource), state.desired)) fail();
     const current = await readPolicy();
-    if (!samePolicy(current, state.desired)) fail();
+    if (!samePolicy(current, state.desired, plan.resource)) fail();
     if (state.stage === 'completed') return state;
     state = { ...state, stage: 'completed', observedEtag: current.etag, verifiedAt: new Date().toISOString(),
       outcome: state.stage === 'acknowledged' ? 'acknowledged-write-and-policy-observation' : 'desired-policy-observed-after-unconfirmed-write',

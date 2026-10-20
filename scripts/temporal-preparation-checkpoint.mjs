@@ -7,6 +7,7 @@ async function saveCheckpoint({ firestore, lockRef, controlRef, stateRef,
   immutableReceipt, ownedOperation, expectedAuthority, config, operationId, bindingDigest, operatorPrincipal, identityState, kind }) {
   const [field, action] = { identity: ['cloudIdentityPreparation', 'prepare-cloud-run-identity'],
     pool: ['cloudPoolPreparation', 'prepare-cloud-run-pool'], secret: ['cloudSecretAccessPreparation', 'prepare-cloud-run-secret-access'],
+    runtimeAccess: ['cloudRuntimeAccessPreparation', 'prepare-cloud-run-runtime-access'],
     runtimeRole: ['cloudRuntimeRolePreparation', 'prepare-cloud-run-runtime-role'],
     firestore: ['cloudFirestoreAccessPreparation', 'prepare-cloud-run-firestore-access'],
     scaler: ['cloudScalerAccessPreparation', 'prepare-cloud-run-scaler-access'] }[kind] ?? [];
@@ -45,3 +46,5 @@ export const saveScalerAccessPreparationCheckpoint = options => saveCheckpoint({
 export const saveFirestoreAccessPreparationCheckpoint = options => saveCheckpoint({ ...options, kind: 'firestore' });
 
 export const saveRuntimeRolePreparationCheckpoint = options => saveCheckpoint({ ...options, kind: 'runtimeRole' });
+
+export const saveRuntimeAccessPreparationCheckpoint = options => saveCheckpoint({ ...options, kind: 'runtimeAccess' });
