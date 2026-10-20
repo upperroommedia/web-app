@@ -72,7 +72,7 @@ export async function readCloudRunOperatorKey(path, expectedSHA256) {
 /** Load current verified TS source, not a possibly stale untracked lib/ build.
  * CI typechecking and the immutable release/source/image guards remain mandatory.
  * The compiler/SDK come from the frozen runtime's pinned dependency installation. */
-export async function collectCloudRunReleaseWorkers({ binding, config, platform, firestore, artifactDirectory, recordIntent }) {
+export async function collectCloudRunReleaseWorkers({ binding, config, platform, firestore, artifactDirectory, recordIntent, savedIntent }) {
   validateCloudRunReleasePlatform(platform);
   if (['FIRESTORE_EMULATOR_HOST', 'FIREBASE_AUTH_EMULATOR_HOST', 'FIREBASE_DATABASE_EMULATOR_HOST',
     'FIREBASE_STORAGE_EMULATOR_HOST'].some(name => process.env[name]))
@@ -95,10 +95,13 @@ export async function collectCloudRunReleaseWorkers({ binding, config, platform,
     connection = await application.Connection.connect({ address: platform.cloudAddress, tls: true, apiKey: key,
       connectTimeout: 15000 });
     const client = new application.Client({ connection, namespace: platform.temporalNamespace });
-    return await application.collectServerlessRoleReadiness({ client, firestore, artifactDirectory, onStartIntent: recordIntent,
+    const options = { client, firestore, artifactDirectory,
       bindings: platform.roleBindings.map(({ projectId, region, namespace, role, buildId, poolName,
         deploymentName, runnerServiceAccount, image }) => ({ projectId, region, namespace, role, buildId,
-        poolName, deploymentName, runnerServiceAccount, image })) });
+        poolName, deploymentName, runnerServiceAccount, image })) };
+    return savedIntent
+      ? await application.reconcileServerlessRoleReadiness({ ...options, savedIntent })
+      : await application.collectServerlessRoleReadiness({ ...options, onStartIntent: recordIntent });
   } finally { await connection?.close(); }
 }
 

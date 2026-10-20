@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { writeFile, realpath, stat, open } from 'node:fs/promises';
+import { constants } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { GoogleAuth } from 'google-auth-library';
 import { Connection, type Client } from '@temporalio/client';
@@ -24,6 +25,37 @@ export interface ServerlessRoleBinding {
   deploymentName: string;
   runnerServiceAccount: string;
   image: string;
+}
+export interface ServerlessReadinessStartIntent {
+  schemaVersion: number;
+  workflowId: string;
+  nonce: string;
+  bindings: ServerlessRoleBinding[];
+  createdAt: string;
+}
+async function readPrivateReceipt(directory: string, name: string, optional = false): Promise<unknown> {
+  let handle;
+  try {
+    handle = await open(join(directory, name), constants.O_RDONLY | constants.O_NOFOLLOW);
+    const file = await handle.stat();
+    if (
+      !file.isFile() ||
+      file.uid !== process.getuid?.() ||
+      (file.mode & 0o777) !== 0o600 ||
+      file.size < 1 ||
+      file.size > 65536
+    )
+      fail();
+    const buffer = Buffer.alloc(file.size + 1);
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    if (bytesRead !== file.size) fail();
+    return JSON.parse(buffer.subarray(0, bytesRead).toString('utf8'));
+  } catch (error) {
+    if (optional && (error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    fail();
+  } finally {
+    await handle?.close();
+  }
 }
 async function writeExclusiveReceipt(directory: string, name: string, value: unknown): Promise<void> {
   await writeFile(join(directory, name), JSON.stringify(value), { mode: 0o600, flag: 'wx', flush: true });
@@ -196,13 +228,8 @@ export async function collectServerlessReadinessObservations(options: {
   bindings: ServerlessRoleBinding[];
   artifactDirectory: string;
   readResource?: typeof readServerlessResource;
-  onStartIntent?: (intent: {
-    schemaVersion: number;
-    workflowId: string;
-    nonce: string;
-    bindings: ServerlessRoleBinding[];
-    createdAt: string;
-  }) => Promise<void>;
+  onStartIntent?: (intent: ServerlessReadinessStartIntent) => Promise<void>;
+  savedIntent?: ServerlessReadinessStartIntent;
 }) {
   const bindings = structuredClone(options.bindings);
   if (
@@ -228,11 +255,40 @@ export async function collectServerlessReadinessObservations(options: {
     directory.uid !== process.getuid?.()
   )
     fail();
-  const nonce = randomBytes(16).toString('hex'),
-    workflowId = `serverless-readiness-${nonce}`;
-  const intent = { schemaVersion: 1, workflowId, nonce, bindings, createdAt: new Date().toISOString() };
-  await writeExclusiveReceipt(options.artifactDirectory, 'readiness-start-intent.json', intent);
-  await options.onStartIntent?.(intent);
+  const reconciling = Object.prototype.hasOwnProperty.call(options, 'savedIntent');
+  if (
+    reconciling &&
+    (!options.savedIntent || typeof options.savedIntent !== 'object' || Array.isArray(options.savedIntent))
+  )
+    fail();
+  const generatedNonce = randomBytes(16).toString('hex');
+  const intent = structuredClone(
+    options.savedIntent ?? {
+      schemaVersion: 1,
+      workflowId: `serverless-readiness-${generatedNonce}`,
+      nonce: generatedNonce,
+      bindings,
+      createdAt: new Date().toISOString(),
+    }
+  );
+  if (
+    Object.keys(intent).sort().join(',') !== 'bindings,createdAt,nonce,schemaVersion,workflowId' ||
+    intent.schemaVersion !== 1 ||
+    !/^[a-f0-9]{32}$/.test(intent.nonce) ||
+    intent.workflowId !== `serverless-readiness-${intent.nonce}` ||
+    !Number.isFinite(Date.parse(intent.createdAt)) ||
+    Date.parse(intent.createdAt) > Date.now() + 5000 ||
+    workerReadinessDigest(intent.bindings) !== workerReadinessDigest(bindings)
+  )
+    fail();
+  const { nonce, workflowId } = intent;
+  if (reconciling) {
+    const localIntent = await readPrivateReceipt(options.artifactDirectory, 'readiness-start-intent.json');
+    if (workerReadinessDigest(localIntent) !== workerReadinessDigest(intent)) fail();
+  } else {
+    await writeExclusiveReceipt(options.artifactDirectory, 'readiness-start-intent.json', intent);
+    await options.onStartIntent?.(intent);
+  }
   const read = options.readResource ?? readServerlessResource;
   const service = options.client.connection.workflowService;
   const routing = async (binding: ServerlessRoleBinding) => {
@@ -271,23 +327,69 @@ export async function collectServerlessReadinessObservations(options: {
   };
   try {
     for (const binding of bindings) await routing(binding);
-    const startedAt = Date.now();
-    const handle = await options.client.connection.withDeadline(Date.now() + 15000, () =>
-      options.client.workflow.start('WorkerRuntimeProbe', {
-        workflowId,
-        taskQueue: 'urm-orchestration',
-        args: [
-          { projectId: 'urm-app-staging', buildId: bindings[0].buildId, nonce, roles: bindings.map((b) => b.role) },
-        ],
-        workflowExecutionTimeout: '10 minutes',
-        workflowIdReusePolicy: 'REJECT_DUPLICATE',
-        workflowIdConflictPolicy: 'FAIL',
-      })
-    );
-    await writeExclusiveReceipt(options.artifactDirectory, 'readiness-start-ack.json', {
-      workflowId,
-      runId: handle.firstExecutionRunId,
-    });
+    const startedAt = reconciling ? Date.parse(intent.createdAt) : Date.now();
+    let handle: ReturnType<Client['workflow']['getHandle']>;
+    let runId: string;
+    if (reconciling) {
+      // GET only: absence, a failed lookup or an expired execution cannot authorize another start.
+      const described = await options.client.connection.withDeadline(Date.now() + 10000, () =>
+        options.client.workflow.getHandle(workflowId).describe()
+      );
+      if (
+        described.workflowId !== workflowId ||
+        described.type !== 'WorkerRuntimeProbe' ||
+        described.taskQueue !== 'urm-orchestration' ||
+        !described.runId ||
+        described.startTime.getTime() < startedAt - 5000 ||
+        described.startTime.getTime() > Date.now() + 5000
+      )
+        fail();
+      runId = described.runId;
+      handle = options.client.workflow.getHandle(workflowId, runId, { firstExecutionRunId: runId, followRuns: false });
+      const original = await options.client.connection.withDeadline(Date.now() + 10000, () => handle.fetchHistory());
+      const first = original.events?.[0]?.workflowExecutionStartedEventAttributes;
+      const input = first?.input?.payloads;
+      if (
+        !first ||
+        first.originalExecutionRunId !== runId ||
+        first.firstExecutionRunId !== runId ||
+        first.continuedExecutionRunId ||
+        first.workflowType?.name !== 'WorkerRuntimeProbe' ||
+        first.taskQueue?.name !== 'urm-orchestration' ||
+        !input ||
+        input.length !== 1 ||
+        workerReadinessDigest(defaultPayloadConverter.fromPayload(input[0])) !==
+          workerReadinessDigest({
+            projectId: 'urm-app-staging',
+            buildId: bindings[0].buildId,
+            nonce,
+            roles: bindings.map((b) => b.role),
+          })
+      )
+        fail();
+      const acknowledgement = await readPrivateReceipt(options.artifactDirectory, 'readiness-start-ack.json', true);
+      if (
+        acknowledgement !== undefined &&
+        workerReadinessDigest(acknowledgement) !== workerReadinessDigest({ workflowId, runId })
+      )
+        fail();
+    } else {
+      const started = await options.client.connection.withDeadline(Date.now() + 15000, () =>
+        options.client.workflow.start('WorkerRuntimeProbe', {
+          workflowId,
+          taskQueue: 'urm-orchestration',
+          args: [
+            { projectId: 'urm-app-staging', buildId: bindings[0].buildId, nonce, roles: bindings.map((b) => b.role) },
+          ],
+          workflowExecutionTimeout: '10 minutes',
+          workflowIdReusePolicy: 'REJECT_DUPLICATE',
+          workflowIdConflictPolicy: 'FAIL',
+        })
+      );
+      runId = started.firstExecutionRunId;
+      handle = options.client.workflow.getHandle(workflowId, runId, { firstExecutionRunId: runId, followRuns: false });
+      await writeExclusiveReceipt(options.artifactDirectory, 'readiness-start-ack.json', { workflowId, runId });
+    }
     const result = object(await options.client.connection.withDeadline(startedAt + 660000, () => handle.result()));
     const history = await options.client.connection.withDeadline(Date.now() + 10000, () => handle.fetchHistory());
     const scheduled = new Map(
@@ -325,7 +427,7 @@ export async function collectServerlessReadinessObservations(options: {
         evidence.nonce !== nonce ||
         evidence.role !== binding.role ||
         evidence.workflowId !== workflowId ||
-        evidence.runId !== handle.firstExecutionRunId ||
+        evidence.runId !== runId ||
         evidence.taskQueue !== `urm-${binding.role}` ||
         evidence.attempt !== 1 ||
         !Number.isFinite(Date.parse(evidence.observedAt)) ||
@@ -390,12 +492,16 @@ export async function collectServerlessReadinessObservations(options: {
       schemaVersion: 1,
       scope: 'observed-role-execution-and-declared-pool-identity',
       workflowId,
-      runId: handle.firstExecutionRunId,
+      runId,
       verifiedAt: new Date().toISOString(),
       roles,
       historyDigest: createHash('sha256').update(JSON.stringify(history)).digest('hex'),
     };
-    await writeExclusiveReceipt(options.artifactDirectory, 'readiness-proof.json', proof);
+    await writeExclusiveReceipt(
+      options.artifactDirectory,
+      reconciling ? `readiness-reconciliation-${randomBytes(16).toString('hex')}.json` : 'readiness-proof.json',
+      proof
+    );
     return proof;
   } catch {
     throw new Error('SERVERLESS_READINESS_PENDING_RECONCILE_SAVED_INTENT');
@@ -405,12 +511,41 @@ export async function collectServerlessReadinessObservations(options: {
 /** Guarded native entry: transport overrides and injected API readers are not
  * accepted here. Observations still cannot replace the other release gates. */
 export async function collectServerlessRoleReadiness(
-  options: Omit<Parameters<typeof collectServerlessReadinessObservations>[0], 'readResource' | 'onStartIntent'> & {
+  options: Omit<
+    Parameters<typeof collectServerlessReadinessObservations>[0],
+    'readResource' | 'onStartIntent' | 'savedIntent'
+  > & {
     onStartIntent: NonNullable<Parameters<typeof collectServerlessReadinessObservations>[0]['onStartIntent']>;
   }
 ) {
-  if (typeof options.onStartIntent !== 'function') fail();
-  const native = options.client.connection;
+  if (typeof options.onStartIntent !== 'function' || Object.prototype.hasOwnProperty.call(options, 'savedIntent'))
+    fail();
+  assertNativeReadinessConnection(options.client);
+  return collectServerlessReadinessObservations({ ...options, readResource: readServerlessResource });
+}
+
+/** Reconcile the exact saved execution using GETs only; never retries its start. */
+export async function reconcileServerlessRoleReadiness(
+  options: Omit<
+    Parameters<typeof collectServerlessReadinessObservations>[0],
+    'readResource' | 'onStartIntent' | 'savedIntent'
+  > & {
+    savedIntent: ServerlessReadinessStartIntent;
+  }
+) {
+  if (!options.savedIntent || typeof options.savedIntent !== 'object' || Array.isArray(options.savedIntent)) fail();
+  assertNativeReadinessConnection(options.client);
+  return collectServerlessReadinessObservations({
+    client: options.client,
+    firestore: options.firestore,
+    bindings: options.bindings,
+    artifactDirectory: options.artifactDirectory,
+    savedIntent: options.savedIntent,
+    readResource: readServerlessResource,
+  });
+}
+function assertNativeReadinessConnection(client: Client): void {
+  const native = client.connection;
   const connection = native instanceof Connection ? native.options : fail();
   // The pinned SDK normalizes tls into native gRPC ChannelCredentials and
   // removes the original tls option. Inspect the actual secure channel setting.
@@ -421,5 +556,4 @@ export async function collectServerlessRoleReadiness(
     ['grpc.ssl_target_name_override', 'grpc.default_authority'].some((key) => connection.channelArgs[key] !== undefined)
   )
     fail();
-  return collectServerlessReadinessObservations({ ...options, readResource: readServerlessResource });
 }

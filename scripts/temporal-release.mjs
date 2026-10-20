@@ -248,14 +248,18 @@ await runWithCleanup(
           if (configuredPlatform.workerHosting === 'cloud-run') {
             validateWorkerCoverage(config, configuredPlatform);
             validateCloudEvidence(configuredPlatform, await readCloudRunNamespaceEvidence(configuredPlatform), { requireRecovery: false });
-            const prior = (await lockRef.get()).data()?.cloudWorkerIntent;
-            if (prior) {
-              cloudWorkerProbePending = true;
-              throw new Error('CLOUD_RUN_SAVED_PROBE_RECONCILIATION_REQUIRED');
-            }
-            const directory = await realpath(await mkdtemp(join(tmpdir(), 'urm-temporal-cloud-ready-')));
+            const held = await lockRef.get();
+            assertNativeSnapshot(ownedOperation, held);
+            const hasPrior = Object.prototype.hasOwnProperty.call(held.data(), 'cloudWorkerIntent');
+            const prior = held.data()?.cloudWorkerIntent;
+            if (hasPrior) cloudWorkerProbePending = true;
+            if (hasPrior && (!prior || typeof prior !== 'object' || Array.isArray(prior) ||
+              Object.keys(prior).sort().join(',') !== 'artifactDirectory,bindings,createdAt,nonce,schemaVersion,workflowId'))
+              throw new Error('CLOUD_RUN_SAVED_PROBE_INTENT_INVALID');
+            const directory = prior?.artifactDirectory ?? await realpath(await mkdtemp(join(tmpdir(), 'urm-temporal-cloud-ready-')));
+            const savedIntent = prior && (({ artifactDirectory, ...intent }) => intent)(prior);
             await collectCloudRunReleaseWorkers({ binding, config, platform: configuredPlatform, firestore,
-              artifactDirectory: directory,
+              artifactDirectory: directory, savedIntent,
               recordIntent: async (intent) => {
                 // From this point a lost transaction acknowledgement is uncertain.
                 cloudWorkerProbePending = true;

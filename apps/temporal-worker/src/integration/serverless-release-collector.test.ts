@@ -1,6 +1,6 @@
 import { msToTs } from '@temporalio/common/lib/time';
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, readFile, rm, realpath } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, realpath, rename, readdir, writeFile } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -16,6 +16,7 @@ import {
 } from '../runtime/readiness-probe';
 import {
   collectServerlessRoleReadiness,
+  reconcileServerlessRoleReadiness,
   collectServerlessReadinessObservations,
   type ServerlessRoleBinding,
 } from '../runtime/serverless-release-readiness';
@@ -196,6 +197,118 @@ test('collector joins actual version routing, native activity history and privat
         readResource: async (name) => resources.get(name),
       })
     ).rejects.toMatchObject({ code: 'EEXIST' });
+    const starts = jest.spyOn(client.workflow, 'start');
+    const priorArtifacts = await readdir(directory);
+    for (const savedIntent of [undefined, null]) {
+      await expect(
+        Reflect.apply(reconcileServerlessRoleReadiness, undefined, [
+          {
+            client,
+            firestore: db,
+            bindings,
+            artifactDirectory: directory,
+            savedIntent,
+            onStartIntent: () => {
+              throw new Error('Must not call a start callback');
+            },
+          },
+        ])
+      ).rejects.toThrow('SERVERLESS_NATIVE_READINESS_UNCONFIRMED');
+      await expect(
+        Reflect.apply(collectServerlessReadinessObservations, undefined, [
+          {
+            client,
+            firestore: db,
+            bindings,
+            artifactDirectory: directory,
+            savedIntent,
+            readResource: async (name: string) => resources.get(name),
+          },
+        ])
+      ).rejects.toThrow('SERVERLESS_NATIVE_READINESS_UNCONFIRMED');
+    }
+    await expect(
+      Reflect.apply(reconcileServerlessRoleReadiness, undefined, [
+        {
+          client,
+          firestore: db,
+          bindings,
+          artifactDirectory: directory,
+        },
+      ])
+    ).rejects.toThrow('SERVERLESS_NATIVE_READINESS_UNCONFIRMED');
+    expect(starts).not.toHaveBeenCalled();
+    expect(await readdir(directory)).toEqual(priorArtifacts);
+    const originalIntent = await readFile(join(directory, 'readiness-start-intent.json'), 'utf8');
+    const originalAck = await readFile(join(directory, 'readiness-start-ack.json'), 'utf8');
+    const originalProof = await readFile(join(directory, 'readiness-proof.json'), 'utf8');
+    const savedIntent = JSON.parse(originalIntent);
+    const reconciled = await collectServerlessReadinessObservations({
+      client,
+      firestore: db,
+      bindings,
+      artifactDirectory: directory,
+      savedIntent,
+      readResource: async (name) => resources.get(name),
+      onStartIntent: async () => {
+        throw new Error('Reconciliation must never start or persist a new intent');
+      },
+    });
+    expect(reconciled.workflowId).toBe(proof.workflowId);
+    expect(reconciled.runId).toBe(proof.runId);
+    expect(reconciled.roles.map((role) => role.receipt)).toEqual(proof.roles.map((role) => role.receipt));
+    expect(await readFile(join(directory, 'readiness-start-intent.json'), 'utf8')).toBe(originalIntent);
+    expect(await readFile(join(directory, 'readiness-start-ack.json'), 'utf8')).toBe(originalAck);
+    expect(await readFile(join(directory, 'readiness-proof.json'), 'utf8')).toBe(originalProof);
+    await rename(join(directory, 'readiness-start-ack.json'), join(directory, 'retained-original-ack.json'));
+    const withoutAck = await collectServerlessReadinessObservations({
+      client,
+      firestore: db,
+      bindings,
+      artifactDirectory: directory,
+      savedIntent,
+      readResource: async (name) => resources.get(name),
+    });
+    expect(withoutAck.runId).toBe(proof.runId);
+    expect(starts).not.toHaveBeenCalled();
+    expect(await readFile(join(directory, 'retained-original-ack.json'), 'utf8')).toBe(originalAck);
+    const missingDirectory = await realpath(await mkdtemp(join(tmpdir(), 'urm-collector-not-started-')));
+    try {
+      const nonce = randomUUID().replaceAll('-', '');
+      const neverStarted = { ...savedIntent, nonce, workflowId: `serverless-readiness-${nonce}` };
+      await writeFile(join(missingDirectory, 'readiness-start-intent.json'), JSON.stringify(neverStarted), {
+        mode: 0o600,
+        flag: 'wx',
+      });
+      await expect(
+        collectServerlessReadinessObservations({
+          client,
+          firestore: db,
+          bindings,
+          artifactDirectory: missingDirectory,
+          savedIntent: neverStarted,
+          readResource: async (name) => resources.get(name),
+        })
+      ).rejects.toThrow('SERVERLESS_READINESS_PENDING_RECONCILE_SAVED_INTENT');
+      expect(starts).not.toHaveBeenCalled();
+      await expect(client.workflow.getHandle(neverStarted.workflowId).describe()).rejects.toBeInstanceOf(
+        WorkflowNotFoundError
+      );
+    } finally {
+      await rm(missingDirectory, { recursive: true, force: true });
+    }
+    starts.mockRestore();
+
+    await expect(
+      collectServerlessReadinessObservations({
+        client,
+        firestore: db,
+        bindings,
+        artifactDirectory: directory,
+        savedIntent: { ...savedIntent, nonce: '0'.repeat(32) },
+        readResource: async (name) => resources.get(name),
+      })
+    ).rejects.toThrow('SERVERLESS_NATIVE_READINESS_UNCONFIRMED');
   } finally {
     for (const worker of workers) if (worker.getStatus().runState === 'RUNNING') worker.shutdown();
     await Promise.allSettled(running);
