@@ -520,3 +520,38 @@ delivery. The separate paused diagnostic journal, literal workflow and owned wak
 cleanup operation remain to be implemented. The local native SDK/Firestore/HTTP
 fixture verifies this isolation while an original start acknowledgement is pending,
 using controlled authorization rather than Google-delivered credentials.
+
+
+### Paused diagnostic arming and literal dispatch
+
+`prepare-cloud-run-dispatch-diagnostic` now requires the guarded source/full-CI/image
+inputs and a completed owned activation receipt, rederives that activation's original
+plan, and rereads its native enabled service and prerequisites. Its own operation
+binding is distinct from the earlier activation binding. One Firestore transaction
+fences the original operation/control/state snapshots and creates a private immutable
+authorization, private journal, and two exact watched records. Their permanent
+`diagnostic` state is excluded from normal pending/expired business scans. Resume
+preserves the original nonce, expiry and records without emitting another write.
+
+The actual independent HTTP entrypoint invokes the separate driver before business
+dispatch. It reads only the current parent-derived records, under unchanged paused
+control/state versions and exact private authorization. The verified Eventarc caller
+may claim the initial record; the verified Scheduler caller may reconcile an expired
+15-second lease. A native GET precedes the sole source-fixed `DispatchWakeProbe`
+START. Durable start intent, lease validity after its acknowledgement, and a native
+RPC deadline bounded by the remaining lease and authorization are mandatory. Later
+attempts and expired authorizations permit GET-only original-run reconciliation.
+An existing execution without a durable start attempt is fenced. Exact original
+run/input/type/queue/candidate version and absence of Activities/children/continuation
+are checked before the private dispatch acknowledgement. The literal workflow waits
+two seconds and returns its nonce/run; it has no provider or application activities.
+
+Arming still stops with its parent operation retained. Same-parent enabled-wake
+creation/cleanup, a post-trigger immutable pulse, native delivery provenance and
+completion proof remain unfinished. Records created before a trigger exists do not
+prove delivery; they must not be replayed or rewritten as a substitute. The five-minute
+arming window authorizes initial START only and does not expire cleanup or uncertain
+original-run GETs. No release phase, routing, ownership, WCI or business admission
+advances. Local SDK/emulator tests use controlled arming and authorization, including
+actual elapsed local leases and delayed checkpoint acknowledgements; they do not
+establish Cloud Run, Google delivery, effective permissions or staging readiness.

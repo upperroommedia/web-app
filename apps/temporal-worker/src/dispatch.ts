@@ -4,6 +4,7 @@ import * as Sentry from '@sentry/node';
 import { getSharedFirebaseAppOwnership } from '@upperroom/shared/firebase/firebaseAdminOwnership';
 import { loadRuntimeConfig, assertRuntimeNamespace } from './runtime/config';
 import { nativeDispatchCallerAuthorization, type DispatchAuthorization } from './runtime/dispatch-caller';
+import { DispatchDiagnostic } from './runtime/dispatch-diagnostic';
 import { OutboxDispatcher } from './runtime/dispatcher';
 import { createServerlessDispatchHandler } from './runtime/serverless-dispatch';
 
@@ -86,6 +87,8 @@ export async function runDispatchService() {
       throw new Error('Serverless dispatcher requires its creator-owned Firebase app');
     const { getFirestore } = await import('firebase-admin/firestore');
     dispatcher = new OutboxDispatcher({ db: getFirestore(owner.app), client, projectId: config.projectId, requireOpenAdmission: true });
+    const diagnostic = new DispatchDiagnostic({ db: getFirestore(owner.app), client, projectId: config.projectId,
+      buildId: config.buildId, serviceRevision: `projects/${config.projectId}/locations/us-central1/services/${process.env.K_SERVICE ?? ''}/revisions/${process.env.K_REVISION ?? ''}` });
     handler = createServerlessDispatchHandler({
       projectId: config.projectId,
       admission: (() => {
@@ -99,7 +102,9 @@ export async function runDispatchService() {
           audience: process.env.TEMPORAL_DISPATCH_AUDIENCE ?? '', eventSubject: process.env.TEMPORAL_DISPATCH_EVENT_SUBJECT ?? '',
           schedulerSubject: process.env.TEMPORAL_DISPATCH_SCHEDULER_SUBJECT ?? '' })
         : { verify: async () => { throw new Error('DISPATCH_CALLER_UNCONFIRMED'); }, drain: async () => undefined } satisfies DispatchAuthorization,
-      run: async (signal) => {
+      run: async (signal, context) => {
+        const observed = await connection!.withDeadline(Date.now() + 20000, () => diagnostic.tick(signal, context));
+        if (observed !== undefined) return !signal.aborted && observed;
         await connection!.withDeadline(Date.now() + 20000, () => dispatcher!.tick(signal));
         return !signal.aborted && dispatcher!.healthy;
       },

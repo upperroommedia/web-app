@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { armCloudRunDispatchDiagnostic } from '../temporal-dispatch-diagnostic.mjs';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { readFileSync } from 'node:fs';
@@ -135,4 +136,39 @@ for (const [cycle, saver, field] of [['scheduler', saveDispatchSchedulerCycleChe
   await assert.rejects(saver({...options,identityState:{stage:'completed',plan,creationState}}));
   assert.equal((await lockRef.get()).get(`${field}.stage`),'stopping');assert.equal((await immutableReceipt.get()).exists,false);
  } finally {for(const ref of [lockRef,controlRef,stateRef,immutableReceipt,creationReceipt])await ref.delete();await deleteApp(app);}
+});
+
+
+test('diagnostic atomic producer preserves distinct original activation binding and original authorization on resume',async()=>{
+ const app=initializeApp({projectId:'demo-preparation-checkpoint'},randomUUID()),db=getFirestore(app);
+ const id=randomUUID(),releaseId=randomUUID(),prefix=`_diagnosticTests/${id}/records`;
+ const lockRef=db.doc(`${prefix}/operation`),controlRef=db.doc(`${prefix}/control`),stateRef=db.doc(`${prefix}/state`);
+ const bindingDigest='a'.repeat(64),activationBinding='f'.repeat(64);
+ const config={environment:'staging',releaseId};
+ const nativeActivation={stage:'completed',plan:{operationId:randomUUID(),buildId,desired:{template:{containers:[{image}]}}},
+  service:{admission:'enabled',revision:'projects/urm-app-staging/locations/us-central1/services/dispatch/revisions/dispatch-r1'},
+  prerequisites:{eventUniqueId:'123456789012345678901',schedulerUniqueId:'123456789012345678902'}};
+ const activationReceipt={operationId:nativeActivation.plan.operationId,releaseId,bindingDigest:activationBinding,identityState:nativeActivation};
+ try{
+  await lockRef.create({operationId:id,releaseId,bindingDigest,action:'prepare-cloud-run-dispatch-diagnostic'});
+  await controlRef.create({releaseId,admission:'paused',domains:Object.fromEntries(['media','publishing','images','emails','accounts','bundles','search'].map(d=>[d,{admission:'paused'}]))});
+  await stateRef.create({releaseId,phase:'provider-usage-ready'});
+  const options={firestore:db,lockRef,controlRef,stateRef,ownedOperation:nativeSnapshotProof(await lockRef.get()),
+   expectedAuthority:{control:nativeSnapshotProof(await controlRef.get()),state:nativeSnapshotProof(await stateRef.get())},
+   operationId:id,bindingDigest,config,platform:platform(),activationReceipt,nativeActivation};
+  options.ownedOperation=await armCloudRunDispatchDiagnostic(options);
+  const original=(await lockRef.get()).get('cloudDispatchDiagnostic');
+  assert.equal(original.bindingDigest,bindingDigest);
+  const record=db.doc(`durableJobOutbox/diagnostic-${id}-outbox`),before=await record.get();
+  assert.equal(before.get('state'),'diagnostic');
+  options.ownedOperation=await armCloudRunDispatchDiagnostic(options);
+  assert.equal((await record.get()).updateTime.isEqual(before.updateTime),true);
+  assert.deepEqual((await lockRef.get()).get('cloudDispatchDiagnostic'),original);
+  await controlRef.update({admission:'open'});
+  await assert.rejects(armCloudRunDispatchDiagnostic(options));
+  assert.equal((await record.get()).updateTime.isEqual(before.updateTime),true);
+ }finally{
+  for(const ref of [lockRef,controlRef,stateRef,db.doc(`_control/temporalDispatchDiagnosticAuthorization-${id}`),db.doc(`_control/temporalDispatchDiagnostic-${id}`),db.doc(`durableJobOutbox/diagnostic-${id}-outbox`),db.doc(`durableJobCommands/diagnostic-${id}-commands`)])await ref.delete();
+  await deleteApp(app);
+ }
 });
