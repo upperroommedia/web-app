@@ -3,6 +3,30 @@ import { Context } from '@temporalio/activity';
 import type { Firestore } from 'firebase-admin/firestore';
 import type { WorkerWitness } from './worker-witness';
 
+/** Stable across Firestore map ordering; shared with the native collector. */
+export function workerReadinessDigest(value: unknown): string {
+  const canonical = (item: unknown): unknown => {
+    if (Array.isArray(item)) return item.map(canonical);
+    if (item !== null && typeof item === 'object')
+      return Object.fromEntries(
+        Object.entries(item)
+          .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+          .map(([key, entry]) => [key, canonical(entry)])
+      );
+    if (
+      item === null ||
+      typeof item === 'string' ||
+      typeof item === 'boolean' ||
+      (typeof item === 'number' && Number.isFinite(item))
+    )
+      return item;
+    throw new Error('INVALID_WORKER_READINESS_EVIDENCE');
+  };
+  return createHash('sha256')
+    .update(JSON.stringify(canonical(value)))
+    .digest('hex');
+}
+
 export const WORKER_READINESS_COLLECTION = 'temporalWorkerReadiness';
 export const WORKER_READINESS_ROLES = ['orchestration', 'controls', 'media', 'email', 'images', 'search'] as const;
 export type WorkerReadinessRole = (typeof WORKER_READINESS_ROLES)[number];
@@ -75,7 +99,7 @@ export function createWorkerReadinessActivities(options: {
         observedAt: new Date().toISOString(),
       };
       const id = createHash('sha256').update(`${evidence.runId}:${request.role}:${request.nonce}`).digest('hex');
-      const digest = createHash('sha256').update(JSON.stringify(evidence)).digest('hex');
+      const digest = workerReadinessDigest(evidence);
       // Create only: retries/ambiguous acknowledgements may not overwrite another
       // observation or manufacture a new instance under the same probe receipt.
       try {
