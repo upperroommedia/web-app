@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 import { collectCloudRunReleaseWorkers, readCloudRunNamespaceEvidence, verifyCloudRunScalerPolicies } from './temporal-release-cloud-run.mjs';
 import { verifyCloudRunDispatchConfiguration } from './temporal-release-dispatch.mjs';
+import { verifyPreparationEvidence } from './temporal-preparation-evidence.mjs';
+import { prepareCloudRunIdentity } from './temporal-prepare-cloud-identity.mjs';
+import { saveIdentityPreparationCheckpoint } from './temporal-preparation-checkpoint.mjs';
 // Every step is explicit, revision-fenced, resumable, and leaves admissions paused on failure.
 import { readFile, writeFile, mkdtemp, rm, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -88,6 +91,7 @@ if (
     'compatibility-ready',
     'drain',
     'workers-ready',
+    'prepare-cloud-run-identity',
     'provider-usage-ready',
     'take-ownership',
     'backend-ready',
@@ -131,6 +135,18 @@ const operatorIdentity = {
   runtimePins: binding.runtimePins,
   resourceBinding,
 };
+const preparationArguments = action === 'prepare-cloud-run-identity' ? {
+  role: args[args.indexOf('--identity-role') + 1],
+  kind: args[args.indexOf('--identity-kind') + 1],
+  proof: args[args.indexOf('--preparation-proof') + 1],
+  digest: args[args.indexOf('--preparation-proof-sha256') + 1],
+} : undefined;
+if (preparationArguments) {
+  if (!['--identity-role', '--identity-kind', '--preparation-proof', '--preparation-proof-sha256'].every(flag => args.includes(flag)) ||
+    !/^[a-f0-9]{64}$/.test(preparationArguments.digest ?? ''))
+    throw new Error('Explicit immutable identity preparation inputs required');
+  operatorIdentity.cloudIdentityPreparation = preparationArguments;
+}
 const bindingDigest = proofDigest(operatorIdentity);
 const adc = prepareLocalReleaseADC(binding.operatorRoot, config.projectId);
 let resources;
@@ -162,6 +178,7 @@ await runWithCleanup(
     let operationAcquired = false,
       transitionPending = false,
       cloudWorkerProbePending = false,
+      cloudIdentityPending = false,
       expectedAuthority,
       resourceIdentity,
       ownedOperation,
@@ -1005,6 +1022,37 @@ await runWithCleanup(
               providerUsageBackfillRevision: marker.controlRevision,
               providerUsageVerifiedAt: Date.now(),
             });
+          } else if (action === 'prepare-cloud-run-identity') {
+            requirePhase(state, ['provider-usage-ready']);
+            if (config.environment !== 'staging' || operatorPrincipal.adcAndGcloudAccountMatch !== true)
+              throw new Error('IDENTITY_PREPARATION_REQUIRES_MATCHED_STAGING_OPERATOR');
+            const platform = JSON.parse(await readFile(config.platformConfig, 'utf8'));
+            if (platform.workerHosting !== 'cloud-run') throw new Error('IDENTITY_PREPARATION_REQUIRES_CLOUD_RUN');
+            validateWorkerCoverage(config, platform);
+            await verifyPreparationEvidence({ ...preparationArguments,
+              path: preparationArguments.proof, platform, binding, google: api });
+            const currentOperation = await lockRef.get();
+            assertNativeSnapshot(ownedOperation, currentOperation);
+            const hasSaved = Object.prototype.hasOwnProperty.call(currentOperation.data(), 'cloudIdentityPreparation');
+            if (hasSaved) cloudIdentityPending = true;
+            const immutableReceipt = firestore.doc(`_control/temporalCloudIdentityPreparation-${operationId}`);
+            const result = await prepareCloudRunIdentity({ platform, role: preparationArguments.role,
+              kind: preparationArguments.kind, operationId, creator: operatorPrincipal.email,
+              evidenceDigest: preparationArguments.digest, api,
+              saved: hasSaved ? currentOperation.get('cloudIdentityPreparation') : undefined,
+              save: async (identityState) => {
+                cloudIdentityPending = true;
+                ownedOperation = await saveIdentityPreparationCheckpoint({ firestore, lockRef, controlRef, stateRef,
+                  immutableReceipt, ownedOperation, expectedAuthority, config, operationId, bindingDigest,
+                  operatorPrincipal, identityState });
+              },
+            });
+            const receipt = await immutableReceipt.get();
+            if (!receipt.exists || receipt.get('bindingDigest') !== bindingDigest ||
+              receipt.get('identityState.account.uniqueId') !== result.account.uniqueId)
+              throw new Error('IDENTITY_PREPARATION_RECEIPT_UNCONFIRMED');
+            cloudIdentityPending = false;
+            console.log(`Dedicated identity preparation recorded at ${immutableReceipt.path}; no grants or compute activation.`);
           } else if (action === 'workers-ready') {
             requirePhase(state, ['provider-usage-ready', 'workers-ready']);
             const platform = await verifyReleaseWorkers();
@@ -1354,7 +1402,7 @@ await runWithCleanup(
         console.log(`Temporal release ${action} checkpoint saved. Existing jobs and worker versions are retained.`);
       },
       async () => {
-        if (!operationAcquired || transitionPending || cloudWorkerProbePending) return;
+        if (!operationAcquired || transitionPending || cloudWorkerProbePending || cloudIdentityPending) return;
         await firestore.runTransaction(async (tx) => {
           const lock = await tx.get(lockRef);
           if (lock.data()?.operationId === operationId) {
