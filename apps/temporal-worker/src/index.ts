@@ -1,3 +1,4 @@
+import { createWorkerReadinessActivities } from './runtime/readiness-probe';
 import { createServer, type Server } from 'node:http';
 import { getSharedFirebaseAppOwnership } from '@upperroom/shared/firebase/firebaseAdminOwnership';
 import { Client, Connection } from '@temporalio/client';
@@ -141,7 +142,12 @@ export async function runWorkerProcess(bindShutdown?: (shutdown: () => Promise<v
         namespace: config.namespace,
         taskQueue: queue,
         workflowBundle: ['urm-media', 'urm-controls'].includes(queue) ? undefined : { codePath: config.workflowBundle },
-        activities: queues[queue as keyof typeof queues],
+        activities: {
+          ...queues[queue as keyof typeof queues],
+          ...(config.hosting === 'cloud-run' ? createWorkerReadinessActivities({
+            firestore: db, projectId: config.projectId, buildId: config.buildId, queue, witness,
+          }) : {}),
+        },
         workerDeploymentOptions: {
           useWorkerVersioning: true,
           defaultVersioningBehavior: VersioningBehavior.PINNED,

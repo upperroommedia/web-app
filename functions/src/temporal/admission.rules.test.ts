@@ -59,6 +59,7 @@ describe('durable projection and immutable source rules', () => {
   it('denies all new private execution and audit records even to browser admins', async () => {
     const collections = [
       'temporalYouTubeAcquisitions',
+      'temporalWorkerReadiness',
       'durableActivityExecutions',
       'durableJobCancellationIntents',
       'durableJobCriticalSections',

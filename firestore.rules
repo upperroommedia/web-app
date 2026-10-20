@@ -187,6 +187,11 @@ service cloud.firestore {
       allow create: if releaseAllowsLegacy('media') && canUpload() && request.resource.data.uploaderId == request.auth.uid;
     }
 
+    // Native operator execution evidence is private, including from browser admins.
+    match /temporalWorkerReadiness/{document=**} {
+      allow read, write: if false;
+    }
+
     // Bundle metadata - allow public read access for bundle timestamp checking
     // These documents only contain timestamps and counts, not sensitive data
     match /metadata/{bundleDoc} {

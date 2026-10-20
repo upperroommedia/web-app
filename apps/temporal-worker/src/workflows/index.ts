@@ -9,3 +9,5 @@ export { ProviderOrphanReview } from './provider-review';
 
 export { publishingEntityWorkflow, maintenanceWorkflow } from './publishing/entities';
 export { WorkerRestartProbe } from './verification';
+
+export { WorkerRuntimeProbe } from './verification/runtime';
