@@ -123,7 +123,7 @@ test('native bootstrap protection recognizes original old pinned wait and reject
     const options = {
       client,
       firestore: db,
-      platform: { temporalNamespace: namespace, roleBindings: [{ role: 'controls', buildId, deploymentName }] },
+      platform: { temporalNamespace: namespace, roleBindings: [{ role: 'controls', buildId, deploymentName },{role:'orchestration',buildId,deploymentName:'urm-worker-staging'}] },
       role: 'controls',
       operationId,
       releaseId,
@@ -151,28 +151,34 @@ test('native bootstrap protection recognizes original old pinned wait and reject
     await launch('urm-controls', false, { deploymentName, buildId });
     assert.equal((await observeBootstrapRegistration(options)).role, 'controls');
     assert.equal((await observeBootstrapProtection(options)).protectedRunCount, 1);
-    for (const action of ['activate-cloud-run-controls-pool', 'stop-cloud-run-controls-activation']) {
-      await operation.update({ action });
-      assert.equal((await observeBootstrapProtection(options)).protectedRunCount, 1);
+    await launch('urm-orchestration',true,{deploymentName:'urm-worker-staging',buildId});
+    const selectRole=async role=>{options.role=role;await operation.update({action:`stop-cloud-run-${role}-activation`});};
+    for(const role of ['controls','orchestration']){
+      const actions=[`bootstrap-stop-cloud-run-${role}`,`activate-cloud-run-${role}-pool`,`stop-cloud-run-${role}-activation`];
+      options.role=role;
+      for(const action of actions){
+        await operation.update({action});
+        assert.equal((await observeBootstrapProtection(options)).protectedRunCount,1);
+      }
+      assert.deepEqual((await observeBootstrapRegistration(options)).queues,role==='controls'?[{name:'urm-controls',type:2}]:[{name:'urm-orchestration',type:1},{name:'urm-orchestration',type:2}]);
     }
     await lock.create({ state: 'held', sessionId: 'original' });
     const before = await lock.get();
     await assert.rejects(observeBootstrapProtection(options), /CLOUD_RUN_BOOTSTRAP_PROTECTION_UNCONFIRMED/);
     assert.equal((await lock.get()).updateTime?.isEqual(before.updateTime), true);
     await lock.delete();
-    const candidateQueue = `explicit-${operationId}`;
-    await launch(candidateQueue, true, { deploymentName, buildId });
+    const candidateQueue = 'urm-orchestration';
     const candidate = await rpc(() =>
       client.workflow.start('WorkerRestartProbe', {
         workflowId: `candidate-${operationId}`,
         taskQueue: candidateQueue,
-        versioningOverride: { pinnedTo: { deploymentName, buildId } },
+        versioningOverride: { pinnedTo: { deploymentName:'urm-worker-staging', buildId } },
         workflowExecutionTimeout: '1 minute',
       })
     );
     handles.push(candidate);
     await rpc(() => candidate.query('workerRestartProbe.status'));
-    await assert.rejects(observeBootstrapProtection(options), /CLOUD_RUN_BOOTSTRAP_PROTECTION_UNCONFIRMED/);
+    for(const role of ['controls','orchestration']){await selectRole(role);await assert.rejects(observeBootstrapProtection(options),/CLOUD_RUN_BOOTSTRAP_PROTECTION_UNCONFIRMED/);}
     for (const handle of handles) {
       await rpc(() => handle.signal('workerRestartProbe.release'));
       await rpc(() => handle.result());
@@ -197,22 +203,15 @@ test('native bootstrap protection recognizes original old pinned wait and reject
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
     assert.equal(noOpenRuns, true);
-    assert.equal((await observeBootstrapProtection(options)).protectedRunCount, 0);
-    // Actual LOCAL conflict-token routing change is a negative fixture only.
-    // The release operations themselves never promote a version.
-    const described = await rpc(() =>
-      client.connection.workflowService.describeWorkerDeployment({ namespace, deploymentName })
-    );
-    await rpc(() =>
-      client.connection.workflowService.setWorkerDeploymentCurrentVersion({
-        namespace,
-        deploymentName,
-        buildId,
-        conflictToken: described.conflictToken,
-        identity: 'owned-negative-protection-fixture',
-      })
-    );
-    await assert.rejects(observeBootstrapProtection(options), /CLOUD_RUN_BOOTSTRAP_PROTECTION_UNCONFIRMED/);
+    // Each target's positive non-current baseline precedes its LOCAL CAS negative.
+    for(const binding of options.platform.roleBindings){
+      await selectRole(binding.role);
+      assert.equal((await observeBootstrapProtection(options)).protectedRunCount,0);
+      const described=await rpc(()=>client.connection.workflowService.describeWorkerDeployment({namespace,deploymentName:binding.deploymentName}));
+      await rpc(()=>client.connection.workflowService.setWorkerDeploymentCurrentVersion({namespace,deploymentName:binding.deploymentName,buildId,
+        conflictToken:described.conflictToken,identity:'owned-negative-protection-fixture'}));
+      await assert.rejects(observeBootstrapProtection(options),/CLOUD_RUN_BOOTSTRAP_PROTECTION_UNCONFIRMED/);
+    }
   } catch (error) {
     failures.unshift(error);
   } finally {

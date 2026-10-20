@@ -51,6 +51,7 @@ function fixture() {
     },
   };
   const service = {
+    describeWorkerDeploymentVersion:async()=>{throw Object.assign(new Error('absent'),{code:5});},
     listWorkerDeployments: async () => ({ workerDeployments: [], nextPageToken: [] }),
     listWorkflowExecutions: async () => ({ executions: [], nextPageToken: [] }),
     describeWorkerDeployment: async () => ({
@@ -128,4 +129,18 @@ test('noncurrent queue registration cannot substitute current candidate readines
   });
   const result = await observeBootstrapRegistration(f.options);
   assert.match(result.scope, /no workflow start, promotion or readiness/);
+});
+for(const extra of [{name:'urm-media',type:2},{name:'urm-orchestration',type:1}])test('controls complete queue inventory denies extra/shared-role queues',async()=>{
+ const f=fixture();f.service.describeWorkerDeploymentVersion=async()=>({workerDeploymentVersionInfo:{deploymentVersion:{deploymentName:'candidate',buildId:'a'.repeat(40)},taskQueueInfos:[{name:'urm-controls',type:2},extra]}});
+ await assert.rejects(observeBootstrapRegistration(f.options));await assert.rejects(observeBootstrapProtection(f.options));
+});
+test('orchestration registration requires only its Workflow+Activity pair; extra role queues deny both proof and stop protection',async()=>{
+ const f=fixture();f.options.role='orchestration';f.options.platform.roleBindings[0].role='orchestration';
+ const get=f.options.firestore.getAll;f.options.firestore.getAll=async()=>{const d=await get();d[0].data().action='activate-cloud-run-orchestration-pool';return d;};
+ const queues=[{name:'urm-orchestration',type:1},{name:'urm-orchestration',type:2}];
+ f.service.describeWorkerDeploymentVersion=async()=>({workerDeploymentVersionInfo:{deploymentVersion:{deploymentName:'candidate',buildId:'a'.repeat(40)},taskQueueInfos:queues}});
+ assert.deepEqual((await observeBootstrapRegistration(f.options)).queues,queues);
+ await observeBootstrapProtection(f.options);
+ queues.push({name:'urm-controls',type:2});
+ await assert.rejects(observeBootstrapRegistration(f.options));await assert.rejects(observeBootstrapProtection(f.options));
 });

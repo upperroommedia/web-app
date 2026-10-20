@@ -379,3 +379,38 @@ test('post-credential namespace inventory drift cannot reuse the saved compute o
   await assert.rejects(retain(f.options));
   assert.equal(writes, 0);
 });
+
+const {bootstrapStopCloudRunOrchestrationPool:orchestrationCycle,activateCloudRunOrchestrationPool:orchestrationRetain,stopCloudRunOrchestrationActivation:orchestrationAbort}=await import('./temporal-bootstrap-pool.mjs');
+async function orchestrationAfterCycle(){
+ const f=fixture('orchestration'),r=await orchestrationCycle(f.options);
+ f.options.receipts.bootstrapCycle={operationId:f.options.operationId,releaseId:f.options.releaseId,identityState:structuredClone(r)};
+ f.options.operationId=randomUUID();return f;
+}
+test('orchestration uses its own exact source secrets/permissions and stays noncurrent through cycle, retention and unused stop',async()=>{
+ const f=await orchestrationAfterCycle(),kept=await orchestrationRetain(f.options);
+ assert.equal(kept.disposition,'retained');assert.equal(kept.plan.role,'orchestration');
+ assert.deepEqual(f.options.settings.runtimeSecrets.map(x=>x.name),['RUNTIME_ALERT_RECIPIENTS','ADMIN_BASE_URL']);
+ assert.ok(f.options.receipts.projectRole.identityState.nativeRole.includedPermissions.includes('firebaseauth.users.update'));
+ assert.deepEqual(f.options.receipts.storageRole.identityState.nativeRole.includedPermissions,['storage.objects.create','storage.objects.delete','storage.objects.get']);
+ assert.equal(f.calls.some(c=>/setWorkerDeployment|compute-config/.test(c.url)),false);
+ f.options.receipts.activation={operationId:f.options.operationId,releaseId:f.options.releaseId,identityState:structuredClone(kept)};f.options.operationId=randomUUID();
+ const stopped=await orchestrationAbort(f.options);assert.equal(stopped.stop.pool.desiredManualInstanceCount,0);
+ assert.deepEqual(f.calls.filter(c=>c.method==='PATCH').map(c=>c.request.scaling.manualInstanceCount),[1,0,1,0]);
+});
+for(const bad of ['runner','projectRole','storageAccess','settings','secret-policy'])test(`orchestration denies ${bad} without another start`,async()=>{
+ const f=await orchestrationAfterCycle(),control=fixture(),api=f.options.api;
+ if(['runner','projectRole','storageAccess'].includes(bad))f.options.receipts[bad]=control.options.receipts[bad];
+ if(bad==='settings')f.options.settings.runtimeSecrets=[];
+ f.options.api=async(...args)=>{const r=await api(...args);if(bad==='secret-policy'&&args[0].includes('ADMIN_BASE_URL:getIamPolicy'))r.bindings=[];return r;};
+ await assert.rejects(orchestrationRetain(f.options));assert.equal(f.calls.filter(c=>c.method==='PATCH').length,2);
+});
+for(const [role,run] of [['orchestration',cycle],['controls',orchestrationCycle]])test(`${role} cannot choose another role's bootstrap wrapper`,async()=>{
+ const f=fixture(role);await assert.rejects(run(f.options));assert.equal(f.calls.filter(c=>c.method==='PATCH').length,0);
+});
+test('orchestration observer failure cleans up under its same parent; protected work prevents unused stop',async()=>{
+ const f=await orchestrationAfterCycle();f.options.observeRegistration=async()=>{throw new Error('unknown');};
+ await assert.rejects(orchestrationRetain(f.options));assert.equal(f.pool.scaling.manualInstanceCount,0);assert.equal(f.saved.disposition,'stopped');
+ const g=await orchestrationAfterCycle(),kept=await orchestrationRetain(g.options);
+ g.options.receipts.activation={operationId:g.options.operationId,releaseId:g.options.releaseId,identityState:structuredClone(kept)};g.options.operationId=randomUUID();
+ g.options.observeProtection=async()=>{throw new Error('candidate current/working');};await assert.rejects(orchestrationAbort(g.options));assert.equal(g.pool.scaling.manualInstanceCount,1);
+});

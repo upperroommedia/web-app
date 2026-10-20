@@ -6,7 +6,7 @@ import { temporalCloudScalerPrincipals } from '../../temporal-release-cloud-run.
 import { runtimeRolePreparationPlan } from '../../temporal-prepare-runtime-role.mjs';
 import { proofDigest } from '../../temporal-release-runtime.mjs';
 /** Controlled Cloud/creation receipts only; never native attestation. */
-export function controlsBootstrapFixture() {
+export function controlsBootstrapFixture(role='controls') {
   const buildId = 'a'.repeat(40),
     image = `us-central1-docker.pkg.dev/urm-app-staging/urm-temporal/worker@sha256:${'b'.repeat(64)}`,
     workerRoles = ['orchestration', 'controls'];
@@ -47,12 +47,11 @@ export function controlsBootstrapFixture() {
       stabilizationSeconds: 180,
     })),
   };
-  const b = platform.roleBindings[1],
+  const b = platform.roleBindings.find(b=>b.role===role),
     releaseId = randomUUID(),
     operationId = randomUUID(),
     evidenceDigest = 'c'.repeat(64),
-    settings = { apiKeyVersion: '2', runtimeSecrets: [] },
-    role = 'controls';
+    settings = { apiKeyVersion: '2', runtimeSecrets: role==='orchestration'?['RUNTIME_ALERT_RECIPIENTS','ADMIN_BASE_URL'].map(name=>({name,secret:name,version:'2'})):[] };
   const receipts = {},
     policies = new Map(),
     roles = new Map(),
@@ -313,7 +312,7 @@ export function controlsBootstrapFixture() {
       if (url.includes('secretmanager'))
         return url.includes('getIamPolicy')
           ? { etag: 'key', bindings: [{ role: 'roles/secretmanager.secretAccessor', members: [runner] }] }
-          : { name: 'projects/urm-app-staging/secrets/TEMPORAL_WORKER_API_KEY/versions/2', state: 'ENABLED' };
+          : { name:url.split('/v1/')[1], state: 'ENABLED' };
       if (url.includes('/serviceAccounts/')) {
         const r = url.includes(b.runnerServiceAccount) ? receipts.runner : receipts.scaler;
         return { ...r.identityState.account, projectId: 'urm-app-staging' };

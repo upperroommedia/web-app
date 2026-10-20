@@ -1,13 +1,13 @@
 # Serverless bootstrap and process recovery boundary
 
-The guarded controller now has a controls-only **bootstrap and stop cycle** in
+The guarded controller now has a controls and orchestration **bootstrap and stop cycles** in
 source. It joins the owned zero-pool/account/grant receipts, starts desired manual
-count one, observes the native non-current Activity queue, then stops the same
+count one, observes the exact native non-current role queues, then stops the same
 owned pool under the original parent. Observation failure also enters owned stop;
 uncertain authority, protected work or an unknown result retains the fence.
-The source also connects a kept-running controls activation and a separate stop of
+The source also connects a kept-running controls or orchestration activation and a separate stop of
 that exact unused activation. None of these operations has been applied to Cloud Run.
-Other role activation and guarded promotion remain unimplemented.
+Media, images, email and search activation and guarded promotion remain unimplemented.
 
 The final native role-readiness collector still requires candidate versions current,
 with no ramp, on the real role queues. The cycle cannot replace that collector.
@@ -31,7 +31,7 @@ The existing integration CI includes two additional real SDK tests:
 
 The serial release-recovery CI also runs
 `scripts/integration/temporal-controls-bootstrap.native.mjs`: actual local SDK
-old pinned waiting-run inventory, non-current controls queue registration,
+old pinned waiting-run inventory, non-current controls Activity and orchestration Workflow/Activity registration,
 provider-lock preservation, and explicit candidate-run denial against the dedicated
 Firestore emulator. Controlled Cloud API tests cover the scale/stop protocol;
 the actual Firestore checkpoint regression checks paused authority, immutable
@@ -42,7 +42,7 @@ TypeScript SDK 1.24.0 configuration. They do not establish general no-work isola
 Cloud Run process replacement, native cloud delivery, effective IAM or readiness.
 In particular, non-current is not a fence against explicitly routed tasks.
 
-## Connected controls-only cycle and kept activation
+## Connected controls and orchestration cycles and kept activation
 
 `bootstrap-stop-cloud-run-controls` uses a SHA-pinned private manifest containing
 exactly eleven distinct completed preparation operation IDs: runner, scaler, pool,
@@ -52,6 +52,22 @@ It persists an immutable activation record before observing registration; each s
 request and its authorization remain immutable after its saved attempt. Known LROs
 resume; unknown ACKs use GET only and never resend or assert causality.
 
+The equivalent orchestration actions are `bootstrap-stop-cloud-run-orchestration`,
+`activate-cloud-run-orchestration-pool` and
+`stop-cloud-run-orchestration-activation`. Each has a separate fixed checkpoint
+field and immutable receipt prefix; a descriptor cannot select another role or
+reuse a controls receipt. Orchestration rechecks its own operational alert/admin
+secret settings and existing narrow Auth, RTDB and Storage grants. No new grant
+semantics are introduced by activation.
+
+Controls registration requires exactly its Activity queue. Orchestration requires
+exactly its Workflow and Activity queues, both named `urm-orchestration`. Foreign,
+shared, duplicate or unsupported queues deny registration and unused-pool stop.
+Partial expected registration can wait while warming; it cannot satisfy completion.
+Starting orchestration non-current is distinct from promoting it. This enables a
+future separately guarded pinned inert verification operation; this change does
+not implement that operation or relax the final current-version readiness gate.
+
 Both stable work scans and the final refreshed namespace compute inventory must
 remain within five seconds; a long scan is a denial, not renewed freshness. Every
 open execution must be pinned to a different registered version, without pending
@@ -60,7 +76,7 @@ session, unresolved dispatch record/lease or candidate execution denies the cycl
 These conservative checks can reject retained old work; do not clear any record to
 make them pass. They are observations, not a cross-API exclusion or drainage proof.
 
-The source-owned controls authorization callback also executes at the HTTP boundary
+The source-owned role authorization callback also executes at the HTTP boundary
 **after** the controller obtains its Google credential. It rechecks the original
 protection and complete namespace-compute inventory digests and component freshness;
 a slow credential refresh or intervening authority/routing/inventory change cannot
@@ -89,8 +105,8 @@ protection before its sole saved conditional stop. A current or working candidat
 cannot be forced to zero. Cleanup has no authorization-expiry shortcut. Desired
 zero still proves neither process termination nor drain. After this stop, the
 original cycle origin cannot authorize another activation; a new origin requires a
-separately reviewed contract. Other roles, media capacity and guarded promotion
-remain out of scope.
+separately reviewed contract. Media, images, email and search activation, media
+capacity and guarded promotion remain out of scope.
 
 Any extension to other roles and the later handoff must retain these requirements:
 

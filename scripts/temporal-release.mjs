@@ -19,10 +19,10 @@ import { saveDiagnosticWakeCheckpoint, pulseDiagnosticWake } from './temporal-di
 import { armCloudRunDispatchDiagnostic } from './temporal-dispatch-diagnostic.mjs';
 import { activateCloudRunDispatchService } from './temporal-activate-dispatch-service.mjs';
 import { prepareCloudRunDispatchService } from './temporal-prepare-dispatch-service.mjs';
-import { activateCloudRunControlsPool, stopCloudRunControlsActivation, bootstrapStopCloudRunControlsPool } from './temporal-bootstrap-pool.mjs';
+import { bootstrapStopCloudRunOrchestrationPool, activateCloudRunOrchestrationPool, stopCloudRunOrchestrationActivation, activateCloudRunControlsPool, stopCloudRunControlsActivation, bootstrapStopCloudRunControlsPool } from './temporal-bootstrap-pool.mjs';
 import { prepareCloudRunZeroPool } from './temporal-prepare-cloud-pool.mjs';
 import { readPreparationReceipt } from './temporal-preparation-evidence.mjs';
-import { saveControlsActivationCheckpoint, saveControlsActivationStopCheckpoint, savePoolBootstrapCycleCheckpoint, saveDispatchActivationCheckpoint, saveDispatchEventarcCycleCheckpoint, saveDispatchSchedulerCycleCheckpoint, saveEventarcAuditPreparationCheckpoint, saveDispatchWakeStopCheckpoint, saveDispatchAccessPreparationCheckpoint, saveDispatchServicePreparationCheckpoint, saveIdentityPreparationCheckpoint, savePoolPreparationCheckpoint, saveSecretAccessPreparationCheckpoint, saveScalerAccessPreparationCheckpoint, saveFirestoreAccessPreparationCheckpoint, saveRuntimeRolePreparationCheckpoint, saveRuntimeAccessPreparationCheckpoint } from './temporal-preparation-checkpoint.mjs';
+import { saveOrchestrationBootstrapCycleCheckpoint, saveOrchestrationActivationCheckpoint, saveOrchestrationActivationStopCheckpoint, saveControlsActivationCheckpoint, saveControlsActivationStopCheckpoint, savePoolBootstrapCycleCheckpoint, saveDispatchActivationCheckpoint, saveDispatchEventarcCycleCheckpoint, saveDispatchSchedulerCycleCheckpoint, saveEventarcAuditPreparationCheckpoint, saveDispatchWakeStopCheckpoint, saveDispatchAccessPreparationCheckpoint, saveDispatchServicePreparationCheckpoint, saveIdentityPreparationCheckpoint, savePoolPreparationCheckpoint, saveSecretAccessPreparationCheckpoint, saveScalerAccessPreparationCheckpoint, saveFirestoreAccessPreparationCheckpoint, saveRuntimeRolePreparationCheckpoint, saveRuntimeAccessPreparationCheckpoint } from './temporal-preparation-checkpoint.mjs';
 // Every step is explicit, revision-fenced, resumable, and leaves admissions paused on failure.
 import { readFile, writeFile, mkdtemp, rm, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -113,6 +113,9 @@ if (
     'prepare-cloud-run-identity',
     'prepare-cloud-run-pool',
     'bootstrap-stop-cloud-run-controls',
+    'bootstrap-stop-cloud-run-orchestration',
+    'activate-cloud-run-orchestration-pool',
+    'stop-cloud-run-orchestration-activation',
     'activate-cloud-run-controls-pool',
     'stop-cloud-run-controls-activation',
     'prepare-cloud-run-dispatch-diagnostic', 'activate-cloud-run-dispatch-service',
@@ -169,7 +172,11 @@ const operatorIdentity = {
   runtimePins: binding.runtimePins,
   resourceBinding,
 };
-const preparationArguments = ['activate-cloud-run-controls-pool','stop-cloud-run-controls-activation','bootstrap-stop-cloud-run-controls', 'prepare-cloud-run-dispatch-diagnostic', 'activate-cloud-run-dispatch-service', 'prepare-cloud-run-identity', 'prepare-cloud-run-dispatch-service', 'prepare-cloud-run-dispatch-access', 'prepare-stop-cloud-run-dispatch-scheduler', 'prepare-stop-cloud-run-dispatch-eventarc', 'stop-cloud-run-dispatch-wake', 'prepare-cloud-run-pool', 'prepare-cloud-run-secret-access', 'prepare-cloud-run-scaler-access', 'prepare-cloud-run-firestore-access', 'prepare-cloud-run-runtime-role', 'prepare-cloud-run-runtime-access', 'prepare-cloud-run-eventarc-audit'].includes(action) ? {
+const poolOperationRoles=Object.freeze({
+ 'bootstrap-stop-cloud-run-controls':'controls','activate-cloud-run-controls-pool':'controls','stop-cloud-run-controls-activation':'controls',
+ 'bootstrap-stop-cloud-run-orchestration':'orchestration','activate-cloud-run-orchestration-pool':'orchestration','stop-cloud-run-orchestration-activation':'orchestration',
+});
+const preparationArguments = ['activate-cloud-run-orchestration-pool','stop-cloud-run-orchestration-activation','bootstrap-stop-cloud-run-orchestration','activate-cloud-run-controls-pool','stop-cloud-run-controls-activation','bootstrap-stop-cloud-run-controls', 'prepare-cloud-run-dispatch-diagnostic', 'activate-cloud-run-dispatch-service', 'prepare-cloud-run-identity', 'prepare-cloud-run-dispatch-service', 'prepare-cloud-run-dispatch-access', 'prepare-stop-cloud-run-dispatch-scheduler', 'prepare-stop-cloud-run-dispatch-eventarc', 'stop-cloud-run-dispatch-wake', 'prepare-cloud-run-pool', 'prepare-cloud-run-secret-access', 'prepare-cloud-run-scaler-access', 'prepare-cloud-run-firestore-access', 'prepare-cloud-run-runtime-role', 'prepare-cloud-run-runtime-access', 'prepare-cloud-run-eventarc-audit'].includes(action) ? {
   role: args[args.indexOf('--identity-role') + 1],
   kind: args[args.indexOf('--identity-kind') + 1],
   proof: args[args.indexOf('--preparation-proof') + 1],
@@ -180,7 +187,7 @@ if (preparationArguments) {
   if (!required.every(flag => args.includes(flag)) ||
     !/^[a-f0-9]{64}$/.test(preparationArguments.digest ?? ''))
     throw new Error('Explicit immutable identity preparation inputs required');
-  if (['activate-cloud-run-controls-pool','stop-cloud-run-controls-activation','bootstrap-stop-cloud-run-controls', 'prepare-cloud-run-dispatch-diagnostic', 'activate-cloud-run-dispatch-service', 'prepare-cloud-run-dispatch-service', 'prepare-cloud-run-dispatch-access', 'prepare-stop-cloud-run-dispatch-scheduler', 'prepare-stop-cloud-run-dispatch-eventarc', 'stop-cloud-run-dispatch-wake', 'prepare-cloud-run-pool', 'prepare-cloud-run-secret-access', 'prepare-cloud-run-scaler-access', 'prepare-cloud-run-firestore-access', 'prepare-cloud-run-runtime-role', 'prepare-cloud-run-runtime-access', 'prepare-cloud-run-eventarc-audit'].includes(action)) {
+  if (['activate-cloud-run-orchestration-pool','stop-cloud-run-orchestration-activation','bootstrap-stop-cloud-run-orchestration','activate-cloud-run-controls-pool','stop-cloud-run-controls-activation','bootstrap-stop-cloud-run-controls', 'prepare-cloud-run-dispatch-diagnostic', 'activate-cloud-run-dispatch-service', 'prepare-cloud-run-dispatch-service', 'prepare-cloud-run-dispatch-access', 'prepare-stop-cloud-run-dispatch-scheduler', 'prepare-stop-cloud-run-dispatch-eventarc', 'stop-cloud-run-dispatch-wake', 'prepare-cloud-run-pool', 'prepare-cloud-run-secret-access', 'prepare-cloud-run-scaler-access', 'prepare-cloud-run-firestore-access', 'prepare-cloud-run-runtime-role', 'prepare-cloud-run-runtime-access', 'prepare-cloud-run-eventarc-audit'].includes(action)) {
     delete preparationArguments.kind;
     preparationArguments.settings = args[args.indexOf('--pool-settings') + 1];
     preparationArguments.settingsDigest = args[args.indexOf('--pool-settings-sha256') + 1];
@@ -189,10 +196,10 @@ if (preparationArguments) {
       !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(preparationArguments.runnerOperationId ?? ''))
       throw new Error('Explicit immutable pool preparation inputs required');
   }
-  if (['bootstrap-stop-cloud-run-controls','activate-cloud-run-controls-pool','stop-cloud-run-controls-activation'].includes(action)) {
+  if (Object.hasOwn(poolOperationRoles,action)) {
     preparationArguments.receipts=args[args.indexOf('--bootstrap-receipts')+1];
     preparationArguments.receiptsDigest=args[args.indexOf('--bootstrap-receipts-sha256')+1];
-    if(preparationArguments.role!=='controls'||!args.includes('--bootstrap-receipts')||!args.includes('--bootstrap-receipts-sha256')||
+    if(preparationArguments.role!==poolOperationRoles[action]||!args.includes('--bootstrap-receipts')||!args.includes('--bootstrap-receipts-sha256')||
       !/^[a-f0-9]{64}$/.test(preparationArguments.receiptsDigest??'')) throw new Error('FIXED_CONTROLS_BOOTSTRAP_RECEIPTS_REQUIRED');
   }
   if (action === 'prepare-cloud-run-dispatch-diagnostic') {
@@ -1146,7 +1153,7 @@ await runWithCleanup(
               throw new Error('IDENTITY_PREPARATION_RECEIPT_UNCONFIRMED');
             cloudIdentityPending = false;
             console.log(`Dedicated identity preparation recorded at ${immutableReceipt.path}; no grants or compute activation.`);
-          } else if (['bootstrap-stop-cloud-run-controls','activate-cloud-run-controls-pool','stop-cloud-run-controls-activation'].includes(action)) {
+          } else if (Object.hasOwn(poolOperationRoles,action)) {
             requirePhase(state, ['provider-usage-ready']);
             if(config.environment!=='staging'||operatorPrincipal.adcAndGcloudAccountMatch!==true)
               throw new Error('BOOTSTRAP_REQUIRES_MATCHED_STAGING_OPERATOR');
@@ -1155,12 +1162,20 @@ await runWithCleanup(
             await verifyPreparationEvidence({...preparationArguments,path:preparationArguments.proof,platform,binding,google:api});
             const settings=await readPreparationReceipt(preparationArguments.settings,preparationArguments.settingsDigest);
             const ids=await readPreparationReceipt(preparationArguments.receipts,preparationArguments.receiptsDigest);
+            const operation={
+              'bootstrap-stop-cloud-run-controls':{role:'controls',mode:'cycle',field:'cloudPoolBootstrapCycle',prefix:'temporalCloudPoolBootstrapCycle',creationPrefix:'temporalCloudPoolBootstrapActivation',run:bootstrapStopCloudRunControlsPool,checkpoint:savePoolBootstrapCycleCheckpoint},
+              'activate-cloud-run-controls-pool':{role:'controls',mode:'retain',field:'cloudControlsActivation',prefix:'temporalCloudControlsActivation',creationPrefix:'temporalCloudControlsActivationStart',run:activateCloudRunControlsPool,checkpoint:saveControlsActivationCheckpoint},
+              'stop-cloud-run-controls-activation':{role:'controls',mode:'abort',field:'cloudControlsActivationStop',prefix:'temporalCloudControlsActivationStop',run:stopCloudRunControlsActivation,checkpoint:saveControlsActivationStopCheckpoint},
+              'bootstrap-stop-cloud-run-orchestration':{role:'orchestration',mode:'cycle',field:'cloudOrchestrationBootstrapCycle',prefix:'temporalCloudOrchestrationBootstrapCycle',creationPrefix:'temporalCloudOrchestrationBootstrapActivation',run:bootstrapStopCloudRunOrchestrationPool,checkpoint:saveOrchestrationBootstrapCycleCheckpoint},
+              'activate-cloud-run-orchestration-pool':{role:'orchestration',mode:'retain',field:'cloudOrchestrationActivation',prefix:'temporalCloudOrchestrationActivation',creationPrefix:'temporalCloudOrchestrationActivationStart',run:activateCloudRunOrchestrationPool,checkpoint:saveOrchestrationActivationCheckpoint},
+              'stop-cloud-run-orchestration-activation':{role:'orchestration',mode:'abort',field:'cloudOrchestrationActivationStop',prefix:'temporalCloudOrchestrationActivationStop',run:stopCloudRunOrchestrationActivation,checkpoint:saveOrchestrationActivationStopCheckpoint},
+            }[action];
             const prefixes={runner:'temporalCloudIdentityPreparation',scaler:'temporalCloudIdentityPreparation',pool:'temporalCloudPoolPreparation',
               runnerScaler:'temporalCloudScalerAccessPreparation',scalerTrust:'temporalCloudScalerAccessPreparation',poolAccess:'temporalCloudScalerAccessPreparation',
               firestore:'temporalCloudFirestoreAccessPreparation',projectRole:'temporalCloudRuntimeRolePreparation',projectAccess:'temporalCloudRuntimeAccessPreparation',
               storageRole:'temporalCloudRuntimeRolePreparation',storageAccess:'temporalCloudRuntimeAccessPreparation',
-              ...(action!=='bootstrap-stop-cloud-run-controls'?{bootstrapCycle:'temporalCloudPoolBootstrapCycle'}:{}),
-              ...(action==='stop-cloud-run-controls-activation'?{activation:'temporalCloudControlsActivation'}:{})};
+              ...(operation.mode!=='cycle'?{bootstrapCycle:operation.role==='controls'?'temporalCloudPoolBootstrapCycle':'temporalCloudOrchestrationBootstrapCycle'}:{}),
+              ...(operation.mode==='abort'?{activation:operation.role==='controls'?'temporalCloudControlsActivation':'temporalCloudOrchestrationActivation'}:{})};
             if(!ids||Object.keys(ids).sort().join(',')!==Object.keys(prefixes).sort().join(',')||ids.runner!==preparationArguments.runnerOperationId||
               new Set(Object.values(ids)).size!==Object.keys(prefixes).length||Object.values(ids).some(id=>!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(id??'')))
               throw new Error('EXACT_BOOTSTRAP_RECEIPT_MANIFEST_REQUIRED');
@@ -1171,30 +1186,25 @@ await runWithCleanup(
               receipts[key]=snapshot.data();
             }
             const currentOperation=await lockRef.get();assertNativeSnapshot(ownedOperation,currentOperation);
-            const operation={
-              'bootstrap-stop-cloud-run-controls':{field:'cloudPoolBootstrapCycle',prefix:'temporalCloudPoolBootstrapCycle',creationPrefix:'temporalCloudPoolBootstrapActivation',run:bootstrapStopCloudRunControlsPool,checkpoint:savePoolBootstrapCycleCheckpoint},
-              'activate-cloud-run-controls-pool':{field:'cloudControlsActivation',prefix:'temporalCloudControlsActivation',creationPrefix:'temporalCloudControlsActivationStart',run:activateCloudRunControlsPool,checkpoint:saveControlsActivationCheckpoint},
-              'stop-cloud-run-controls-activation':{field:'cloudControlsActivationStop',prefix:'temporalCloudControlsActivationStop',run:stopCloudRunControlsActivation,checkpoint:saveControlsActivationStopCheckpoint},
-            }[action];
             const hasSaved=Object.hasOwn(currentOperation.data(),operation.field);
             if(hasSaved)cloudIdentityPending=true;
             const immutableReceipt=firestore.doc(`_control/${operation.prefix}-${operationId}`);
             const creationReceipt=operation.creationPrefix?firestore.doc(`_control/${operation.creationPrefix}-${operationId}`):undefined;
-            const result=await operation.run({platform,role:'controls',settings,operationId,releaseId:config.releaseId,
+            const result=await operation.run({platform,role:operation.role,settings,operationId,releaseId:config.releaseId,
               evidenceDigest:preparationArguments.digest,receipts,api,saved:hasSaved?currentOperation.get(operation.field):undefined,
-              observeProtection:()=>verifyCloudRunBootstrapProtection({binding,config,platform,firestore,role:'controls',operationId,bindingDigest,expectedAuthority,releaseId:config.releaseId}),
-              observeRegistration:()=>verifyCloudRunBootstrapRegistration({binding,config,platform,firestore,role:'controls'}),
+              observeProtection:()=>verifyCloudRunBootstrapProtection({binding,config,platform,firestore,role:operation.role,operationId,bindingDigest,expectedAuthority,releaseId:config.releaseId}),
+              observeRegistration:()=>verifyCloudRunBootstrapRegistration({binding,config,platform,firestore,role:operation.role}),
               save:async identityState=>{
                 cloudIdentityPending=true;
                 ownedOperation=await operation.checkpoint({firestore,lockRef,controlRef,stateRef,immutableReceipt,creationReceipt,ownedOperation,
                   expectedAuthority,config,operationId,bindingDigest,operatorPrincipal,identityState});
               }});
             const receipt=await immutableReceipt.get();
-            if(!receipt.exists||receipt.get('bindingDigest')!==bindingDigest||receipt.get(action==='activate-cloud-run-controls-pool'?'identityState.activationState.pool.uid':'identityState.stop.pool.uid')!==(action==='activate-cloud-run-controls-pool'?result.activationState.pool.uid:result.stop.pool.uid)||
-              result.disposition!==(action==='activate-cloud-run-controls-pool'?'retained':'stopped'))
+            if(!receipt.exists||receipt.get('bindingDigest')!==bindingDigest||receipt.get(operation.mode==='retain'?'identityState.activationState.pool.uid':'identityState.stop.pool.uid')!==(operation.mode==='retain'?result.activationState.pool.uid:result.stop.pool.uid)||
+              result.disposition!==(operation.mode==='retain'?'retained':'stopped'))
               throw new Error('BOOTSTRAP_CYCLE_RECEIPT_UNCONFIRMED');
             cloudIdentityPending=false;
-            console.log(`Owned controls configuration operation recorded at ${immutableReceipt.path}; no routing or readiness advance.`);
+            console.log(`Owned role-bound configuration operation recorded at ${immutableReceipt.path}; no routing or readiness advance.`);
           } else if (action === 'prepare-cloud-run-pool') {
             requirePhase(state, ['provider-usage-ready']);
             if (config.environment !== 'staging' || operatorPrincipal.adcAndGcloudAccountMatch !== true)

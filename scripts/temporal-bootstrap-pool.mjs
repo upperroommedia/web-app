@@ -15,7 +15,7 @@ import {
 import { readOwnedPreparationRuntimeRole } from './temporal-prepare-runtime-role.mjs';
 import { verifyPreparedPoolMetadata, verifyPoolPreparationPrerequisites } from './temporal-prepare-cloud-pool.mjs';
 const fail = () => {
-  throw new Error('CLOUD_RUN_CONTROLS_BOOTSTRAP_UNCONFIRMED');
+  throw new Error('CLOUD_RUN_ROLE_POOL_BOOTSTRAP_UNCONFIRMED');
 };
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
 const rawHash = (x) => createHash('sha256').update(JSON.stringify(x)).digest('hex');
@@ -222,12 +222,12 @@ async function verifyAccess(o, zeroPlan) {
     policiesSHA256: proofDigest({ scalerPolicies, projectPolicy, proofs }),
   };
 }
-/** Bootstrap one unused controls pool, observe its non-current native queue,
+/** Bootstrap one unused source-bound controls/orchestration pool, observe its non-current native queue,
  * then stop that same pool under the SAME parent, including observation failure.
  * A later handoff activation needs its own reviewed operation; this cycle does
  * not promote routing, attach WCI, retire workers or prove live instance count.
  */
-async function runControlsPoolOperation(o, mode) {
+async function runReviewedPoolOperation(o, mode, expectedRole) {
   const {
     platform,
     role,
@@ -244,7 +244,8 @@ async function runControlsPoolOperation(o, mode) {
   } = o;
   validateCloudRunReleasePlatform(platform);
   if (
-    role !== 'controls' ||
+    role !== expectedRole ||
+    !['controls','orchestration'].includes(expectedRole) ||
     !['cycle', 'retain', 'abort'].includes(mode) ||
     !uuid.test(operationId ?? '') ||
     !uuid.test(releaseId ?? '') ||
@@ -701,7 +702,7 @@ async function runControlsPoolOperation(o, mode) {
           retainedRegistration,
           verifiedAt: new Date().toISOString(),
           scope:
-            'owned controls desired-one non-current registration retained for separate guarded handoff; not live count, effective runtime access, promotion, WCI or readiness',
+            'owned role-bound desired-one non-current registration retained for separate guarded handoff; not live count, effective runtime access, promotion, WCI or readiness',
         });
         return state;
       }
@@ -714,7 +715,7 @@ async function runControlsPoolOperation(o, mode) {
       disposition: 'stopped',
       verifiedAt: new Date().toISOString(),
       scope:
-        'owned controls bootstrap/stop cycle; desired counts not live process counts; unknown ACK not causal; no promotion/WCI/drainage/readiness',
+        'owned role-bound bootstrap/stop cycle; desired counts not live process counts; unknown ACK not causal; no promotion/WCI/drainage/readiness',
     });
     if (state.observation.status !== 'confirmed' || mode === 'retain') fail();
     return state;
@@ -724,13 +725,17 @@ async function runControlsPoolOperation(o, mode) {
 }
 
 // Fixed entrypoints: descriptors cannot choose a cleanup policy or role.
-const execute = async (o, mode) => {
+const execute = async (o, mode, role) => {
   try {
-    return await runControlsPoolOperation(o, mode);
+    return await runReviewedPoolOperation(o, mode, role);
   } catch {
     return fail();
   }
 };
-export const bootstrapStopCloudRunControlsPool = (o) => execute(o, 'cycle');
-export const activateCloudRunControlsPool = (o) => execute(o, 'retain');
-export const stopCloudRunControlsActivation = (o) => execute(o, 'abort');
+export const bootstrapStopCloudRunControlsPool = (o) => execute(o, 'cycle', 'controls');
+export const activateCloudRunControlsPool = (o) => execute(o, 'retain', 'controls');
+export const stopCloudRunControlsActivation = (o) => execute(o, 'abort', 'controls');
+
+export const bootstrapStopCloudRunOrchestrationPool=o=>execute(o,'cycle','orchestration');
+export const activateCloudRunOrchestrationPool=o=>execute(o,'retain','orchestration');
+export const stopCloudRunOrchestrationActivation=o=>execute(o,'abort','orchestration');

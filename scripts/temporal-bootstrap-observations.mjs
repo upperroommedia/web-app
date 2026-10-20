@@ -5,6 +5,19 @@ const fail = () => {
 };
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
 const version = (x) => (x?.updateTime ? `${x.updateTime.seconds}:${x.updateTime.nanoseconds}` : fail());
+const actions={
+ controls:['bootstrap-stop-cloud-run-controls','activate-cloud-run-controls-pool','stop-cloud-run-controls-activation'],
+ orchestration:['bootstrap-stop-cloud-run-orchestration','activate-cloud-run-orchestration-pool','stop-cloud-run-orchestration-activation'],
+};
+function queueInventory(role,infos,complete=false){
+ if(!Object.hasOwn(actions,role)||infos!==undefined&&!Array.isArray(infos))fail();
+ const expected=role==='orchestration'?[1,2]:[2],seen=new Set();
+ for(const q of infos??[]){
+  if(q?.name!==`urm-${role}`||!expected.includes(q.type)||seen.has(q.type))fail();seen.add(q.type);
+ }
+ const result=[...seen].sort().map(type=>({name:`urm-${role}`,type}));
+ return complete&&result.length!==expected.length?undefined:result;
+}
 /** Native observations under a still-paused original operation. Conservative:
  * any pending Activity, unversioned open run, active provider session/lock or
  * unresolved dispatch lease stops bootstrap. Never settles or edits old work.
@@ -12,7 +25,7 @@ const version = (x) => (x?.updateTime ? `${x.updateTime.seconds}:${x.updateTime.
 export async function observeBootstrapProtection(o) {
   const { client, firestore: db, platform, role, operationId, bindingDigest, expectedAuthority, releaseId } = o;
   if (
-    role !== 'controls' ||
+    !Object.hasOwn(actions,role) ||
     db.projectId !== 'urm-app-staging' ||
     db.databaseId !== '(default)' ||
     client.options.namespace !== platform.temporalNamespace
@@ -55,11 +68,7 @@ export async function observeBootstrapProtection(o) {
       p.get('operationId') !== operationId ||
       p.get('bindingDigest') !== bindingDigest ||
       p.get('releaseId') !== releaseId ||
-      ![
-        'bootstrap-stop-cloud-run-controls',
-        'activate-cloud-run-controls-pool',
-        'stop-cloud-run-controls-activation',
-      ].includes(p.get('action')) ||
+      !actions[role].includes(p.get('action')) ||
       c.get('releaseId') !== releaseId ||
       s.get('releaseId') !== releaseId ||
       c.get('admission') !== 'paused' ||
@@ -163,6 +172,13 @@ export async function observeBootstrapProtection(o) {
         cursor = page.size === 100 ? page.docs.at(-1) : undefined;
       } while (cursor);
     }
+    let candidateQueues=[];
+    try{
+      const candidate=await rpc(()=>service.describeWorkerDeploymentVersion({namespace,deploymentVersion:{deploymentName:binding.deploymentName,buildId:binding.buildId}}));
+      const info=candidate.workerDeploymentVersionInfo;
+      if(info?.deploymentVersion?.deploymentName!==binding.deploymentName||info.deploymentVersion.buildId!==binding.buildId)fail();
+      candidateQueues=queueInventory(role,info.taskQueueInfos);
+    }catch(error){if(error?.code!==5)throw error;}
     let routing = null;
     try {
       const report = await rpc(() =>
@@ -184,6 +200,7 @@ export async function observeBootstrapProtection(o) {
       workflows: workflows.sort((a, b) => a.executionSHA256.localeCompare(b.executionSHA256)),
       rows: rows.sort((a, b) => a[0].localeCompare(b[0])),
       routing,
+      candidateQueues,
     };
   };
   try {
@@ -220,7 +237,7 @@ export async function observeBootstrapRegistration({ client, platform, role }) {
   const b = platform.roleBindings.find((x) => x.role === role),
     namespace = platform.temporalNamespace,
     service = client.connection.workflowService;
-  if (role !== 'controls' || client.options.namespace !== namespace) fail();
+  if (!Object.hasOwn(actions,role) || client.options.namespace !== namespace) fail();
   const end = Date.now() + 30000;
   while (Date.now() < end) {
     try {
@@ -235,10 +252,11 @@ export async function observeBootstrapRegistration({ client, platform, role }) {
       );
       const v = version.workerDeploymentVersionInfo,
         r = report.workerDeploymentInfo?.routingConfig;
+      const queues=queueInventory(role,v?.taskQueueInfos,true);
       if (
         v?.deploymentVersion?.deploymentName === b.deploymentName &&
         v.deploymentVersion.buildId === b.buildId &&
-        v.taskQueueInfos?.some((q) => q.name === 'urm-controls' && q.type === 2) &&
+        queues &&
         r?.currentDeploymentVersion?.buildId !== b.buildId &&
         r?.rampingDeploymentVersion?.buildId !== b.buildId &&
         Number(r?.rampingVersionPercentage ?? 0) === 0
@@ -249,9 +267,10 @@ export async function observeBootstrapRegistration({ client, platform, role }) {
           buildId: b.buildId,
           observedAt: new Date().toISOString(),
           registrationSHA256: proofDigest(version),
+          queues,
           routingSHA256: proofDigest(report),
           scope:
-            'native non-current controls Activity queue registration only; no workflow start, promotion or readiness',
+            'native non-current exact role queue inventory only; no workflow start, promotion or readiness',
         };
     } catch (error) {
       if (error?.code !== 5) throw error;
