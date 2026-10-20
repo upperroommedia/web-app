@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { Firestore, Transaction } from 'firebase-admin/firestore';
+import type { YouTubeStreamReceipt } from '../processYouTubeUrl';
 import type { MediaJobRef } from './types';
 import { youtubeAcquisitionId, type RemoteYouTubeResult, validateAcquiredYouTubeSource } from './hetzner-acquisition';
 
@@ -210,6 +211,135 @@ export function createYouTubeAcquisitionHostStore(options: {
         tx.update(doc, { status: 'running', owner, startedAt: Date.now() });
         return { launch: true };
       });
+    },
+    /** Upload attempts are private children of the actual running host owner.
+     * An unresolved attempt fences later attempts; no timeout or lease takeover.
+     * A repeated begin is reconciliation-only and never authorizes another producer.
+     */
+    upload(ref: MediaJobRef, attemptId: string) {
+      ref = Object.freeze({ ...ref });
+      if (!/^[a-f0-9-]{36}$/.test(attemptId)) return fail();
+      const parent = target(ref);
+      const doc = parent.collection('uploads').doc(attemptId);
+      const path = `workflow-audio/${ref.sermonId}/${ref.requestVersion}/source-${attemptId}.bin`;
+      type Bytes = { bytes: number; crc32c: string };
+      const checkedBytes = (raw: Bytes): Bytes => {
+        if (
+          !raw ||
+          Object.keys(raw).sort().join(',') !== 'bytes,crc32c' ||
+          !Number.isSafeInteger(raw.bytes) ||
+          raw.bytes <= 0 ||
+          raw.bytes > 20 * 1024 ** 3 ||
+          typeof raw.crc32c !== 'string' ||
+          !/^[A-Za-z0-9+/]{6}==$/.test(raw.crc32c)
+        )
+          return fail();
+        return { bytes: raw.bytes, crc32c: raw.crc32c };
+      };
+      type Upload = {
+        state: 'streaming' | 'bytes_complete' | 'retained';
+        expected?: Bytes;
+        receipt?: YouTubeStreamReceipt;
+      };
+      const checked = (raw: unknown): Upload => {
+        const value = raw as Upload & { path: string; owner: AcquisitionHostProcess };
+        if (
+          !value ||
+          value.path !== path ||
+          fingerprint(host(value.owner)) !== fingerprint(owner) ||
+          !['streaming', 'bytes_complete', 'retained'].includes(value.state)
+        )
+          return fail();
+        const keys = Object.keys(value).sort().join(',');
+        if (value.state === 'streaming') {
+          if (keys !== 'createdAt,owner,path,state') return fail();
+        } else {
+          checkedBytes(value.expected!);
+          if (value.state === 'bytes_complete') {
+            if (keys !== 'createdAt,expected,owner,path,state') return fail();
+          } else {
+            const receipt = value.receipt;
+            if (
+              keys !== 'createdAt,expected,owner,path,receipt,state' ||
+              !receipt ||
+              Object.keys(receipt).sort().join(',') !== 'bytes,crc32c,generation,path' ||
+              receipt.path !== path ||
+              typeof receipt.generation !== 'string' ||
+              !/^[1-9][0-9]{0,29}$/.test(receipt.generation) ||
+              receipt.bytes !== value.expected!.bytes ||
+              receipt.crc32c !== value.expected!.crc32c
+            )
+              return fail();
+          }
+        }
+        if (!('createdAt' in value) || !Number.isSafeInteger(value.createdAt) || Number(value.createdAt) < 0)
+          return fail();
+        return value;
+      };
+      const current = async (tx: Transaction) => {
+        const snapshot = await tx.get(parent);
+        owned(operation(snapshot.data(), ref));
+        const upload = await tx.get(doc);
+        await options.assertEligible(tx, ref);
+        if (snapshot.get('activeUpload') !== attemptId) return fail();
+        return checked(upload.data());
+      };
+      return {
+        path,
+        binding: Object.freeze({
+          jobId: ref.jobId,
+          requestVersion: ref.requestVersion,
+          operationId: youtubeAcquisitionId(ref),
+          attemptId,
+        }),
+        async begin(): Promise<{ launch: boolean; expected?: Bytes; receipt?: YouTubeStreamReceipt }> {
+          return options.firestore.runTransaction(async (tx) => {
+            const snapshot = await tx.get(parent);
+            owned(operation(snapshot.data(), ref));
+            const upload = await tx.get(doc);
+            await options.assertEligible(tx, ref);
+            if (upload.exists) {
+              if (snapshot.get('activeUpload') !== attemptId) return fail();
+              const value = checked(upload.data());
+              return {
+                launch: false,
+                ...(value.expected ? { expected: value.expected } : {}),
+                ...(value.receipt ? { receipt: value.receipt } : {}),
+              };
+            }
+            if (snapshot.get('activeUpload') !== undefined) return fail();
+            tx.create(doc, { state: 'streaming', path, owner, createdAt: Date.now() });
+            tx.update(parent, { activeUpload: attemptId });
+            return { launch: true };
+          });
+        },
+        async recordBytes(raw: Bytes): Promise<void> {
+          const expected = checkedBytes(raw);
+          await options.firestore.runTransaction(async (tx) => {
+            const value = await current(tx);
+            if (value.state !== 'streaming' || value.expected) return fail();
+            tx.update(doc, { state: 'bytes_complete', expected });
+          });
+        },
+        async retain(raw: YouTubeStreamReceipt): Promise<void> {
+          const receipt = { ...raw };
+          if (
+            Object.keys(receipt).sort().join(',') !== 'bytes,crc32c,generation,path' ||
+            receipt.path !== path ||
+            typeof receipt.generation !== 'string' ||
+            !/^[1-9][0-9]{0,29}$/.test(receipt.generation)
+          )
+            return fail();
+          checkedBytes({ bytes: receipt.bytes, crc32c: receipt.crc32c });
+          await options.firestore.runTransaction(async (tx) => {
+            const value = await current(tx);
+            if (!value.expected || value.expected.bytes !== receipt.bytes || value.expected.crc32c !== receipt.crc32c)
+              return fail();
+            if (value.state === 'retained' && value.receipt!.generation !== receipt.generation) return fail();
+            tx.update(doc, { state: 'retained', receipt });
+          });
+        },
+      };
     },
     /** The process driver must drain its real children before this call can
      * settle. Unknown/failed drain leaves ownership running. Never accept a
