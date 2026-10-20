@@ -52,6 +52,25 @@ const record = (value: unknown): Record<string, unknown> => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return failure('YOUTUBE_ACQUISITION_PROTOCOL');
   return value as Record<string, unknown>;
 };
+export function validateAcquiredYouTubeSource(ref: MediaJobRef, value: unknown): AcquiredYouTubeSource {
+  youtubeAcquisitionId(ref);
+  const artifact = record(value);
+  const prefix = `workflow-audio/${ref.sermonId}/${ref.requestVersion}/source-`;
+  if (
+    Object.keys(artifact).sort().join(',') !== 'duration,generation,path' ||
+    typeof artifact.path !== 'string' ||
+    !artifact.path.startsWith(prefix) ||
+    !/^[A-Za-z0-9_-]+\.(mp3|m4a|webm|ogg|wav|opus|flac|mp4|bin)$/.test(artifact.path.slice(prefix.length)) ||
+    typeof artifact.generation !== 'string' ||
+    !/^[1-9][0-9]{0,29}$/.test(artifact.generation) ||
+    typeof artifact.duration !== 'number' ||
+    !Number.isFinite(artifact.duration) ||
+    artifact.duration <= 0 ||
+    artifact.duration > 86400
+  )
+    return failure('YOUTUBE_ACQUISITION_PROTOCOL');
+  return { path: artifact.path, generation: artifact.generation, duration: artifact.duration };
+}
 function observation(
   value: unknown,
   request: AcquisitionRequest
@@ -63,25 +82,7 @@ function observation(
   )
     return failure('YOUTUBE_ACQUISITION_PROTOCOL');
   if (data.status === 'ready') {
-    const artifact = record(data.artifact);
-    const prefix = `workflow-audio/${request.ref.sermonId}/${request.ref.requestVersion}/source-`;
-    if (
-      Object.keys(artifact).sort().join(',') !== 'duration,generation,path' ||
-      typeof artifact.path !== 'string' ||
-      !artifact.path.startsWith(prefix) ||
-      !/^[A-Za-z0-9_-]+\.(mp3|m4a|webm|ogg|wav|opus|flac|mp4|bin)$/.test(artifact.path.slice(prefix.length)) ||
-      typeof artifact.generation !== 'string' ||
-      !/^[1-9][0-9]{0,29}$/.test(artifact.generation) ||
-      typeof artifact.duration !== 'number' ||
-      !Number.isFinite(artifact.duration) ||
-      artifact.duration <= 0 ||
-      artifact.duration > 86400
-    )
-      return failure('YOUTUBE_ACQUISITION_PROTOCOL');
-    return {
-      kind: 'source',
-      artifact: { path: artifact.path, generation: artifact.generation, duration: artifact.duration },
-    };
+    return { kind: 'source', artifact: validateAcquiredYouTubeSource(request.ref, data.artifact) };
   }
   if (data.artifact !== undefined) return failure('YOUTUBE_ACQUISITION_PROTOCOL');
   if (data.status === 'missing' || data.status === 'running') return { status: data.status };
