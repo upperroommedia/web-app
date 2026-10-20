@@ -75,6 +75,7 @@ export function renderServerlessDispatchService(config) {
     name: names.service,
     ingress: 'INGRESS_TRAFFIC_ALL',
     invokerIamDisabled: false,
+    scaling: { minInstanceCount: 0, maxInstanceCount: 1 },
     labels: { 'urm-role': 'dispatch', 'urm-build': config.buildId },
     template: {
       serviceAccount: names.runnerServiceAccount,

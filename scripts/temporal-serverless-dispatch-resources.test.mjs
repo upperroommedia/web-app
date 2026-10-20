@@ -22,6 +22,7 @@ test('private dispatch uses request-billed zero-minimum compute and a separate i
   const n = dispatchResourceNames(c.buildId);
   assert.equal(s.name, n.service);
   assert.equal(s.invokerIamDisabled, false);
+  assert.deepEqual(s.scaling, { minInstanceCount: 0, maxInstanceCount: 1 });
   assert.deepEqual(s.template.scaling, { minInstanceCount: 0, maxInstanceCount: 1 });
   assert.equal(s.template.maxInstanceRequestConcurrency, 1);
   assert.equal(s.template.timeout, '30s');

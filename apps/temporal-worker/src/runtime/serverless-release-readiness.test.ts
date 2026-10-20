@@ -128,3 +128,18 @@ test('unexpected private binding fields cannot enter the saved intent', () => {
   const accidental = { ...f.binding, privateCredential: 'SYNTHETIC_ONLY' };
   expect(() => validateServerlessRoleBinding(accidental)).toThrow();
 });
+
+test('omitted protobuf false reconciliation fields retain all positive readiness checks', () => {
+  const { binding, pool, revision } = fixture();
+  Reflect.deleteProperty(pool, 'reconciling');
+  Reflect.deleteProperty(revision, 'reconciling');
+  expect(verifyServerlessPool(binding, pool, revision).poolUid).toBe('pool-1');
+  for (const invalid of [true, null, 'false', 0]) {
+    expect(() => verifyServerlessPool(binding, { ...pool, reconciling: invalid }, revision)).toThrow();
+    expect(() => verifyServerlessPool(binding, pool, { ...revision, reconciling: invalid })).toThrow();
+  }
+  expect(() => verifyServerlessPool(binding, { ...pool, observedGeneration: '1' }, revision)).toThrow();
+  expect(() =>
+    verifyServerlessPool(binding, { ...pool, terminalCondition: { state: 'CONDITION_FAILED' } }, revision)
+  ).toThrow();
+});

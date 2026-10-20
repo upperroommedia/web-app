@@ -40,7 +40,8 @@ export function validateCloudRunReleasePlatform(platform, peer) {
     seen.add(binding.role);
   }
   const names = dispatchResourceNames(platform.workerBuildId);
-  if (!platform.dispatch || Object.keys(platform.dispatch).sort().join(',') !== Object.keys(names).sort().join(',') ||
+  if (!platform.dispatch || Object.keys(platform.dispatch).sort().join(',') !== [...Object.keys(names), 'apiKeyVersion'].sort().join(',') ||
+    typeof platform.dispatch.apiKeyVersion !== 'string' || !/^[1-9][0-9]{0,18}$/.test(platform.dispatch.apiKeyVersion) ||
     Object.entries(names).some(([key, value]) => platform.dispatch[key] !== value)) fail();
   if (peer !== undefined) {
     if (peer.environment !== 'production' || peer.firebaseProjectId !== 'urm-app' ||

@@ -19,7 +19,7 @@ function profile() {
     temporalNamespace: 'urm-app-staging.qwejt', cloudAccountId: 'qwejt', cloudProvider: 'gcp', cloudRegion: 'us-central1',
     cloudAddress: 'us-central1.gcp.api.temporal.io:7233', cloudReplicaRegions: [], cloudEvidence: '/private/tmp/cloud-evidence.json',
     workerBuildId: buildId, workerImage: image, workerRoles, dispatcherEnabled: false,
-    operatorApiKeyFile: '/private/tmp/operator-api-key', operatorApiKeySHA256: 'c'.repeat(64), dispatch: dispatchResourceNames(buildId),
+    operatorApiKeyFile: '/private/tmp/operator-api-key', operatorApiKeySHA256: 'c'.repeat(64), dispatch: { ...dispatchResourceNames(buildId), apiKeyVersion: '7' },
     roleBindings: workerRoles.map(role => ({ projectId: 'urm-app-staging', region: 'us-central1', namespace: 'urm-app-staging.qwejt',
       buildId, role, ...serverlessResourceNames(buildId, role), image, maxInstances: 1, stabilizationSeconds: 180 })),
   };
@@ -174,4 +174,10 @@ for (const concern of [
       verifyCloudRunScalerPolicies(p, api),
       (error) => error.message === 'CLOUD_RUN_SCALER_POLICY_UNCONFIRMED'
     );
+  });
+
+for (const version of ['latest', '', '0', 7, null])
+  test(`dispatch key version must be a pinned numeric string: ${JSON.stringify(version)}`, () => {
+    const p = profile(); p.dispatch.apiKeyVersion = version;
+    assert.throws(() => validateCloudRunReleasePlatform(p));
   });

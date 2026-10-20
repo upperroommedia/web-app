@@ -79,7 +79,7 @@ const generation = (value: unknown): string =>
     : fail();
 const settled = (resource: Record<string, any>) => {
   if (
-    resource.reconciling !== false ||
+    (resource.reconciling !== undefined && resource.reconciling !== false) ||
     resource.deleteTime !== undefined ||
     generation(resource.generation) !== generation(resource.observedGeneration)
   )
