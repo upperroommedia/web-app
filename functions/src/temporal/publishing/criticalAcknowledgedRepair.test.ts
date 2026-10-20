@@ -1,4 +1,4 @@
-import { FieldValue, Timestamp, type Firestore, type Transaction } from 'firebase-admin/firestore';
+import { FieldValue, Timestamp, getFirestore, type Firestore, type Transaction } from 'firebase-admin/firestore';
 import { createHash } from 'node:crypto';
 import {
   acknowledgedProjectionDigest,
@@ -790,6 +790,91 @@ describe('original acknowledgement backed critical projection', () => {
     });
     f.flush();
     expect(f.rows.get('sermons/sermon')?.title).toBe('New title');
+  });
+  test.each([
+    { name: 'missing row ID', placement: { listId: 'list', position: 1 }, allowed: true },
+    { name: 'matching row ID', placement: { listId: 'list', position: 1, listItemId: 'confirmed-row' }, allowed: true },
+    {
+      name: 'conflicting frozen row ID',
+      placement: { listId: 'list', position: 1, listItemId: 'foreign-row' },
+      allowed: false,
+    },
+    { name: 'non-map ancestor', placement: null, allowed: false },
+  ])('list row binding preserves a complete placement map: $name', async ({ placement, allowed }) => {
+    const f = fixture('list', 'list');
+    const canonicalPath = 'lists/list/listItems/sermon';
+    f.rows.set(canonicalPath, { subsplashId: 'media', physicalPlacement: { listId: 'list', position: 0 } });
+    const row = {
+      id: 'confirmed-row',
+      type: 'media-item',
+      app_key: '9XTSHD',
+      _embedded: { 'media-item': { id: 'media' }, 'source-list': { id: 'list' } },
+    };
+    const payload = { id: 'list', _embedded: { 'list-rows': [row] } };
+    const target = f.session.resources[0];
+    f.request.fingerprint = providerMutationFingerprint(['PATCH', { target, body: payload }]);
+    const patch = { position: 1, 'uploadStatus.status': 'UPLOADED', physicalPlacement: placement };
+    const originalPatch = JSON.parse(JSON.stringify(patch));
+    const frozen = await prepareAcknowledgedProjectionPlan(f.tx, f.session, {
+      requests: [{ ...f.request, target, payload }],
+      writes: [
+        {
+          path: canonicalPath,
+          expectedFields: { subsplashId: 'media' },
+          patch,
+          listRowBindings: [
+            { field: 'uploadStatus.listItemId', requestStep: 'metadata', listId: 'list', mediaId: 'media' },
+            { field: 'physicalPlacement.listItemId', requestStep: 'metadata', listId: 'list', mediaId: 'media' },
+          ],
+        },
+      ],
+      verifications: [
+        {
+          provider: 'subsplash',
+          account: 'app:9XTSHD',
+          resourceType: 'list',
+          resourceId: 'list',
+          expectedProviderFields: { id: 'list' },
+        },
+      ],
+    });
+    frozen.commit();
+    f.flush();
+    f.complete();
+    for (const [key, value] of f.rows)
+      if (key.startsWith('temporalProviderMutationFacts/') || key.includes('/requests/'))
+        f.rows.set(key, { ...value, result: { _embedded: { 'list-rows': [row] } } });
+    const prepared = await prepareAcknowledgedRepair(f.tx, f.db, f.ref, f.session.id);
+    const update = f.tx.update.bind(f.tx);
+    f.tx.update = (reference: any, data: any) => {
+      // Validate the actual transport payload; this batch is never committed.
+      const db = getFirestore();
+      db.batch().update(db.doc(reference.path), data);
+      return update(reference, data);
+    };
+    const repair = commitAcknowledgedRepair(f.tx, f.db, f.ref, prepared.operation, [
+      {
+        provider: 'subsplash',
+        account: 'app:9XTSHD',
+        resourceType: 'list',
+        resourceId: 'list',
+        state: 'present',
+        body: { id: 'list', _embedded: { 'list-rows': [row] } },
+      },
+    ]);
+    if (allowed) {
+      await expect(repair).resolves.toMatchObject({ writesCompleted: 1 });
+      f.flush();
+      expect(f.rows.get(canonicalPath)?.physicalPlacement).toEqual({
+        listId: 'list',
+        position: 1,
+        listItemId: 'confirmed-row',
+      });
+    } else {
+      await expect(repair).rejects.toMatchObject({ code: 'PUBLISHING_CRITICAL_ACK_PROJECTION_REQUIRED' });
+      expect(f.rows.get(canonicalPath)?.physicalPlacement).toEqual({ listId: 'list', position: 0 });
+    }
+    expect(patch).toEqual(originalPatch);
   });
   test('a new list row ID must come from both its original ACK and the fresh fixed list observation', async () => {
     const f = fixture('list', 'list'),
