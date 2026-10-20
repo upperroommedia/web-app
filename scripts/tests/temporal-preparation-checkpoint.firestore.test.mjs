@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { prepareCloudRunIdentity } from '../temporal-prepare-cloud-identity.mjs';
-import { saveIdentityPreparationCheckpoint } from '../temporal-preparation-checkpoint.mjs';
+import { saveIdentityPreparationCheckpoint, savePoolPreparationCheckpoint } from '../temporal-preparation-checkpoint.mjs';
 import { nativeSnapshotProof } from '../temporal-release-runtime.mjs';
 import { serverlessResourceNames } from '../temporal-serverless-platform.mjs';
 import { dispatchResourceNames } from '../temporal-serverless-dispatch-resources.mjs';
@@ -68,4 +68,29 @@ test('native checkpoint fences control/state drift before create and preserves c
       for (const ref of [lockRef, controlRef, stateRef, receipt]) await ref.delete();
     }
   } finally { await deleteApp(app); }
+});
+
+test('pool checkpoint uses its own action and field under real native authority fences', async () => {
+  const app = initializeApp({ projectId: 'demo-preparation-checkpoint' }, randomUUID()), db = getFirestore(app);
+  const prefix = `_identityPreparationTests/${randomUUID()}/records`;
+  const lockRef = db.doc(`${prefix}/operation`), controlRef = db.doc(`${prefix}/control`), stateRef = db.doc(`${prefix}/state`), immutableReceipt = db.doc(`${prefix}/receipt`);
+  const operationId = randomUUID(), releaseId = randomUUID(), bindingDigest = 'e'.repeat(64), config = { releaseId, domains: ['publishing'] };
+  try {
+    await lockRef.create({ operationId, releaseId, action: 'prepare-cloud-run-pool', bindingDigest });
+    await controlRef.create({ releaseId, admission: 'paused', domains: { publishing: { admission: 'paused' } } });
+    await stateRef.create({ releaseId, phase: 'provider-usage-ready' });
+    const options = { firestore: db, lockRef, controlRef, stateRef, immutableReceipt, config, operationId, bindingDigest, operatorPrincipal: { email: 'operator@example.test' },
+      ownedOperation: nativeSnapshotProof(await lockRef.get()), expectedAuthority: { control: nativeSnapshotProof(await controlRef.get()), state: nativeSnapshotProof(await stateRef.get()) },
+      identityState: { stage: 'planned', plan: { source: 'synthetic' } } };
+    options.ownedOperation = await savePoolPreparationCheckpoint(options);
+    assert.equal((await lockRef.get()).get('cloudPoolPreparation.stage'), 'planned');
+    assert.equal((await lockRef.get()).get('cloudIdentityPreparation'), undefined);
+    await assert.rejects(saveIdentityPreparationCheckpoint(options));
+    await controlRef.update({ admission: 'open' });
+    await assert.rejects(savePoolPreparationCheckpoint({ ...options, identityState: { ...options.identityState, stage: 'attempted' } }));
+    assert.equal((await lockRef.get()).get('cloudPoolPreparation.stage'), 'planned');
+  } finally {
+    for (const ref of [lockRef, controlRef, stateRef, immutableReceipt]) await ref.delete();
+    await deleteApp(app);
+  }
 });

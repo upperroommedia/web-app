@@ -5,6 +5,7 @@ import { constants } from 'node:fs';
 import { createRequire } from 'node:module';
 import { firebaseResourceEnvironment, validateConfig } from './temporal-platform.mjs';
 import { serverlessComputeArguments } from './temporal-serverless-platform.mjs';
+import { observeNamespaceComputeIsolation } from './temporal-compute-isolation.mjs';
 import { dispatchResourceNames } from './temporal-serverless-dispatch-resources.mjs';
 
 
@@ -73,7 +74,7 @@ export async function readCloudRunOperatorKey(path, expectedSHA256) {
 /** Load current verified TS source, not a possibly stale untracked lib/ build.
  * CI typechecking and the immutable release/source/image guards remain mandatory.
  * The compiler/SDK come from the frozen runtime's pinned dependency installation. */
-export async function collectCloudRunReleaseWorkers({ binding, config, platform, firestore, artifactDirectory, recordIntent, savedIntent }) {
+async function withNativeCloudRunClient({ binding, config, platform, firestore }, observe) {
   validateCloudRunReleasePlatform(platform);
   if (['FIRESTORE_EMULATOR_HOST', 'FIREBASE_AUTH_EMULATOR_HOST', 'FIREBASE_DATABASE_EMULATOR_HOST',
     'FIREBASE_STORAGE_EMULATOR_HOST'].some(name => process.env[name]))
@@ -96,14 +97,25 @@ export async function collectCloudRunReleaseWorkers({ binding, config, platform,
     connection = await application.Connection.connect({ address: platform.cloudAddress, tls: true, apiKey: key,
       connectTimeout: 15000 });
     const client = new application.Client({ connection, namespace: platform.temporalNamespace });
+    return await observe(client, application);
+
+  } finally { await connection?.close(); }
+}
+
+export async function collectCloudRunReleaseWorkers({ binding, config, platform, firestore, artifactDirectory, recordIntent, savedIntent }) {
+  return withNativeCloudRunClient({ binding, config, platform, firestore }, async (client, application) => {
     const options = { client, firestore, artifactDirectory,
       bindings: platform.roleBindings.map(({ projectId, region, namespace, role, buildId, poolName,
         deploymentName, runnerServiceAccount, image }) => ({ projectId, region, namespace, role, buildId,
         poolName, deploymentName, runnerServiceAccount, image })) };
     return savedIntent
-      ? await application.reconcileServerlessRoleReadiness({ ...options, savedIntent })
-      : await application.collectServerlessRoleReadiness({ ...options, onStartIntent: recordIntent });
-  } finally { await connection?.close(); }
+      ? application.reconcileServerlessRoleReadiness({ ...options, savedIntent })
+      : application.collectServerlessRoleReadiness({ ...options, onStartIntent: recordIntent });
+  });
+}
+export async function verifyCloudRunComputeIsolation(options) {
+  return withNativeCloudRunClient(options, client =>
+    observeNamespaceComputeIsolation(client, options.platform.temporalNamespace));
 }
 
 export async function readCloudRunNamespaceEvidence(platform) {

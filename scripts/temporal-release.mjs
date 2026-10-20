@@ -1,9 +1,11 @@
 #!/usr/bin/env node
-import { collectCloudRunReleaseWorkers, readCloudRunNamespaceEvidence, verifyCloudRunScalerPolicies } from './temporal-release-cloud-run.mjs';
+import { collectCloudRunReleaseWorkers, readCloudRunNamespaceEvidence, verifyCloudRunScalerPolicies, verifyCloudRunComputeIsolation } from './temporal-release-cloud-run.mjs';
 import { verifyCloudRunDispatchConfiguration } from './temporal-release-dispatch.mjs';
 import { verifyPreparationEvidence } from './temporal-preparation-evidence.mjs';
 import { prepareCloudRunIdentity } from './temporal-prepare-cloud-identity.mjs';
-import { saveIdentityPreparationCheckpoint } from './temporal-preparation-checkpoint.mjs';
+import { prepareCloudRunZeroPool } from './temporal-prepare-cloud-pool.mjs';
+import { readPreparationReceipt } from './temporal-preparation-evidence.mjs';
+import { saveIdentityPreparationCheckpoint, savePoolPreparationCheckpoint } from './temporal-preparation-checkpoint.mjs';
 // Every step is explicit, revision-fenced, resumable, and leaves admissions paused on failure.
 import { readFile, writeFile, mkdtemp, rm, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -92,6 +94,7 @@ if (
     'drain',
     'workers-ready',
     'prepare-cloud-run-identity',
+    'prepare-cloud-run-pool',
     'provider-usage-ready',
     'take-ownership',
     'backend-ready',
@@ -135,16 +138,26 @@ const operatorIdentity = {
   runtimePins: binding.runtimePins,
   resourceBinding,
 };
-const preparationArguments = action === 'prepare-cloud-run-identity' ? {
+const preparationArguments = ['prepare-cloud-run-identity', 'prepare-cloud-run-pool'].includes(action) ? {
   role: args[args.indexOf('--identity-role') + 1],
   kind: args[args.indexOf('--identity-kind') + 1],
   proof: args[args.indexOf('--preparation-proof') + 1],
   digest: args[args.indexOf('--preparation-proof-sha256') + 1],
 } : undefined;
 if (preparationArguments) {
-  if (!['--identity-role', '--identity-kind', '--preparation-proof', '--preparation-proof-sha256'].every(flag => args.includes(flag)) ||
+  const required = ['--identity-role', '--preparation-proof', '--preparation-proof-sha256', ...(action === 'prepare-cloud-run-identity' ? ['--identity-kind'] : ['--pool-settings', '--pool-settings-sha256', '--runner-preparation-operation'])];
+  if (!required.every(flag => args.includes(flag)) ||
     !/^[a-f0-9]{64}$/.test(preparationArguments.digest ?? ''))
     throw new Error('Explicit immutable identity preparation inputs required');
+  if (action === 'prepare-cloud-run-pool') {
+    delete preparationArguments.kind;
+    preparationArguments.settings = args[args.indexOf('--pool-settings') + 1];
+    preparationArguments.settingsDigest = args[args.indexOf('--pool-settings-sha256') + 1];
+    preparationArguments.runnerOperationId = args[args.indexOf('--runner-preparation-operation') + 1];
+    if (!/^[a-f0-9]{64}$/.test(preparationArguments.settingsDigest ?? '') ||
+      !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(preparationArguments.runnerOperationId ?? ''))
+      throw new Error('Explicit immutable pool preparation inputs required');
+  }
   operatorIdentity.cloudIdentityPreparation = preparationArguments;
 }
 const bindingDigest = proofDigest(operatorIdentity);
@@ -1053,6 +1066,40 @@ await runWithCleanup(
               throw new Error('IDENTITY_PREPARATION_RECEIPT_UNCONFIRMED');
             cloudIdentityPending = false;
             console.log(`Dedicated identity preparation recorded at ${immutableReceipt.path}; no grants or compute activation.`);
+          } else if (action === 'prepare-cloud-run-pool') {
+            requirePhase(state, ['provider-usage-ready']);
+            if (config.environment !== 'staging' || operatorPrincipal.adcAndGcloudAccountMatch !== true)
+              throw new Error('POOL_PREPARATION_REQUIRES_MATCHED_STAGING_OPERATOR');
+            const platform = JSON.parse(await readFile(config.platformConfig, 'utf8'));
+            validateWorkerCoverage(config, platform);
+            await verifyPreparationEvidence({ ...preparationArguments, path: preparationArguments.proof,
+              platform, binding, google: api });
+            const settings = await readPreparationReceipt(preparationArguments.settings, preparationArguments.settingsDigest);
+            const runnerReceipt = await firestore.doc(`_control/temporalCloudIdentityPreparation-${preparationArguments.runnerOperationId}`).get();
+            if (!runnerReceipt.exists) throw new Error('POOL_RUNNER_PREPARATION_REQUIRED');
+            const currentOperation = await lockRef.get();
+            assertNativeSnapshot(ownedOperation, currentOperation);
+            const hasSaved = Object.prototype.hasOwnProperty.call(currentOperation.data(), 'cloudPoolPreparation');
+            if (hasSaved) cloudIdentityPending = true;
+            const immutableReceipt = firestore.doc(`_control/temporalCloudPoolPreparation-${operationId}`);
+            const result = await prepareCloudRunZeroPool({ platform, role: preparationArguments.role, settings,
+              operationId, releaseId: config.releaseId, evidenceDigest: preparationArguments.digest,
+              identityReceipt: runnerReceipt.data(), api,
+              observeComputeIsolation: () => verifyCloudRunComputeIsolation({ binding, config, platform, firestore }),
+              saved: hasSaved ? currentOperation.get('cloudPoolPreparation') : undefined,
+              save: async identityState => {
+                cloudIdentityPending = true;
+                ownedOperation = await savePoolPreparationCheckpoint({ firestore, lockRef, controlRef, stateRef,
+                  immutableReceipt, ownedOperation, expectedAuthority, config, operationId, bindingDigest,
+                  operatorPrincipal, identityState });
+              },
+            });
+            const receipt = await immutableReceipt.get();
+            if (!receipt.exists || receipt.get('bindingDigest') !== bindingDigest ||
+              receipt.get('identityState.pool.uid') !== result.pool.uid)
+              throw new Error('POOL_PREPARATION_RECEIPT_UNCONFIRMED');
+            cloudIdentityPending = false;
+            console.log(`Zero-target pool configuration recorded at ${immutableReceipt.path}; no activation or readiness claim.`);
           } else if (action === 'workers-ready') {
             requirePhase(state, ['provider-usage-ready', 'workers-ready']);
             const platform = await verifyReleaseWorkers();
