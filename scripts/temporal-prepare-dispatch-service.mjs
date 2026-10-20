@@ -18,7 +18,7 @@ async function prerequisites(plan, identityReceipt, api) {
     b.members?.includes(`serviceAccount:${plan.runner}`))) fail();
   return { runnerUniqueId: runner.uniqueId, secretVersion: normalize(version.name) };
 }
-function observedIdentity(observation, plan) {
+export function preparedDispatchServiceIdentity(observation, plan) {
   const { service, revision } = observation;
   if (!isDeepStrictEqual(service.annotations, plan.body.annotations)) fail();
   return { name: service.name, uid: service.uid, generation: String(service.generation),
@@ -57,7 +57,7 @@ export async function prepareCloudRunDispatchService({ platform, role, settings,
       await save(state);
     }
     if (state.stage === 'completed') {
-      const current = observedIdentity(await observeCloudRunDispatchService(platform, api, 'disabled'), plan);
+      const current = preparedDispatchServiceIdentity(await observeCloudRunDispatchService(platform, api, 'disabled'), plan);
       if (!isDeepStrictEqual(state.service, current)) fail();
       const fresh = await prerequisites(plan, identityReceipt, api);
       if (!isDeepStrictEqual(fresh, state.prerequisites)) fail();
@@ -77,9 +77,9 @@ export async function prepareCloudRunDispatchService({ platform, role, settings,
     } while (Date.now() < end);
     if (result?.done !== true) fail();
     if (result.error) { await save({ ...state, stage: 'failed', errorSHA256: proofDigest(result.error) }); fail(); }
-    const acknowledged = observedIdentity(await observeCloudRunDispatchService(platform,
+    const acknowledged = preparedDispatchServiceIdentity(await observeCloudRunDispatchService(platform,
       (url, ...args) => url === `https://run.googleapis.com/v2/${body.name}` ? Promise.resolve(result.response) : api(url, ...args), 'disabled'), plan);
-    const current = observedIdentity(await observeCloudRunDispatchService(platform, api, 'disabled'), plan);
+    const current = preparedDispatchServiceIdentity(await observeCloudRunDispatchService(platform, api, 'disabled'), plan);
     if (!isDeepStrictEqual(acknowledged, current)) fail();
     const policy = await api(`https://run.googleapis.com/v2/${body.name}:getIamPolicy?options.requestedPolicyVersion=3`);
     if (!policy || (policy.bindings !== undefined && (!Array.isArray(policy.bindings) || policy.bindings.length))) fail();

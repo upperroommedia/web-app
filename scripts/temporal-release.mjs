@@ -8,10 +8,11 @@ import { prepareCloudRunRuntimeAccess } from './temporal-prepare-runtime-access.
 import { prepareCloudRunRuntimeRole } from './temporal-prepare-runtime-role.mjs';
 import { prepareCloudRunFirestoreAccess } from './temporal-prepare-firestore-access.mjs';
 import { prepareCloudRunSecretAccess } from './temporal-prepare-secret-access.mjs';
+import { prepareCloudRunDispatchAccess } from './temporal-prepare-dispatch-access.mjs';
 import { prepareCloudRunDispatchService } from './temporal-prepare-dispatch-service.mjs';
 import { prepareCloudRunZeroPool } from './temporal-prepare-cloud-pool.mjs';
 import { readPreparationReceipt } from './temporal-preparation-evidence.mjs';
-import { saveDispatchServicePreparationCheckpoint, saveIdentityPreparationCheckpoint, savePoolPreparationCheckpoint, saveSecretAccessPreparationCheckpoint, saveScalerAccessPreparationCheckpoint, saveFirestoreAccessPreparationCheckpoint, saveRuntimeRolePreparationCheckpoint, saveRuntimeAccessPreparationCheckpoint } from './temporal-preparation-checkpoint.mjs';
+import { saveDispatchAccessPreparationCheckpoint, saveDispatchServicePreparationCheckpoint, saveIdentityPreparationCheckpoint, savePoolPreparationCheckpoint, saveSecretAccessPreparationCheckpoint, saveScalerAccessPreparationCheckpoint, saveFirestoreAccessPreparationCheckpoint, saveRuntimeRolePreparationCheckpoint, saveRuntimeAccessPreparationCheckpoint } from './temporal-preparation-checkpoint.mjs';
 // Every step is explicit, revision-fenced, resumable, and leaves admissions paused on failure.
 import { readFile, writeFile, mkdtemp, rm, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -102,6 +103,7 @@ if (
     'prepare-cloud-run-identity',
     'prepare-cloud-run-pool',
     'prepare-cloud-run-dispatch-service',
+    'prepare-cloud-run-dispatch-access',
     'prepare-cloud-run-secret-access',
     'prepare-cloud-run-scaler-access',
     'prepare-cloud-run-firestore-access',
@@ -150,7 +152,7 @@ const operatorIdentity = {
   runtimePins: binding.runtimePins,
   resourceBinding,
 };
-const preparationArguments = ['prepare-cloud-run-identity', 'prepare-cloud-run-dispatch-service', 'prepare-cloud-run-pool', 'prepare-cloud-run-secret-access', 'prepare-cloud-run-scaler-access', 'prepare-cloud-run-firestore-access', 'prepare-cloud-run-runtime-role', 'prepare-cloud-run-runtime-access'].includes(action) ? {
+const preparationArguments = ['prepare-cloud-run-identity', 'prepare-cloud-run-dispatch-service', 'prepare-cloud-run-dispatch-access', 'prepare-cloud-run-pool', 'prepare-cloud-run-secret-access', 'prepare-cloud-run-scaler-access', 'prepare-cloud-run-firestore-access', 'prepare-cloud-run-runtime-role', 'prepare-cloud-run-runtime-access'].includes(action) ? {
   role: args[args.indexOf('--identity-role') + 1],
   kind: args[args.indexOf('--identity-kind') + 1],
   proof: args[args.indexOf('--preparation-proof') + 1],
@@ -161,7 +163,7 @@ if (preparationArguments) {
   if (!required.every(flag => args.includes(flag)) ||
     !/^[a-f0-9]{64}$/.test(preparationArguments.digest ?? ''))
     throw new Error('Explicit immutable identity preparation inputs required');
-  if (['prepare-cloud-run-dispatch-service', 'prepare-cloud-run-pool', 'prepare-cloud-run-secret-access', 'prepare-cloud-run-scaler-access', 'prepare-cloud-run-firestore-access', 'prepare-cloud-run-runtime-role', 'prepare-cloud-run-runtime-access'].includes(action)) {
+  if (['prepare-cloud-run-dispatch-service', 'prepare-cloud-run-dispatch-access', 'prepare-cloud-run-pool', 'prepare-cloud-run-secret-access', 'prepare-cloud-run-scaler-access', 'prepare-cloud-run-firestore-access', 'prepare-cloud-run-runtime-role', 'prepare-cloud-run-runtime-access'].includes(action)) {
     delete preparationArguments.kind;
     preparationArguments.settings = args[args.indexOf('--pool-settings') + 1];
     preparationArguments.settingsDigest = args[args.indexOf('--pool-settings-sha256') + 1];
@@ -173,6 +175,14 @@ if (preparationArguments) {
   if (action === 'prepare-cloud-run-secret-access') {
     if (!args.includes('--secret-name')) throw new Error('Explicit source-rendered secret required');
     preparationArguments.secret = args[args.indexOf('--secret-name') + 1];
+  }
+  if (action === 'prepare-cloud-run-dispatch-access') {
+    for (const [field, flag] of [['surface', '--dispatch-iam-surface'], ['eventOperationId', '--event-preparation-operation'], ['schedulerOperationId', '--scheduler-preparation-operation'], ['serviceOperationId', '--service-preparation-operation']]) {
+      if (!args.includes(flag)) throw new Error('Explicit dispatch caller preparation inputs required');
+      preparationArguments[field] = args[args.indexOf(flag) + 1];
+    }
+    if (![preparationArguments.eventOperationId, preparationArguments.schedulerOperationId, preparationArguments.serviceOperationId].every(value => /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(value ?? '')))
+      throw new Error('Explicit immutable dispatch receipts required');
   }
   if (action === 'prepare-cloud-run-scaler-access') {
     for (const [field, flag] of [['surface', '--iam-surface'], ['scalerOperationId', '--scaler-preparation-operation'], ['poolOperationId', '--pool-preparation-operation']]) {
@@ -1210,6 +1220,46 @@ await runWithCleanup(
               throw new Error('SECRET_PREPARATION_RECEIPT_UNCONFIRMED');
             cloudIdentityPending = false;
             console.log(`Scoped runtime preparation recorded at ${immutableReceipt.path}; no effective-access or activation claim.`);
+          } else if (action === 'prepare-cloud-run-dispatch-access') {
+            requirePhase(state, ['provider-usage-ready']);
+            if (config.environment !== 'staging' || operatorPrincipal.adcAndGcloudAccountMatch !== true)
+              throw new Error('DISPATCH_ACCESS_PREPARATION_REQUIRES_MATCHED_STAGING_OPERATOR');
+            const platform = JSON.parse(await readFile(config.platformConfig, 'utf8'));
+            validateWorkerCoverage(config, platform);
+            await verifyPreparationEvidence({ ...preparationArguments, path: preparationArguments.proof,
+              platform, binding, google: api });
+            const settings = await readPreparationReceipt(preparationArguments.settings, preparationArguments.settingsDigest);
+            const [runnerReceipt, eventReceipt, schedulerReceipt, serviceReceipt] = await Promise.all([
+              firestore.doc(`_control/temporalCloudIdentityPreparation-${preparationArguments.runnerOperationId}`).get(),
+              firestore.doc(`_control/temporalCloudIdentityPreparation-${preparationArguments.eventOperationId}`).get(),
+              firestore.doc(`_control/temporalCloudIdentityPreparation-${preparationArguments.schedulerOperationId}`).get(),
+              firestore.doc(`_control/temporalCloudDispatchServicePreparation-${preparationArguments.serviceOperationId}`).get(),
+            ]);
+            if (![runnerReceipt, eventReceipt, schedulerReceipt, serviceReceipt].every(receipt => receipt.exists))
+              throw new Error('DISPATCH_OWNED_RESOURCE_PREPARATION_REQUIRED');
+            const currentOperation = await lockRef.get();
+            assertNativeSnapshot(ownedOperation, currentOperation);
+            const hasSaved = Object.prototype.hasOwnProperty.call(currentOperation.data(), 'cloudDispatchAccessPreparation');
+            if (hasSaved) cloudIdentityPending = true;
+            const immutableReceipt = firestore.doc(`_control/temporalCloudDispatchAccessPreparation-${operationId}`);
+            const result = await prepareCloudRunDispatchAccess({ platform, role: preparationArguments.role,
+              surface: preparationArguments.surface, settings, operationId, releaseId: config.releaseId,
+              evidenceDigest: preparationArguments.digest, runnerReceipt: runnerReceipt.data(), eventReceipt: eventReceipt.data(), schedulerReceipt: schedulerReceipt.data(),
+              serviceReceipt: serviceReceipt.data(), api,
+              saved: hasSaved ? currentOperation.get('cloudDispatchAccessPreparation') : undefined,
+              save: async identityState => {
+                cloudIdentityPending = true;
+                ownedOperation = await saveDispatchAccessPreparationCheckpoint({ firestore, lockRef, controlRef, stateRef,
+                  immutableReceipt, ownedOperation, expectedAuthority, config, operationId, bindingDigest,
+                  operatorPrincipal, identityState });
+              },
+            });
+            const receipt = await immutableReceipt.get();
+            if (!receipt.exists || receipt.get('bindingDigest') !== bindingDigest ||
+              receipt.get('identityState.observedEtag') !== result.observedEtag)
+              throw new Error('DISPATCH_ACCESS_PREPARATION_RECEIPT_UNCONFIRMED');
+            cloudIdentityPending = false;
+            console.log(`Scoped disabled-service caller policy observation recorded at ${immutableReceipt.path}; no activation or effective-access claim.`);
           } else if (action === 'prepare-cloud-run-scaler-access') {
             requirePhase(state, ['provider-usage-ready']);
             if (config.environment !== 'staging' || operatorPrincipal.adcAndGcloudAccountMatch !== true)

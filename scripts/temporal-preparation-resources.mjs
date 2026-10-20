@@ -34,7 +34,7 @@ export function renderPreparationWorkload(platform, role, settings) {
 export const normalizeStagingResourceName = value => typeof value === 'string'
   ? value.replace(/^projects\/251680231116\//, 'projects/urm-app-staging/') : value;
 async function readOwnedIdentity(plan, identityReceipt, api, kind) {
-  const email = kind === 'runner' ? plan.runner : plan.scaler;
+  const email = kind === 'runner' ? plan.runner : kind === 'scaler' ? plan.scaler : plan.callers?.[kind];
   const state = identityReceipt?.identityState;
   if (identityReceipt?.releaseId !== plan.releaseId || state?.stage !== 'completed' || state.plan?.kind !== kind ||
     state.plan.role !== plan.role || state.plan.buildId !== plan.buildId || state.plan.email !== email ||
@@ -57,3 +57,8 @@ export function poolSecretReferences(body) {
 
 export const readOwnedPreparationRunner = (plan, receipt, api) => readOwnedIdentity(plan, receipt, api, 'runner');
 export const readOwnedPreparationScaler = (plan, receipt, api) => readOwnedIdentity(plan, receipt, api, 'scaler');
+
+export function readOwnedDispatchCaller(plan, receipt, api, kind) {
+  if (!['event', 'scheduler'].includes(kind) || plan.role !== 'dispatch') fail();
+  return readOwnedIdentity(plan, receipt, api, kind);
+}
