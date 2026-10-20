@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { collectCloudRunReleaseWorkers, readCloudRunNamespaceEvidence, verifyCloudRunScalerPolicies, verifyCloudRunComputeIsolation } from './temporal-release-cloud-run.mjs';
+import { verifyDispatchTemporalKeyIdentity } from './temporal-dispatch-key-identity.mjs';
 import { verifyCloudRunDispatchConfiguration } from './temporal-release-dispatch.mjs';
 import { verifyPreparationEvidence } from './temporal-preparation-evidence.mjs';
 import { prepareCloudRunIdentity } from './temporal-prepare-cloud-identity.mjs';
@@ -355,6 +356,7 @@ await runWithCleanup(
             const directory = prior?.artifactDirectory ?? await realpath(await mkdtemp(join(tmpdir(), 'urm-temporal-cloud-ready-')));
             const savedIntent = prior && (({ artifactDirectory, ...intent }) => intent)(prior);
             const scalerPolicies = await verifyCloudRunScalerPolicies(configuredPlatform, api);
+            const dispatchKeyIdentity = await verifyDispatchTemporalKeyIdentity({ version: configuredPlatform.dispatch.apiKeyVersion, api });
             const dispatchConfiguration = await verifyCloudRunDispatchConfiguration(configuredPlatform, api);
             await collectCloudRunReleaseWorkers({ binding, config, platform: configuredPlatform, firestore,
               artifactDirectory: directory, savedIntent,
@@ -375,6 +377,8 @@ await runWithCleanup(
             await writeFile(join(directory, `scaler-policy-${randomUUID()}.json`), JSON.stringify(scalerPolicies),
               { flag: 'wx', mode: 0o600 });
             await writeFile(join(directory, `dispatch-configuration-${randomUUID()}.json`), JSON.stringify(dispatchConfiguration),
+              { flag: 'wx', mode: 0o600 });
+            await writeFile(join(directory, `dispatch-key-identity-${randomUUID()}.json`), JSON.stringify(dispatchKeyIdentity),
               { flag: 'wx', mode: 0o600 });
             cloudWorkerProbePending = false;
             // Never substitute role execution for the remaining native guards.

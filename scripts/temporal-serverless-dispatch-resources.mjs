@@ -105,7 +105,7 @@ export function renderServerlessDispatchService(config, admission) {
         {
           name: 'temporal-api',
           secret: {
-            secret: 'TEMPORAL_DISPATCH_API_KEY',
+            secret: 'TEMPORAL_WORKER_API_KEY',
             defaultMode: 292,
             items: [{ version: config.apiKeyVersion, path: 'api-key' }],
           },

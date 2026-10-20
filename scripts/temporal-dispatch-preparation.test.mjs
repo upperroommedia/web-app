@@ -37,13 +37,13 @@ function accessFixture(action = 'secret', kind = 'runner') {
  const runner = preparationIdentityEmail(p,'dispatch',kind);
  const identityReceipt = { releaseId, identityState: { stage: 'completed', plan: { kind, role:'dispatch',buildId,email:runner,evidenceDigest }, account:{email:runner,uniqueId:'123456789012345678901',description:'owned-dispatch'} } };
  let saved, policy={version:1,etag:'original',bindings:[]}, writes=0; const resources=[];
- const options={ platform:p,role:'dispatch',settings:{apiKeyVersion:'2',runtimeSecrets:[]},secret:'TEMPORAL_DISPATCH_API_KEY',operationId,releaseId,evidenceDigest,identityReceipt,
+ const options={ platform:p,role:'dispatch',settings:{apiKeyVersion:'2',runtimeSecrets:[]},secret:'TEMPORAL_WORKER_API_KEY',operationId,releaseId,evidenceDigest,identityReceipt,
   save:async value=>{saved=structuredClone(value);},api:async(url,method='GET',body)=>{
    resources.push(url);
    if(url.includes(':getIamPolicy'))return structuredClone(policy);
    if(url.includes(':setIamPolicy')){assert.equal(saved.stage,'attempted');writes++;policy={...structuredClone(body.policy),etag:'new'};return structuredClone(policy);}
    if(url.includes('/serviceAccounts/'))return {projectId:'urm-app-staging',...identityReceipt.identityState.account};
-   if(url.startsWith('https://secretmanager.'))return {name:'projects/urm-app-staging/secrets/TEMPORAL_DISPATCH_API_KEY/versions/2',state:'ENABLED'};
+   if(url.startsWith('https://secretmanager.'))return {name:'projects/urm-app-staging/secrets/TEMPORAL_WORKER_API_KEY/versions/2',state:'ENABLED'};
    if(url.startsWith('https://firestore.'))return {name:'projects/urm-app-staging/databases/(default)',uid:'native-default',type:'FIRESTORE_NATIVE',locationId:'us-central1'};
    if(url.startsWith('https://run.'))throw Object.assign(new Error('absent'),{status:404});
    throw new Error('Unexpected API');
@@ -70,8 +70,8 @@ for(const bad of ['version','extra-secret','extra-key','missing-array'])test(`di
  if(bad==='missing-array')delete f.options.settings.runtimeSecrets;
  await assert.rejects(f.run());assert.equal(f.writes,0);
 });
-test('dispatch cannot choose worker key or provider secret instead of its rendered key',async()=>{
- const f=accessFixture();f.options.secret='TEMPORAL_WORKER_API_KEY';await assert.rejects(f.run());assert.equal(f.writes,0);
+for (const secret of ['TEMPORAL_OPERATOR_API_KEY', 'TEMPORAL_DISPATCH_API_KEY', 'SUBSPLASH_PASSWORD']) test(`dispatch cannot choose ${secret} instead of its source-pinned shared worker key`,async()=>{
+ const f=accessFixture();f.options.secret=secret;await assert.rejects(f.run());assert.equal(f.writes,0);
 });
 for(const action of ['secret','firestore'])test(`existing dispatch service denies fresh ${action} grant`,async()=>{
  const f=accessFixture(action),api=f.options.api;
@@ -86,7 +86,7 @@ test('dispatch has no custom runtime-role or scaler preparation surface',async()
  const f=accessFixture();await assert.rejects(prepareCloudRunRuntimeRole({...f.options,surface:'project'}));
  await assert.rejects(prepareCloudRunScalerAccess({...f.options,surface:'scaler-trust'}));assert.equal(f.writes,0);
 });
-test('dispatch renderer keeps credentials to one numeric dedicated key and retains min0/private service',()=>{
+test('dispatch renderer keeps credentials to one numeric shared worker key and retains min0/private service',()=>{
  const w=renderPreparationWorkload(platform(),'dispatch',{apiKeyVersion:'2',runtimeSecrets:[]});
  assert.equal(w.type,'service');assert.equal(w.body.invokerIamDisabled,false);assert.equal(w.body.scaling.minInstanceCount,0);
  assert.deepEqual(w.body.template.volumes[0].secret.items,[{version:'2',path:'api-key'}]);

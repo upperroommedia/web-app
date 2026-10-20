@@ -39,7 +39,7 @@ test('private dispatch uses request-billed zero-minimum compute and a separate i
   assert.equal(Object.hasOwn(env, 'GOOGLE_APPLICATION_CREDENTIALS'), false);
   for (const name of ['PORT', 'K_SERVICE', 'K_REVISION', 'K_CONFIGURATION'])
     assert.equal(Object.hasOwn(env, name), false);
-  assert.equal(s.template.volumes[0].secret.secret, 'TEMPORAL_DISPATCH_API_KEY');
+  assert.equal(s.template.volumes[0].secret.secret, 'TEMPORAL_WORKER_API_KEY');
   assert.equal(s.template.volumes[0].secret.items[0].version, '2');
 });
 test('two collection-scoped Firestore triggers preserve delivery retries and discard payloads at the handler', () => {

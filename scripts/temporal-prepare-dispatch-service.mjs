@@ -11,7 +11,7 @@ function operationName(value) {
 }
 async function prerequisites(plan, identityReceipt, api, platform) {
   const runner = await readOwnedPreparationRunner(plan, identityReceipt, api);
-  const secret = 'projects/urm-app-staging/secrets/TEMPORAL_DISPATCH_API_KEY';
+  const secret = 'projects/urm-app-staging/secrets/TEMPORAL_WORKER_API_KEY';
   const version = await api(`https://secretmanager.googleapis.com/v1/${secret}/versions/${plan.apiKeyVersion}`);
   if (normalize(version.name) !== `${secret}/versions/${plan.apiKeyVersion}` || version.state !== 'ENABLED') fail();
   const policy = await api(`https://secretmanager.googleapis.com/v1/${secret}:getIamPolicy?options.requestedPolicyVersion=3`);

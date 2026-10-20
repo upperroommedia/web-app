@@ -57,7 +57,7 @@ function fixture() {
  if(url.startsWith('https://cloudresourcemanager.')) { assert.equal(method,'POST'); assert.deepEqual(body,{options:{requestedPolicyVersion:3}}); return { version: 3, etag: 'native-project', auditConfigs: [{service:'eventarc.googleapis.com',auditLogConfigs:[{logType:'DATA_WRITE'}]}], bindings: ['eventarc','cloudscheduler','pubsub'].map(s => ({ role: `roles/${s}.serviceAgent`, members: [`serviceAccount:service-251680231116@gcp-sa-${s}.iam.gserviceaccount.com`] })) }; }
  if(url.includes('iam.googleapis.com/'))return {projectId:'urm-app-staging',email:runner,uniqueId:'12345678901234567890',description:'owned'};
  if(url.includes('secretmanager')&&url.includes(':getIamPolicy'))return{etag:'secret',bindings:[{role:'roles/secretmanager.secretAccessor',members:[`serviceAccount:${runner}`]}]};
- if(url.includes('secretmanager'))return{name:'projects/urm-app-staging/secrets/TEMPORAL_DISPATCH_API_KEY/versions/7',state:'ENABLED'};
+ if(url.includes('secretmanager'))return{name:'projects/urm-app-staging/secrets/TEMPORAL_WORKER_API_KEY/versions/7',state:'ENABLED'};
  if(url.includes(':getIamPolicy'))return{etag:'empty',bindings:[]};
  if(method==='POST'){
  assert.equal(saved.stage,'attempted');posts++;
