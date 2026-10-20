@@ -410,3 +410,27 @@ The independent dispatch handler previously waited for the HTTP response race du
 Local unit regressions reproduce the early-drain bug for both successful and rejected delayed dependencies. A real local Temporal/Firestore/HTTP integration test holds the acknowledgement after a native workflow start was accepted, verifies503 with shutdown still waiting, then leaves the interrupted native Firestore lease intact. A replacement dispatcher cannot steal it before expiry; after a **controlled lease-clock advance**, reconciliation acknowledges the same original RunId with one workflow-start history event. No worker or Activity/provider executes. Independent cleanup attempts preserve primary/cleanup failures and always attempt owned environment teardown.
 
 This is local SDK, transaction and HTTP proof. The replacement is a new dispatcher object, not an OS process restart; lease expiry is controlled, not a native Scheduler timer wake. Cloud Run termination behavior, actual Eventarc/Scheduler delivery, zero-to-work-to-zero, candidate runtime credentials and original staging-run recovery remain required. No deployed readiness claim follows from these tests.
+
+
+### Independent dispatch admission before activation
+
+The independent HTTP entrypoint always requires open canonical release admission when
+acquiring a new or expired dispatch lease. It validates the private control record
+before scanning and reads it again in the same Firestore transaction that writes
+each outbox or command lease. Missing, unsupported, malformed or globally paused
+control produces no new lease and an unhealthy dispatch result. The legacy embedded
+dispatcher retains its existing continuation behavior.
+
+This is a prerequisite for enabling the independent service: absence of the three
+expected wake resources does not exclude direct callers or other producers. A pause
+committed before lease authorization prevents that claim. Work claimed before a pause
+still requires the existing in-flight/provider-lease drain protocol; a later network
+submission is not atomic with release control. Reopening preserves original pending
+operations and expired leases for normal same-Workflow-ID reconciliation.
+
+The dedicated-emulator/native local Temporal test exercises paused HTTP rejection,
+reopening, accepted-start/lost-ACK shutdown, and paused expired-lease preservation
+followed by same-original-run recovery. This is local integration evidence only;
+it does not prove deployed credentials, native Cloud Run delivery, an OS restart,
+Scheduler/timer wakes, or zero-to-work-to-zero behavior. No activation operation or
+live service change is established by this prerequisite.

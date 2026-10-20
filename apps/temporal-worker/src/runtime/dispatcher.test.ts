@@ -14,7 +14,7 @@ const dispatch = {
   workflowId: 'test:test-project:job1',
   taskQueue: 'urm-orchestration',
 };
-function harness(records: Record<string, any>, now = 1000) {
+function harness(records: Record<string, any>, now = 1000, requireOpenAdmission = false) {
   const doc = (id: string): any => ({
     id,
     get: async () => ({ exists: !!records[id], data: () => records[id], get: (field: string) => records[id]?.[field] }),
@@ -22,6 +22,7 @@ function harness(records: Record<string, any>, now = 1000) {
     update: async (patch: any) => Object.assign(records[id], patch),
   });
   const db: any = {
+    doc,
     runTransaction: async (run: any) =>
       run({
         get: async (reference: any) => ({ data: () => structuredClone(records[reference.id]) }),
@@ -61,6 +62,7 @@ function harness(records: Record<string, any>, now = 1000) {
     projectId: ref.projectId,
     now: () => now,
     leaseMs: 100,
+    requireOpenAdmission,
   });
   return { dispatcher, workflow, db };
 }
@@ -368,4 +370,46 @@ test('an interrupted pass leaves ambiguous leases and does not claim its next re
   expect(records['durableJobOutbox/a'].state).toBe('dispatching');
   expect(records['durableJobOutbox/b'].state).toBe('pending');
   expect(dispatcher.healthy).toBe(false);
+});
+
+const openRelease = () => ({ schemaVersion: 1, revision: 1, releaseId: 'fixture-release', admission: 'open',
+  domains: Object.fromEntries(['media', 'publishing', 'images', 'emails', 'accounts', 'bundles', 'search']
+    .map(domain => [domain, { owner: 'temporal', admission: 'open' }])) });
+test.each([undefined, { ...openRelease(), admission: 'paused' }, { ...openRelease(), schemaVersion: 2 },
+  { ...openRelease(), revision: 0 }, { ...openRelease(), releaseId: '' }, { ...openRelease(), domains: {} }, { ...openRelease(), domains: [] },
+  { ...openRelease(), domains: { ...openRelease().domains, media: [] } },
+  { ...openRelease(), domains: { ...openRelease().domains, media: { owner: ['temporal'], admission: ['open'] } } }])(
+  'independent dispatcher fails closed for unavailable or invalid admission %j', async control => {
+    const records: Record<string, any> = { 'durableJobOutbox/a': pending() };
+    if (control) records['_control/temporalRelease'] = control;
+    const { dispatcher, workflow } = harness(records, 1000, true);
+    await dispatcher.tick();
+    expect(workflow.start).not.toHaveBeenCalled();
+    expect(records['durableJobOutbox/a'].attempt).toBe(0);
+    expect(dispatcher.healthy).toBe(false);
+  }
+);
+test.each(['durableJobOutbox', 'durableJobCommands'])('independent dispatcher rechecks release pause inside the %s lease transaction', async collection => {
+  const records: Record<string, any> = { [`${collection}/a`]: pending(), '_control/temporalRelease': openRelease() };
+  const { dispatcher, workflow, db } = harness(records, 1000, true);
+  const transaction = db.runTransaction;
+  db.runTransaction = async (run: any) => {
+    records['_control/temporalRelease'].admission = 'paused';
+    return transaction(run);
+  };
+  await dispatcher.tick();
+  expect(workflow.start).not.toHaveBeenCalled();
+  expect(dispatcher.healthy).toBe(false);
+  expect(records[`${collection}/a`].attempt).toBe(0);
+});
+test('independent dispatcher resumes the unchanged pending operation after admission opens', async () => {
+  const records: Record<string, any> = { 'durableJobOutbox/a': pending(),
+    '_control/temporalRelease': { ...openRelease(), admission: 'paused' } };
+  const { dispatcher, workflow } = harness(records, 1000, true);
+  await dispatcher.tick();
+  expect(records['durableJobOutbox/a'].attempt).toBe(0);
+  records['_control/temporalRelease'] = { ...openRelease(), revision: 2 };
+  await dispatcher.tick();
+  expect(workflow.start).toHaveBeenCalledTimes(1);
+  expect(records['durableJobOutbox/a'].state).toBe('dispatched');
 });

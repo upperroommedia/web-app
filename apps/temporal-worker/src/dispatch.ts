@@ -84,7 +84,7 @@ export async function runDispatchService() {
     )
       throw new Error('Serverless dispatcher requires its creator-owned Firebase app');
     const { getFirestore } = await import('firebase-admin/firestore');
-    dispatcher = new OutboxDispatcher({ db: getFirestore(owner.app), client, projectId: config.projectId });
+    dispatcher = new OutboxDispatcher({ db: getFirestore(owner.app), client, projectId: config.projectId, requireOpenAdmission: true });
     handler = createServerlessDispatchHandler({
       projectId: config.projectId,
       admission: (() => {

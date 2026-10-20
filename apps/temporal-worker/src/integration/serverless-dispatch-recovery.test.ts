@@ -73,7 +73,7 @@ test('native accepted start survives interrupted HTTP shutdown and expired-lease
       return typeof value === 'function' ? value.bind(target) : value;
     },
   });
-  const first = new OutboxDispatcher({ db, client: { workflow }, projectId, now: () => clock, leaseMs: 1000 });
+  const first = new OutboxDispatcher({ db, client: { workflow }, projectId, requireOpenAdmission: true, now: () => clock, leaseMs: 1000 });
   const handler = createServerlessDispatchHandler({ projectId, admission: 'enabled',
     reconcileJob: `projects/${projectId}/locations/us-central1/jobs/local-reconcile`,
     run: async signal => { await first.tick(signal); return first.healthy; } });
@@ -81,17 +81,36 @@ test('native accepted start survives interrupted HTTP shutdown and expired-lease
   let closing: Promise<void> | undefined;
   let primary: { error: unknown } | undefined;
   try {
+    const control = db.doc('_control/temporalRelease');
+    await control.create({ schemaVersion: 1, revision: 1, releaseId: jobId, admission: 'paused',
+      domains: Object.fromEntries(['media', 'publishing', 'images', 'emails', 'accounts', 'bundles', 'search']
+        .map(domain => [domain, { owner: 'temporal', admission: 'open' }])) });
     await job.create({ projectId, state: 'running' });
     await outbox.create({ state: 'pending', nextAttemptAt: 0,
       dispatch: { ref: { projectId, jobId }, workflowId, workflowType: 'inertLocalDispatchFixture', taskQueue: jobId } });
     await new Promise<void>(yes => { server.listen(0, '127.0.0.1', yes); });
     const address = server.address();
     if (!address || typeof address === 'string') throw new Error('Local fixture address required');
-    const response = fetch(`http://127.0.0.1:${address.port}/dispatch`, { method: 'POST', headers: {
+    const request = () => fetch(`http://127.0.0.1:${address.port}/dispatch`, { method: 'POST', headers: {
       'ce-id': jobId, 'ce-type': 'google.cloud.firestore.document.v1.written',
       'ce-source': `//firestore.googleapis.com/projects/${projectId}/databases/(default)`,
       'ce-subject': `documents/durableJobOutbox/${jobId}`,
     } });
+    await control.update({ 'domains.media.owner': ['temporal'], admission: 'open' });
+    const malformed = await bounded(request());
+    expect(malformed.status).toBe(503);
+    await malformed.arrayBuffer();
+    expect(starts).toBe(0);
+    expect((await outbox.get()).get('leaseToken')).toBeUndefined();
+    await control.update({ 'domains.media.owner': 'temporal', admission: 'paused' });
+    const denied = await bounded(request());
+    expect(denied.status).toBe(503);
+    await denied.arrayBuffer();
+    expect(starts).toBe(0);
+    expect((await outbox.get()).get('state')).toBe('pending');
+    expect((await outbox.get()).get('leaseToken')).toBeUndefined();
+    await control.update({ admission: 'open', revision: 2 });
+    const response = request();
     await bounded(accepted.promise);
     const original = await environment.client.workflow.getHandle(workflowId).describe();
     const leased = await outbox.get();
@@ -109,11 +128,17 @@ test('native accepted start survives interrupted HTTP shutdown and expired-lease
     expect((await outbox.get()).get('leaseToken')).toBe(leased.get('leaseToken'));
     expect((await outbox.get()).get('state')).toBe('dispatching');
     expect(starts).toBe(1);
-    const replacement = new OutboxDispatcher({ db, client: environment.client, projectId, now: () => clock });
+    const replacement = new OutboxDispatcher({ db, client: environment.client, projectId, requireOpenAdmission: true, now: () => clock });
     try {
       await replacement.tick(); // An unexpired native lease cannot be stolen.
       expect((await outbox.get()).get('attempt')).toBe(1);
       clock += 1001; // Controlled lease clock; not a native timer-wake proof.
+      await control.update({ admission: 'paused', revision: 3 });
+      await replacement.tick();
+      expect((await outbox.get()).get('leaseToken')).toBe(leased.get('leaseToken'));
+      expect((await outbox.get()).get('attempt')).toBe(1);
+      expect(replacement.healthy).toBe(false);
+      await control.update({ admission: 'open', revision: 4 });
       await replacement.tick();
       expect((await outbox.get()).get('state')).toBe('dispatched');
       expect((await outbox.get()).get('attempt')).toBe(2);

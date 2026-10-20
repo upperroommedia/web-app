@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { TEMPORAL_RELEASE_CONTROL_PATH } from '@upperroom/orchestration/release-admission';
 import type { Firestore, DocumentReference } from 'firebase-admin/firestore';
 import { WorkflowIdConflictPolicy, WorkflowIdReusePolicy } from '@temporalio/common';
 import type { Client } from '@temporalio/client';
@@ -36,6 +37,24 @@ export interface DispatcherOptions {
   now?: () => number;
   leaseMs?: number;
   batchSize?: number;
+  /** Independent HTTP dispatch must obtain each lease under open release admission. */
+  requireOpenAdmission?: boolean;
+}
+// Global admission controls the independent producer. Per-domain ownership remains
+// enforced by native workflows/Activities; already-claimed work still needs release drain.
+function record(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+function admissionOpen(value: unknown): boolean {
+  if (!record(value) || value.schemaVersion !== 1 || !Number.isSafeInteger(value.revision) ||
+    Number(value.revision) < 1 || typeof value.releaseId !== 'string' || !value.releaseId.trim() ||
+    value.admission !== 'open' || !record(value.domains)) return false;
+  const domains = value.domains;
+  return ['media', 'publishing', 'images', 'emails', 'accounts', 'bundles', 'search'].every(domain => {
+    const state = domains[domain];
+    return record(state) && (state.owner === 'temporal' || state.owner === 'legacy') &&
+      (state.admission === 'open' || state.admission === 'paused');
+  });
 }
 const args = (value: unknown): unknown[] => (value === undefined ? [] : Array.isArray(value) ? value : [value]);
 /** Outbox ownership is a lease, never a process-local flag. A lost Temporal acknowledgement
@@ -51,8 +70,11 @@ export class OutboxDispatcher {
     this.owner = options.owner ?? randomUUID();
     this.now = options.now ?? Date.now;
   }
-  private async claim(ref: DocumentReference, signal?: AbortSignal): Promise<Lease | undefined> {
+  private async claim(ref: DocumentReference, signal?: AbortSignal): Promise<Lease | undefined | null> {
     return this.options.db.runTransaction(async (tx) => {
+      if (this.options.requireOpenAdmission && !admissionOpen((await tx.get(
+        this.options.db.doc(TEMPORAL_RELEASE_CONTROL_PATH)
+      )).data())) return null;
       const snapshot = await tx.get(ref);
       const value = snapshot.data() as OutboxRecord | undefined;
       const now = this.now();
@@ -225,6 +247,9 @@ export class OutboxDispatcher {
   }
   async tick(signal?: AbortSignal): Promise<void> {
     this.healthy = false;
+    if (this.options.requireOpenAdmission && !admissionOpen((await this.options.db.doc(
+      TEMPORAL_RELEASE_CONTROL_PATH
+    ).get()).data())) return;
     let successful = true;
     for (const collection of ['durableJobOutbox', 'durableJobCommands']) {
       if (this.stopped || signal?.aborted) return;
@@ -249,6 +274,7 @@ export class OutboxDispatcher {
       for (const snapshot of [...pending.docs, ...expired.docs]) {
         if (this.stopped || signal?.aborted) return;
         const lease = await this.claim(snapshot.ref, signal);
+        if (lease === null) return;
         if (!lease) continue;
         try {
           await this.send(lease.value, signal);
