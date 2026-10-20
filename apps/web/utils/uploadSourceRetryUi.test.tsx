@@ -8,7 +8,12 @@ let mockError: string | null = null;
 jest.mock('../hooks/useDurableJobs', () => ({
   useDurableJob: () => ({ job: mockJob, loading: false, stale: mockStale, error: mockError }),
 }));
-jest.mock('../components/jobs/JobStatusPanel', () => ({ __esModule: true, default: () => null }));
+jest.mock('../context/user/UserContext', () => ({
+  __esModule: true,
+  default: () => ({ user: { uid: 'uploader-1', isAdmin: () => false } }),
+}));
+jest.mock('../utils/durableJobs', () => ({ submitDurableCommand: jest.fn() }));
+jest.mock('../components/AvatarWithDefaultImage', () => ({ __esModule: true, default: () => null }));
 jest.mock('@mui/material/Dialog', () => ({
   __esModule: true,
   default: ({ open, children }: { open: boolean; children: React.ReactNode }) =>

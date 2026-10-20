@@ -84,7 +84,8 @@ export default function UploadProgressComponent({
   const audio = useDurableJob(childId);
   const sourceReceived = job?.kind === 'upload.create' && job.state === 'succeeded';
   const currentJob = sourceReceived ? audio.job : job;
-  const stale = source.stale || Boolean(source.error) || Boolean(childId && (audio.stale || audio.error));
+  const stale =
+    Boolean(receipt?.jobId && (source.stale || source.error)) || Boolean(childId && (audio.stale || audio.error));
   const isComplete = Boolean(
     !isUploading &&
       sourceReceived &&
@@ -412,7 +413,9 @@ export default function UploadProgressComponent({
                   maxWidth: 350,
                 }}
               >
-                {uploadProgress.error
+                {canRetrySource
+                  ? 'This audio attempt stopped. You can start a new attempt with the same saved source.'
+                  : uploadProgress.error
                   ? uploadProgress.message
                   : currentJob?.error?.message || 'Your upload needs attention before it can continue.'}
               </Typography>
@@ -484,6 +487,11 @@ export default function UploadProgressComponent({
                 : sourceReceived
                 ? 'Source received. You can follow audio processing on the sermon page.'
                 : 'Your upload is saved. You can follow its progress on the sermon page.'}
+            </Typography>
+          )}
+          {canRetrySource && (
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 2, textAlign: 'center' }}>
+              Try this upload again with the same audio and saved settings. Your sermon details and lists will be kept.
             </Typography>
           )}
           {canRetrySource && job && (
