@@ -1276,7 +1276,7 @@ async function runSystemCommand(
 ): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     const proc = spawn(command, args);
-      acquisitionCancellation.getStore()?.trackProcess(proc);
+    acquisitionCancellation.getStore()?.trackProcess(proc);
     let stdout = '';
     let stderr = '';
 
@@ -3453,7 +3453,7 @@ export const processYouTubeUrl = async (
   const command = `${ytdlpPath} ${args.join(' ')}`;
   log.debug('Executing yt-dlp streaming command', { command, formatId, extractionMode });
   const ytdlp = spawn(ytdlpPath, args);
-      cancelToken.trackProcess(ytdlp);
+  cancelToken.trackProcess(ytdlp);
 
   ytdlp.on('error', (err) => {
     cleanupCookiesFile(cookieContext?.cookiesFilePath, cleaned);
@@ -3716,7 +3716,59 @@ async function resolvePreferredAudioFormatId(
   return { ...parseSelectedFormat(stdout), extractionMode: 'public_provider' };
 }
 
-const downloadYouTubeAudioToFileInternal = async (
+/** Only a verified native provider failure may enter the existing auth ladder. */
+export class YouTubeStreamProviderError extends Error {}
+/** Storage/byte-budget/unknown-ACK failures must never trigger a provider retry. */
+export class YouTubeStreamBoundaryError extends Error {
+  constructor() {
+    super('YouTube streaming is awaiting a verified upload result.');
+  }
+}
+export interface YouTubeStreamReceipt {
+  path: string;
+  generation: string;
+  bytes: number;
+  crc32c: string;
+}
+/** Host-only sink: every invocation must allocate its own upload intent, count
+ * bytes with backpressure, wait for native exit0 and verify uploaded integrity.
+ * A rejected invocation must drain producer/pipeline before another attempt.
+ * Configuration and private arguments never cross Temporal history or HTTP.
+ */
+export interface YouTubeAcquisitionStreamSink {
+  execute(input: {
+    binary: string;
+    args: string[];
+    directory: string;
+    authority: YouTubeSuccessfulAcquisitionAuthority;
+    cancellation: CancelToken;
+  }): Promise<YouTubeStreamReceipt>;
+}
+function recordSuccessfulYouTubeStream(
+  receipt: YouTubeStreamReceipt,
+  authority: YouTubeSuccessfulAcquisitionAuthority,
+  ctx?: LogContext
+): YouTubeStreamReceipt {
+  if (
+    !receipt ||
+    Object.keys(receipt).sort().join(',') !== 'bytes,crc32c,generation,path' ||
+    typeof receipt.path !== 'string' ||
+    !/^workflow-audio\/[A-Za-z0-9_-]+\/[a-f0-9]{16}\/source-[A-Za-z0-9_-]+\.(mp3|m4a|webm|ogg|wav|opus|flac|mp4|bin)$/.test(
+      receipt.path
+    ) ||
+    typeof receipt.generation !== 'string' ||
+    !/^[1-9][0-9]{0,29}$/.test(receipt.generation) ||
+    !Number.isSafeInteger(receipt.bytes) ||
+    receipt.bytes <= 0 ||
+    receipt.bytes > 20 * 1024 ** 3 ||
+    typeof receipt.crc32c !== 'string' ||
+    !/^[A-Za-z0-9+/]{6}==$/.test(receipt.crc32c)
+  )
+    throw new YouTubeStreamBoundaryError();
+  if (ctx) ctx.youtubeSuccessfulAcquisitionAuthority = authority;
+  return { path: receipt.path, generation: receipt.generation, bytes: receipt.bytes, crc32c: receipt.crc32c };
+}
+type YouTubeAcquireArguments = [
   ytdlpPath: string,
   url: YouTubeUrl,
   outputFilePath: string,
@@ -3724,8 +3776,27 @@ const downloadYouTubeAudioToFileInternal = async (
   updateProgressCallback: (progress: number) => void,
   realtimeDB: Database,
   ctx?: LogContext
-): Promise<string> => {
+];
+function downloadYouTubeAudioToFileInternal(...args: YouTubeAcquireArguments): Promise<string>;
+function downloadYouTubeAudioToFileInternal(
+  ...args: [...YouTubeAcquireArguments, streamSink: YouTubeAcquisitionStreamSink]
+): Promise<YouTubeStreamReceipt>;
+async function downloadYouTubeAudioToFileInternal(
+  ytdlpPath: string,
+  url: YouTubeUrl,
+  outputFilePath: string,
+  cancelToken: CancelToken,
+  updateProgressCallback: (progress: number) => void,
+  realtimeDB: Database,
+  ctx?: LogContext,
+  streamSink?: YouTubeAcquisitionStreamSink
+): Promise<string | YouTubeStreamReceipt> {
   const log = createLoggerWithContext(ctx);
+  if (
+    streamSink &&
+    (!isInProcessBrowserFallbackEnabled() || !getLocalBrowserProfileDir() || getBrowserFallbackTargets().length > 0)
+  )
+    throw new Error('YOUTUBE_STREAM_CONFIGURATION_UNSUPPORTED');
   const isDevelopment = process.env.NODE_ENV === 'development';
   ensureProductionPoTokenProviderConfigured(isDevelopment);
 
@@ -3763,11 +3834,12 @@ const downloadYouTubeAudioToFileInternal = async (
     extraCookieArgs: string[] = [],
     browserPoToken?: string
   ): string[] => {
-    const args = ['-f', config.formatSpec, '--no-playlist', '-o', `${outputFilePath}.%(ext)s`];
-    if (config.useConcurrentFragments) {
+    const args = ['-f', config.formatSpec, '--no-playlist', '-o', streamSink ? '-' : `${outputFilePath}.%(ext)s`];
+    if (streamSink) args.push('--no-cache-dir', '--no-part', '--no-continue', '--downloader', 'native', '-N', '1');
+    if (config.useConcurrentFragments && !streamSink) {
       args.push('-N', config.dashConcurrency || getYtDlpConcurrentFragments());
     }
-    if (config.abortOnUnavailableFragments) {
+    if (streamSink || config.abortOnUnavailableFragments) {
       args.push('--abort-on-unavailable-fragments');
     }
     if (config.noPart) {
@@ -3776,7 +3848,7 @@ const downloadYouTubeAudioToFileInternal = async (
     if (config.noContinue) {
       args.push('--no-continue');
     }
-    if (config.extractAudio) {
+    if (config.extractAudio && !streamSink) {
       args.push('-x');
     }
     applyPreferredIpFamilyArgs(args);
@@ -3790,7 +3862,7 @@ const downloadYouTubeAudioToFileInternal = async (
     if (extraCookieArgs.length > 0) {
       args.push(...extraCookieArgs);
     }
-    if (config.useExternalDownloader && shouldUseExternalDownloaderForYouTubeDownload(mode)) {
+    if (!streamSink && config.useExternalDownloader && shouldUseExternalDownloaderForYouTubeDownload(mode)) {
       maybeApplyYtDlpExternalDownloaderArgs(args, log, {
         protocol: config.protocol,
         fragmentCount: config.fragmentCount,
@@ -3837,9 +3909,29 @@ const downloadYouTubeAudioToFileInternal = async (
     config: DownloadAttemptConfig,
     extraCookieArgs: string[] = [],
     browserPoToken?: string
-  ): Promise<string> =>
-    new Promise<string>((resolve, reject) => {
-      const args = buildArgs(mode, config, extraCookieArgs, browserPoToken);
+  ): Promise<string | YouTubeStreamReceipt> => {
+    if (streamSink && cancelToken.isCancellationRequested) throw new YouTubeStreamBoundaryError();
+    const args = buildArgs(mode, config, extraCookieArgs, browserPoToken);
+    if (streamSink) {
+      let receipt: YouTubeStreamReceipt;
+      try {
+        receipt = await streamSink.execute({
+          binary: ytdlpPath,
+          args,
+          directory: path.dirname(ensureSafeTempPath(outputFilePath)),
+          authority: mode,
+          cancellation: cancelToken,
+        });
+      } catch (error) {
+        if (streamSink && cancelToken.isCancellationRequested) throw new YouTubeStreamBoundaryError();
+        if (error instanceof YouTubeStreamBoundaryError) throw error;
+        if (error instanceof YouTubeStreamProviderError) throw error;
+        throw new YouTubeStreamBoundaryError();
+      }
+      cancelToken.signal.throwIfAborted();
+      return recordSuccessfulYouTubeStream(receipt, mode, ctx);
+    }
+    return new Promise<string>((resolve, reject) => {
       const command = redactYouTubeCommandForLogs(`${ytdlpPath} ${args.join(' ')}`);
       const stallTimeoutMs = getYtdlpDownloadStallTimeoutMs();
       const stallPollIntervalMs = Math.min(getYtdlpDownloadStallPollIntervalMs(), stallTimeoutMs);
@@ -3941,6 +4033,8 @@ const downloadYouTubeAudioToFileInternal = async (
               rejectWithError(error instanceof Error ? error : new Error(String(error)))
             );
           } catch (error) {
+            if (streamSink && cancelToken.isCancellationRequested) throw new YouTubeStreamBoundaryError();
+            if (error instanceof YouTubeStreamBoundaryError) throw error;
             rejectWithError(error instanceof Error ? error : new Error(String(error)));
           }
           return;
@@ -4122,6 +4216,7 @@ const downloadYouTubeAudioToFileInternal = async (
         });
       }, stallPollIntervalMs);
     });
+  };
 
   const buildResolvedFallbackAttempt = (resolved: {
     formatId: string;
@@ -4231,10 +4326,12 @@ const downloadYouTubeAudioToFileInternal = async (
     mode: YouTubeExtractionMode,
     config: DownloadAttemptConfig,
     extraCookieArgs: string[]
-  ): Promise<string> => {
+  ): Promise<string | YouTubeStreamReceipt> => {
     try {
       return await execute(mode, config, extraCookieArgs);
     } catch (error) {
+      if (streamSink && cancelToken.isCancellationRequested) throw new YouTubeStreamBoundaryError();
+      if (error instanceof YouTubeStreamBoundaryError) throw error;
       const message = error instanceof Error ? error.message : String(error);
       if (isBrowserPoTokenMedia403(message, mode, ctx)) {
         try {
@@ -4246,6 +4343,8 @@ const downloadYouTubeAudioToFileInternal = async (
           });
           return await execute(mode, config, extraCookieArgs, poToken);
         } catch (poTokenError) {
+          if (streamSink && cancelToken.isCancellationRequested) throw new YouTubeStreamBoundaryError();
+          if (poTokenError instanceof YouTubeStreamBoundaryError) throw poTokenError;
           log.error('Session-bound browser PO token recovery failed', {
             error: poTokenError instanceof Error ? poTokenError.message : String(poTokenError),
             attemptStrategy: config.attemptStrategy,
@@ -4295,6 +4394,8 @@ const downloadYouTubeAudioToFileInternal = async (
           initialAttempt.extraCookieArgs
         );
       } catch (directAudioError) {
+        if (streamSink && cancelToken.isCancellationRequested) throw new YouTubeStreamBoundaryError();
+        if (directAudioError instanceof YouTubeStreamBoundaryError) throw directAudioError;
         const directAudioMessage =
           directAudioError instanceof Error ? directAudioError.message : String(directAudioError);
         log.warn('Primary direct-audio YouTube download failed; falling back to resolved format selection', {
@@ -4330,6 +4431,8 @@ const downloadYouTubeAudioToFileInternal = async (
         );
       }
     } catch (guestError) {
+      if (streamSink && cancelToken.isCancellationRequested) throw new YouTubeStreamBoundaryError();
+      if (guestError instanceof YouTubeStreamBoundaryError) throw guestError;
       if (initialAttempt.mode !== 'public_provider') {
         throw guestError;
       }
@@ -4367,6 +4470,8 @@ const downloadYouTubeAudioToFileInternal = async (
       try {
         return await runAttemptWithOptionalBrowserRefresh('cookie_provider', directAudioAttempt, cookieContext.args);
       } catch (authenticatedError) {
+        if (streamSink && cancelToken.isCancellationRequested) throw new YouTubeStreamBoundaryError();
+        if (authenticatedError instanceof YouTubeStreamBoundaryError) throw authenticatedError;
         const authenticatedMessage =
           authenticatedError instanceof Error ? authenticatedError.message : String(authenticatedError);
         const authenticatedFailureClass = classifyYouTubeFailure(authenticatedMessage, 'cookie_provider');
@@ -4376,6 +4481,39 @@ const downloadYouTubeAudioToFileInternal = async (
 
         if (shouldUseBrowserFallbackForGuestFailure(guestMessage, guestFailureClass)) {
           try {
+            if (streamSink) {
+              const resolved = await resolveAudioUrlWithInProcessBrowserFallback(ytdlpPath, url, realtimeDB, log);
+              const args = [
+                '-nostdin',
+                '-user_agent',
+                YTDLP_HTTP_USER_AGENT,
+                '-i',
+                resolved.url,
+                '-vn',
+                '-acodec',
+                'copy',
+                '-f',
+                'matroska',
+                'pipe:1',
+              ];
+              if (cancelToken.isCancellationRequested) throw new YouTubeStreamBoundaryError();
+              let receipt: YouTubeStreamReceipt;
+              try {
+                receipt = await streamSink.execute({
+                  binary: getFFmpegPath(),
+                  args,
+                  directory: path.dirname(ensureSafeTempPath(outputFilePath)),
+                  authority: 'browser_fallback',
+                  cancellation: cancelToken,
+                });
+              } catch (error) {
+                if (streamSink && cancelToken.isCancellationRequested) throw new YouTubeStreamBoundaryError();
+                if (error instanceof YouTubeStreamProviderError) throw error;
+                throw new YouTubeStreamBoundaryError();
+              }
+              cancelToken.signal.throwIfAborted();
+              return recordSuccessfulYouTubeStream(receipt, 'browser_fallback', ctx);
+            }
             const fallback = await invokeBrowserFallbackDownloadSection(
               ytdlpPath,
               url,
@@ -4414,6 +4552,8 @@ const downloadYouTubeAudioToFileInternal = async (
             });
             return verifiedFallbackFilePath;
           } catch (browserFallbackError) {
+            if (streamSink && cancelToken.isCancellationRequested) throw new YouTubeStreamBoundaryError();
+            if (browserFallbackError instanceof YouTubeStreamBoundaryError) throw browserFallbackError;
             const browserFallbackMessage =
               browserFallbackError instanceof Error ? browserFallbackError.message : String(browserFallbackError);
             const classifiedBrowserFallbackFailure = classifyYouTubeFailure(browserFallbackMessage, 'browser_fallback');
@@ -4458,7 +4598,7 @@ const downloadYouTubeAudioToFileInternal = async (
   } finally {
     cleanupCookiesFile(cookieContext?.cookiesFilePath, cleaned);
   }
-};
+}
 
 async function getYouTubeAudioFragments(
   ytdlpPath: string,
@@ -5523,5 +5663,12 @@ export const downloadYouTubeSection = async (
 };
 
 /** Binds provider probes, HTTP requests and native download children to one cancellation lifetime. */
-export const downloadYouTubeAudioToFile = (...args: Parameters<typeof downloadYouTubeAudioToFileInternal>): Promise<string> =>
+export const downloadYouTubeAudioToFile = (...args: YouTubeAcquireArguments): Promise<string> =>
   withYouTubeCancellation(args[3], () => downloadYouTubeAudioToFileInternal(...args));
+
+/** New internal output adapter; activation requires bounded native scratch and a
+ * concrete verified stream sink. No route or worker uses it until those gates pass.
+ */
+export const acquireYouTubeToStream = (
+  ...args: [...YouTubeAcquireArguments, streamSink: YouTubeAcquisitionStreamSink]
+): Promise<YouTubeStreamReceipt> => withYouTubeCancellation(args[3], () => downloadYouTubeAudioToFileInternal(...args));
