@@ -5,7 +5,7 @@ import Alert from '@mui/material/Alert';
 import Button from '@mui/material/Button';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
-import AppLayout from '../../../layout/AppLayout';
+import AdminActivityLayout from '../../../layout/AdminActivityLayout';
 import useAuth from '../../../context/user/UserContext';
 import { useVisibleJobPage } from '../../../hooks/useDurableJobs';
 import JobStatusPanel from '../../../components/jobs/JobStatusPanel';
@@ -137,4 +137,4 @@ export default function ActivityPage() {
     </Stack>
   );
 }
-ActivityPage.PageLayout = AppLayout;
+ActivityPage.PageLayout = AdminActivityLayout;

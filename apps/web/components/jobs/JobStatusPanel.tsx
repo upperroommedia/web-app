@@ -897,7 +897,7 @@ export default function JobStatusPanel({ job, compact = false, stale = false, sh
               Open {job.entity.type}
             </Button>
           )}
-          {compact && (
+          {compact && canReview && (
             <Button component={Link} href={`/admin/activity/${encodeURIComponent(job.jobId)}`} size="small">
               View task details
             </Button>
