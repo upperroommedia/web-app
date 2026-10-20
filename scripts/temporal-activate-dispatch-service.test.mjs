@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { prepareStopCloudRunScheduler } from './temporal-prepare-stop-scheduler.mjs';
 import { prepareStopCloudRunEventarc } from './temporal-prepare-stop-eventarc.mjs';
 import { proofDigest } from './temporal-release-runtime.mjs';
 import assert from 'node:assert/strict';
@@ -254,7 +255,7 @@ test('uncertain attempted-checkpoint acknowledgement never permits the PATCH or 
 });
 
 
-for(const surface of ['outbox-trigger','commands-trigger'])for(const observationFails of [false,true,'expiry','late'])test(`${surface} owned enabled diagnostic observes only after native creation then deletes even observation failure=${observationFails}`,async()=>{
+for(const surface of ['outbox-trigger','commands-trigger','scheduler'])for(const observationFails of [false,true,'expiry','late'])test(`${surface} owned enabled diagnostic observes only after native creation then deletes even observation failure=${observationFails}`,async()=>{
  const f=await activationFixture(),activationState=await activateCloudRunDispatchService(f.options),p=f.options.platform;
  const operationId='66666666-2222-4333-8444-555555555555';
  const activationReceipt={operationId:f.options.operationId,releaseId:f.options.releaseId,bindingDigest:'9'.repeat(64),identityState:activationState};
@@ -273,11 +274,17 @@ for(const surface of ['outbox-trigger','commands-trigger'])for(const observation
  const firestore={doc:path=>({path}),runTransaction:async fn=>{const result=await fn({get:async ref=>snapshots[ref.path]});
   if(observationFails==='expiry'&&saved?.stage==='attempted'&&!shifted){shifted=true;Date.now=()=>originalNow()+600000;}return result;}};
  const parent='projects/urm-app-staging/locations/us-central1',createOp=`${parent}/operations/diagnostic-create`,stopOp=`${parent}/operations/diagnostic-stop`,baseApi=f.options.api;
+ const cycle = surface === 'scheduler' ? prepareStopCloudRunScheduler : prepareStopCloudRunEventarc;
  const options={...f.options,operationId,creator:'operator@example.test',surface,diagnostic:{firestore,manifest,activationReceipt},
   save:async value=>{saved=structuredClone(value);if(value.creationState){const r={operationId,releaseId:manifest.releaseId,operatorPrincipal:{email:'operator@example.test'},identityState:value.creationState};if(receipt)assert.deepEqual(receipt,r);else receipt=r;}},
   readCreationReceipt:async()=>receipt,
   observeDiagnostic:async()=>{observations++;assert.ok(resource);assert.equal(saved.stage,'created');assert.ok(receipt);if(observationFails===true||observationFails==='late')Date.now=()=>originalNow()+600000;if(observationFails===true)throw new Error('controlled proof failure');return{scope:'controlled observation'};},
   api:async(url,method='GET',body)=>{
+   if(surface==='scheduler'&&url.startsWith('https://cloudscheduler.googleapis.com/')){
+    if(url.endsWith(':pause')){deletes++;assert.ok(receipt);assert.equal(saved.stopState.stage,'attempted');resource.state='PAUSED';return structuredClone(resource);}
+    if(method==='POST'){creates++;assert.equal(saved.stage,'attempted');resource={...structuredClone(body),state:'ENABLED',userUpdateTime:new Date().toISOString()};return structuredClone(resource);}
+    if(!resource)throw Object.assign(new Error('absent'),{status:404});return structuredClone(resource);
+   }
    if(url.startsWith('https://eventarc.googleapis.com/')){
     if(url.endsWith(createOp))return{name:createOp,done:true,response:structuredClone(resource)};
     if(url.endsWith(stopOp))return{name:stopOp,done:true,response:{}};
@@ -287,9 +294,9 @@ for(const surface of ['outbox-trigger','commands-trigger'])for(const observation
    }
    return baseApi(url,method,body);
   }};
- if(observationFails==='expiry'){try{await assert.rejects(prepareStopCloudRunEventarc(options));assert.equal(creates,0);assert.equal(deletes,0);assert.equal(saved.stage,'attempted');}finally{Date.now=originalNow;}return;}
- try {if(observationFails)await assert.rejects(prepareStopCloudRunEventarc(options));else assert.equal((await prepareStopCloudRunEventarc(options)).stage,'completed');}finally{Date.now=originalNow;}
- assert.equal(creates,1);assert.equal(deletes,1);assert.equal(observations,1);assert.equal(resource,undefined);assert.equal(saved.stopState.stage,'completed');
- if(observationFails)await assert.rejects(prepareStopCloudRunEventarc({...options,saved}));else await prepareStopCloudRunEventarc({...options,saved});
+ if(observationFails==='expiry'){try{await assert.rejects(cycle(options));assert.equal(creates,0);assert.equal(deletes,0);assert.equal(saved.stage,'attempted');}finally{Date.now=originalNow;}return;}
+ try {if(observationFails)await assert.rejects(cycle(options));else assert.equal((await cycle(options)).stage,'completed');}finally{Date.now=originalNow;}
+ assert.equal(creates,1);assert.equal(deletes,1);assert.equal(observations,1);if(surface==='scheduler')assert.equal(resource.state,'PAUSED');else assert.equal(resource,undefined);assert.equal(saved.stopState.stage,'completed');
+ if(observationFails)await assert.rejects(cycle({...options,saved}));else await cycle({...options,saved});
  assert.equal(creates,1);assert.equal(deletes,1);assert.equal(observations,1);
 });

@@ -37,7 +37,7 @@ function nativeOperation(value) {
  */
 export async function stopCloudRunDispatchWake({ platform, role, settings, releaseId, evidenceDigest, operationId,
   surface, runnerReceipt, eventReceipt, schedulerReceipt, diagnostic, serviceReceipt, wakeReceipt, api, save, saved }) {
-  if (diagnostic !== undefined && !['outbox-trigger', 'commands-trigger'].includes(surface)) fail();
+  if (diagnostic !== undefined && !['outbox-trigger', 'commands-trigger', 'scheduler'].includes(surface)) fail();
   if (!uuid.test(operationId ?? '') || [api, save].some(fn => typeof fn !== 'function')) fail();
   const original = wakeReceipt?.identityState;
   if (wakeReceipt?.releaseId !== releaseId || original?.stage !== 'completed' ||

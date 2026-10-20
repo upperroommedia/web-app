@@ -57,7 +57,8 @@ export async function armCloudRunDispatchDiagnostic({
     const saved = parent.get('cloudDispatchDiagnostic');
     const createdAt = saved?.createdAt ?? control.readTime.toMillis();
     const manifest = {
-      schemaVersion: 1,
+      schemaVersion: 2,
+      commandsRecovery: 'scheduler',
       operationId,
       releaseId: config.releaseId,
       bindingDigest,

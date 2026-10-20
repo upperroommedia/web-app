@@ -1220,12 +1220,23 @@ await runWithCleanup(
               save:async child=>{ownedOperation=await saveDiagnosticWakeCheckpoint({firestore,lockRef,controlRef,stateRef,ownedOperation,expectedAuthority,diagnostic,operatorPrincipal},child);},
               readCreationReceipt:async()=>{const r=await creationRef.get();return r.exists?r.data():undefined;},
               observeDiagnostic:async({signal})=>{await pulseDiagnosticWake(diagnostic,`${surface}-trigger`,signal);
-                return collectCloudRunDispatchDiagnostic({binding,config,platform,firestore,diagnostic,surface,signal});},
+                return collectCloudRunDispatchDiagnostic({binding,config,platform,firestore,diagnostic,surface,recovery:surface==='commands'?'retry':undefined,signal});},
             });
             if(wake.stage!=='completed'||wake.stopState?.stage!=='completed'||!wake.diagnosticObservation||wake.diagnosticObservationFailed)
               throw new Error('DIAGNOSTIC_EVENTARC_OBSERVATION_OR_CLEANUP_UNCONFIRMED');
             }
-            throw new Error('DIAGNOSTIC_EVENTARC_CYCLES_COMPLETE_RETRY_SCHEDULER_AND_RECOVERY_PENDING');
+            const schedulerCreation = firestore.doc(`_control/temporalDispatchDiagnosticWakeCreation-${operationId}-scheduler`);
+            const schedulerWake = await prepareStopCloudRunScheduler({platform,role:preparationArguments.role,settings,releaseId:config.releaseId,
+              evidenceDigest:preparationArguments.digest,operationId,creator:operatorPrincipal.email,surface:'scheduler',diagnostic,
+              runnerReceipt:receipts[0].data(),eventReceipt:receipts[1].data(),schedulerReceipt:receipts[2].data(),serviceReceipt:receipts[3].data(),api,
+              saved:(await lockRef.get()).get('cloudDispatchDiagnosticSchedulerWake'),
+              save:async child=>{ownedOperation=await saveDiagnosticWakeCheckpoint({firestore,lockRef,controlRef,stateRef,ownedOperation,expectedAuthority,diagnostic,operatorPrincipal},child);},
+              readCreationReceipt:async()=>{const r=await schedulerCreation.get();return r.exists?r.data():undefined;},
+              observeDiagnostic:async({signal})=>collectCloudRunDispatchDiagnostic({binding,config,platform,firestore,diagnostic,surface:'commands',recovery:'scheduler',signal}),
+            });
+            if(schedulerWake.stage!=='completed'||schedulerWake.stopState?.stage!=='completed'||!schedulerWake.diagnosticObservation||schedulerWake.diagnosticObservationFailed)
+              throw new Error('DIAGNOSTIC_SCHEDULER_RECOVERY_OR_CLEANUP_UNCONFIRMED');
+            throw new Error('DIAGNOSTIC_WAKE_CYCLES_COMPLETE_NATIVE_PLATFORM_AND_PROCESS_RECOVERY_PENDING');
           } else if (action === 'activate-cloud-run-dispatch-service') {
             requirePhase(state, ['provider-usage-ready']);
             if (config.environment !== 'staging' || operatorPrincipal.adcAndGcloudAccountMatch !== true)

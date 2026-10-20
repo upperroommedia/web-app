@@ -216,6 +216,15 @@ test('native diagnostic wake checkpoint/pulse preserve original creation and unk
   assert.notEqual(commandsFirst.get('diagnosticPulse.creationReceiptDigest'),first.get('diagnosticPulse.creationReceiptDigest'));
   await pulseDiagnosticWake(diagnostic,'commands-trigger');
   assert.equal((await commandsRef.get()).updateTime.isEqual(commandsFirst.updateTime),true);
+  const schedulerReceiptRef=db.doc(`_control/temporalDispatchDiagnosticWakeCreation-${operationId}-scheduler`);refs.push(schedulerReceiptRef);
+  const schedulerCreation={...creation,plan:{operationId,surface:'scheduler',body:{name:'controlled-owned-job'}},resource:{name:'controlled-owned-job',userUpdateTime:new Date().toISOString()}};
+  const schedulerChild={...child,plan:{...child.plan,creation:schedulerCreation.plan},creationState:schedulerCreation};
+  await assert.rejects(saveDiagnosticWakeCheckpoint(options,schedulerChild));
+  options.ownedOperation=await saveDiagnosticWakeCheckpoint(options,{...commandsChild,stage:'completed',stopState:{stage:'completed'},diagnosticObservation:{recovery:'retry'}});
+  options.ownedOperation=await saveDiagnosticWakeCheckpoint(options,schedulerChild);
+  assert.equal((await schedulerReceiptRef.get()).get('identityState.resource.name'),'controlled-owned-job');
+  await assert.rejects(pulseDiagnosticWake(diagnostic,'scheduler'));
+  await assert.rejects(saveDiagnosticWakeCheckpoint(options,{...schedulerChild,creationState:{...schedulerCreation,resource:{name:'foreign'}}}));
   await controlRef.update({admission:'open'});await assert.rejects(pulseDiagnosticOutbox(diagnostic));assert.equal((await refs[5].get()).updateTime.isEqual(first.updateTime),true);
  }finally{for(const ref of refs)await ref.delete();await db.terminate();await deleteApp(app);}
 });

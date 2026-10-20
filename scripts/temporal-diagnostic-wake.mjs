@@ -1,10 +1,10 @@
 import { proofDigest, assertNativeSnapshot, nativeSnapshotProof } from './temporal-release-runtime.mjs';
 import { assertDiagnosticWakeAuthority } from './temporal-diagnostic-authority.mjs';
 const surfaceKey = (surface) => {
-  if (!['outbox-trigger', 'commands-trigger'].includes(surface)) throw new Error('DIAGNOSTIC_WAKE_SURFACE_REQUIRED');
-  return surface === 'outbox-trigger' ? 'outbox' : 'commands';
+  if (!['outbox-trigger', 'commands-trigger', 'scheduler'].includes(surface)) throw new Error('DIAGNOSTIC_WAKE_SURFACE_REQUIRED');
+  return surface === 'outbox-trigger' ? 'outbox' : surface === 'commands-trigger' ? 'commands' : 'scheduler';
 };
-const wakeField = (key) => key === 'outbox' ? 'cloudDispatchDiagnosticWake' : 'cloudDispatchDiagnosticCommandsWake';
+const wakeField = (key) => key === 'outbox' ? 'cloudDispatchDiagnosticWake' : key === 'commands' ? 'cloudDispatchDiagnosticCommandsWake' : 'cloudDispatchDiagnosticSchedulerWake';
 const fail = () => {
   throw new Error('DIAGNOSTIC_WAKE_CHECKPOINT_UNCONFIRMED');
 };
@@ -44,6 +44,9 @@ export async function saveDiagnosticWakeCheckpoint(o, state) {
     if (key === 'commands' && (p.get('cloudDispatchDiagnosticWake.stage') !== 'completed' ||
       p.get('cloudDispatchDiagnosticWake.stopState.stage') !== 'completed' ||
       !p.get('cloudDispatchDiagnosticWake.diagnosticObservation') || p.get('cloudDispatchDiagnosticWake.diagnosticObservationFailed'))) fail();
+    if (key === 'scheduler' && (p.get('cloudDispatchDiagnosticCommandsWake.stage') !== 'completed' ||
+      p.get('cloudDispatchDiagnosticCommandsWake.stopState.stage') !== 'completed' ||
+      p.get('cloudDispatchDiagnosticCommandsWake.diagnosticObservation.recovery') !== 'retry' || p.get('cloudDispatchDiagnosticCommandsWake.diagnosticObservationFailed'))) fail();
     const previous = p.get(field);
     if (previous?.plan && proofDigest(previous.plan) !== proofDigest(state.plan)) fail();
     const creation = state.creationState;
@@ -71,6 +74,7 @@ export async function pulseDiagnosticOutbox(diagnostic, signal) {
   return pulseDiagnosticWake(diagnostic, 'outbox-trigger', signal);
 }
 export async function pulseDiagnosticWake(diagnostic, surface, signal) {
+  if (surface === 'scheduler') fail();
   const key = surfaceKey(surface), field = wakeField(key), pulseField = `${key}Pulse`;
   const m = await assertDiagnosticWakeAuthority(diagnostic),
     { firestore } = diagnostic;

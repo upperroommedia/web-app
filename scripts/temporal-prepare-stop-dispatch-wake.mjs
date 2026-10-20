@@ -18,7 +18,7 @@ export async function prepareStopCloudRunDispatchWake(options) {
   if ([api, save, readCreationReceipt].some(fn => typeof fn !== 'function') ||
     typeof creator !== 'string' || !/^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+$/.test(creator)) fail();
   if (!['scheduler', 'outbox-trigger', 'commands-trigger'].includes(surface)) fail();
-  if (options.diagnostic !== undefined && !['outbox-trigger', 'commands-trigger'].includes(surface)) fail();
+  if (options.diagnostic !== undefined && !['outbox-trigger', 'commands-trigger', 'scheduler'].includes(surface)) fail();
   const scheduler = surface === 'scheduler';
   const creation = dispatchWakePlan(options);
   const authority = dispatchPreparationAuthority(options);
@@ -118,10 +118,10 @@ export async function prepareStopCloudRunDispatchWake(options) {
     if (state.stage === 'created' && options.diagnostic !== undefined) {
       try {
         if (typeof options.observeDiagnostic !== 'function') fail();
-        const controller = new AbortController(), observationDeadline = Date.now() + 30000;
+        const controller = new AbortController(), observationDeadline = Date.now() + (scheduler ? 90000 : 60000);
         let timer;
         observationWork = Promise.resolve().then(() => options.observeDiagnostic({ surface, creationState: state.creationState, signal: controller.signal }));
-        const observation = await Promise.race([observationWork, new Promise((_, reject) => { timer = setTimeout(() => { controller.abort(); reject(new Error('DIAGNOSTIC_OBSERVATION_DEADLINE')); }, 30000); })]).finally(() => clearTimeout(timer));
+        const observation = await Promise.race([observationWork, new Promise((_, reject) => { timer = setTimeout(() => { controller.abort(); reject(new Error('DIAGNOSTIC_OBSERVATION_DEADLINE')); }, scheduler ? 90000 : 60000); })]).finally(() => clearTimeout(timer));
         if(controller.signal.aborted||Date.now()>=observationDeadline)fail();
         state = { ...state, diagnosticObservation: observation };
       } catch { observationFailed = true; state = { ...state, diagnosticObservationFailed: true }; }

@@ -12,7 +12,8 @@ const fail = (): never => {
 const domains = ['media', 'publishing', 'images', 'emails', 'accounts', 'bundles', 'search'];
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
 export interface DispatchDiagnosticManifest {
-  schemaVersion: 1;
+  schemaVersion: 2;
+  commandsRecovery: 'scheduler';
   operationId: string;
   releaseId: string;
   bindingDigest: string;
@@ -37,11 +38,12 @@ function manifest(value: unknown): DispatchDiagnosticManifest {
   const m = value as DispatchDiagnosticManifest;
   if (
     Object.keys(m).sort().join(',') !==
-      'activationDigest,bindingDigest,buildId,controlVersion,createdAt,eventSubject,expiresAt,image,nonce,operationId,releaseId,schedulerSubject,schemaVersion,serviceRevision,stateVersion' ||
+      'activationDigest,bindingDigest,buildId,commandsRecovery,controlVersion,createdAt,eventSubject,expiresAt,image,nonce,operationId,releaseId,schedulerSubject,schemaVersion,serviceRevision,stateVersion' ||
     !Object.entries(m)
       .filter(([key]) => !['schemaVersion', 'createdAt', 'expiresAt'].includes(key))
       .every(([, value]) => typeof value === 'string') ||
-    m.schemaVersion !== 1 ||
+    m.schemaVersion !== 2 ||
+    m.commandsRecovery !== 'scheduler' ||
     !uuid.test(m.operationId) ||
     !uuid.test(m.releaseId) ||
     ![m.bindingDigest, m.activationDigest].every((v) => /^[a-f0-9]{64}$/.test(v)) ||
@@ -142,7 +144,7 @@ export class DispatchDiagnostic {
       for (const surface of surfaces) {
         const recordRef = db.doc(diagnosticRecordPath(m.operationId, surface));
         const authority = async (tx: FirebaseFirestore.Transaction) => {
-          const [p, c, s, a, j, r, creation] = await Promise.all(
+          const [p, c, s, a, j, r, creation, schedulerCreation] = await Promise.all(
             [
               parentRef,
               controlRef,
@@ -151,6 +153,7 @@ export class DispatchDiagnostic {
               journalRef,
               recordRef,
               db.doc(`_control/temporalDispatchDiagnosticWakeCreation-${m.operationId}-${surface}`),
+              db.doc(`_control/temporalDispatchDiagnosticWakeCreation-${m.operationId}-scheduler`),
             ].map((ref) => tx.get(ref))
           );
           if (
@@ -175,6 +178,11 @@ export class DispatchDiagnostic {
           )
             fail();
           pulseBinding(m, surface, r, j, creation);
+          if (context.caller.kind === 'scheduler' && (!schedulerCreation.exists ||
+            schedulerCreation.get('operationId') !== m.operationId || schedulerCreation.get('releaseId') !== m.releaseId ||
+            schedulerCreation.get('bindingDigest') !== m.bindingDigest || schedulerCreation.get('identityState.stage') !== 'completed' ||
+            schedulerCreation.get('identityState.plan.surface') !== 'scheduler' || schedulerCreation.get('identityState.plan.operationId') !== m.operationId ||
+            context.delivery.kind !== 'scheduler' || context.delivery.job !== schedulerCreation.get('identityState.plan.body.name'))) fail();
           return r;
         };
         const claim = await db.runTransaction(async (tx) => {
@@ -193,6 +201,14 @@ export class DispatchDiagnostic {
               !Number.isSafeInteger(previous.expiresAt))
           )
             fail();
+          if (previous && context.caller.kind === 'event' && surface === 'commands' && r.get('retryFaultAppliedAt') !== undefined &&
+            digest(r.get('firstEventDelivery')) === digest(context.delivery)) {
+            const j = await tx.get(journalRef), witness = { delivery: context.delivery, pulseDigest: digest(r.get('diagnosticPulse')), runId: r.get('runId'), leaseExpiresAt: previous.expiresAt };
+            const prior = j.get('commandsRetry');
+            if (prior !== undefined && digest(prior) !== digest(witness)) fail();
+            if (prior === undefined) tx.update(journalRef, { commandsRetry: witness });
+            return { retryObserved: true, attempt: 0 };
+          }
           if (
             (!previous && (context.caller.kind !== 'event' || now >= m.expiresAt)) ||
             (previous && (context.caller.kind !== 'scheduler' || previous.expiresAt > now))
@@ -204,9 +220,11 @@ export class DispatchDiagnostic {
             caller: { kind: context.caller.kind, subject: context.caller.subject },
             delivery: context.delivery,
             claimedAt: now,
+            ...(!previous ? { firstEventDelivery: context.delivery } : {}),
           });
           return { completed: false, attempt };
         });
+        if (claim.retryObserved) return false;
         if (claim.completed) continue;
         const workflowId = `dispatch-diagnostic-${m.operationId}-${surface}`;
         const input: DispatchWakeProbeInput = {
@@ -236,6 +254,7 @@ export class DispatchDiagnostic {
             tx.update(recordRef, {
               startAttemptedAt: r.readTime.toMillis(),
               startPulseDigest: digest(r.get('diagnosticPulse')),
+              ...(surface === 'commands' ? { retryFaultIntent: {kind: 'withhold-accepted-start-ack', pulseDigest: digest(r.get('diagnosticPulse'))} } : {}),
             });
             return r.get('lease.expiresAt') as number;
           });
@@ -304,7 +323,7 @@ export class DispatchDiagnostic {
           )
         )
           fail();
-        await db.runTransaction(async (tx) => {
+        const acknowledged = await db.runTransaction(async (tx) => {
           const r = await authority(tx);
           if (
             r.get('lease.token') !== token ||
@@ -313,13 +332,25 @@ export class DispatchDiagnostic {
             (r.get('runId') && r.get('runId') !== description.runId)
           )
             fail();
+          if (surface === 'commands') {
+            if (digest(r.get('retryFaultIntent')) !== digest({kind: 'withhold-accepted-start-ack', pulseDigest: digest(r.get('diagnosticPulse'))})) fail();
+            if (claim.attempt === 1) {
+              if (r.get('retryFaultAppliedAt') !== undefined) fail();
+              tx.update(recordRef, {runId: description.runId, retryFaultAppliedAt: r.readTime.toMillis(), firstLeaseExpiresAt: r.get('lease.expiresAt'), startHistoryDigest: digest(JSON.parse(JSON.stringify(history)))});
+              return false;
+            }
+            if (!Number.isSafeInteger(r.get('retryFaultAppliedAt')) || !Number.isSafeInteger(r.get('firstLeaseExpiresAt')) ||
+              !Number.isSafeInteger(r.get('claimedAt')) || r.get('claimedAt') < r.get('firstLeaseExpiresAt')) fail();
+          }
           tx.update(recordRef, {
             runId: description.runId,
             dispatchAcknowledged: true,
             startHistoryDigest: digest(JSON.parse(JSON.stringify(history))),
             observedAt: r.readTime.toMillis(),
           });
+          return true;
         });
+        if (!acknowledged) return false;
       }
       return true;
     } catch {
@@ -335,16 +366,19 @@ export async function collectDispatchDiagnosticExecution(options: {
   manifest: DispatchDiagnosticManifest;
   deadline: number;
   surface?: 'outbox' | 'commands';
+  recovery?: 'retry' | 'scheduler';
 }) {
   const m = manifest(options.manifest),
     { db, client, deadline } = options,
     surface = options.surface ?? 'outbox';
   if (!['outbox', 'commands'].includes(surface)) fail();
   if (!Number.isFinite(deadline) || Date.now() >= deadline) fail();
-  const [r, j, c] = await db.getAll(
+  if (options.recovery !== undefined && (surface !== 'commands' || !['retry', 'scheduler'].includes(options.recovery))) fail();
+  const [r, j, c, scheduler] = await db.getAll(
     db.doc(diagnosticRecordPath(m.operationId, surface)),
     db.doc(`_control/temporalDispatchDiagnostic-${m.operationId}`),
-    db.doc(`_control/temporalDispatchDiagnosticWakeCreation-${m.operationId}-${surface}`)
+    db.doc(`_control/temporalDispatchDiagnosticWakeCreation-${m.operationId}-${surface}`),
+    db.doc(`_control/temporalDispatchDiagnosticWakeCreation-${m.operationId}-scheduler`)
   );
   const pulseDigest = pulseBinding(m, surface, r, j, c);
   if (r.get('startPulseDigest') !== pulseDigest) fail();
@@ -353,19 +387,29 @@ export async function collectDispatchDiagnosticExecution(options: {
   if (
     r.get('state') !== 'diagnostic' ||
     r.get('manifestDigest') !== digest(m) ||
-    r.get('dispatchAcknowledged') !== true ||
+    (options.recovery === 'retry' ? r.get('dispatchAcknowledged') !== undefined : r.get('dispatchAcknowledged') !== true) ||
     !uuid.test(runId ?? '') ||
-    r.get('caller.kind') !== 'event' ||
-    r.get('caller.subject') !== m.eventSubject ||
-    r.get('delivery.kind') !== 'event' ||
-    r.get('delivery.subject') !== `documents/${diagnosticRecordPath(m.operationId, surface)}` ||
-    typeof r.get('delivery.id') !== 'string' ||
-    !r.get('delivery.id') ||
+    (options.recovery === 'scheduler'
+      ? r.get('caller.kind') !== 'scheduler' || r.get('caller.subject') !== m.schedulerSubject || r.get('delivery.kind') !== 'scheduler' ||
+        !scheduler.exists || scheduler.get('operationId') !== m.operationId || scheduler.get('releaseId') !== m.releaseId || scheduler.get('bindingDigest') !== m.bindingDigest ||
+        scheduler.get('identityState.stage') !== 'completed' || scheduler.get('identityState.plan.surface') !== 'scheduler' ||
+        scheduler.get('identityState.plan.operationId') !== m.operationId || r.get('delivery.job') !== scheduler.get('identityState.plan.body.name') ||
+        r.get('lease.attempt') < 2 || r.get('claimedAt') < r.get('firstLeaseExpiresAt')
+      : r.get('caller.kind') !== 'event' || r.get('caller.subject') !== m.eventSubject || r.get('delivery.kind') !== 'event' ||
+        r.get('delivery.subject') !== `documents/${diagnosticRecordPath(m.operationId, surface)}` || typeof r.get('delivery.id') !== 'string' || !r.get('delivery.id')) ||
     !Number.isSafeInteger(r.get('startAttemptedAt')) ||
     r.get('startAttemptedAt') < m.createdAt ||
     r.get('startAttemptedAt') >= m.expiresAt
   )
     fail();
+  if (surface === 'commands') {
+    const retry = j.get('commandsRetry');
+    if (!options.recovery || !Number.isSafeInteger(r.get('retryFaultAppliedAt')) || !Number.isSafeInteger(r.get('firstLeaseExpiresAt')) ||
+      r.get('retryFaultAppliedAt') < r.get('startAttemptedAt') || r.get('retryFaultAppliedAt') >= r.get('firstLeaseExpiresAt') ||
+      digest(r.get('retryFaultIntent')) !== digest({kind: 'withhold-accepted-start-ack', pulseDigest}) ||
+      retry?.runId !== runId || retry?.pulseDigest !== pulseDigest || retry?.leaseExpiresAt !== r.get('firstLeaseExpiresAt') ||
+      digest(retry?.delivery) !== digest(r.get('firstEventDelivery'))) fail();
+  }
   const handle = client.workflow.getHandle(workflowId, runId, { firstExecutionRunId: runId, followRuns: false });
   const history = await client.connection.withDeadline(Math.min(deadline, Date.now() + 10000), () =>
     handle.fetchHistory()
@@ -414,9 +458,10 @@ export async function collectDispatchDiagnosticExecution(options: {
     surface,
     creationReceiptDigest: digest(c.data()),
     pulseDigest,
-    callerKind: 'event',
-    callerSubject: m.eventSubject,
-    deliveryId: r.get('delivery.id'),
+    callerKind: options.recovery === 'scheduler' ? 'scheduler' : 'event',
+    callerSubject: options.recovery === 'scheduler' ? m.schedulerSubject : m.eventSubject,
+    ...(options.recovery === 'scheduler' ? { schedulerReceiptDigest: digest(scheduler.data()), job: r.get('delivery.job') } : {deliveryId: r.get('delivery.id')}),
+    ...(surface === 'commands' ? {recovery: options.recovery, retryWitnessDigest: digest(j.get('commandsRetry'))} : {}),
     serviceRevision: m.serviceRevision,
     scope:
       'native original timer completion joined to stored verified-caller dispatch; not exclusive transport causality, inherited isolation or readiness',

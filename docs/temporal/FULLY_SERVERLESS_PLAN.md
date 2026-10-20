@@ -554,7 +554,8 @@ precede one atomic post-trigger journal/record pulse. Runtime claims, START inte
 ACK and native completion must retain the same creation-receipt/pulse binding.
 Records created before a trigger exists cannot establish this proof.
 
-The observation window is bounded to thirty seconds and checked again after awaits.
+Eventarc observation is bounded to sixty seconds and Scheduler observation to ninety
+seconds, with a wall-clock check again after awaits.
 Observation failure or timeout proceeds to conditional owned trigger deletion; the
 operation then waits for outstanding observer work to settle. Unknown creation/stop
 ACKs retain the existing causal-readback/no-resend protocol. Cleanup and existing-pulse
@@ -570,9 +571,26 @@ pulse, original workflow/run and completion proof. A commands pulse or run canno
 inherit the outbox acknowledgement. Resume preserves both surfaces and the original
 nonce and expiry; an uncertain earlier create/delete prevents progression.
 
-The parent remains retained and the controller still stops after these partial
-Eventarc cycles. Eventarc retry, independent Scheduler lease wakes, process recovery,
-real Google/Cloud Run API acceptance and remaining readiness gates are unfinished.
+The v2 manifest fixes commands recovery to Scheduler. Before the sole commands
+START, the driver persists one pulse-bound fault intent. Only a verified accepted
+original run/history permits the deliberate first ACK suppression; unrelated SDK or
+store failures remain uncertainty. Matching verified Eventarc redelivery records a
+private journal retry witness without changing the lease or issuing another RPC.
+Commands observation joins this pending ACK, retry witness and original timer run;
+it does not claim dispatch completion.
+
+After confirmed commands trigger cleanup, the same parent creates the fixed Scheduler
+job and saves its immutable native creation receipt before observing recovery. A
+verified Scheduler caller needs that exact receipt and job selector transactionally.
+It can claim only an expired original lease and can only GET the original execution.
+The final collector requires the same run, fault intent, retry witness, candidate pin,
+completion and Scheduler receipt. Owned pause follows even a failed observation.
+Creation remains expiry-bound; recovery GET and owned cleanup do not extend or reset
+the original nonce, run or initial authorization.
+
+The parent remains retained and the controller still stops after these diagnostic
+cycles. Native Google/Cloud Run delivery and API acceptance, effective candidate
+access, original process recovery and remaining readiness gates are unfinished.
 No release phase, routing, ownership, WCI or business admission advances. Tests combine
 controlled Google resource observations, actual dedicated Firestore transactions and
 actual local Temporal execution, rather than deployed Cloud Run delivery evidence.

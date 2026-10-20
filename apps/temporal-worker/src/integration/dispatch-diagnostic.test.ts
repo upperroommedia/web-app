@@ -60,7 +60,8 @@ test('separate paused diagnostic starts only the fixed pinned original and recon
       serviceRevision = 'projects/urm-app-staging/locations/us-central1/services/dispatch/revisions/dispatch-r1';
     // Controlled arming observation. The operator's actual atomic producer is tested separately.
     const manifest = {
-      schemaVersion: 1 as const,
+      schemaVersion: 2 as const,
+      commandsRecovery: 'scheduler' as const,
       operationId,
       releaseId,
       bindingDigest,
@@ -105,6 +106,7 @@ test('separate paused diagnostic starts only the fixed pinned original and recon
         cloudDispatchDiagnostic: manifest,
       });
       tx.create(db.doc(`_control/temporalDispatchDiagnosticAuthorization-${operationId}`), manifest);
+      tx.create(db.doc(`_control/temporalDispatchDiagnosticWakeCreation-${operationId}-scheduler`), {operationId,releaseId,bindingDigest,identityState:{stage:'completed',plan:{operationId,surface:'scheduler',body:{name:'controlled-local'}}}});
       tx.create(db.doc(`_control/temporalDispatchDiagnostic-${operationId}`), {
         manifestDigest: digest(manifest),
         outboxPulse: seeded.pulse('outbox'),
@@ -203,8 +205,7 @@ test('separate paused diagnostic starts only the fixed pinned original and recon
         if (key === 'start')
           return async (...args: Parameters<typeof target.start>) => {
             starts++;
-            await target.start(...args);
-            throw new Error('controlled post-acceptance ACK loss');
+            return target.start(...args);
           };
         const v = Reflect.get(target, key);
         return typeof v === 'function' ? v.bind(target) : v;
@@ -221,15 +222,38 @@ test('separate paused diagnostic starts only the fixed pinned original and recon
     const unknown = await db.doc(diagnosticRecordPath(operationId, 'commands')).get();
     expect(unknown.get('startAttemptedAt')).toEqual(expect.any(Number));
     expect(starts).toBe(1);
+    expect(unknown.get('retryFaultAppliedAt')).toEqual(expect.any(Number));
+    expect(unknown.get('dispatchAcknowledged')).toBeUndefined();
+    expect(await diagnostic.tick(signal, {...context('commands'),delivery:{...context('commands').delivery,id:'other-event'}})).toBe(false);
+    expect((await db.doc(`_control/temporalDispatchDiagnostic-${operationId}`).get()).get('commandsRetry')).toBeUndefined();
+    expect(await diagnostic.tick(signal, context('commands'))).toBe(false);
+    expect((await db.doc(`_control/temporalDispatchDiagnostic-${operationId}`).get()).get('commandsRetry.runId')).toBe(unknown.get('runId'));
+    await environment.client.workflow.getHandle(`dispatch-diagnostic-${operationId}-commands`,unknown.get('runId'),{followRuns:false}).result();
+    const pendingProof=await collectDispatchDiagnosticExecution({db,client:environment.client,manifest,surface:'commands',recovery:'retry',deadline:Date.now()+10000});
+    expect(pendingProof.runId).toBe(unknown.get('runId'));
     expect(await diagnostic.tick(signal, scheduled)).toBe(false);
     // Actual elapsed local lease, not a Cloud Scheduler wake or native Cloud Run proof.
     const wait = Math.max(0, unknown.get('lease.expiresAt') - Date.now() + 100);
     await new Promise((resolve) => setTimeout(resolve, wait));
+    const schedulerReceiptRef=db.doc(`_control/temporalDispatchDiagnosticWakeCreation-${operationId}-scheduler`), schedulerReceipt=(await schedulerReceiptRef.get()).data()!;
+    await schedulerReceiptRef.delete();
+    expect(await diagnostic.tick(signal, scheduled)).toBe(false);
+    expect((await db.doc(diagnosticRecordPath(operationId,'commands')).get()).get('lease.attempt')).toBe(1);
+    await schedulerReceiptRef.create(schedulerReceipt);
+    expect(await diagnostic.tick(signal,{...scheduled,delivery:{kind:'scheduler',job:'foreign-job'}})).toBe(false);
+    expect((await db.doc(diagnosticRecordPath(operationId,'commands')).get()).get('lease.attempt')).toBe(1);
     expect(await diagnostic.tick(signal, scheduled)).toBe(true);
     const recovered = await db.doc(diagnosticRecordPath(operationId, 'commands')).get();
     expect(recovered.get('lease.attempt')).toBe(2);
     expect(recovered.get('dispatchAcknowledged')).toBe(true);
     expect(starts).toBe(1);
+    const recoveryProof=await collectDispatchDiagnosticExecution({db,client:environment.client,manifest,surface:'commands',recovery:'scheduler',deadline:Date.now()+10000});
+    expect(recoveryProof.runId).toBe(unknown.get('runId'));
+    expect(recoveryProof.callerKind).toBe('scheduler');
+    const commandsRecoveryRef=db.doc(diagnosticRecordPath(operationId,'commands'));
+    await commandsRecoveryRef.update({firstLeaseExpiresAt:FieldValue.delete()});
+    await expect(collectDispatchDiagnosticExecution({db,client:environment.client,manifest,surface:'commands',recovery:'scheduler',deadline:Date.now()+10000})).rejects.toThrow();
+    await commandsRecoveryRef.update({firstLeaseExpiresAt:unknown.get('firstLeaseExpiresAt')});
     const original = environment.client.workflow.getHandle(`dispatch-diagnostic-${operationId}-commands`);
     expect((await original.describe()).runId).toBe(recovered.get('runId'));
     expect(
@@ -257,10 +281,11 @@ test('separate paused diagnostic starts only the fixed pinned original and recon
       tx.create(db.doc(`_control/temporalDispatchDiagnosticWakeCreation-${commandsId}-commands`), commandsSeed.receipts.commands);
       tx.create(db.doc(diagnosticRecordPath(commandsId, 'commands')), { state: 'diagnostic', surface: 'commands', manifestDigest: digest(commandsManifest), diagnosticPulse: commandsSeed.pulse('commands') });
     });
-    expect(await diagnostic.tick(signal, { caller: caller('event'), delivery: {kind: 'event', id: 'controlled-commands-event', subject: `documents/${diagnosticRecordPath(commandsId, 'commands')}`} })).toBe(true);
+    expect(await diagnostic.tick(signal, { caller: caller('event'), delivery: {kind: 'event', id: 'controlled-commands-event', subject: `documents/${diagnosticRecordPath(commandsId, 'commands')}`} })).toBe(false);
+    expect(await diagnostic.tick(signal, { caller: caller('event'), delivery: {kind: 'event', id: 'controlled-commands-event', subject: `documents/${diagnosticRecordPath(commandsId, 'commands')}`} })).toBe(false);
     const commandsRef = db.doc(diagnosticRecordPath(commandsId, 'commands')), commandsRecord = await commandsRef.get();
     await environment.client.workflow.getHandle(`dispatch-diagnostic-${commandsId}-commands`, commandsRecord.get('runId'), { followRuns: false }).result();
-    const collectCommands = () => collectDispatchDiagnosticExecution({db, client: environment!.client, manifest: commandsManifest, surface: 'commands', deadline: Date.now()+10000});
+    const collectCommands = () => collectDispatchDiagnosticExecution({db, client: environment!.client, manifest: commandsManifest, surface: 'commands', recovery:'retry', deadline: Date.now()+10000});
     const commandsCompletion = await collectCommands();
     expect(commandsCompletion.surface).toBe('commands');
     expect(commandsCompletion.runId).toBe(commandsRecord.get('runId'));
