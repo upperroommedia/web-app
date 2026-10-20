@@ -1,6 +1,6 @@
 # Serverless bootstrap and process recovery boundary
 
-The guarded controller now has a all six role-specific **bootstrap and stop cycles** in
+The guarded controller now has all six role-specific **bootstrap and stop cycles** in
 source. It joins the owned zero-pool/account/grant receipts, starts desired manual
 count one, observes the exact native non-current role queues, then stops the same
 owned pool under the original parent. Observation failure also enters owned stop;
@@ -41,6 +41,35 @@ These observations apply to the tested local Temporal CLI 1.9.1 / Server 1.32.0 
 TypeScript SDK 1.24.0 configuration. They do not establish general no-work isolation,
 Cloud Run process replacement, native cloud delivery, effective IAM or readiness.
 In particular, non-current is not a fence against explicitly routed tasks.
+
+The serial integration suite also includes `shared-deployment-handoff.test.ts`.
+It makes an old shared deployment current on a Workflow queue and a controls
+Activity queue, then registers independent controls and orchestration candidates.
+It promotes controls first and observes the **actual Activity queue's** native
+`versioningInfo` and poller deployment options, while the shared deployment remains
+on its old version. Only then does it promote orchestration in the shared
+deployment, with the server's missing-queue and no-poller guards left enabled.
+Both mutations use native deployment conflict tokens. Reusing the original
+controls token is rejected with `FAILED_PRECONDITION` (code 9).
+
+An exact original pinned run waits across both mutations, completes Workflow
+Tasks on the old shared identity/version, and executes its later Activity on the
+old controls worker. Its original RunId and one execution start are preserved.
+A fresh execution uses current orchestration and the independent controls worker.
+The original history before/after handoff and fresh completed history replay
+against the test-only source bundle. This does not test production workflow
+compatibility or immutable image bytes. No workers are retired by the fixture.
+
+The fixture uses a separate mutation connection with explicit `interceptors: []`
+and `grpc.enable_retries: 0`: the installed SDK's default connection otherwise
+adds retry interceptors. A future guarded promotion must preserve that distinction
+and persist its exact request/token before its single mutation RPC. Queue routing
+observations and a deployment conflict token do not establish an atomic lock over
+another deployment's queue ownership. Recheck actual queue routing, original
+history heads, pending attempts, provider leases and paused authority immediately
+before mutation; unknown acknowledgement permits readback only, never resend,
+rollback, retirement or a causal success claim. The canonical production
+promotion operation remains unimplemented.
 
 ## Connected role cycles and kept activation
 
