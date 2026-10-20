@@ -1041,7 +1041,7 @@ const Uploader = (props: UploaderProps) => {
             {uploadProgress.message}
           </Alert>
         )}
-        {user.isAdmin() && (
+        {props.user.isAdmin() && (
           <Button sx={{ mt: 2 }} onClick={() => void router.push('/admin/activity')}>
             Open Activity
           </Button>
