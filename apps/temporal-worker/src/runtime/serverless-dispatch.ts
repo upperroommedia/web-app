@@ -1,5 +1,13 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import type { DispatchAuthorization } from './dispatch-caller';
+import type { DispatchAuthorization, DispatchCaller } from './dispatch-caller';
+
+export interface DispatchPassContext {
+  readonly caller: Readonly<DispatchCaller>;
+  /** Delivery metadata is only a selector; it never authorizes a record or proves native delivery. */
+  readonly delivery: Readonly<
+    { kind: 'event'; id: string; subject: string } | { kind: 'scheduler'; job: string }
+  >;
+}
 
 export interface ServerlessDispatchOptions {
   projectId: string;
@@ -7,7 +15,7 @@ export interface ServerlessDispatchOptions {
   reconcileJob: string;
   authorization: DispatchAuthorization;
   /** One bounded pass through the durable outbox. False requests delivery retry. */
-  run(signal: AbortSignal): Promise<boolean>;
+  run(signal: AbortSignal, context: Readonly<DispatchPassContext>): Promise<boolean>;
   passTimeoutMs?: number;
 }
 
@@ -34,6 +42,7 @@ export function createServerlessDispatchHandler(options: ServerlessDispatchOptio
   let draining = false;
   let inflight: Promise<boolean> | undefined;
   let actualWork: Promise<boolean> | undefined;
+  let activeContextKey: string | undefined;
   const handler = async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
     request.resume();
     const end = (status: number) => response.writeHead(status, { 'cache-control': 'no-store' }).end();
@@ -50,10 +59,11 @@ export function createServerlessDispatchHandler(options: ServerlessDispatchOptio
       return;
     }
     const headers = request.headers;
+    let delivery: DispatchPassContext['delivery'];
     if (request.url === '/dispatch') {
       if (
         typeof headers['ce-id'] !== 'string' ||
-        !headers['ce-id'] ||
+        !/^[\x21-\x7e]{1,1024}$/.test(headers['ce-id']) ||
         headers['ce-type'] !== 'google.cloud.firestore.document.v1.written' ||
         headers['ce-source'] !== `//firestore.googleapis.com/projects/${options.projectId}/databases/(default)` ||
         typeof headers['ce-subject'] !== 'string' ||
@@ -62,11 +72,13 @@ export function createServerlessDispatchHandler(options: ServerlessDispatchOptio
         end(400);
         return;
       }
+      delivery = Object.freeze({ kind: 'event', id: headers['ce-id'], subject: headers['ce-subject'] });
     } else if (request.url === '/reconcile') {
       if (headers['x-cloudscheduler-jobname'] !== options.reconcileJob) {
         end(400);
         return;
       }
+      delivery = Object.freeze({ kind: 'scheduler', job: options.reconcileJob });
     } else {
       end(404);
       return;
@@ -78,16 +90,24 @@ export function createServerlessDispatchHandler(options: ServerlessDispatchOptio
     }
     const authentication = new AbortController();
     authorizing.add(authentication);
+    let context: Readonly<DispatchPassContext>;
     try {
-      await options.authorization.verify(headers, request.url === '/dispatch' ? 'event' : 'scheduler', authentication.signal);
+      const caller = await options.authorization.verify(headers, delivery.kind, authentication.signal);
       if (draining || authentication.signal.aborted) { end(503); return; }
+      if (caller.kind !== delivery.kind || typeof caller.subject !== 'string' || !caller.subject) {
+        end(403); return;
+      }
+      context = Object.freeze({ caller: Object.freeze({ kind: caller.kind, subject: caller.subject }), delivery });
     } catch { end(draining ? 503 : 403); return; }
     finally { authorizing.delete(authentication); }
-    // Eventarc may deliver concurrently; do not run overlapping scans in one process.
-    // Other instances are fenced by the existing transactional document leases.
+    // Only the identical authenticated delivery may share this pass. A Scheduler
+    // wake or another event must retry rather than inherit its acknowledgement or authority.
+    const contextKey = JSON.stringify(context);
+    if (inflight && activeContextKey !== contextKey) { end(503); return; }
     if (!inflight) {
       const controller = new AbortController();
       active = controller;
+      activeContextKey = contextKey;
       const aborted = new Promise<boolean>((resolve) =>
         controller.signal.addEventListener('abort', () => resolve(false), { once: true })
       );
@@ -95,12 +115,13 @@ export function createServerlessDispatchHandler(options: ServerlessDispatchOptio
       // A deadline ends the HTTP response, not ownership of a still-running SDK call.
       // Retain the slot until that call settles so hung dependencies cannot spawn more passes.
       const work = Promise.resolve()
-        .then(() => options.run(controller.signal))
+        .then(() => options.run(controller.signal, context))
         .finally(() => {
           if (active === controller) {
             active = undefined;
             inflight = undefined;
             actualWork = undefined;
+            activeContextKey = undefined;
           }
         });
       actualWork = work;

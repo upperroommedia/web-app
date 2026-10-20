@@ -1,5 +1,6 @@
 import { createServerlessDispatchHandler } from './serverless-dispatch';
-import type { IncomingMessage, ServerResponse } from 'node:http';
+import type { IncomingMessage, ServerResponse, IncomingHttpHeaders } from 'node:http';
+import type { DispatchRoute } from './dispatch-caller';
 
 function request(handler: ReturnType<typeof createServerlessDispatchHandler>, overrides: Record<string, unknown> = {}) {
   const req = {
@@ -36,7 +37,7 @@ test('a valid outbox event wakes bounded dispatch without starting a polling loo
   const run = jest.fn().mockResolvedValue(true);
   const handler = createServerlessDispatchHandler({
     projectId: 'urm-app-staging',
-    authorization: { verify: jest.fn().mockResolvedValue({ kind: 'event', subject: 'controlled' }), drain: async () => undefined },
+    authorization: { verify: jest.fn(async (_headers: IncomingHttpHeaders, kind: DispatchRoute) => ({ kind, subject: 'controlled' })), drain: async () => undefined },
     admission: 'enabled' as const,
     reconcileJob: 'projects/urm-app-staging/locations/us-central1/jobs/dispatch-reconcile',
     run,
@@ -49,7 +50,7 @@ test('a valid outbox event wakes bounded dispatch without starting a polling loo
 
 const config = (run = jest.fn().mockResolvedValue(true)) => ({
   projectId: 'urm-app-staging',
-  authorization: { verify: jest.fn().mockResolvedValue({ kind: 'event', subject: 'controlled' }), drain: async () => undefined },
+  authorization: { verify: jest.fn(async (_headers: IncomingHttpHeaders, kind: DispatchRoute) => ({ kind, subject: 'controlled' })), drain: async () => undefined },
     admission: 'enabled' as const,
   reconcileJob: 'projects/urm-app-staging/locations/us-central1/jobs/dispatch-reconcile',
   run,
@@ -260,4 +261,101 @@ test('shutdown cancellation during authorization prevents late joining or work',
  const pending=request(handler);await new Promise<void>(yes=>setImmediate(yes));
  let drained=false;const closing=handler.drain().then(()=>{drained=true;});await new Promise<void>(yes=>setImmediate(yes));expect(drained).toBe(false);
  finish();await Promise.all([pending.done,closing]);expect(pending.result().status).toBe(503);expect(run).not.toHaveBeenCalled();
+});
+
+test('the actual pass receives only the verified caller and immutable event projection', async () => {
+  const run = jest.fn().mockResolvedValue(true);
+  const options = config(run);
+  const call = request(createServerlessDispatchHandler(options));
+  await call.done;
+  expect(run.mock.calls[0][1]).toEqual({
+    caller: { kind: 'event', subject: 'controlled' },
+    delivery: { kind: 'event', id: 'event-1', subject: 'documents/durableJobOutbox/job-1' },
+  });
+  expect(Object.isFrozen(run.mock.calls[0][1])).toBe(true);
+  expect(Object.isFrozen(run.mock.calls[0][1].caller)).toBe(true);
+  expect(Object.isFrozen(run.mock.calls[0][1].delivery)).toBe(true);
+});
+
+test.each(['scheduler', 'other-event', 'other-caller'] as const)(
+  'concurrent %s cannot inherit another delivery acknowledgement or claim authority', async kind => {
+    let finish!: (value: boolean) => void;
+    const run = jest.fn(() => new Promise<boolean>(resolve => { finish = resolve; }));
+    const options = config(run);
+    const handler = createServerlessDispatchHandler(options);
+    const first = request(handler);
+    await new Promise<void>(resolve => setImmediate(resolve));
+    if (kind === 'scheduler') options.authorization.verify.mockResolvedValueOnce({ kind: 'scheduler', subject: 'scheduler-owned' });
+    if (kind === 'other-caller') options.authorization.verify.mockResolvedValueOnce({ kind: 'event', subject: 'other-owned' });
+    const second = request(handler, kind === 'scheduler'
+      ? { url: '/reconcile', headers: { 'x-cloudscheduler-jobname': options.reconcileJob } }
+      : kind === 'other-event'
+        ? { headers: { 'ce-id': 'event-2', 'ce-type': 'google.cloud.firestore.document.v1.written',
+          'ce-source': '//firestore.googleapis.com/projects/urm-app-staging/databases/(default)',
+          'ce-subject': 'documents/durableJobCommands/command-2' } }
+        : {});
+    await new Promise<void>(resolve => setImmediate(resolve));
+    const beforeSettlement = second.result().status;
+    finish(true);
+    await Promise.all([first.done, second.done]);
+    await handler.drain();
+    expect(beforeSettlement).toBe(503);
+    expect(second.result().status).toBe(503);
+    expect(run).toHaveBeenCalledTimes(1);
+  }
+);
+
+test('identical verified redelivery shares one successful pass', async () => {
+  let finish!: (value: boolean) => void;
+  const run = jest.fn(() => new Promise<boolean>(resolve => { finish = resolve; }));
+  const handler = createServerlessDispatchHandler(config(run));
+  const first = request(handler), duplicate = request(handler);
+  await new Promise<void>(resolve => setImmediate(resolve));
+  expect(run).toHaveBeenCalledTimes(1);
+  finish(true);
+  await Promise.all([first.done, duplicate.done]);
+  expect(first.result().status).toBe(204);
+  expect(duplicate.result().status).toBe(204);
+  await handler.drain();
+});
+
+test('an event cannot inherit an active Scheduler pass', async () => {
+  let finish!: (value: boolean) => void;
+  const run = jest.fn(() => new Promise<boolean>(resolve => { finish = resolve; }));
+  const options = config(run), handler = createServerlessDispatchHandler(options);
+  const first = request(handler, { url: '/reconcile', headers: { 'x-cloudscheduler-jobname': options.reconcileJob } });
+  await new Promise<void>(resolve => setImmediate(resolve));
+  const event = request(handler);
+  await event.done;
+  expect(event.result().status).toBe(503);
+  finish(true);
+  await first.done;
+  expect(first.result().status).toBe(204);
+  expect(run).toHaveBeenCalledTimes(1);
+  expect(run.mock.calls[0]).toHaveLength(2);
+  await handler.drain();
+});
+
+test.each(['', 'a'.repeat(1025), 'event\nprivate', ['event-1']])('rejects unbounded or ambiguous event ID before authorization', async id => {
+  const options = config(), handler = createServerlessDispatchHandler(options);
+  const call = request(handler, { headers: {
+    'ce-id': id, 'ce-type': 'google.cloud.firestore.document.v1.written',
+    'ce-source': '//firestore.googleapis.com/projects/urm-app-staging/databases/(default)',
+    'ce-subject': 'documents/durableJobOutbox/job-1',
+  } });
+  await call.done;
+  expect(call.result().status).toBe(400);
+  expect(options.authorization.verify).not.toHaveBeenCalled();
+  expect(options.run).not.toHaveBeenCalled();
+  await handler.drain();
+});
+
+test('a verifier result for the wrong route cannot acquire a pass', async () => {
+  const options = config();
+  options.authorization.verify.mockResolvedValueOnce({ kind: 'scheduler', subject: 'controlled' });
+  const handler = createServerlessDispatchHandler(options), call = request(handler);
+  await call.done;
+  expect(call.result().status).toBe(403);
+  expect(options.run).not.toHaveBeenCalled();
+  await handler.drain();
 });

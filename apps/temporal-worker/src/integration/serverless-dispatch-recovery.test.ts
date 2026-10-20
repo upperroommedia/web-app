@@ -5,7 +5,7 @@ import { resolve } from 'node:path';
 import { initializeApp, deleteApp } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import { OutboxDispatcher } from '../runtime/dispatcher';
-import { createServerlessDispatchHandler } from '../runtime/serverless-dispatch';
+import { createServerlessDispatchHandler, type DispatchPassContext } from '../runtime/serverless-dispatch';
 import { createLocalTestEnvironment } from '../test-support/local-test-environment';
 
 function deferred() {
@@ -74,9 +74,10 @@ test('native accepted start survives interrupted HTTP shutdown and expired-lease
     },
   });
   const first = new OutboxDispatcher({ db, client: { workflow }, projectId, requireOpenAdmission: true, now: () => clock, leaseMs: 1000 });
-  const handler = createServerlessDispatchHandler({ projectId, authorization: { verify: async () => ({ kind: 'event', subject: 'controlled-local' }), drain: async () => undefined }, admission: 'enabled',
+  const passContexts: Readonly<DispatchPassContext>[] = [];
+  const handler = createServerlessDispatchHandler({ projectId, authorization: { verify: async (_headers, kind) => ({ kind, subject: `controlled-local-${kind}` }), drain: async () => undefined }, admission: 'enabled',
     reconcileJob: `projects/${projectId}/locations/us-central1/jobs/local-reconcile`,
-    run: async signal => { await first.tick(signal); return first.healthy; } });
+    run: async (signal, context) => { passContexts.push(context); await first.tick(signal); return first.healthy; } });
   const server = createServer((req, res) => { void handler(req, res); });
   let closing: Promise<void> | undefined;
   let primary: { error: unknown } | undefined;
@@ -116,6 +117,20 @@ test('native accepted start survives interrupted HTTP shutdown and expired-lease
     const leased = await outbox.get();
     expect(leased.get('state')).toBe('dispatching');
     expect(leased.get('attempt')).toBe(1);
+    // These are controlled local callers, not native Google-authenticated deliveries.
+    const otherCaller = await bounded(fetch(`http://127.0.0.1:${address.port}/reconcile`, {
+      method: 'POST', headers: { 'x-cloudscheduler-jobname': `projects/${projectId}/locations/us-central1/jobs/local-reconcile` },
+    }));
+    expect(otherCaller.status).toBe(503);
+    await otherCaller.arrayBuffer();
+    expect(starts).toBe(1);
+    expect(passContexts).toHaveLength(3); // malformed, paused, then the accepted event pass
+    expect(passContexts[2]).toEqual({
+      caller: { kind: 'event', subject: 'controlled-local-event' },
+      delivery: { kind: 'event', id: jobId, subject: `documents/durableJobOutbox/${jobId}` },
+    });
+    expect(Object.isFrozen(passContexts[2])).toBe(true);
+    expect((await outbox.get()).get('leaseToken')).toBe(leased.get('leaseToken'));
     let drained = false;
     closing = handler.drain().then(() => { drained = true; });
     const aborted = await bounded(response);

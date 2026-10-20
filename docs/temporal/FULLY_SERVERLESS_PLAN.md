@@ -509,3 +509,14 @@ token form; there is no decoded-claims fallback. Local RSA/Google-SDK signature 
 real Gaxios/default-fetch local HTTP transport tests, and the local native
 Temporal/Firestore/HTTP test with controlled authorization do not prove actual
 Google authentication, Eventarc/Scheduler delivery or staging readiness.
+
+The HTTP pass now receives a copied, frozen projection of its verified caller and
+bounded delivery selector. Only an identical verified caller and selector may
+share an in-flight pass. A different event or Scheduler wake receives 503 and must
+retry; it cannot inherit another delivery's acknowledgement or claim authority.
+The existing business dispatcher still uses its canonical admission checks. Event
+metadata remains a selector, not permission to claim a record or proof of native
+delivery. The separate paused diagnostic journal, literal workflow and owned wake
+cleanup operation remain to be implemented. The local native SDK/Firestore/HTTP
+fixture verifies this isolation while an original start acknowledgement is pending,
+using controlled authorization rather than Google-delivered credentials.
