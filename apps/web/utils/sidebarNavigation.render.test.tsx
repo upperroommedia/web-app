@@ -54,7 +54,7 @@ it('keeps upload selected and publisher navigation visible without admin destina
   pathname = '/';
   const links = anchors();
   expect(namedLink(links, 'Upload Sermon', '/')).toContain('Mui-selected');
-  namedLink(links, 'Activity', '/admin/activity');
+  expect(links.some((link) => link.includes('href="/admin/activity"'))).toBe(false);
   namedLink(links, 'Sermons', '/admin/sermons');
   namedLink(links, 'Series', '/admin/series');
   expect(links.some((link) => link.includes('href="/admin/users"'))).toBe(false);
@@ -72,4 +72,15 @@ it('renders admin destinations as named anchors without nested interactive butto
   ])
     namedLink(links, name, `/admin/${path}`);
   expect(namedLink(links, 'Users', '/admin/users')).toContain('Mui-selected');
+});
+
+it('places Activity in Administration before the other admin destinations', () => {
+  admin = true;
+  const html = renderToStaticMarkup(<SidebarLayout>Page content</SidebarLayout>);
+  const administration = html.indexOf('Administration');
+  const activityLink = html.indexOf('aria-label="Activity"');
+  const usersLink = html.indexOf('aria-label="Users"');
+  expect(administration).toBeGreaterThan(-1);
+  expect(activityLink).toBeGreaterThan(administration);
+  expect(usersLink).toBeGreaterThan(activityLink);
 });
