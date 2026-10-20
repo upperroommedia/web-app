@@ -702,3 +702,7 @@ failures propagate so the caller can release its reservation and retry later.
 Signing in does not immediately declare the session healthy: the existing periodic
 authenticated media download check must pass before waiting jobs resume. The
 page refreshes this status every 30 seconds. Leave Chrome open and signed in.
+
+### Read-only acquisition resource inventory
+
+`python3 ops/process-audio-hetzner/scripts/inspect-acquisition-resources.py` runs on the existing host and reads Docker resource configuration, physical root capacity and native memory observations. It emits no container environment, command or provider diagnostics. Keep its output private because it identifies native containers and host mount paths. It does not change workloads or authorize an acquisition/deployment; `activationAuthorized` is always false. Missing hard limits and unproved shared-host enforcement must be resolved through the reviewed serverless plan before the new acquisition adapter is activated. Existing full-file budgets remain unchanged.
