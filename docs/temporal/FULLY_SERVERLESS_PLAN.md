@@ -546,7 +546,7 @@ run/input/type/queue/candidate version and absence of Activities/children/contin
 are checked before the private dispatch acknowledgement. The literal workflow waits
 two seconds and returns its nonce/run; it has no provider or application activities.
 
-Arming now continues through an outbox-only, same-parent Eventarc cycle. Enabled
+Arming now continues through separate outbox and commands Eventarc cycles under the same parent. Enabled
 service authority requires the original completed activation and current private
 parent/control/state/authorization; the legacy preparation path still requires a
 disabled service. Native creation acknowledgement and immutable creation receipt
@@ -564,8 +564,14 @@ or a replaced resource fails closed. Native GET-only collection joins the exact
 original pinned timer completion and stored verified caller; its scope does not claim
 exclusive transport causality, inherited isolation or in-flight delivery drainage.
 
-The parent remains retained and the controller still stops after this partial outbox
-cycle. Commands/Eventarc retry, independent Scheduler lease wakes, process recovery,
+Commands creation requires the outbox observation and owned STOP to be completed.
+Each surface keeps its own parent checkpoint, immutable creation receipt, post-trigger
+pulse, original workflow/run and completion proof. A commands pulse or run cannot
+inherit the outbox acknowledgement. Resume preserves both surfaces and the original
+nonce and expiry; an uncertain earlier create/delete prevents progression.
+
+The parent remains retained and the controller still stops after these partial
+Eventarc cycles. Eventarc retry, independent Scheduler lease wakes, process recovery,
 real Google/Cloud Run API acceptance and remaining readiness gates are unfinished.
 No release phase, routing, ownership, WCI or business admission advances. Tests combine
 controlled Google resource observations, actual dedicated Firestore transactions and

@@ -1,5 +1,5 @@
 import test from 'node:test';
-import { saveDiagnosticWakeCheckpoint,pulseDiagnosticOutbox } from '../temporal-diagnostic-wake.mjs';
+import { saveDiagnosticWakeCheckpoint,pulseDiagnosticOutbox,pulseDiagnosticWake } from '../temporal-diagnostic-wake.mjs';
 import { armCloudRunDispatchDiagnostic } from '../temporal-dispatch-diagnostic.mjs';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
@@ -199,6 +199,23 @@ test('native diagnostic wake checkpoint/pulse preserve original creation and unk
   await assert.rejects(pulseDiagnosticOutbox({...diagnostic,firestore:lostDb}));
   const first=await refs[5].get();assert.ok(first.get('diagnosticPulse'));
   await pulseDiagnosticOutbox(diagnostic);assert.equal((await refs[5].get()).updateTime.isEqual(first.updateTime),true);
+  const commandsRef=db.doc(`durableJobCommands/diagnostic-${operationId}-commands`), commandsReceiptRef=db.doc(`_control/temporalDispatchDiagnosticWakeCreation-${operationId}-commands`);
+  refs.push(commandsRef,commandsReceiptRef);
+  await commandsRef.create({state:'diagnostic',manifestDigest:proofDigest(m)});
+  const commandsCreation={...creation,plan:{operationId,surface:'commands-trigger'},resource:{uid:'commands-owned'}};
+  const commandsChild={...child,plan:{...child.plan,creation:commandsCreation.plan},creationState:commandsCreation};
+  await assert.rejects(saveDiagnosticWakeCheckpoint(options,commandsChild)); // outbox is not stopped yet
+  options.ownedOperation=await saveDiagnosticWakeCheckpoint(options,{...child,stage:'completed',stopState:{stage:'completed'},diagnosticObservation:{scope:'controlled fixture'}});
+  const originalOutbox=(await lockRef.get()).get('cloudDispatchDiagnosticWake');
+  options.ownedOperation=await saveDiagnosticWakeCheckpoint(options,commandsChild);
+  assert.deepEqual((await lockRef.get()).get('cloudDispatchDiagnosticWake'),originalOutbox);
+  await assert.rejects(saveDiagnosticWakeCheckpoint(options,{...commandsChild,creationState:creation}));
+  calls=0;
+  await assert.rejects(pulseDiagnosticWake({...diagnostic,firestore:lostDb},'commands-trigger'));
+  const commandsFirst=await commandsRef.get();
+  assert.notEqual(commandsFirst.get('diagnosticPulse.creationReceiptDigest'),first.get('diagnosticPulse.creationReceiptDigest'));
+  await pulseDiagnosticWake(diagnostic,'commands-trigger');
+  assert.equal((await commandsRef.get()).updateTime.isEqual(commandsFirst.updateTime),true);
   await controlRef.update({admission:'open'});await assert.rejects(pulseDiagnosticOutbox(diagnostic));assert.equal((await refs[5].get()).updateTime.isEqual(first.updateTime),true);
  }finally{for(const ref of refs)await ref.delete();await db.terminate();await deleteApp(app);}
 });

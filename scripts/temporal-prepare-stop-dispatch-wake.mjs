@@ -18,7 +18,7 @@ export async function prepareStopCloudRunDispatchWake(options) {
   if ([api, save, readCreationReceipt].some(fn => typeof fn !== 'function') ||
     typeof creator !== 'string' || !/^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+$/.test(creator)) fail();
   if (!['scheduler', 'outbox-trigger', 'commands-trigger'].includes(surface)) fail();
-  if (options.diagnostic !== undefined && surface !== 'outbox-trigger') fail();
+  if (options.diagnostic !== undefined && !['outbox-trigger', 'commands-trigger'].includes(surface)) fail();
   const scheduler = surface === 'scheduler';
   const creation = dispatchWakePlan(options);
   const authority = dispatchPreparationAuthority(options);

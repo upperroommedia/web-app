@@ -14,7 +14,7 @@ import { prepareStopCloudRunEventarc } from './temporal-prepare-stop-eventarc.mj
 import { prepareStopCloudRunScheduler } from './temporal-prepare-stop-scheduler.mjs';
 import { stopCloudRunDispatchWake } from './temporal-stop-dispatch-wake.mjs';
 import { prepareCloudRunDispatchAccess } from './temporal-prepare-dispatch-access.mjs';
-import { saveDiagnosticWakeCheckpoint, pulseDiagnosticOutbox } from './temporal-diagnostic-wake.mjs';
+import { saveDiagnosticWakeCheckpoint, pulseDiagnosticWake } from './temporal-diagnostic-wake.mjs';
 import { armCloudRunDispatchDiagnostic } from './temporal-dispatch-diagnostic.mjs';
 import { activateCloudRunDispatchService } from './temporal-activate-dispatch-service.mjs';
 import { prepareCloudRunDispatchService } from './temporal-prepare-dispatch-service.mjs';
@@ -1210,19 +1210,22 @@ await runWithCleanup(
             ownedOperation = await armCloudRunDispatchDiagnostic({firestore,lockRef,controlRef,stateRef,ownedOperation,expectedAuthority,
               operationId,bindingDigest,config,platform,activationReceipt:activation,nativeActivation});
             const diagnostic = {firestore,manifest:(await lockRef.get()).get('cloudDispatchDiagnostic'),activationReceipt:activation};
-            const savedWake = (await lockRef.get()).get('cloudDispatchDiagnosticWake');
-            const creationRef = firestore.doc(`_control/temporalDispatchDiagnosticWakeCreation-${operationId}-outbox`);
+            for (const surface of ['outbox', 'commands']) {
+            const field = surface === 'outbox' ? 'cloudDispatchDiagnosticWake' : 'cloudDispatchDiagnosticCommandsWake';
+            const savedWake = (await lockRef.get()).get(field);
+            const creationRef = firestore.doc(`_control/temporalDispatchDiagnosticWakeCreation-${operationId}-${surface}`);
             const wake = await prepareStopCloudRunEventarc({platform,role:preparationArguments.role,settings,releaseId:config.releaseId,
-              evidenceDigest:preparationArguments.digest,operationId,creator:operatorPrincipal.email,surface:'outbox-trigger',diagnostic,
+              evidenceDigest:preparationArguments.digest,operationId,creator:operatorPrincipal.email,surface:`${surface}-trigger`,diagnostic,
               runnerReceipt:receipts[0].data(),eventReceipt:receipts[1].data(),schedulerReceipt:receipts[2].data(),serviceReceipt:receipts[3].data(),api,saved:savedWake,
               save:async child=>{ownedOperation=await saveDiagnosticWakeCheckpoint({firestore,lockRef,controlRef,stateRef,ownedOperation,expectedAuthority,diagnostic,operatorPrincipal},child);},
               readCreationReceipt:async()=>{const r=await creationRef.get();return r.exists?r.data():undefined;},
-              observeDiagnostic:async({signal})=>{await pulseDiagnosticOutbox(diagnostic,signal);
-                return collectCloudRunDispatchDiagnostic({binding,config,platform,firestore,diagnostic,signal});},
+              observeDiagnostic:async({signal})=>{await pulseDiagnosticWake(diagnostic,`${surface}-trigger`,signal);
+                return collectCloudRunDispatchDiagnostic({binding,config,platform,firestore,diagnostic,surface,signal});},
             });
             if(wake.stage!=='completed'||wake.stopState?.stage!=='completed'||!wake.diagnosticObservation||wake.diagnosticObservationFailed)
-              throw new Error('DIAGNOSTIC_OUTBOX_OBSERVATION_OR_CLEANUP_UNCONFIRMED');
-            throw new Error('DIAGNOSTIC_OUTBOX_CYCLE_COMPLETE_RETRY_SCHEDULER_AND_RECOVERY_PENDING');
+              throw new Error('DIAGNOSTIC_EVENTARC_OBSERVATION_OR_CLEANUP_UNCONFIRMED');
+            }
+            throw new Error('DIAGNOSTIC_EVENTARC_CYCLES_COMPLETE_RETRY_SCHEDULER_AND_RECOVERY_PENDING');
           } else if (action === 'activate-cloud-run-dispatch-service') {
             requirePhase(state, ['provider-usage-ready']);
             if (config.environment !== 'staging' || operatorPrincipal.adcAndGcloudAccountMatch !== true)

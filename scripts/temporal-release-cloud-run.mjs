@@ -252,7 +252,7 @@ export async function collectCloudRunDispatchDiagnostic(options){
  return withNativeCloudRunClient(options,async(client,application)=>{
   const deadline=Date.now()+20000;
   while(Date.now()<deadline&&!options.signal?.aborted){
-   try{return await application.collectDispatchDiagnosticExecution({db:options.firestore,client,manifest:options.diagnostic.manifest,deadline});}
+   try{return await application.collectDispatchDiagnosticExecution({db:options.firestore,client,manifest:options.diagnostic.manifest,surface:options.surface,deadline});}
    catch{if(Date.now()>=deadline||options.signal?.aborted)break;await new Promise(resolve=>setTimeout(resolve,500));}
   }
   throw new Error('NATIVE_DIAGNOSTIC_COMPLETION_UNCONFIRMED');

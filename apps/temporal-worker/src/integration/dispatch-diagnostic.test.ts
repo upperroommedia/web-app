@@ -247,6 +247,34 @@ test('separate paused diagnostic starts only the fixed pinned original and recon
     expect(
       (await db.doc(diagnosticRecordPath(operationId, 'commands')).get()).get('dispatchAcknowledged')
     ).toBeUndefined();
+    // A separate commands event has its own pulse, original run and completion proof.
+    const commandsId = randomUUID(), commandsManifest = { ...manifest, operationId: commandsId, nonce: '1'.repeat(32) };
+    const commandsSeed = pulseState(commandsManifest);
+    await db.runTransaction(async tx => {
+      tx.update(parent, { operationId: commandsId, cloudDispatchDiagnostic: commandsManifest });
+      tx.create(db.doc(`_control/temporalDispatchDiagnosticAuthorization-${commandsId}`), commandsManifest);
+      tx.create(db.doc(`_control/temporalDispatchDiagnostic-${commandsId}`), { manifestDigest: digest(commandsManifest), commandsPulse: commandsSeed.pulse('commands') });
+      tx.create(db.doc(`_control/temporalDispatchDiagnosticWakeCreation-${commandsId}-commands`), commandsSeed.receipts.commands);
+      tx.create(db.doc(diagnosticRecordPath(commandsId, 'commands')), { state: 'diagnostic', surface: 'commands', manifestDigest: digest(commandsManifest), diagnosticPulse: commandsSeed.pulse('commands') });
+    });
+    expect(await diagnostic.tick(signal, { caller: caller('event'), delivery: {kind: 'event', id: 'controlled-commands-event', subject: `documents/${diagnosticRecordPath(commandsId, 'commands')}`} })).toBe(true);
+    const commandsRef = db.doc(diagnosticRecordPath(commandsId, 'commands')), commandsRecord = await commandsRef.get();
+    await environment.client.workflow.getHandle(`dispatch-diagnostic-${commandsId}-commands`, commandsRecord.get('runId'), { followRuns: false }).result();
+    const collectCommands = () => collectDispatchDiagnosticExecution({db, client: environment!.client, manifest: commandsManifest, surface: 'commands', deadline: Date.now()+10000});
+    const commandsCompletion = await collectCommands();
+    expect(commandsCompletion.surface).toBe('commands');
+    expect(commandsCompletion.runId).toBe(commandsRecord.get('runId'));
+    expect(commandsCompletion.creationReceiptDigest).toBe(digest(commandsSeed.receipts.commands));
+    await commandsRef.update({runId: first.get('runId')});
+    await expect(collectCommands()).rejects.toThrow();
+    await commandsRef.update({runId: commandsRecord.get('runId'), diagnosticPulse: seeded.pulse('outbox')});
+    await expect(collectCommands()).rejects.toThrow();
+    await commandsRef.update({diagnosticPulse: commandsSeed.pulse('commands')});
+    const commandsReceiptRef = db.doc(`_control/temporalDispatchDiagnosticWakeCreation-${commandsId}-commands`);
+    await commandsReceiptRef.set(commandsSeed.receipts.outbox);
+    await expect(collectCommands()).rejects.toThrow();
+    await commandsReceiptRef.set(commandsSeed.receipts.commands);
+    expect((await collectCommands()).runId).toBe(commandsRecord.get('runId'));
     // Protocol strings cannot be supplied as coercible singleton arrays.
     const malformedId = randomUUID(),
       malformedManifest = { ...manifest, operationId: malformedId, nonce: [manifest.nonce] };

@@ -334,18 +334,21 @@ export async function collectDispatchDiagnosticExecution(options: {
   client: Client;
   manifest: DispatchDiagnosticManifest;
   deadline: number;
+  surface?: 'outbox' | 'commands';
 }) {
   const m = manifest(options.manifest),
-    { db, client, deadline } = options;
+    { db, client, deadline } = options,
+    surface = options.surface ?? 'outbox';
+  if (!['outbox', 'commands'].includes(surface)) fail();
   if (!Number.isFinite(deadline) || Date.now() >= deadline) fail();
   const [r, j, c] = await db.getAll(
-    db.doc(diagnosticRecordPath(m.operationId, 'outbox')),
+    db.doc(diagnosticRecordPath(m.operationId, surface)),
     db.doc(`_control/temporalDispatchDiagnostic-${m.operationId}`),
-    db.doc(`_control/temporalDispatchDiagnosticWakeCreation-${m.operationId}-outbox`)
+    db.doc(`_control/temporalDispatchDiagnosticWakeCreation-${m.operationId}-${surface}`)
   );
-  const pulseDigest = pulseBinding(m, 'outbox', r, j, c);
+  const pulseDigest = pulseBinding(m, surface, r, j, c);
   if (r.get('startPulseDigest') !== pulseDigest) fail();
-  const workflowId = `dispatch-diagnostic-${m.operationId}-outbox`,
+  const workflowId = `dispatch-diagnostic-${m.operationId}-${surface}`,
     runId = r.get('runId');
   if (
     r.get('state') !== 'diagnostic' ||
@@ -355,7 +358,7 @@ export async function collectDispatchDiagnosticExecution(options: {
     r.get('caller.kind') !== 'event' ||
     r.get('caller.subject') !== m.eventSubject ||
     r.get('delivery.kind') !== 'event' ||
-    r.get('delivery.subject') !== `documents/${diagnosticRecordPath(m.operationId, 'outbox')}` ||
+    r.get('delivery.subject') !== `documents/${diagnosticRecordPath(m.operationId, surface)}` ||
     typeof r.get('delivery.id') !== 'string' ||
     !r.get('delivery.id') ||
     !Number.isSafeInteger(r.get('startAttemptedAt')) ||
@@ -373,7 +376,7 @@ export async function collectDispatchDiagnosticExecution(options: {
     buildId: m.buildId,
     nonce: m.nonce,
     operationId: m.operationId,
-    surface: 'outbox',
+    surface,
   };
   const completed = history.events?.filter((e) => e.workflowExecutionCompletedEventAttributes) ?? [];
   if (
@@ -408,6 +411,8 @@ export async function collectDispatchDiagnosticExecution(options: {
     workflowId,
     runId,
     historyDigest: digest(JSON.parse(JSON.stringify(history))),
+    surface,
+    creationReceiptDigest: digest(c.data()),
     pulseDigest,
     callerKind: 'event',
     callerSubject: m.eventSubject,

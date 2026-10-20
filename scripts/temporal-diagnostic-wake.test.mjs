@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { pulseDiagnosticOutbox } from './temporal-diagnostic-wake.mjs';
+import { pulseDiagnosticOutbox, pulseDiagnosticWake } from './temporal-diagnostic-wake.mjs';
 import { proofDigest } from './temporal-release-runtime.mjs';
-function fixture(expired = true) {
+function fixture(expired = true, surface = 'outbox') {
   const operationId = '11111111-2222-4333-8444-555555555555',
     releaseId = '22222222-2222-4333-8444-555555555555';
   const activationReceipt = { identityState: { stage: 'completed' } };
@@ -20,7 +20,7 @@ function fixture(expired = true) {
     operationId,
     releaseId,
     bindingDigest: m.bindingDigest,
-    identityState: { stage: 'completed', resource: { uid: 'controlled-owned-trigger' } },
+    identityState: { stage: 'completed', plan: { operationId, surface: `${surface}-trigger` }, resource: { uid: 'controlled-owned-trigger' } },
   };
   const pulse = { operationId, nonce: m.nonce, creationReceiptDigest: proofDigest(creation) };
   const parent = {
@@ -29,9 +29,9 @@ function fixture(expired = true) {
     releaseId,
     bindingDigest: m.bindingDigest,
     cloudDispatchDiagnostic: m,
-    cloudDispatchDiagnosticWake: { stage: 'completed', creationState: creation.identityState },
+    [surface === 'outbox' ? 'cloudDispatchDiagnosticWake' : 'cloudDispatchDiagnosticCommandsWake']: { stage: 'completed', creationState: creation.identityState },
   };
-  const journal = { manifestDigest: proofDigest(m), outboxPulse: pulse },
+  const journal = { manifestDigest: proofDigest(m), [`${surface}Pulse`]: pulse },
     record = { state: 'diagnostic', manifestDigest: proofDigest(m), diagnosticPulse: pulse };
   const values = {
     '_control/temporalReleaseOperation': parent,
@@ -48,8 +48,8 @@ function fixture(expired = true) {
     '_control/temporalReleaseState': { releaseId, phase: 'provider-usage-ready' },
     [`_control/temporalDispatchDiagnosticAuthorization-${operationId}`]: m,
     [`_control/temporalDispatchDiagnostic-${operationId}`]: journal,
-    [`durableJobOutbox/diagnostic-${operationId}-outbox`]: record,
-    [`_control/temporalDispatchDiagnosticWakeCreation-${operationId}-outbox`]: creation,
+    [`${surface === 'outbox' ? 'durableJobOutbox' : 'durableJobCommands'}/diagnostic-${operationId}-${surface}`]: record,
+    [`_control/temporalDispatchDiagnosticWakeCreation-${operationId}-${surface}`]: creation,
   };
   let writes = 0,
     transactions = 0;
@@ -75,6 +75,7 @@ function fixture(expired = true) {
   return {
     diagnostic: { firestore, manifest: m, activationReceipt },
     parent,
+    creation,
     journal,
     record,
     m,
@@ -115,4 +116,21 @@ test('parent binding drift between preliminary read and pulse transaction cannot
   };
   await assert.rejects(pulseDiagnosticOutbox(f.diagnostic));
   assert.equal(f.writes, 0);
+});
+
+for (const surface of ['outbox', 'commands']) test(`${surface} cannot inherit the other surface pulse or receipt`, async () => {
+  const f = fixture(false, surface), other = surface === 'outbox' ? 'commands' : 'outbox';
+  await pulseDiagnosticWake(f.diagnostic, `${surface}-trigger`);
+  const original = f.journal[`${surface}Pulse`];
+  delete f.journal[`${surface}Pulse`]; f.journal[`${other}Pulse`] = original;
+  await assert.rejects(pulseDiagnosticWake(f.diagnostic, `${surface}-trigger`));
+  f.journal[`${surface}Pulse`] = original;
+  f.creation.identityState.plan.surface = `${other}-trigger`;
+  await assert.rejects(pulseDiagnosticWake(f.diagnostic, `${surface}-trigger`));
+  assert.equal(f.writes, 0);
+});
+test('Scheduler cannot acquire a creation/pulse capability', async () => {
+  const f = fixture(false);
+  await assert.rejects(pulseDiagnosticWake(f.diagnostic, 'scheduler'));
+  assert.equal(f.transactions, 0);
 });
