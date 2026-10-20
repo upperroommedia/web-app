@@ -36,6 +36,7 @@ import {
 import { createHash } from 'node:crypto';
 import { Context } from '@temporalio/activity';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
+import { getFirebaseImagesBucket } from '@upperroom/shared/shared/firebaseProjectConfig';
 import { Storage } from '@google-cloud/storage';
 import { withProviderIndexedTransaction } from '@upperroom/orchestration/provider-transaction';
 import { createDurableJobStore, durableEntityKey } from '@upperroom/orchestration/job-store';
@@ -870,7 +871,7 @@ export function createRuntimeActivities(
         ...createReviewedCreateActivities(db, store, projectId),
         ...createLifecycleActivities(store, { authorizeCriticalRepair: criticalRepair.loadCertificate }),
         ...createEmailControlActivities({ db, store, projectId }),
-        ...createImageControlActivities({ firestore: db, loadIntent: store.loadIntent, project }),
+        ...createImageControlActivities({ imagesBucket: getFirebaseImagesBucket(), firestore: db, loadIntent: store.loadIntent, project }),
         ...createSearchControlActivities({ firestore: db, project }),
         ...createProviderOrphanReviewActivities(db, projectId, project),
       }),
@@ -879,6 +880,7 @@ export function createRuntimeActivities(
     'urm-images': () =>
       protect(
         createImageActivities({
+          imagesBucket: getFirebaseImagesBucket(),
           getActor: (uid: string) => firebaseAdmin.auth().getUser(uid),
           firestore: db,
           storage: new Storage({ projectId }),

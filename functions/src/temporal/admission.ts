@@ -1,5 +1,6 @@
 import { onCall, HttpsError, type CallableRequest } from 'firebase-functions/v2/https';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
+import { getFirebaseImagesBucket } from '@upperroom/shared/shared/firebaseProjectConfig';
 import type { Transaction } from 'firebase-admin/firestore';
 import type {
   DurableAdmissionRequest,
@@ -217,6 +218,7 @@ export async function commandServerDurableJob(
       ) {
         const { authorizeImageDeletionContinuation } = await import('./images/activities');
         writeImageGrant = await authorizeImageDeletionContinuation(db, tx, ref, {
+          imagesBucket: getFirebaseImagesBucket(),
           actorUid,
           commandId: commandDoc.id,
           expectedRevision: input.expectedRevision,
