@@ -5,6 +5,9 @@ import { setTimeout as pause } from 'node:timers/promises';
 import { runYouTubeAcquisitionProcess } from '../../../process-audio/src/temporal/hetzner-acquisition-process';
 import type { MediaJobRef } from '../../../process-audio/src/temporal/types';
 
+const run = (options: Omit<Parameters<typeof runYouTubeAcquisitionProcess>[0], 'authorize'>) =>
+  runYouTubeAcquisitionProcess({ ...options, authorize: async () => true });
+
 const ref: MediaJobRef = {
   projectId: 'urm-app-staging',
   jobId: 'process-test',
@@ -40,9 +43,7 @@ test('a native helper receives only the bound private reference and local worksp
     if (Object.keys(m).sort().join(',') !== 'directory,operationId,ref' || m.ref.jobId !== 'process-test' || !m.operationId.startsWith('ytacq-')) process.exit(2);
     process.exit(0);
   });`);
-  await expect(
-    runYouTubeAcquisitionProcess({ helperPath, directory, ref, signal: new AbortController().signal })
-  ).resolves.toBe('completed');
+  await expect(run({ helperPath, directory, ref, signal: new AbortController().signal })).resolves.toBe('completed');
 });
 test('cancelled native work drains its descendant process group before returning', async () => {
   const helperPath = await helper(`process.once('message', m => {
@@ -53,7 +54,7 @@ test('cancelled native work drains its descendant process group before returning
     setInterval(()=>{},1000);
   });`);
   const controller = new AbortController();
-  const running = runYouTubeAcquisitionProcess({ helperPath, directory, ref, signal: controller.signal });
+  const running = run({ helperPath, directory, ref, signal: controller.signal });
   const settled = expect(running).resolves.toBe('cancelled');
   try {
     await waitFile('ready');
@@ -66,9 +67,7 @@ test('native helper diagnostics cannot escape into a durable error', async () =>
   const helperPath = await helper(
     `process.once('message',()=>{process.stderr.write('https://private.invalid/?token=SECRET');process.exit(3);});`
   );
-  await expect(
-    runYouTubeAcquisitionProcess({ helperPath, directory, ref, signal: new AbortController().signal })
-  ).resolves.toBe('failed');
+  await expect(run({ helperPath, directory, ref, signal: new AbortController().signal })).resolves.toBe('failed');
 });
 test('pre-cancelled execution cannot start the helper', async () => {
   const helperPath = await helper(
@@ -76,9 +75,7 @@ test('pre-cancelled execution cannot start the helper', async () => {
   );
   const controller = new AbortController();
   controller.abort(new Error('pre-cancelled'));
-  await expect(runYouTubeAcquisitionProcess({ helperPath, directory, ref, signal: controller.signal })).rejects.toThrow(
-    'pre-cancelled'
-  );
+  await expect(run({ helperPath, directory, ref, signal: controller.signal })).rejects.toThrow('pre-cancelled');
   await expect(access(join(directory, 'never-started'))).rejects.toMatchObject({ code: 'ENOENT' });
 });
 
@@ -87,9 +84,7 @@ test('a direct helper exit cannot hide a still-live descendant', async () => {
     const child=require('node:child_process').spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});
     child.once('spawn',()=>process.exit(0));
   });`);
-  await expect(
-    runYouTubeAcquisitionProcess({ helperPath, directory, ref, signal: new AbortController().signal })
-  ).resolves.toBe('failed');
+  await expect(run({ helperPath, directory, ref, signal: new AbortController().signal })).resolves.toBe('failed');
 });
 test('a helper ignoring termination is killed and drained, rather than releasing capacity early', async () => {
   const helperPath = await helper(`process.once('message', m=>{
@@ -98,7 +93,7 @@ test('a helper ignoring termination is killed and drained, rather than releasing
     setInterval(()=>{},1000);
   });`);
   const controller = new AbortController();
-  const running = runYouTubeAcquisitionProcess({ helperPath, directory, ref, signal: controller.signal });
+  const running = run({ helperPath, directory, ref, signal: controller.signal });
   const settled = expect(running).resolves.toBe('cancelled');
   try {
     await waitFile('ready');
@@ -107,3 +102,33 @@ test('a helper ignoring termination is killed and drained, rather than releasing
   }
   await settled;
 }, 15000);
+
+test('denied durable authorization cannot send the helper its execution message', async () => {
+  const helperPath = await helper(
+    `process.once('message',m=>{require('node:fs').writeFileSync(m.directory+'/unauthorized','bad');process.exit(0);});`
+  );
+  const authorize = jest.fn(async (pid: number) => {
+    process.kill(pid, 0);
+    return false;
+  });
+  await expect(
+    runYouTubeAcquisitionProcess({ helperPath, directory, ref, signal: new AbortController().signal, authorize })
+  ).resolves.toBe('failed');
+  expect(authorize).toHaveBeenCalledTimes(1);
+  await expect(access(join(directory, 'unauthorized'))).rejects.toMatchObject({ code: 'ENOENT' });
+});
+test('cancellation during durable authorization cannot later send execution IPC', async () => {
+  const helperPath = await helper(
+    `process.once('message',m=>{require('node:fs').writeFileSync(m.directory+'/late-start','bad');process.exit(0);});`
+  );
+  const controller = new AbortController();
+  const authorize = async (_pid: number, signal: AbortSignal) => {
+    controller.abort();
+    await pause(20);
+    return !signal.aborted;
+  };
+  await expect(
+    runYouTubeAcquisitionProcess({ helperPath, directory, ref, signal: controller.signal, authorize })
+  ).resolves.toBe('cancelled');
+  await expect(access(join(directory, 'late-start'))).rejects.toMatchObject({ code: 'ENOENT' });
+});

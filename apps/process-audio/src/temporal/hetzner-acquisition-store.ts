@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { Firestore, Transaction } from 'firebase-admin/firestore';
+import { FieldValue, type Firestore, type Transaction } from 'firebase-admin/firestore';
 import type { YouTubeStreamReceipt } from '../processYouTubeUrl';
 import type { MediaJobRef } from './types';
 import { youtubeAcquisitionId, type RemoteYouTubeResult, validateAcquiredYouTubeSource } from './hetzner-acquisition';
@@ -198,6 +198,13 @@ export function createYouTubeAcquisitionHostStore(options: {
       const snapshot = await target(ref).get();
       return snapshot.exists ? operation(snapshot.data(), ref) : undefined;
     },
+    async assertCurrent(ref: MediaJobRef): Promise<void> {
+      ref = Object.freeze({ ...ref });
+      await options.firestore.runTransaction(async (tx) => {
+        owned(operation((await tx.get(target(ref))).data(), ref));
+        await options.assertEligible(tx, ref);
+      });
+    },
     async claim(ref: MediaJobRef, verifiedCallerEmail: string): Promise<{ launch: boolean }> {
       ref = Object.freeze({ ...ref });
       const doc = target(ref);
@@ -319,6 +326,20 @@ export function createYouTubeAcquisitionHostStore(options: {
             const value = await current(tx);
             if (value.state !== 'streaming' || value.expected) return fail();
             tx.update(doc, { state: 'bytes_complete', expected });
+          });
+        },
+        /** Only the concrete uploader calls this after a confirmed native
+         * producer failure accompanies a successful bounded transfer. Uncertain drain/upload
+         * never releases this fence, and the failed attempt ID never relaunches.
+         * Partial objects remain discoverable in this private upload journal.
+         */
+        async rejectFailedProducer(drain: () => Promise<void>): Promise<void> {
+          await drain();
+          await options.firestore.runTransaction(async (tx) => {
+            const value = await current(tx);
+            if (value.state !== 'streaming') return fail();
+            tx.update(doc, { state: 'failed', failedAt: Date.now() });
+            tx.update(parent, { activeUpload: FieldValue.delete() });
           });
         },
         async retain(raw: YouTubeStreamReceipt): Promise<void> {

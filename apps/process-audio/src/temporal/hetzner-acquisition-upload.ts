@@ -4,6 +4,13 @@ import { CRC32C, Storage } from '@google-cloud/storage';
 import type { YouTubeStreamReceipt } from '../processYouTubeUrl';
 import type { createYouTubeAcquisitionHostStore } from './hetzner-acquisition-store';
 
+/** Verified native failure after actual drain; only this permits provider fallback. */
+export class YouTubeUploadProducerFailed extends Error {
+  constructor() {
+    super('YOUTUBE_UPLOAD_PRODUCER_FAILED');
+  }
+}
+
 const uncertain = () => new Error('YOUTUBE_UPLOAD_UNCERTAIN');
 const bucketName = 'urm-app-staging.firebasestorage.app';
 type Journal = ReturnType<ReturnType<typeof createYouTubeAcquisitionHostStore>['upload']>;
@@ -78,12 +85,11 @@ export async function uploadYouTubeObject(options: {
     if (options.signal.aborted) onAbort();
     try {
       const completion = producer.completion.then(
-        (result) => {
-          if (result !== 'succeeded') {
-            cancellation.abort();
-            throw uncertain();
-          }
-        },
+        // A known failed producer already closed and drained its native pipes.
+        // Let its bounded partial upload settle naturally. Only a successful
+        // transfer plus known failed native exit can permit provider fallback;
+        // promise ordering cannot establish what caused a transfer failure.
+        (result) => result,
         () => {
           cancellation.abort();
           throw uncertain();
@@ -119,7 +125,14 @@ export async function uploadYouTubeObject(options: {
       const results = await Promise.race([Promise.allSettled([transfer, completion]), failedDrain]);
       await drain();
       options.signal.throwIfAborted();
-      if (results[1].status !== 'fulfilled' || !eof || bytes <= 0) throw uncertain();
+      if (results[0].status === 'fulfilled' && results[1].status === 'fulfilled' && results[1].value === 'failed') {
+        await journal.rejectFailedProducer(async () => {
+          await drain();
+        });
+        throw new YouTubeUploadProducerFailed();
+      }
+      if (results[1].status !== 'fulfilled' || results[1].value !== 'succeeded' || !eof || bytes <= 0)
+        throw uncertain();
       // Even a lost final upload ACK can be reconciled once the complete source
       // checksum and successful native exit+drain are known and durably recorded.
       expected = { bytes, crc32c: hash.toString() };

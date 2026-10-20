@@ -50,6 +50,11 @@ export async function runYouTubeAcquisitionProcess(options: {
   directory: string;
   ref: MediaJobRef;
   signal: AbortSignal;
+  /** Host-internal native PID inspection + durable ownership/resource claim.
+   * The helper must remain inert until this resolves true. Implementations must
+   * honor the supplied cancellation budget and never accept an HTTP boolean.
+   */
+  authorize: (processId: number, signal: AbortSignal) => Promise<boolean>;
 }): Promise<'completed' | 'cancelled' | 'failed'> {
   const ref = Object.freeze({ ...options.ref });
   youtubeAcquisitionId(ref);
@@ -91,6 +96,28 @@ export async function runYouTubeAcquisitionProcess(options: {
   deadline.unref();
   try {
     if (options.signal.aborted) abort();
+    if (!stopped) {
+      const permission = new AbortController();
+      const budget = AbortSignal.any([options.signal, permission.signal]);
+      const timeout = setTimeout(() => permission.abort(), 10000);
+      let abortPermission: (() => void) | undefined;
+      const cancelled = new Promise<never>((_, reject) => {
+        abortPermission = () => reject(failure());
+        budget.addEventListener('abort', abortPermission, { once: true });
+        if (budget.aborted) abortPermission();
+      });
+      try {
+        if (!child.pid) throw failure();
+        const allowed = await Promise.race([options.authorize(child.pid, budget), cancelled]);
+        if (!allowed || budget.aborted || stopped || exitCode !== null || spawnFailed) throw failure();
+      } catch {
+        if (!stopped) stop(options.signal.aborted ? 'cancelled' : 'failed');
+      } finally {
+        clearTimeout(timeout);
+        if (abortPermission) budget.removeEventListener('abort', abortPermission);
+        permission.abort();
+      }
+    }
     if (!stopped) {
       child.send({ operationId: youtubeAcquisitionId(ref), ref, directory: options.directory }, (error) => {
         if (error) {

@@ -8,7 +8,10 @@ import {
   prepareYouTubeAcquisition,
   YOUTUBE_ACQUISITIONS,
 } from '../../../apps/process-audio/src/temporal/hetzner-acquisition-store';
-import { uploadYouTubeObject } from '../../../apps/process-audio/src/temporal/hetzner-acquisition-upload';
+import {
+  uploadYouTubeObject,
+  YouTubeUploadProducerFailed,
+} from '../../../apps/process-audio/src/temporal/hetzner-acquisition-upload';
 import { youtubeAcquisitionId } from '../../../apps/process-audio/src/temporal/hetzner-acquisition';
 import type { MediaJobRef } from '../../../apps/process-audio/src/temporal/types';
 let app: App, db: Firestore, ref: MediaJobRef;
@@ -300,4 +303,91 @@ test('cancellation after completed upload still drains a producer that has not e
     finish('failed');
     output.destroy();
   }
+});
+
+test('a confirmed failed native attempt can yield a fresh isolated upload without reusing its bytes', async () => {
+  const old = journal();
+  await expect(
+    uploadYouTubeObject({
+      journal: old,
+      signal: new AbortController().signal,
+      start: async () => ({
+        output: Readable.from([Buffer.from('partial-old')]),
+        completion: Promise.resolve('failed'),
+        drain: async () => undefined,
+      }),
+    })
+  ).rejects.toBeInstanceOf(YouTubeUploadProducerFailed);
+  const next = journal();
+  const receipt = await uploadYouTubeObject({
+    journal: next,
+    signal: new AbortController().signal,
+    start: async () => ({
+      output: Readable.from([Buffer.from('complete-new')]),
+      completion: Promise.resolve('succeeded'),
+      drain: async () => undefined,
+    }),
+  });
+  expect(receipt.path).not.toBe(old.path);
+  expect((await bucket.file(receipt.path, { generation: receipt.generation }).download())[0].toString()).toBe(
+    'complete-new'
+  );
+  await expect(old.begin()).rejects.toThrow('YOUTUBE_ACQUISITION_OWNERSHIP');
+});
+test('transfer failure which stops the native producer cannot be relabelled as an authentication retry', async () => {
+  const j = journal();
+  let finish: (value: 'succeeded' | 'failed') => void = () => undefined;
+  const completion = new Promise<'succeeded' | 'failed'>((resolve) => {
+    finish = resolve;
+  });
+  const output = Readable.from(
+    (async function* () {
+      yield Buffer.from('partial');
+      throw new Error('source pipeline interrupted');
+    })()
+  );
+  const result = uploadYouTubeObject({
+    journal: j,
+    signal: new AbortController().signal,
+    start: async () => ({
+      output,
+      completion,
+      drain: async () => {
+        finish('failed');
+      },
+    }),
+  });
+  await expect(result).rejects.not.toBeInstanceOf(YouTubeUploadProducerFailed);
+  await expect(journal().begin()).rejects.toThrow('YOUTUBE_ACQUISITION_OWNERSHIP');
+});
+test('fresh attempt permission checks reject a revoked actor and replacement native owner', async () => {
+  await expect(store().assertCurrent(ref)).resolves.toBeUndefined();
+  await expect(store(8).assertCurrent(ref)).rejects.toThrow('YOUTUBE_ACQUISITION_OWNERSHIP');
+  await db.doc(`_testYouTubeUpload/${ref.jobId}`).set({ allowed: false });
+  await expect(store().assertCurrent(ref)).rejects.toThrow('REVOKED');
+});
+
+test('independent source failure during delayed teardown cannot be mistaken for native-provider failure', async () => {
+  const j = journal();
+  let finishNative: (value: 'succeeded' | 'failed') => void = () => undefined;
+  const completion = new Promise<'succeeded' | 'failed'>((resolve) => {
+    finishNative = resolve;
+  });
+  const output = new Readable({
+    read() {
+      this.destroy(new Error('independent source failure'));
+    },
+    destroy(error, done) {
+      finishNative('failed');
+      setTimeout(() => done(error), 50);
+    },
+  });
+  await expect(
+    uploadYouTubeObject({
+      journal: j,
+      signal: new AbortController().signal,
+      start: async () => ({ output, completion, drain: async () => undefined }),
+    })
+  ).rejects.not.toBeInstanceOf(YouTubeUploadProducerFailed);
+  await expect(journal().begin()).rejects.toThrow('YOUTUBE_ACQUISITION_OWNERSHIP');
 });
