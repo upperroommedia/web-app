@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { validateCloudRunReleasePlatform } from './temporal-release-cloud-run.mjs';
 import {
+  dispatchResourceNames,
   renderServerlessDispatchService,
   renderServerlessDispatchWakeups,
 } from './temporal-serverless-dispatch-resources.mjs';
@@ -65,9 +66,21 @@ export async function observeCloudRunDispatchService(platform, api, admission) {
     image: platform.workerImage,
     apiKeyVersion: platform.dispatch.apiKeyVersion,
   };
-  const expected = renderServerlessDispatchService(config, admission);
+  const names = dispatchResourceNames(platform.workerBuildId);
   try {
-    const nativeService = await api(`https://run.googleapis.com/v2/${expected.name}`);
+    const nativeService = await api(`https://run.googleapis.com/v2/${names.service}`);
+    let callerIdentity;
+    if (admission === 'enabled') {
+      const accounts = [];
+      for (const email of [names.eventServiceAccount, names.schedulerServiceAccount]) {
+        const account = await api(`https://iam.googleapis.com/v1/projects/urm-app-staging/serviceAccounts/${email}`);
+        if (account?.email !== email || account.projectId !== project || account.disabled === true ||
+          !/^[0-9]{10,30}$/.test(account.uniqueId ?? '')) fail();
+        accounts.push(account.uniqueId);
+      }
+      callerIdentity = { audience: nativeService.uri, eventSubject: accounts[0], schedulerSubject: accounts[1] };
+    }
+    const expected = renderServerlessDispatchService(config, admission, callerIdentity);
     const service = {
       ...nativeService,
       name: canonicalName(nativeService.name),

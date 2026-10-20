@@ -36,6 +36,7 @@ test('a valid outbox event wakes bounded dispatch without starting a polling loo
   const run = jest.fn().mockResolvedValue(true);
   const handler = createServerlessDispatchHandler({
     projectId: 'urm-app-staging',
+    authorization: { verify: jest.fn().mockResolvedValue({ kind: 'event', subject: 'controlled' }), drain: async () => undefined },
     admission: 'enabled' as const,
     reconcileJob: 'projects/urm-app-staging/locations/us-central1/jobs/dispatch-reconcile',
     run,
@@ -48,6 +49,7 @@ test('a valid outbox event wakes bounded dispatch without starting a polling loo
 
 const config = (run = jest.fn().mockResolvedValue(true)) => ({
   projectId: 'urm-app-staging',
+  authorization: { verify: jest.fn().mockResolvedValue({ kind: 'event', subject: 'controlled' }), drain: async () => undefined },
     admission: 'enabled' as const,
   reconcileJob: 'projects/urm-app-staging/locations/us-central1/jobs/dispatch-reconcile',
   run,
@@ -100,7 +102,7 @@ test('concurrent events share a pass and shutdown waits for the pass before refu
   const handler = createServerlessDispatchHandler(config(run));
   const first = request(handler);
   const second = request(handler);
-  await Promise.resolve();
+  await new Promise<void>(yes => setImmediate(yes));
   expect(run).toHaveBeenCalledTimes(1);
   const draining = handler.drain();
   finish(true);
@@ -183,7 +185,7 @@ test('a timed-out dependency retains the single-pass slot until it actually sett
     finish(true);
     await jest.advanceTimersByTimeAsync(0);
     const third = request(handler);
-    await Promise.resolve();
+    await jest.advanceTimersByTimeAsync(0);
     expect(run).toHaveBeenCalledTimes(2);
     finish(true);
     await third.done;
@@ -233,4 +235,29 @@ test.each(['resolve', 'reject'] as const)('shutdown retains ownership of an abor
   await closing;
   expect(drainedBeforeSdkSettled).toBe(false);
   expect(drained).toBe(true);
+});
+
+test('every request must authorize before joining a pending pass',async()=>{
+ let finish!:(v:boolean)=>void;
+ const options=config(jest.fn(()=>new Promise<boolean>(yes=>{finish=yes;})));
+ options.authorization.verify.mockResolvedValueOnce({kind:'event',subject:'controlled'}).mockRejectedValueOnce(new Error('private verifier failure'));
+ const handler=createServerlessDispatchHandler(options),first=request(handler);
+ await new Promise<void>(yes=>setImmediate(yes));
+ const denied=request(handler);await denied.done;
+ expect(denied.result()).toEqual({status:403,body:''});expect(options.run).toHaveBeenCalledTimes(1);
+ finish(true);await first.done;await handler.drain();
+});
+test('duplicate authorization headers are rejected before credential verification or work',async()=>{
+ const options=config(),handler=createServerlessDispatchHandler(options);
+ const denied=request(handler,{rawHeaders:['Authorization','Bearer first','authorization','Bearer second']});
+ await denied.done;expect(denied.result().status).toBe(403);expect(options.authorization.verify).not.toHaveBeenCalled();expect(options.run).not.toHaveBeenCalled();await handler.drain();
+});
+test('shutdown cancellation during authorization prevents late joining or work',async()=>{
+ let finish!:()=>void;
+ const work=new Promise<void>(yes=>{finish=yes;});const run=jest.fn().mockResolvedValue(true);
+ const authorization={verify:async()=>{await work;return {kind:'event' as const,subject:'controlled'};},drain:()=>work};
+ const handler=createServerlessDispatchHandler({...config(run),authorization});
+ const pending=request(handler);await new Promise<void>(yes=>setImmediate(yes));
+ let drained=false;const closing=handler.drain().then(()=>{drained=true;});await new Promise<void>(yes=>setImmediate(yes));expect(drained).toBe(false);
+ finish();await Promise.all([pending.done,closing]);expect(pending.result().status).toBe(503);expect(run).not.toHaveBeenCalled();
 });

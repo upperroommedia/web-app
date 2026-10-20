@@ -1,9 +1,11 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import type { DispatchAuthorization } from './dispatch-caller';
 
 export interface ServerlessDispatchOptions {
   projectId: string;
   admission: 'disabled' | 'enabled';
   reconcileJob: string;
+  authorization: DispatchAuthorization;
   /** One bounded pass through the durable outbox. False requests delivery retry. */
   run(signal: AbortSignal): Promise<boolean>;
   passTimeoutMs?: number;
@@ -15,6 +17,9 @@ export interface ServerlessDispatchOptions {
  */
 export function createServerlessDispatchHandler(options: ServerlessDispatchOptions) {
   if (!['disabled', 'enabled'].includes(options.admission)) throw new Error('Explicit dispatch admission required');
+  if (typeof options.authorization?.verify !== 'function' || typeof options.authorization?.drain !== 'function')
+    throw new Error('Native caller authorization required');
+  const authorizing = new Set<AbortController>();
   const admission = options.admission; // Immutable process configuration; callers cannot flip a prepared instance.
   if (!['urm-app-staging', 'urm-app'].includes(options.projectId)) throw new Error('Invalid dispatch project');
   if (
@@ -66,6 +71,18 @@ export function createServerlessDispatchHandler(options: ServerlessDispatchOptio
       end(404);
       return;
     }
+    const raw = request.rawHeaders ?? [];
+    if (raw.filter((value, index) => index % 2 === 0 && value.toLowerCase() === 'authorization').length > 1 ||
+      raw.filter((value, index) => index % 2 === 0 && value.toLowerCase() === 'x-serverless-authorization').length > 1) {
+      end(403); return;
+    }
+    const authentication = new AbortController();
+    authorizing.add(authentication);
+    try {
+      await options.authorization.verify(headers, request.url === '/dispatch' ? 'event' : 'scheduler', authentication.signal);
+      if (draining || authentication.signal.aborted) { end(503); return; }
+    } catch { end(draining ? 503 : 403); return; }
+    finally { authorizing.delete(authentication); }
     // Eventarc may deliver concurrently; do not run overlapping scans in one process.
     // Other instances are fenced by the existing transactional document leases.
     if (!inflight) {
@@ -99,9 +116,10 @@ export function createServerlessDispatchHandler(options: ServerlessDispatchOptio
     async drain(): Promise<void> {
       draining = true;
       active?.abort();
+      for (const controller of authorizing) controller.abort();
       // HTTP timeout/cancellation is not SDK settlement. Keep dependencies alive
       // until the actual pass settles; interrupted leases remain for reconciliation.
-      await actualWork?.catch(() => undefined);
+      await Promise.all([actualWork?.catch(() => undefined), options.authorization.drain()]);
     },
   });
 }

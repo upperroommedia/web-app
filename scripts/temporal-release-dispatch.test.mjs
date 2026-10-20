@@ -59,7 +59,7 @@ function fixture() {
     image,
     apiKeyVersion: platform.dispatch.apiKeyVersion,
   };
-  const service = renderServerlessDispatchService(config, 'enabled');
+  const service = renderServerlessDispatchService(config, 'enabled', { audience: `https://${platform.dispatch.serviceId}-251680231116.us-central1.run.app`, eventSubject: '12345678901234567891', schedulerSubject: '12345678901234567892' });
   Object.assign(service, {
     uid: 'service-uid',
     etag: 'service-etag',
@@ -106,6 +106,8 @@ function fixture() {
     if (url.startsWith('https://cloudresourcemanager.')) { assert.equal(method,'POST'); assert.deepEqual(body,{options:{requestedPolicyVersion:3}}); return managedPolicy; }
     assert.equal(method, 'GET');
     assert.equal(body, undefined);
+    for (const [email, uniqueId] of [[platform.dispatch.eventServiceAccount, '12345678901234567891'], [platform.dispatch.schedulerServiceAccount, '12345678901234567892']])
+      if (url === `https://iam.googleapis.com/v1/projects/urm-app-staging/serviceAccounts/${email}`) return { email, uniqueId, projectId: 'urm-app-staging' };
     if (url.includes(':getIamPolicy')) return policy;
     if (url.endsWith(revision.name)) return revision;
     if (url.endsWith(service.name)) return service;
@@ -121,7 +123,7 @@ test('joins private dispatch serving revision, zero-minimum settings, native wak
   assert.equal(proof.buildId, buildId);
   assert.equal(proof.triggers.length, 2);
   assert.equal(proof.service.revisionUid, 'revision-uid');
-  assert.equal(f.calls.length, 7);
+  assert.equal(f.calls.length, 9);
   assert.match(proof.scope, /delivery and effective access unproved/);
   assert.equal(JSON.stringify(proof).includes('SMTP'), false);
 });
@@ -205,10 +207,12 @@ test('normalizes native numeric project resource names and omitted zero/false sc
     trigger.transport.pubsub.subscription = numeric(trigger.transport.pubsub.subscription);
   }
   f.scheduler.name = numeric(f.scheduler.name);
-  const values = [f.service, f.revision, ...f.triggers, f.scheduler, f.policy, f.managedPolicy];
+  const values = [f.service,
+    { email: f.platform.dispatch.eventServiceAccount, projectId: 'urm-app-staging', uniqueId: '12345678901234567891' },
+    { email: f.platform.dispatch.schedulerServiceAccount, projectId: 'urm-app-staging', uniqueId: '12345678901234567892' }, f.revision, ...f.triggers, f.scheduler, f.policy, f.managedPolicy];
   let index = 0;
   const proof = await verifyCloudRunDispatchConfiguration(f.platform, async () => values[index++]);
-  assert.equal(index, 7);
+  assert.equal(index, 9);
   assert.equal(proof.service.name, f.platform.dispatch.service);
 });
 
@@ -221,4 +225,18 @@ test('final enabled dispatch cannot replace missing audit policy or override app
  if(bad==='missing')f.managedPolicy.auditConfigs=[];
  else f.managedPolicy.auditConfigs.push({service:'allServices',auditLogConfigs:[{logType:'DATA_WRITE',exemptedMembers:['user:other@example.test']}]});
  await assert.rejects(verifyCloudRunDispatchConfiguration(f.platform,f.api));}
+});
+test('enabled native readback rejects recreated or disabled callers and audience drift',async()=>{
+ for(const bad of ['recreated','disabled','audience']){
+  const f=fixture(),api=f.api;
+  if(bad==='audience')f.service.uri=f.service.uri.replace('251680231116','251680231117');
+  await assert.rejects(verifyCloudRunDispatchConfiguration(f.platform,async(...args)=>{
+   const value=await api(...args);
+   if(args[0].startsWith('https://iam.')&&args[0].endsWith(f.platform.dispatch.eventServiceAccount)){
+    if(bad==='recreated')return {...value,uniqueId:'99999999999999999999'};
+    if(bad==='disabled')return {...value,disabled:true};
+   }
+   return value;
+  }));
+ }
 });

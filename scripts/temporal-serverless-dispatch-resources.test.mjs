@@ -18,7 +18,7 @@ const observed = () => {
 };
 test('private dispatch uses request-billed zero-minimum compute and a separate image entrypoint', () => {
   const c = config();
-  const s = renderServerlessDispatchService(c, 'enabled');
+  const s = renderServerlessDispatchService(c, 'enabled', { audience: observed().uri, eventSubject: '12345678901234567891', schedulerSubject: '12345678901234567892' });
   const n = dispatchResourceNames(c.buildId);
   assert.equal(s.name, n.service);
   assert.equal(s.invokerIamDisabled, false);
@@ -100,4 +100,14 @@ test('wakeups cannot target another service or arbitrary credential-bearing URL'
     { uri: observed().uri.replace('https:', 'http:') },
   ])
     assert.throws(() => renderServerlessDispatchWakeups(config(), { ...observed(), ...patch }));
+});
+test('enabled caller environment requires the native URI and distinct original numeric subjects',()=>{
+ const c=config(),identity={audience:observed().uri,eventSubject:'12345678901234567891',schedulerSubject:'12345678901234567892'};
+ const env=renderServerlessDispatchService(c,'enabled',identity).template.containers[0].env;
+ assert.equal(env.find(e=>e.name==='TEMPORAL_DISPATCH_AUDIENCE').value,identity.audience);
+ assert.equal(env.find(e=>e.name==='TEMPORAL_DISPATCH_EVENT_SUBJECT').value,identity.eventSubject);
+ for(const bad of [undefined,{...identity,audience:identity.audience+'/foreign'},{...identity,eventSubject:'not-a-subject'},
+  {...identity,eventSubject:identity.schedulerSubject},{...identity,unexpected:true}])
+  assert.throws(()=>renderServerlessDispatchService(c,'enabled',bad));
+ assert.throws(()=>renderServerlessDispatchService(c,'disabled',identity));
 });

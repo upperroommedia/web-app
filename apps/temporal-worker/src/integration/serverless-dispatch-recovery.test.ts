@@ -74,7 +74,7 @@ test('native accepted start survives interrupted HTTP shutdown and expired-lease
     },
   });
   const first = new OutboxDispatcher({ db, client: { workflow }, projectId, requireOpenAdmission: true, now: () => clock, leaseMs: 1000 });
-  const handler = createServerlessDispatchHandler({ projectId, admission: 'enabled',
+  const handler = createServerlessDispatchHandler({ projectId, authorization: { verify: async () => ({ kind: 'event', subject: 'controlled-local' }), drain: async () => undefined }, admission: 'enabled',
     reconcileJob: `projects/${projectId}/locations/us-central1/jobs/local-reconcile`,
     run: async signal => { await first.tick(signal); return first.healthy; } });
   const server = createServer((req, res) => { void handler(req, res); });

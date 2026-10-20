@@ -3,6 +3,7 @@ import { Client, Connection } from '@temporalio/client';
 import * as Sentry from '@sentry/node';
 import { getSharedFirebaseAppOwnership } from '@upperroom/shared/firebase/firebaseAdminOwnership';
 import { loadRuntimeConfig, assertRuntimeNamespace } from './runtime/config';
+import { nativeDispatchCallerAuthorization, type DispatchAuthorization } from './runtime/dispatch-caller';
 import { OutboxDispatcher } from './runtime/dispatcher';
 import { createServerlessDispatchHandler } from './runtime/serverless-dispatch';
 
@@ -93,6 +94,11 @@ export async function runDispatchService() {
         return admission;
       })(),
       reconcileJob,
+      authorization: process.env.TEMPORAL_DISPATCH_ADMISSION === 'enabled'
+        ? nativeDispatchCallerAuthorization({ projectId: config.projectId, buildId: config.buildId,
+          audience: process.env.TEMPORAL_DISPATCH_AUDIENCE ?? '', eventSubject: process.env.TEMPORAL_DISPATCH_EVENT_SUBJECT ?? '',
+          schedulerSubject: process.env.TEMPORAL_DISPATCH_SCHEDULER_SUBJECT ?? '' })
+        : { verify: async () => { throw new Error('DISPATCH_CALLER_UNCONFIRMED'); }, drain: async () => undefined } satisfies DispatchAuthorization,
       run: async (signal) => {
         await connection!.withDeadline(Date.now() + 20000, () => dispatcher!.tick(signal));
         return !signal.aborted && dispatcher!.healthy;

@@ -478,3 +478,34 @@ probe observations plus actual dedicated Firestore authority transactions. They 
 not establish native API acceptance, deployed effective permissions, invocation,
 event/retry/lease wakes, original process recovery or readiness. The existing
 recovery/dispatch hard stop remains in place before workers-ready/ownership/open.
+
+### Authenticated dispatch caller provenance
+
+Enabled dispatch templates now carry the original native service URI and distinct
+owned Eventarc/Scheduler service-account numeric UIDs. The native configuration
+observer rereads both accounts and derives the expected audience/UID environment;
+a recreated account or audience drift cannot satisfy readback. Disabled preparation
+has no enabled-caller binding.
+
+The actual HTTP entrypoint requires a Google-signed, intact Bearer ID token before
+each request may join a dispatch pass. Google's verifier checks signature, then
+source-bound audience, route-specific email and original UID, issuer, verified email
+and explicit time checks apply. Duplicate headers, arrays, ambiguous headers and
+unsupported signature-stripped forms are denied. Raw tokens and verifier errors
+are never persisted or returned. The runtime lease admission fence is unchanged.
+
+An authorization timeout retains its occupied slot until actual verifier settlement;
+shutdown aborts and waits for it. The installed Gaxios interceptor sets prepared
+fetch redirect/size controls, combines caller cancellation with an eight-second
+certificate deadline, and explicitly disables the Google client's retryConfig.
+The whole authorization deadline is ten seconds, with a wall-clock check after
+verification. Certificate transport uses fixed Google endpoints only.
+
+[Google's service-account token documentation](https://docs.cloud.google.com/docs/authentication/token-types)
+identifies `sub` as the account's unique ID. [Cloud Run authentication documentation](https://docs.cloud.google.com/run/docs/authenticating/service-to-service)
+explains signature removal for X-Serverless-Authorization and precedence when both
+headers exist. Actual candidate Google delivery must establish the supported intact
+token form; there is no decoded-claims fallback. Local RSA/Google-SDK signature tests,
+real Gaxios/default-fetch local HTTP transport tests, and the local native
+Temporal/Firestore/HTTP test with controlled authorization do not prove actual
+Google authentication, Eventarc/Scheduler delivery or staging readiness.

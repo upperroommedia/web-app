@@ -42,11 +42,22 @@ function validate(config) {
  * delivery; IAM remains mandatory. This body never grants public invocation.
  * The existing image's tini entrypoint is retained, only its node target changes.
  */
-export function renderServerlessDispatchService(config, admission) {
+export function renderServerlessDispatchService(config, admission, callerIdentity) {
   if (!['disabled', 'enabled'].includes(admission)) throw new Error('Explicit dispatch admission required');
   validate(config);
   const names = dispatchResourceNames(config.buildId);
+  if (admission === 'enabled') {
+    let url;
+    try { url = new URL(callerIdentity?.audience); } catch { throw new Error('Native dispatch caller identity required'); }
+    if (Object.keys(callerIdentity).sort().join(',') !== 'audience,eventSubject,schedulerSubject' ||
+      url.origin !== callerIdentity.audience || url.protocol !== 'https:' || url.username || url.password || url.port ||
+      !url.hostname.startsWith(`${names.serviceId}-`) || !/^[a-z0-9-]+\.(?:[a-z0-9-]+\.)?run\.app$/.test(url.hostname) ||
+      !/^[0-9]{10,30}$/.test(callerIdentity.eventSubject ?? '') || !/^[0-9]{10,30}$/.test(callerIdentity.schedulerSubject ?? '') ||
+      callerIdentity.eventSubject === callerIdentity.schedulerSubject) throw new Error('Native dispatch caller identity required');
+  } else if (callerIdentity !== undefined) throw new Error('Disabled dispatch cannot bind callers');
   const env = {
+    ...(admission === 'enabled' ? { TEMPORAL_DISPATCH_AUDIENCE: callerIdentity.audience,
+      TEMPORAL_DISPATCH_EVENT_SUBJECT: callerIdentity.eventSubject, TEMPORAL_DISPATCH_SCHEDULER_SUBJECT: callerIdentity.schedulerSubject } : {}),
     NODE_ENV: 'production',
     NODE_OPTIONS: '--max-old-space-size=1536',
     ...firebaseResourceEnvironment({

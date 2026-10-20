@@ -35,7 +35,8 @@ export async function activateCloudRunDispatchService(options) {
     deploymentName, runnerServiceAccount, image }));
   const config = { projectId: 'urm-app-staging', region: 'us-central1', buildId: platform.workerBuildId,
     image: platform.workerImage, apiKeyVersion: settings.apiKeyVersion };
-  const desired = renderServerlessDispatchService(config, 'enabled');
+  const desired = renderServerlessDispatchService(config, 'enabled', { audience: authority.original.service.uri,
+    eventSubject: options.eventReceipt.identityState.account.uniqueId, schedulerSubject: options.schedulerReceipt.identityState.account.uniqueId });
   desired.annotations = { ...authority.original.plan.body.annotations, 'urm.upperroom.media/activation': operationId };
   const plan = { schemaVersion: 1, operationId, releaseId, evidenceDigest, buildId: platform.workerBuildId,
     artifactDirectory, bindings, desired, serviceReceiptSHA256: proofDigest(options.serviceReceipt),
