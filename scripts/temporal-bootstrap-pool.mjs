@@ -157,7 +157,7 @@ async function verifyAccess(o, zeroPlan) {
   );
   policyHas(projectPolicy, expectedFirestore.grants[0]);
   const proofs = [];
-  for (const surface of ['project', 'storage']) {
+  for (const surface of role === 'search' ? ['project'] : ['project', 'storage']) {
     const roleReceipt = r[`${surface}Role`],
       access = completed(r[`${surface}Access`], releaseId);
     const owned = await readOwnedPreparationRuntimeRole({
@@ -222,7 +222,7 @@ async function verifyAccess(o, zeroPlan) {
     policiesSHA256: proofDigest({ scalerPolicies, projectPolicy, proofs }),
   };
 }
-/** Bootstrap one unused source-bound controls/orchestration pool, observe its non-current native queue,
+/** Bootstrap one unused source-bound controls/orchestration/search pool, observe its non-current native queue,
  * then stop that same pool under the SAME parent, including observation failure.
  * A later handoff activation needs its own reviewed operation; this cycle does
  * not promote routing, attach WCI, retire workers or prove live instance count.
@@ -245,7 +245,7 @@ async function runReviewedPoolOperation(o, mode, expectedRole) {
   validateCloudRunReleasePlatform(platform);
   if (
     role !== expectedRole ||
-    !['controls','orchestration'].includes(expectedRole) ||
+    !['controls','orchestration','search'].includes(expectedRole) ||
     !['cycle', 'retain', 'abort'].includes(mode) ||
     !uuid.test(operationId ?? '') ||
     !uuid.test(releaseId ?? '') ||
@@ -284,8 +284,7 @@ async function runReviewedPoolOperation(o, mode, expectedRole) {
     'firestore',
     'projectRole',
     'projectAccess',
-    'storageRole',
-    'storageAccess',
+    ...(role === 'search' ? [] : ['storageRole', 'storageAccess']),
   ];
   const base = Object.fromEntries(baseKeys.map((key) => [key, r[key]]));
   const expectedKeys = [
@@ -739,3 +738,7 @@ export const stopCloudRunControlsActivation = (o) => execute(o, 'abort', 'contro
 export const bootstrapStopCloudRunOrchestrationPool=o=>execute(o,'cycle','orchestration');
 export const activateCloudRunOrchestrationPool=o=>execute(o,'retain','orchestration');
 export const stopCloudRunOrchestrationActivation=o=>execute(o,'abort','orchestration');
+
+export const bootstrapStopCloudRunSearchPool=o=>execute(o,'cycle','search');
+export const activateCloudRunSearchPool=o=>execute(o,'retain','search');
+export const stopCloudRunSearchActivation=o=>execute(o,'abort','search');

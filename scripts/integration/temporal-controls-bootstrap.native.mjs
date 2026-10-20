@@ -15,6 +15,7 @@ import { readFileSync } from 'node:fs';
 const { initializeApp, deleteApp } = require('firebase-admin/app');
 const { getFirestore } = require('firebase-admin/firestore');
 const { Client } = require('@temporalio/client');
+const {queuePollsWorkflows}=require(fileURLToPath(new URL('../../apps/temporal-worker/src/runtime/queue-polling.ts',import.meta.url)));
 const { msToTs } = require('@temporalio/common/lib/time');
 const { DefaultLogger, Runtime, Worker } = require('@temporalio/worker');
 const { createLocalTestEnvironment } = require(fileURLToPath(
@@ -123,7 +124,7 @@ test('native bootstrap protection recognizes original old pinned wait and reject
     const options = {
       client,
       firestore: db,
-      platform: { temporalNamespace: namespace, roleBindings: [{ role: 'controls', buildId, deploymentName },{role:'orchestration',buildId,deploymentName:'urm-worker-staging'}] },
+      platform: { temporalNamespace: namespace, roleBindings: [{ role: 'controls', buildId, deploymentName },{role:'orchestration',buildId,deploymentName:'urm-worker-staging'},{role:'search',buildId,deploymentName:'urm-worker-search-staging'}] },
       role: 'controls',
       operationId,
       releaseId,
@@ -152,15 +153,16 @@ test('native bootstrap protection recognizes original old pinned wait and reject
     assert.equal((await observeBootstrapRegistration(options)).role, 'controls');
     assert.equal((await observeBootstrapProtection(options)).protectedRunCount, 1);
     await launch('urm-orchestration',true,{deploymentName:'urm-worker-staging',buildId});
+    await launch('urm-search',queuePollsWorkflows('cloud-run','urm-search'),{deploymentName:'urm-worker-search-staging',buildId});
     const selectRole=async role=>{options.role=role;await operation.update({action:`stop-cloud-run-${role}-activation`});};
-    for(const role of ['controls','orchestration']){
+    for(const role of ['controls','orchestration','search']){
       const actions=[`bootstrap-stop-cloud-run-${role}`,`activate-cloud-run-${role}-pool`,`stop-cloud-run-${role}-activation`];
       options.role=role;
       for(const action of actions){
         await operation.update({action});
         assert.equal((await observeBootstrapProtection(options)).protectedRunCount,1);
       }
-      assert.deepEqual((await observeBootstrapRegistration(options)).queues,role==='controls'?[{name:'urm-controls',type:2}]:[{name:'urm-orchestration',type:1},{name:'urm-orchestration',type:2}]);
+      assert.deepEqual((await observeBootstrapRegistration(options)).queues,role!=='orchestration'?[{name:`urm-${role}`,type:2}]:[{name:'urm-orchestration',type:1},{name:'urm-orchestration',type:2}]);
     }
     await lock.create({ state: 'held', sessionId: 'original' });
     const before = await lock.get();
@@ -178,7 +180,7 @@ test('native bootstrap protection recognizes original old pinned wait and reject
     );
     handles.push(candidate);
     await rpc(() => candidate.query('workerRestartProbe.status'));
-    for(const role of ['controls','orchestration']){await selectRole(role);await assert.rejects(observeBootstrapProtection(options),/CLOUD_RUN_BOOTSTRAP_PROTECTION_UNCONFIRMED/);}
+    for(const role of ['controls','orchestration','search']){await selectRole(role);await assert.rejects(observeBootstrapProtection(options),/CLOUD_RUN_BOOTSTRAP_PROTECTION_UNCONFIRMED/);}
     for (const handle of handles) {
       await rpc(() => handle.signal('workerRestartProbe.release'));
       await rpc(() => handle.result());

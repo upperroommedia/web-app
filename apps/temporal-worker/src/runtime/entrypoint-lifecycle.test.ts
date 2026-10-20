@@ -1,3 +1,11 @@
+let mockRequestHandler:
+  | ((
+      request: { url: string },
+      response: { writeHead: (status: number, headers?: unknown) => unknown; end: (body?: string) => void }
+    ) => void)
+  | undefined;
+let mockWorkerQueue = 'urm-controls';
+let mockHosting: 'cloud-run' | 'traditional' = 'traditional';
 const mockEvents: string[] = [];
 const mockApp = { name: '[DEFAULT]', options: { projectId: 'urm-app-staging' } };
 let mockOwnedApp: typeof mockApp | undefined = mockApp;
@@ -59,7 +67,7 @@ jest.mock('@temporalio/worker', () => ({
     }),
   },
   Worker: {
-    create: jest.fn(async () => {
+    create: jest.fn(async (options) => {
       let resolve!: () => void;
       let state = 'INITIALIZED';
       const done = new Promise<void>((yes) => {
@@ -75,7 +83,11 @@ jest.mock('@temporalio/worker', () => ({
           state = 'DRAINING';
           mockEvents.push('worker.shutdown');
         }),
-        getStatus: () => ({ runState: state }),
+        getStatus: () => ({
+          runState: state,
+          workflowPollerState: options.workflowBundle ? 'POLLING' : 'SHUTDOWN',
+          activityPollerState: 'POLLING',
+        }),
         stop: () => {
           state = 'STOPPED';
           mockEvents.push('worker.stopped');
@@ -111,7 +123,9 @@ jest.mock('@upperroom/shared/firebase/firebaseAdminOwnership', () => ({
 }));
 jest.mock('@upperroom/shared/firebase/firebaseAdmin', () => ({}));
 jest.mock('./worker-witness', () => ({ loadWorkerWitness: async () => ({ instanceId: 'test' }) }));
-jest.mock('./provider-sandbox-readiness', () => ({ verifyProviderSandboxReadiness: jest.fn().mockResolvedValue(undefined) }));
+jest.mock('./provider-sandbox-readiness', () => ({
+  verifyProviderSandboxReadiness: jest.fn().mockResolvedValue(undefined),
+}));
 jest.mock('./activities', () => ({ createRuntimeActivities: () => ({ db: {}, queues: { 'urm-controls': {} } }) }));
 jest.mock('./dispatcher', () => ({
   OutboxDispatcher: class {
@@ -126,7 +140,9 @@ jest.mock('./config', () => ({
   loadRuntimeConfig: () => ({
     projectId: 'urm-app-staging',
     buildId: 'unit',
-    queues: ['urm-controls'],
+    queues: [mockWorkerQueue],
+    hosting: mockHosting,
+    workflowBundle: '/fixture/workflows.js',
     namespace: 'unit',
     port: 9999,
     dispatcherEnabled: false,
@@ -135,18 +151,21 @@ jest.mock('./config', () => ({
   assertRuntimeNamespace: jest.fn(),
 }));
 jest.mock('node:http', () => ({
-  createServer: () => ({
-    listening: true,
-    once() {},
-    removeListener() {},
-    listen(_port: number, _host: string, ready: () => void) {
-      ready();
-    },
-    close(done: () => void) {
-      mockEvents.push('server.close');
-      done();
-    },
-  }),
+  createServer: (handler: typeof mockRequestHandler) => {
+    mockRequestHandler = handler;
+    return {
+      listening: true,
+      once() {},
+      removeListener() {},
+      listen(_port: number, _host: string, ready: () => void) {
+        ready();
+      },
+      close(done: () => void) {
+        mockEvents.push('server.close');
+        done();
+      },
+    };
+  },
 }));
 import { runWorkerProcess, startWorkerProcess } from '../index';
 
@@ -154,6 +173,9 @@ const tick = async () => {
   for (let i = 0; i < 30; i++) await Promise.resolve();
 };
 beforeEach(() => {
+  mockRequestHandler = undefined;
+  mockWorkerQueue = 'urm-controls';
+  mockHosting = 'traditional';
   mockEvents.length = 0;
   mockWorkers.length = 0;
   mockSignals.clear();
@@ -284,3 +306,31 @@ test('the same signal owner remains installed until deferred Sentry flush actual
   await run;
   expect(remove.mock.calls.filter(([signal]) => signal === 'SIGTERM')).toHaveLength(1);
 });
+
+for (const hosting of ['cloud-run', 'traditional'] as const)
+  test(`actual search Worker.create preserves ${hosting} queue ownership`, async () => {
+    mockWorkerQueue = 'urm-search';
+    mockHosting = hosting;
+    const { Worker } = await import('@temporalio/worker');
+    const run = track(startWorkerProcess());
+    await tick();
+    expect(mockWorkers).toHaveLength(1);
+    expect(jest.mocked(Worker.create).mock.calls[0][0].workflowBundle).toEqual(
+      hosting === 'cloud-run' ? undefined : { codePath: '/fixture/workflows.js' }
+    );
+    let status = 0;
+    mockRequestHandler?.(
+      { url: '/readyz' },
+      {
+        writeHead(code) {
+          status = code;
+          return this;
+        },
+        end() {},
+      }
+    );
+    expect(status).toBe(200);
+    mockSignals.get('SIGTERM')?.();
+    mockWorkers[0].stop();
+    await run;
+  });

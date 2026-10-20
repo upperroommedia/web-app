@@ -6,6 +6,7 @@ const fail = () => {
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
 const version = (x) => (x?.updateTime ? `${x.updateTime.seconds}:${x.updateTime.nanoseconds}` : fail());
 const actions={
+ search:['bootstrap-stop-cloud-run-search','activate-cloud-run-search-pool','stop-cloud-run-search-activation'],
  controls:['bootstrap-stop-cloud-run-controls','activate-cloud-run-controls-pool','stop-cloud-run-controls-activation'],
  orchestration:['bootstrap-stop-cloud-run-orchestration','activate-cloud-run-orchestration-pool','stop-cloud-run-orchestration-activation'],
 };

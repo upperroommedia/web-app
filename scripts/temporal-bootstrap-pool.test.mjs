@@ -414,3 +414,33 @@ test('orchestration observer failure cleans up under its same parent; protected 
  g.options.receipts.activation={operationId:g.options.operationId,releaseId:g.options.releaseId,identityState:structuredClone(kept)};g.options.operationId=randomUUID();
  g.options.observeProtection=async()=>{throw new Error('candidate current/working');};await assert.rejects(orchestrationAbort(g.options));assert.equal(g.pool.scaling.manualInstanceCount,1);
 });
+
+const {bootstrapStopCloudRunSearchPool:searchCycle,activateCloudRunSearchPool:searchRetain,stopCloudRunSearchActivation:searchAbort}=await import('./temporal-bootstrap-pool.mjs');
+async function searchAfterCycle(){const f=fixture('search'),r=await searchCycle(f.options);f.options.receipts.bootstrapCycle={operationId:f.options.operationId,releaseId:f.options.releaseId,identityState:structuredClone(r)};f.options.operationId=randomUUID();return f;}
+test('search consumes nine own receipts, exact numeric config, project-only Auth read and no bucket authority',async()=>{
+ const f=await searchAfterCycle(),kept=await searchRetain(f.options);
+ assert.equal(kept.disposition,'retained');assert.equal(Object.keys(f.options.receipts).length,10);
+ assert.deepEqual(f.options.receipts.projectRole.identityState.nativeRole.includedPermissions,['firebaseauth.users.get']);
+ assert.deepEqual(f.options.settings.runtimeSecrets,[{name:'TEMPORAL_SEARCH_CONFIG_JSON',secret:'TEMPORAL_SEARCH_CONFIG',version:'2'}]);
+ assert.equal(f.options.receipts.storageRole,undefined);assert.equal(f.calls.some(c=>c.url.includes('storage.googleapis.com')),false);
+ f.options.receipts.activation={operationId:f.options.operationId,releaseId:f.options.releaseId,identityState:structuredClone(kept)};f.options.operationId=randomUUID();
+ await searchAbort(f.options);assert.equal(f.pool.scaling.manualInstanceCount,0);
+ assert.deepEqual(f.calls.filter(c=>c.method==='PATCH').map(c=>c.request.scaling.manualInstanceCount),[1,0,1,0]);
+});
+for(const bad of ['extra-storage','runner','projectRole','settings','secret-policy'])test(`search ${bad} is fenced before another PATCH`,async()=>{
+ const f=await searchAfterCycle(),control=fixture(),api=f.options.api;
+ if(bad==='extra-storage')f.options.receipts.storageRole=control.options.receipts.storageRole;
+ if(['runner','projectRole'].includes(bad))f.options.receipts[bad]=control.options.receipts[bad];
+ if(bad==='settings')f.options.settings.runtimeSecrets=[];
+ f.options.api=async(...args)=>{const r=await api(...args);if(bad==='secret-policy'&&args[0].includes('TEMPORAL_SEARCH_CONFIG:getIamPolicy'))r.bindings=[];return r;};
+ await assert.rejects(searchRetain(f.options));assert.equal(f.calls.filter(c=>c.method==='PATCH').length,2);
+});
+test('search unknown start ACK resumes GET-only; current/working retained candidate is never zeroed',async()=>{
+ const f=await searchAfterCycle(),api=f.options.api;let drop=true;
+ f.options.api=async(...args)=>{const r=await api(...args);if(args[1]==='PATCH'&&drop){drop=false;throw new Error('lost ACK');}return r;};
+ const recovered=await searchRetain(f.options);assert.equal(recovered.disposition,'retained');const n=f.calls.filter(c=>c.method==='PATCH').length;
+ await searchRetain({...f.options,saved:f.saved});assert.equal(f.calls.filter(c=>c.method==='PATCH').length,n);
+ const kept=f.saved;f.options.receipts.activation={operationId:f.options.operationId,releaseId:f.options.releaseId,identityState:structuredClone(kept)};f.options.operationId=randomUUID();
+ f.options.observeProtection=async()=>{throw new Error('working');};await assert.rejects(searchAbort(f.options));assert.equal(f.pool.scaling.manualInstanceCount,1);
+});
+for(const run of [cycle,orchestrationCycle])test('search cannot select another fixed role wrapper',async()=>{const f=fixture('search');await assert.rejects(run(f.options));assert.equal(f.calls.filter(c=>c.method==='PATCH').length,0);});

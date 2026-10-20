@@ -5,7 +5,7 @@ import { assertNativeSnapshot, nativeSnapshotProof, proofDigest } from './tempor
  */
 async function saveCheckpoint({ firestore, lockRef, controlRef, stateRef,
   immutableReceipt, creationReceipt, ownedOperation, expectedAuthority, config, operationId, bindingDigest, operatorPrincipal, identityState, kind }) {
-  const [field, action] = { orchestrationCycle:['cloudOrchestrationBootstrapCycle','bootstrap-stop-cloud-run-orchestration'], orchestrationActivation:['cloudOrchestrationActivation','activate-cloud-run-orchestration-pool'], orchestrationAbort:['cloudOrchestrationActivationStop','stop-cloud-run-orchestration-activation'], poolActivation: ['cloudControlsActivation','activate-cloud-run-controls-pool'], poolAbort: ['cloudControlsActivationStop','stop-cloud-run-controls-activation'], bootstrapCycle: ['cloudPoolBootstrapCycle', 'bootstrap-stop-cloud-run-controls'], dispatchActivation: ['cloudDispatchActivation', 'activate-cloud-run-dispatch-service'], identity: ['cloudIdentityPreparation', 'prepare-cloud-run-identity'],
+  const [field, action] = { searchCycle:['cloudSearchBootstrapCycle','bootstrap-stop-cloud-run-search'],searchActivation:['cloudSearchActivation','activate-cloud-run-search-pool'],searchAbort:['cloudSearchActivationStop','stop-cloud-run-search-activation'], orchestrationCycle:['cloudOrchestrationBootstrapCycle','bootstrap-stop-cloud-run-orchestration'], orchestrationActivation:['cloudOrchestrationActivation','activate-cloud-run-orchestration-pool'], orchestrationAbort:['cloudOrchestrationActivationStop','stop-cloud-run-orchestration-activation'], poolActivation: ['cloudControlsActivation','activate-cloud-run-controls-pool'], poolAbort: ['cloudControlsActivationStop','stop-cloud-run-controls-activation'], bootstrapCycle: ['cloudPoolBootstrapCycle', 'bootstrap-stop-cloud-run-controls'], dispatchActivation: ['cloudDispatchActivation', 'activate-cloud-run-dispatch-service'], identity: ['cloudIdentityPreparation', 'prepare-cloud-run-identity'],
     eventarcCycle: ['cloudDispatchEventarcCycle', 'prepare-stop-cloud-run-dispatch-eventarc'],
     schedulerCycle: ['cloudDispatchSchedulerCycle', 'prepare-stop-cloud-run-dispatch-scheduler'],
     eventarcAudit: ['cloudEventarcAuditPreparation', 'prepare-cloud-run-eventarc-audit'],
@@ -18,18 +18,18 @@ async function saveCheckpoint({ firestore, lockRef, controlRef, stateRef,
     firestore: ['cloudFirestoreAccessPreparation', 'prepare-cloud-run-firestore-access'],
     scaler: ['cloudScalerAccessPreparation', 'prepare-cloud-run-scaler-access'] }[kind] ?? [];
   if (!field) throw new Error('PREPARATION_KIND_REQUIRED');
-  const expectedPoolRole={bootstrapCycle:'controls',poolActivation:'controls',poolAbort:'controls',orchestrationCycle:'orchestration',orchestrationActivation:'orchestration',orchestrationAbort:'orchestration'}[kind];
+  const expectedPoolRole={searchCycle:'search',searchActivation:'search',searchAbort:'search',bootstrapCycle:'controls',poolActivation:'controls',poolAbort:'controls',orchestrationCycle:'orchestration',orchestrationActivation:'orchestration',orchestrationAbort:'orchestration'}[kind];
   if(expectedPoolRole&&identityState.plan?.role!==expectedPoolRole)throw new Error('BOOTSTRAP_ROLE_CHANGED');
   await firestore.runTransaction(async tx => {
-    const creationState = ['bootstrapCycle','poolActivation','orchestrationCycle','orchestrationActivation'].includes(kind) ? identityState.activationState : ['schedulerCycle', 'eventarcCycle'].includes(kind) ? identityState.creationState : undefined;
-    if (['bootstrapCycle','poolActivation','orchestrationCycle','orchestrationActivation'].includes(kind) && (['started', 'stopping', 'completed'].includes(identityState.stage) && !creationState ||
+    const creationState = ['bootstrapCycle','poolActivation','orchestrationCycle','orchestrationActivation','searchCycle','searchActivation'].includes(kind) ? identityState.activationState : ['schedulerCycle', 'eventarcCycle'].includes(kind) ? identityState.creationState : undefined;
+    if (['bootstrapCycle','poolActivation','orchestrationCycle','orchestrationActivation','searchCycle','searchActivation'].includes(kind) && (['started', 'stopping', 'completed'].includes(identityState.stage) && !creationState ||
       creationState && (creationState.stage !== 'completed' || creationState.plan?.operationId !== operationId || creationState.plan?.mode !== 'start' || creationState.plan?.target !== 1 ||
        proofDigest(creationState.plan.origin) !== proofDigest(identityState.plan?.origin) || proofDigest(creationState) !== proofDigest(identityState.start))))
       throw new Error('BOOTSTRAP_ACTIVATION_RECEIPT_REQUIRED');
-    if(['poolActivation','orchestrationActivation'].includes(kind)&&identityState.stage==='completed'){
+    if(['poolActivation','orchestrationActivation','searchActivation'].includes(kind)&&identityState.stage==='completed'){
       const retained=identityState.retainedRegistration;
       if(identityState.disposition==='retained'?
-        identityState.stop!==undefined||identityState.observation?.status!=='confirmed'||retained?.role!==(kind==='orchestrationActivation'?'orchestration':'controls')||retained.buildId!==identityState.plan?.buildId||
+        identityState.stop!==undefined||identityState.observation?.status!=='confirmed'||retained?.role!==expectedPoolRole||retained.buildId!==identityState.plan?.buildId||
           !/^[a-f0-9]{64}$/.test(retained.registrationSHA256??'')||!Number.isFinite(Date.parse(retained.observedAt??'')):
         identityState.disposition!=='stopped'||identityState.stop?.stage!=='completed')throw new Error('CONTROLS_ACTIVATION_OUTCOME_UNCONFIRMED');
     }
@@ -61,7 +61,7 @@ async function saveCheckpoint({ firestore, lockRef, controlRef, stateRef,
       ['proof', 'request', 'attemptedAt', 'prerequisites'].some(key =>
         proofDigest(current.get(field)[key] ?? null) !== proofDigest(identityState[key] ?? null)))
       throw new Error('DISPATCH_ACTIVATION_AUTHORIZATION_CHANGED');
-    if (['bootstrapCycle','poolActivation','poolAbort','orchestrationCycle','orchestrationActivation','orchestrationAbort'].includes(kind)) {
+    if (['bootstrapCycle','poolActivation','poolAbort','orchestrationCycle','orchestrationActivation','orchestrationAbort','searchCycle','searchActivation','searchAbort'].includes(kind)) {
       const previous=current.get(field);
       if(previous){
         for(const key of ['activationState','observation','retentionFailed','retainedRegistration']) if(Object.hasOwn(previous,key) &&
@@ -123,3 +123,7 @@ export const saveControlsActivationStopCheckpoint = options => saveCheckpoint({ 
 export const saveOrchestrationBootstrapCycleCheckpoint=options=>saveCheckpoint({...options,kind:'orchestrationCycle'});
 export const saveOrchestrationActivationCheckpoint=options=>saveCheckpoint({...options,kind:'orchestrationActivation'});
 export const saveOrchestrationActivationStopCheckpoint=options=>saveCheckpoint({...options,kind:'orchestrationAbort'});
+
+export const saveSearchBootstrapCycleCheckpoint=options=>saveCheckpoint({...options,kind:'searchCycle'});
+export const saveSearchActivationCheckpoint=options=>saveCheckpoint({...options,kind:'searchActivation'});
+export const saveSearchActivationStopCheckpoint=options=>saveCheckpoint({...options,kind:'searchAbort'});

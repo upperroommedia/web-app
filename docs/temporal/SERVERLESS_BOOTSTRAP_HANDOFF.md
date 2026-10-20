@@ -1,13 +1,13 @@
 # Serverless bootstrap and process recovery boundary
 
-The guarded controller now has a controls and orchestration **bootstrap and stop cycles** in
+The guarded controller now has a controls, orchestration and search **bootstrap and stop cycles** in
 source. It joins the owned zero-pool/account/grant receipts, starts desired manual
 count one, observes the exact native non-current role queues, then stops the same
 owned pool under the original parent. Observation failure also enters owned stop;
 uncertain authority, protected work or an unknown result retains the fence.
-The source also connects a kept-running controls or orchestration activation and a separate stop of
+The source also connects a kept-running controls, orchestration or search activation and a separate stop of
 that exact unused activation. None of these operations has been applied to Cloud Run.
-Media, images, email and search activation and guarded promotion remain unimplemented.
+Media, images and email activation and guarded promotion remain unimplemented.
 
 The final native role-readiness collector still requires candidate versions current,
 with no ramp, on the real role queues. The cycle cannot replace that collector.
@@ -31,7 +31,7 @@ The existing integration CI includes two additional real SDK tests:
 
 The serial release-recovery CI also runs
 `scripts/integration/temporal-controls-bootstrap.native.mjs`: actual local SDK
-old pinned waiting-run inventory, non-current controls Activity and orchestration Workflow/Activity registration,
+old pinned waiting-run inventory, non-current controls/search Activity and orchestration Workflow/Activity registration,
 provider-lock preservation, and explicit candidate-run denial against the dedicated
 Firestore emulator. Controlled Cloud API tests cover the scale/stop protocol;
 the actual Firestore checkpoint regression checks paused authority, immutable
@@ -42,7 +42,7 @@ TypeScript SDK 1.24.0 configuration. They do not establish general no-work isola
 Cloud Run process replacement, native cloud delivery, effective IAM or readiness.
 In particular, non-current is not a fence against explicitly routed tasks.
 
-## Connected controls and orchestration cycles and kept activation
+## Connected role cycles and kept activation
 
 `bootstrap-stop-cloud-run-controls` uses a SHA-pinned private manifest containing
 exactly eleven distinct completed preparation operation IDs: runner, scaler, pool,
@@ -67,6 +67,26 @@ Partial expected registration can wait while warming; it cannot satisfy completi
 Starting orchestration non-current is distinct from promoting it. This enables a
 future separately guarded pinned inert verification operation; this change does
 not implement that operation or relax the final current-version readiness gate.
+
+Search has separate fixed `bootstrap-stop-cloud-run-search`,
+`activate-cloud-run-search-pool` and `stop-cloud-run-search-activation` actions.
+Their manifests contain nine base receipts, ten with the completed bootstrap
+cycle, and eleven with the retained activation. Search has only its source-derived
+project Auth-read role and conditional Firestore access; Storage role/access
+receipts are rejected, and bootstrap does not query a bucket policy. Its
+`TEMPORAL_SEARCH_CONFIG_JSON` environment binding must reference an enabled
+numeric version of `TEMPORAL_SEARCH_CONFIG` with the owned runner accessor.
+External search credentials remain capabilities; this does not prove their
+runtime validity or authorize a vendor request during bootstrap.
+
+The independent Cloud Run search entrypoint now registers Activities only on
+`urm-search`. Traditional search workers retain their existing Workflow/Activity
+ownership. Worker construction and readiness share the source decision, and the
+native local fixture uses it to assert the exact Activity-only queue inventory.
+This change fixes the previous source mismatch where the real Cloud Run search
+entrypoint would have registered an extra Workflow queue and failed the new gate.
+The actual entrypoint test checks Worker options and readiness for both hosting
+modes; native metadata confirms only the tested local SDK registration.
 
 Both stable work scans and the final refreshed namespace compute inventory must
 remain within five seconds; a long scan is a denial, not renewed freshness. Every
@@ -105,7 +125,7 @@ protection before its sole saved conditional stop. A current or working candidat
 cannot be forced to zero. Cleanup has no authorization-expiry shortcut. Desired
 zero still proves neither process termination nor drain. After this stop, the
 original cycle origin cannot authorize another activation; a new origin requires a
-separately reviewed contract. Media, images, email and search activation, media
+separately reviewed contract. Media, images and email activation, media
 capacity and guarded promotion remain out of scope.
 
 Any extension to other roles and the later handoff must retain these requirements:

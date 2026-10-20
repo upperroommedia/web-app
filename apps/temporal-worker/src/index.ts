@@ -1,3 +1,4 @@
+import { queuePollsWorkflows } from './runtime/queue-polling';
 import { createWorkerReadinessActivities } from './runtime/readiness-probe';
 import { createServer, type Server } from 'node:http';
 import { getSharedFirebaseAppOwnership } from '@upperroom/shared/firebase/firebaseAdminOwnership';
@@ -141,12 +142,18 @@ export async function runWorkerProcess(bindShutdown?: (shutdown: () => Promise<v
         connection: native,
         namespace: config.namespace,
         taskQueue: queue,
-        workflowBundle: ['urm-media', 'urm-controls'].includes(queue) ? undefined : { codePath: config.workflowBundle },
+        workflowBundle: queuePollsWorkflows(config.hosting, queue) ? { codePath: config.workflowBundle } : undefined,
         activities: {
           ...queues[queue as keyof typeof queues],
-          ...(config.hosting === 'cloud-run' ? createWorkerReadinessActivities({
-            firestore: db, projectId: config.projectId, buildId: config.buildId, queue, witness,
-          }) : {}),
+          ...(config.hosting === 'cloud-run'
+            ? createWorkerReadinessActivities({
+                firestore: db,
+                projectId: config.projectId,
+                buildId: config.buildId,
+                queue,
+                witness,
+              })
+            : {}),
         },
         workerDeploymentOptions: {
           useWorkerVersioning: true,
@@ -180,7 +187,7 @@ export async function runWorkerProcess(bindShutdown?: (shutdown: () => Promise<v
         return (
           status.runState === 'RUNNING' &&
           (status.workflowPollerState === 'POLLING' ||
-            (['urm-media', 'urm-controls'].includes(config.queues[index]) &&
+            (!queuePollsWorkflows(config.hosting, config.queues[index]) &&
               status.workflowPollerState === 'SHUTDOWN')) &&
           status.activityPollerState === 'POLLING'
         );

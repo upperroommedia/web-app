@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import {bootstrapStopCloudRunSearchPool,activateCloudRunSearchPool,stopCloudRunSearchActivation} from './temporal-bootstrap-pool.mjs';
+import {saveSearchBootstrapCycleCheckpoint,saveSearchActivationCheckpoint,saveSearchActivationStopCheckpoint} from './temporal-preparation-checkpoint.mjs';
 import { verifyCloudRunBootstrapProtection, verifyCloudRunBootstrapRegistration, collectCloudRunDispatchDiagnostic, collectCloudRunReleaseWorkers, readCloudRunNamespaceEvidence, verifyCloudRunScalerPolicies, verifyCloudRunComputeIsolation } from './temporal-release-cloud-run.mjs';
 import { createReleaseApi } from './temporal-release-api.mjs';
 import { verifyDispatchTemporalKeyIdentity } from './temporal-dispatch-key-identity.mjs';
@@ -113,6 +115,7 @@ if (
     'prepare-cloud-run-identity',
     'prepare-cloud-run-pool',
     'bootstrap-stop-cloud-run-controls',
+    'bootstrap-stop-cloud-run-search','activate-cloud-run-search-pool','stop-cloud-run-search-activation',
     'bootstrap-stop-cloud-run-orchestration',
     'activate-cloud-run-orchestration-pool',
     'stop-cloud-run-orchestration-activation',
@@ -173,10 +176,11 @@ const operatorIdentity = {
   resourceBinding,
 };
 const poolOperationRoles=Object.freeze({
+ 'bootstrap-stop-cloud-run-search':'search','activate-cloud-run-search-pool':'search','stop-cloud-run-search-activation':'search',
  'bootstrap-stop-cloud-run-controls':'controls','activate-cloud-run-controls-pool':'controls','stop-cloud-run-controls-activation':'controls',
  'bootstrap-stop-cloud-run-orchestration':'orchestration','activate-cloud-run-orchestration-pool':'orchestration','stop-cloud-run-orchestration-activation':'orchestration',
 });
-const preparationArguments = ['activate-cloud-run-orchestration-pool','stop-cloud-run-orchestration-activation','bootstrap-stop-cloud-run-orchestration','activate-cloud-run-controls-pool','stop-cloud-run-controls-activation','bootstrap-stop-cloud-run-controls', 'prepare-cloud-run-dispatch-diagnostic', 'activate-cloud-run-dispatch-service', 'prepare-cloud-run-identity', 'prepare-cloud-run-dispatch-service', 'prepare-cloud-run-dispatch-access', 'prepare-stop-cloud-run-dispatch-scheduler', 'prepare-stop-cloud-run-dispatch-eventarc', 'stop-cloud-run-dispatch-wake', 'prepare-cloud-run-pool', 'prepare-cloud-run-secret-access', 'prepare-cloud-run-scaler-access', 'prepare-cloud-run-firestore-access', 'prepare-cloud-run-runtime-role', 'prepare-cloud-run-runtime-access', 'prepare-cloud-run-eventarc-audit'].includes(action) ? {
+const preparationArguments = ['bootstrap-stop-cloud-run-search','activate-cloud-run-search-pool','stop-cloud-run-search-activation','activate-cloud-run-orchestration-pool','stop-cloud-run-orchestration-activation','bootstrap-stop-cloud-run-orchestration','activate-cloud-run-controls-pool','stop-cloud-run-controls-activation','bootstrap-stop-cloud-run-controls', 'prepare-cloud-run-dispatch-diagnostic', 'activate-cloud-run-dispatch-service', 'prepare-cloud-run-identity', 'prepare-cloud-run-dispatch-service', 'prepare-cloud-run-dispatch-access', 'prepare-stop-cloud-run-dispatch-scheduler', 'prepare-stop-cloud-run-dispatch-eventarc', 'stop-cloud-run-dispatch-wake', 'prepare-cloud-run-pool', 'prepare-cloud-run-secret-access', 'prepare-cloud-run-scaler-access', 'prepare-cloud-run-firestore-access', 'prepare-cloud-run-runtime-role', 'prepare-cloud-run-runtime-access', 'prepare-cloud-run-eventarc-audit'].includes(action) ? {
   role: args[args.indexOf('--identity-role') + 1],
   kind: args[args.indexOf('--identity-kind') + 1],
   proof: args[args.indexOf('--preparation-proof') + 1],
@@ -187,7 +191,7 @@ if (preparationArguments) {
   if (!required.every(flag => args.includes(flag)) ||
     !/^[a-f0-9]{64}$/.test(preparationArguments.digest ?? ''))
     throw new Error('Explicit immutable identity preparation inputs required');
-  if (['activate-cloud-run-orchestration-pool','stop-cloud-run-orchestration-activation','bootstrap-stop-cloud-run-orchestration','activate-cloud-run-controls-pool','stop-cloud-run-controls-activation','bootstrap-stop-cloud-run-controls', 'prepare-cloud-run-dispatch-diagnostic', 'activate-cloud-run-dispatch-service', 'prepare-cloud-run-dispatch-service', 'prepare-cloud-run-dispatch-access', 'prepare-stop-cloud-run-dispatch-scheduler', 'prepare-stop-cloud-run-dispatch-eventarc', 'stop-cloud-run-dispatch-wake', 'prepare-cloud-run-pool', 'prepare-cloud-run-secret-access', 'prepare-cloud-run-scaler-access', 'prepare-cloud-run-firestore-access', 'prepare-cloud-run-runtime-role', 'prepare-cloud-run-runtime-access', 'prepare-cloud-run-eventarc-audit'].includes(action)) {
+  if (['bootstrap-stop-cloud-run-search','activate-cloud-run-search-pool','stop-cloud-run-search-activation','activate-cloud-run-orchestration-pool','stop-cloud-run-orchestration-activation','bootstrap-stop-cloud-run-orchestration','activate-cloud-run-controls-pool','stop-cloud-run-controls-activation','bootstrap-stop-cloud-run-controls', 'prepare-cloud-run-dispatch-diagnostic', 'activate-cloud-run-dispatch-service', 'prepare-cloud-run-dispatch-service', 'prepare-cloud-run-dispatch-access', 'prepare-stop-cloud-run-dispatch-scheduler', 'prepare-stop-cloud-run-dispatch-eventarc', 'stop-cloud-run-dispatch-wake', 'prepare-cloud-run-pool', 'prepare-cloud-run-secret-access', 'prepare-cloud-run-scaler-access', 'prepare-cloud-run-firestore-access', 'prepare-cloud-run-runtime-role', 'prepare-cloud-run-runtime-access', 'prepare-cloud-run-eventarc-audit'].includes(action)) {
     delete preparationArguments.kind;
     preparationArguments.settings = args[args.indexOf('--pool-settings') + 1];
     preparationArguments.settingsDigest = args[args.indexOf('--pool-settings-sha256') + 1];
@@ -1163,6 +1167,9 @@ await runWithCleanup(
             const settings=await readPreparationReceipt(preparationArguments.settings,preparationArguments.settingsDigest);
             const ids=await readPreparationReceipt(preparationArguments.receipts,preparationArguments.receiptsDigest);
             const operation={
+              'bootstrap-stop-cloud-run-search':{role:'search',mode:'cycle',field:'cloudSearchBootstrapCycle',prefix:'temporalCloudSearchBootstrapCycle',creationPrefix:'temporalCloudSearchBootstrapActivation',run:bootstrapStopCloudRunSearchPool,checkpoint:saveSearchBootstrapCycleCheckpoint},
+              'activate-cloud-run-search-pool':{role:'search',mode:'retain',field:'cloudSearchActivation',prefix:'temporalCloudSearchActivation',creationPrefix:'temporalCloudSearchActivationStart',run:activateCloudRunSearchPool,checkpoint:saveSearchActivationCheckpoint},
+              'stop-cloud-run-search-activation':{role:'search',mode:'abort',field:'cloudSearchActivationStop',prefix:'temporalCloudSearchActivationStop',run:stopCloudRunSearchActivation,checkpoint:saveSearchActivationStopCheckpoint},
               'bootstrap-stop-cloud-run-controls':{role:'controls',mode:'cycle',field:'cloudPoolBootstrapCycle',prefix:'temporalCloudPoolBootstrapCycle',creationPrefix:'temporalCloudPoolBootstrapActivation',run:bootstrapStopCloudRunControlsPool,checkpoint:savePoolBootstrapCycleCheckpoint},
               'activate-cloud-run-controls-pool':{role:'controls',mode:'retain',field:'cloudControlsActivation',prefix:'temporalCloudControlsActivation',creationPrefix:'temporalCloudControlsActivationStart',run:activateCloudRunControlsPool,checkpoint:saveControlsActivationCheckpoint},
               'stop-cloud-run-controls-activation':{role:'controls',mode:'abort',field:'cloudControlsActivationStop',prefix:'temporalCloudControlsActivationStop',run:stopCloudRunControlsActivation,checkpoint:saveControlsActivationStopCheckpoint},
@@ -1173,9 +1180,9 @@ await runWithCleanup(
             const prefixes={runner:'temporalCloudIdentityPreparation',scaler:'temporalCloudIdentityPreparation',pool:'temporalCloudPoolPreparation',
               runnerScaler:'temporalCloudScalerAccessPreparation',scalerTrust:'temporalCloudScalerAccessPreparation',poolAccess:'temporalCloudScalerAccessPreparation',
               firestore:'temporalCloudFirestoreAccessPreparation',projectRole:'temporalCloudRuntimeRolePreparation',projectAccess:'temporalCloudRuntimeAccessPreparation',
-              storageRole:'temporalCloudRuntimeRolePreparation',storageAccess:'temporalCloudRuntimeAccessPreparation',
-              ...(operation.mode!=='cycle'?{bootstrapCycle:operation.role==='controls'?'temporalCloudPoolBootstrapCycle':'temporalCloudOrchestrationBootstrapCycle'}:{}),
-              ...(operation.mode==='abort'?{activation:operation.role==='controls'?'temporalCloudControlsActivation':'temporalCloudOrchestrationActivation'}:{})};
+              ...(operation.role==='search'?{}:{storageRole:'temporalCloudRuntimeRolePreparation',storageAccess:'temporalCloudRuntimeAccessPreparation'}),
+              ...(operation.mode!=='cycle'?{bootstrapCycle:operation.role==='controls'?'temporalCloudPoolBootstrapCycle':operation.role==='search'?'temporalCloudSearchBootstrapCycle':'temporalCloudOrchestrationBootstrapCycle'}:{}),
+              ...(operation.mode==='abort'?{activation:operation.role==='controls'?'temporalCloudControlsActivation':operation.role==='search'?'temporalCloudSearchActivation':'temporalCloudOrchestrationActivation'}:{})};
             if(!ids||Object.keys(ids).sort().join(',')!==Object.keys(prefixes).sort().join(',')||ids.runner!==preparationArguments.runnerOperationId||
               new Set(Object.values(ids)).size!==Object.keys(prefixes).length||Object.values(ids).some(id=>!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(id??'')))
               throw new Error('EXACT_BOOTSTRAP_RECEIPT_MANIFEST_REQUIRED');

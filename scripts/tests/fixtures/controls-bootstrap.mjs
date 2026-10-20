@@ -9,7 +9,7 @@ import { proofDigest } from '../../temporal-release-runtime.mjs';
 export function controlsBootstrapFixture(role='controls') {
   const buildId = 'a'.repeat(40),
     image = `us-central1-docker.pkg.dev/urm-app-staging/urm-temporal/worker@sha256:${'b'.repeat(64)}`,
-    workerRoles = ['orchestration', 'controls'];
+    workerRoles = ['orchestration', 'controls', 'search'];
   const platform = {
     schemaVersion: 1,
     environment: 'staging',
@@ -51,7 +51,7 @@ export function controlsBootstrapFixture(role='controls') {
     releaseId = randomUUID(),
     operationId = randomUUID(),
     evidenceDigest = 'c'.repeat(64),
-    settings = { apiKeyVersion: '2', runtimeSecrets: role==='orchestration'?['RUNTIME_ALERT_RECIPIENTS','ADMIN_BASE_URL'].map(name=>({name,secret:name,version:'2'})):[] };
+    settings = { apiKeyVersion: '2', runtimeSecrets: role==='search'?[{name:'TEMPORAL_SEARCH_CONFIG_JSON',secret:'TEMPORAL_SEARCH_CONFIG',version:'2'}]:role==='orchestration'?['RUNTIME_ALERT_RECIPIENTS','ADMIN_BASE_URL'].map(name=>({name,secret:name,version:'2'})):[] };
   const receipts = {},
     policies = new Map(),
     roles = new Map(),
@@ -183,7 +183,7 @@ export function controlsBootstrapFixture(role='controls') {
       timeCreated: '2026-01-01T00:00:00Z',
     },
     projectGrants = [firestoreGrant];
-  for (const surface of ['project', 'storage']) {
+  for (const surface of role==='search'?['project']:['project', 'storage']) {
     const plan = runtimeRolePreparationPlan({
       platform,
       role,
