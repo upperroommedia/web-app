@@ -8,7 +8,8 @@ const binding = () => ({
   namespace: 'urm-app-staging.qwejt',
   deploymentName: 'urm-worker-staging',
   buildId,
-  ...serverlessResourceNames(buildId),
+  role: 'orchestration',
+  ...serverlessResourceNames(buildId, 'orchestration'),
   image: `us-central1-docker.pkg.dev/urm-app-staging/urm-temporal/worker@sha256:${'b'.repeat(64)}`,
   maxInstances: 1,
   stabilizationSeconds: 180,
@@ -49,3 +50,18 @@ for (const patch of [
   test(`rejects an unsafe staging binding ${JSON.stringify(patch)}`, () => {
     assert.throws(() => serverlessComputeArguments({ ...binding(), ...patch }));
   });
+
+test('each queue uses its own deployment, pool and least-privilege service identities', () => {
+  const roles = ['orchestration', 'controls', 'media', 'email', 'images', 'search'];
+  const names = roles.map((role) => serverlessResourceNames(buildId, role));
+  for (const field of ['poolName', 'deploymentName', 'runnerServiceAccount', 'invokerServiceAccount'])
+    assert.equal(new Set(names.map((name) => name[field])).size, roles.length);
+  for (let index = 0; index < roles.length; index++) {
+    assert.equal(names[index].taskQueue, `urm-${roles[index]}`);
+    const args = serverlessComputeArguments({ ...binding(), role: roles[index], ...names[index] });
+    assert.equal(args[args.indexOf('--deployment-name') + 1], names[index].deploymentName);
+  }
+  assert.throws(() => serverlessResourceNames(buildId, 'unknown'));
+  assert.throws(() => serverlessResourceNames(buildId, ['controls']));
+  assert.throws(() => serverlessComputeArguments({ ...binding(), role: 'controls' }));
+});

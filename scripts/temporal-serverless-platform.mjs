@@ -3,22 +3,28 @@
 const projectId = 'urm-app-staging';
 const region = 'us-central1';
 const commit = /^[a-f0-9]{40}$/;
-export function serverlessResourceNames(buildId) {
+const roles = { orchestration: 'o', controls: 'c', media: 'm', email: 'e', images: 'i', search: 's' };
+export function serverlessResourceNames(buildId, role) {
   if (typeof buildId !== 'string' || !commit.test(buildId)) throw new Error('A full source commit is required');
+  if (typeof role !== 'string' || !Object.hasOwn(roles, role)) throw new Error('An explicit reviewed worker role is required');
   return {
-    poolName: `urm-worker-${buildId.slice(0, 20)}`,
-    runnerServiceAccount: `temporal-w-${buildId.slice(0, 16)}@${projectId}.iam.gserviceaccount.com`,
-    invokerServiceAccount: `temporal-s-${buildId.slice(0, 16)}@${projectId}.iam.gserviceaccount.com`,
+    deploymentName: role === 'orchestration' ? 'urm-worker-staging' : `urm-worker-${role}-staging`,
+    taskQueue: `urm-${role}`,
+    poolName: `urm-worker-${role}-${buildId.slice(0, 20)}`,
+    runnerServiceAccount: `tw-${roles[role]}-${buildId.slice(0, 20)}@${projectId}.iam.gserviceaccount.com`,
+    invokerServiceAccount: `ts-${roles[role]}-${buildId.slice(0, 20)}@${projectId}.iam.gserviceaccount.com`,
   };
 }
 function validateBinding(config) {
-  const names = serverlessResourceNames(config.buildId);
+  const names = serverlessResourceNames(config.buildId, config.role);
   const fields = [
     'projectId',
     'region',
     'namespace',
     'deploymentName',
     'buildId',
+    'role',
+    'taskQueue',
     'poolName',
     'runnerServiceAccount',
     'invokerServiceAccount',
@@ -31,7 +37,6 @@ function validateBinding(config) {
     config.projectId !== projectId ||
     config.region !== region ||
     config.namespace !== `${projectId}.qwejt` ||
-    config.deploymentName !== 'urm-worker-staging' ||
     Object.entries(names).some(([key, expected]) => config[key] !== expected) ||
     typeof config.image !== 'string' ||
     !/^us-central1-docker\.pkg\.dev\/urm-app-staging\/urm-temporal\/worker@sha256:[a-f0-9]{64}$/.test(config.image) ||
