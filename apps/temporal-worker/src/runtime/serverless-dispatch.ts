@@ -28,6 +28,7 @@ export function createServerlessDispatchHandler(options: ServerlessDispatchOptio
   let active: AbortController | undefined;
   let draining = false;
   let inflight: Promise<boolean> | undefined;
+  let actualWork: Promise<boolean> | undefined;
   const handler = async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
     request.resume();
     const end = (status: number) => response.writeHead(status, { 'cache-control': 'no-store' }).end();
@@ -82,8 +83,10 @@ export function createServerlessDispatchHandler(options: ServerlessDispatchOptio
           if (active === controller) {
             active = undefined;
             inflight = undefined;
+            actualWork = undefined;
           }
         });
+      actualWork = work;
       inflight = Promise.race([work, aborted]).finally(() => clearTimeout(timer));
     }
     try {
@@ -96,7 +99,9 @@ export function createServerlessDispatchHandler(options: ServerlessDispatchOptio
     async drain(): Promise<void> {
       draining = true;
       active?.abort();
-      await inflight?.catch(() => undefined);
+      // HTTP timeout/cancellation is not SDK settlement. Keep dependencies alive
+      // until the actual pass settles; interrupted leases remain for reconciliation.
+      await actualWork?.catch(() => undefined);
     },
   });
 }

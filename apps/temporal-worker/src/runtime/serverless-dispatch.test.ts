@@ -16,8 +16,9 @@ function request(handler: ReturnType<typeof createServerlessDispatchHandler>, ov
   };
   let status = 0;
   let body = '';
-  const res = {
-    writeHead: jest.fn((code: number) => {
+  interface TestResponse { writeHead(code: number): TestResponse; end(value?: string): void }
+  const res: TestResponse = {
+    writeHead: jest.fn((code: number): TestResponse => {
       status = code;
       return res;
     }),
@@ -137,12 +138,13 @@ test('a hung dispatch pass reaches its deadline and aborts rather than acknowled
   jest.useFakeTimers();
   try {
     let active!: AbortSignal;
+    let finish!: (value: boolean) => void;
     const handler = createServerlessDispatchHandler({
       ...config(),
       passTimeoutMs: 1000,
       run: (signal: AbortSignal) => {
         active = signal;
-        return new Promise<boolean>(() => undefined);
+        return new Promise<boolean>(resolve => { finish = resolve; });
       },
     });
     const call = request(handler);
@@ -151,7 +153,9 @@ test('a hung dispatch pass reaches its deadline and aborts rather than acknowled
     await call.done;
     expect(active.aborted).toBe(true);
     expect(call.result().status).toBe(503);
-    await handler.drain();
+    const closing = handler.drain();
+    finish(false);
+    await closing;
   } finally {
     jest.useRealTimers();
   }
@@ -205,4 +209,28 @@ test('prepared disabled service never acquires dispatch authority, including val
 });
 test.each([undefined, null, 'true', 'ENABLED'])('missing or invalid admission %s fails closed', admission => {
   expect(() => createServerlessDispatchHandler(Object.assign(config(), { admission }))).toThrow('Explicit dispatch admission required');
+});
+
+test.each(['resolve', 'reject'] as const)('shutdown retains ownership of an aborted SDK pass until it actually %ss', async settlement => {
+  let settle!: (value: boolean) => void;
+  let reject!: (error: Error) => void;
+  const run = jest.fn(() => new Promise<boolean>((resolve, fail) => { settle = resolve; reject = fail; }));
+  const handler = createServerlessDispatchHandler(config(run));
+  const call = request(handler);
+  await Promise.resolve();
+  let drained = false;
+  const closing = handler.drain().then(() => { drained = true; });
+  await call.done;
+  await Promise.resolve();
+  expect(call.result().status).toBe(503);
+  await new Promise<void>(resolve => setImmediate(resolve));
+  const drainedBeforeSdkSettled = drained;
+  const late = request(handler);
+  await late.done;
+  expect(late.result().status).toBe(503);
+  expect(run).toHaveBeenCalledTimes(1);
+  if (settlement === 'resolve') settle(true); else reject(new Error('private SDK failure'));
+  await closing;
+  expect(drainedBeforeSdkSettled).toBe(false);
+  expect(drained).toBe(true);
 });
