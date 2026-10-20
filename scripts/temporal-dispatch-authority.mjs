@@ -22,14 +22,18 @@ export function dispatchPreparationAuthority({ platform, role, settings, release
   if (!isDeepStrictEqual(original.plan, expected)) fail();
   const callers = { event: platform.dispatch.eventServiceAccount, scheduler: platform.dispatch.schedulerServiceAccount };
   const identityPlan = { role, buildId: platform.workerBuildId, releaseId, evidenceDigest, runner: workload.runner, callers };
-  return { workload, original, callers, async verify(api) {
+  const verifyAccounts = async api => {
     const runner = await readOwnedPreparationRunner(identityPlan, runnerReceipt, api);
     const event = await readOwnedDispatchCaller(identityPlan, eventReceipt, api, 'event');
     const scheduler = await readOwnedDispatchCaller(identityPlan, schedulerReceipt, api, 'scheduler');
     if (new Set([runner.uniqueId, event.uniqueId, scheduler.uniqueId]).size !== 3 ||
       original.prerequisites?.runnerUniqueId !== runner.uniqueId) fail();
+    return { runnerUniqueId: runner.uniqueId, eventUniqueId: event.uniqueId, schedulerUniqueId: scheduler.uniqueId };
+  };
+  return { workload, original, callers, verifyAccounts, async verify(api) {
+    const accounts = await verifyAccounts(api);
     const service = preparedDispatchServiceIdentity(await observeCloudRunDispatchService(platform, api, 'disabled'), expected);
     if (!isDeepStrictEqual(service, original.service)) fail();
-    return { runnerUniqueId: runner.uniqueId, eventUniqueId: event.uniqueId, schedulerUniqueId: scheduler.uniqueId, service };
+    return { ...accounts, service };
   } };
 }

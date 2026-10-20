@@ -434,3 +434,47 @@ followed by same-original-run recovery. This is local integration evidence only;
 it does not prove deployed credentials, native Cloud Run delivery, an OS restart,
 Scheduler/timer wakes, or zero-to-work-to-zero behavior. No activation operation or
 live service change is established by this prerequisite.
+
+### Guarded dispatch service activation
+
+The explicit `activate-cloud-run-dispatch-service` action is separate from
+`workers-ready`. It requires the preparation evidence/settings hashes, original
+runner/event/Scheduler/service preparation operation IDs, matched staging operator,
+source CI/image joins, and unchanged paused release authority at
+`provider-usage-ready`. It neither advances that phase nor creates wakes, changes
+ownership/routing, attaches WCI, scales workers, or opens admission.
+
+The action rederives the original disabled service and three distinct native account
+identities. It checks numeric enabled shared-key version/accessor, exact direct
+caller policy, managed service-agent/audit prerequisites and absence of the three
+source-named wakes. Other producers/inherited callers are not excluded by those
+reads: the mandatory independent runtime admission fence prevents new business
+lease claims while canonical admission is paused. Existing in-flight work still
+requires authoritative drain.
+
+Before mutation, the source-verified native collector must complete a fresh exact
+candidate role/history/private-receipt join. Its intent is saved under this owned
+operation before native start. Uncertain starts reconcile that same intent and
+private directory, never a replacement probe. Private key-identity projections are
+written only after the collector validates that directory. The original probe,
+request, prerequisites and authorization timestamps remain immutable after attempt.
+
+One saved-attempt conditional PATCH changes only the exact enabled template and
+operation annotation on the original service. The final awaited prerequisite reads
+are followed by another freshness check immediately before PATCH. A known native
+LRO is saved before GET-only polling; successful response and current UID,
+generation, revision and configuration must agree. An unknown PATCH acknowledgement
+permits only exact desired enabled readback, with no resend or causal attribution.
+Definite rejection and native operation failure remain fenced. Delayed readback
+validates the original authorization window without extending it or expiring cleanup.
+Completed receipt collisions and later service replacement/configuration changes
+are denied.
+
+The [Cloud Run v2 PATCH API](https://docs.cloud.google.com/run/docs/reference/rest/v2/projects.locations.services/patch)
+accepts a Service and update mask and returns a native Operation. This operation
+uses the existing Service etag with `updateMask=template,annotations`; it never
+sets `allowMissing` or invents a request-id parameter. Tests use controlled API and
+probe observations plus actual dedicated Firestore authority transactions. They do
+not establish native API acceptance, deployed effective permissions, invocation,
+event/retry/lease wakes, original process recovery or readiness. The existing
+recovery/dispatch hard stop remains in place before workers-ready/ownership/open.

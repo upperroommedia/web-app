@@ -5,7 +5,7 @@ import { assertNativeSnapshot, nativeSnapshotProof, proofDigest } from './tempor
  */
 async function saveCheckpoint({ firestore, lockRef, controlRef, stateRef,
   immutableReceipt, creationReceipt, ownedOperation, expectedAuthority, config, operationId, bindingDigest, operatorPrincipal, identityState, kind }) {
-  const [field, action] = { identity: ['cloudIdentityPreparation', 'prepare-cloud-run-identity'],
+  const [field, action] = { dispatchActivation: ['cloudDispatchActivation', 'activate-cloud-run-dispatch-service'], identity: ['cloudIdentityPreparation', 'prepare-cloud-run-identity'],
     eventarcCycle: ['cloudDispatchEventarcCycle', 'prepare-stop-cloud-run-dispatch-eventarc'],
     schedulerCycle: ['cloudDispatchSchedulerCycle', 'prepare-stop-cloud-run-dispatch-scheduler'],
     eventarcAudit: ['cloudEventarcAuditPreparation', 'prepare-cloud-run-eventarc-audit'],
@@ -41,6 +41,13 @@ async function saveCheckpoint({ firestore, lockRef, controlRef, stateRef,
     if (current.get(field)?.plan &&
       proofDigest(current.get(field).plan) !== proofDigest(identityState.plan))
       throw new Error('IDENTITY_PREPARATION_MANIFEST_CHANGED');
+    if (kind === 'dispatchActivation' && Object.hasOwn(current.get(field) ?? {}, 'workerIntent') &&
+      proofDigest(current.get(field).workerIntent) !== proofDigest(identityState.workerIntent ?? null))
+      throw new Error('DISPATCH_ACTIVATION_PROBE_INTENT_CHANGED');
+    if (kind === 'dispatchActivation' && current.get(field) && current.get(field).stage !== 'planned' &&
+      ['proof', 'request', 'attemptedAt', 'prerequisites'].some(key =>
+        proofDigest(current.get(field)[key] ?? null) !== proofDigest(identityState[key] ?? null)))
+      throw new Error('DISPATCH_ACTIVATION_AUTHORIZATION_CHANGED');
     const record = { operationId, releaseId: config.releaseId, bindingDigest, identityState, operatorPrincipal };
     if (receipt?.exists && proofDigest(receipt.data()) !== proofDigest(record))
       throw new Error('IDENTITY_PREPARATION_RECEIPT_CHANGED');
@@ -76,3 +83,5 @@ export const saveEventarcAuditPreparationCheckpoint = options => saveCheckpoint(
 export const saveDispatchSchedulerCycleCheckpoint = options => saveCheckpoint({ ...options, kind: 'schedulerCycle' });
 
 export const saveDispatchEventarcCycleCheckpoint = options => saveCheckpoint({ ...options, kind: 'eventarcCycle' });
+
+export const saveDispatchActivationCheckpoint = options => saveCheckpoint({ ...options, kind: 'dispatchActivation' });

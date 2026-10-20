@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { prepareCloudRunIdentity } from '../temporal-prepare-cloud-identity.mjs';
-import { saveDispatchEventarcCycleCheckpoint, saveDispatchSchedulerCycleCheckpoint, saveEventarcAuditPreparationCheckpoint, saveDispatchWakeStopCheckpoint, saveDispatchAccessPreparationCheckpoint, saveDispatchServicePreparationCheckpoint, saveIdentityPreparationCheckpoint, savePoolPreparationCheckpoint, saveSecretAccessPreparationCheckpoint, saveScalerAccessPreparationCheckpoint, saveFirestoreAccessPreparationCheckpoint, saveRuntimeRolePreparationCheckpoint, saveRuntimeAccessPreparationCheckpoint } from '../temporal-preparation-checkpoint.mjs';
+import { saveDispatchActivationCheckpoint, saveDispatchEventarcCycleCheckpoint, saveDispatchSchedulerCycleCheckpoint, saveEventarcAuditPreparationCheckpoint, saveDispatchWakeStopCheckpoint, saveDispatchAccessPreparationCheckpoint, saveDispatchServicePreparationCheckpoint, saveIdentityPreparationCheckpoint, savePoolPreparationCheckpoint, saveSecretAccessPreparationCheckpoint, saveScalerAccessPreparationCheckpoint, saveFirestoreAccessPreparationCheckpoint, saveRuntimeRolePreparationCheckpoint, saveRuntimeAccessPreparationCheckpoint } from '../temporal-preparation-checkpoint.mjs';
 import { nativeSnapshotProof } from '../temporal-release-runtime.mjs';
 import { serverlessResourceNames } from '../temporal-serverless-platform.mjs';
 import { dispatchResourceNames } from '../temporal-serverless-dispatch-resources.mjs';
@@ -70,10 +70,10 @@ for (const subject of [{ role: 'controls', kind: 'runner' }, { role: 'dispatch',
   } finally { await deleteApp(app); }
 });
 
-for (const kind of ['eventarcCycle', 'eventarcAudit', 'wakeStop', 'dispatchAccess', 'service', 'pool', 'secret', 'scaler', 'firestore', 'runtimeRole', 'runtimeAccess']) test(`${kind} checkpoint uses its own action and field under real native authority fences`, async () => {
-  const saveResource = { eventarcCycle: saveDispatchEventarcCycleCheckpoint, eventarcAudit: saveEventarcAuditPreparationCheckpoint, wakeStop: saveDispatchWakeStopCheckpoint, dispatchAccess: saveDispatchAccessPreparationCheckpoint, service: saveDispatchServicePreparationCheckpoint, pool: savePoolPreparationCheckpoint, secret: saveSecretAccessPreparationCheckpoint, scaler: saveScalerAccessPreparationCheckpoint, firestore: saveFirestoreAccessPreparationCheckpoint, runtimeRole: saveRuntimeRolePreparationCheckpoint, runtimeAccess: saveRuntimeAccessPreparationCheckpoint }[kind];
-  const field = { eventarcCycle: 'cloudDispatchEventarcCycle', eventarcAudit: 'cloudEventarcAuditPreparation', wakeStop: 'cloudDispatchWakeStop', dispatchAccess: 'cloudDispatchAccessPreparation', service: 'cloudDispatchServicePreparation', pool: 'cloudPoolPreparation', secret: 'cloudSecretAccessPreparation', scaler: 'cloudScalerAccessPreparation', firestore: 'cloudFirestoreAccessPreparation', runtimeRole: 'cloudRuntimeRolePreparation', runtimeAccess: 'cloudRuntimeAccessPreparation' }[kind];
-  const action = { eventarcCycle: 'prepare-stop-cloud-run-dispatch-eventarc', eventarcAudit: 'prepare-cloud-run-eventarc-audit', wakeStop: 'stop-cloud-run-dispatch-wake', dispatchAccess: 'prepare-cloud-run-dispatch-access', service: 'prepare-cloud-run-dispatch-service', pool: 'prepare-cloud-run-pool', secret: 'prepare-cloud-run-secret-access', scaler: 'prepare-cloud-run-scaler-access', firestore: 'prepare-cloud-run-firestore-access', runtimeRole: 'prepare-cloud-run-runtime-role', runtimeAccess: 'prepare-cloud-run-runtime-access' }[kind];
+for (const kind of ['dispatchActivation', 'eventarcCycle', 'eventarcAudit', 'wakeStop', 'dispatchAccess', 'service', 'pool', 'secret', 'scaler', 'firestore', 'runtimeRole', 'runtimeAccess']) test(`${kind} checkpoint uses its own action and field under real native authority fences`, async () => {
+  const saveResource = { dispatchActivation: saveDispatchActivationCheckpoint, eventarcCycle: saveDispatchEventarcCycleCheckpoint, eventarcAudit: saveEventarcAuditPreparationCheckpoint, wakeStop: saveDispatchWakeStopCheckpoint, dispatchAccess: saveDispatchAccessPreparationCheckpoint, service: saveDispatchServicePreparationCheckpoint, pool: savePoolPreparationCheckpoint, secret: saveSecretAccessPreparationCheckpoint, scaler: saveScalerAccessPreparationCheckpoint, firestore: saveFirestoreAccessPreparationCheckpoint, runtimeRole: saveRuntimeRolePreparationCheckpoint, runtimeAccess: saveRuntimeAccessPreparationCheckpoint }[kind];
+  const field = { dispatchActivation: 'cloudDispatchActivation', eventarcCycle: 'cloudDispatchEventarcCycle', eventarcAudit: 'cloudEventarcAuditPreparation', wakeStop: 'cloudDispatchWakeStop', dispatchAccess: 'cloudDispatchAccessPreparation', service: 'cloudDispatchServicePreparation', pool: 'cloudPoolPreparation', secret: 'cloudSecretAccessPreparation', scaler: 'cloudScalerAccessPreparation', firestore: 'cloudFirestoreAccessPreparation', runtimeRole: 'cloudRuntimeRolePreparation', runtimeAccess: 'cloudRuntimeAccessPreparation' }[kind];
+  const action = { dispatchActivation: 'activate-cloud-run-dispatch-service', eventarcCycle: 'prepare-stop-cloud-run-dispatch-eventarc', eventarcAudit: 'prepare-cloud-run-eventarc-audit', wakeStop: 'stop-cloud-run-dispatch-wake', dispatchAccess: 'prepare-cloud-run-dispatch-access', service: 'prepare-cloud-run-dispatch-service', pool: 'prepare-cloud-run-pool', secret: 'prepare-cloud-run-secret-access', scaler: 'prepare-cloud-run-scaler-access', firestore: 'prepare-cloud-run-firestore-access', runtimeRole: 'prepare-cloud-run-runtime-role', runtimeAccess: 'prepare-cloud-run-runtime-access' }[kind];
   const app = initializeApp({ projectId: 'demo-preparation-checkpoint' }, randomUUID()), db = getFirestore(app);
   const prefix = `_identityPreparationTests/${randomUUID()}/records`;
   const lockRef = db.doc(`${prefix}/operation`), controlRef = db.doc(`${prefix}/control`), stateRef = db.doc(`${prefix}/state`), immutableReceipt = db.doc(`${prefix}/receipt`);
@@ -89,9 +89,22 @@ for (const kind of ['eventarcCycle', 'eventarcAudit', 'wakeStop', 'dispatchAcces
     assert.equal((await lockRef.get()).get(`${field}.stage`), 'planned');
     assert.equal((await lockRef.get()).get('cloudIdentityPreparation'), undefined);
     await assert.rejects(saveIdentityPreparationCheckpoint(options));
+    if (kind === 'dispatchActivation') {
+      const withIntent = { ...options.identityState, workerIntent: { nonce: 'original' } };
+      options.ownedOperation = await saveResource({ ...options, identityState: withIntent });
+      await assert.rejects(saveResource({ ...options, identityState: options.identityState }));
+      const attempted = { ...withIntent, stage: 'attempted', proof: { runId: 'original-run' },
+        request: { etag: 'original-etag' }, attemptedAt: 'original-time', prerequisites: { runner: 'original' } };
+      options.ownedOperation = await saveResource({ ...options, identityState: attempted });
+      await assert.rejects(saveResource({ ...options, identityState: { ...attempted, proof: null } }));
+      await assert.rejects(saveResource({ ...options, identityState: { ...attempted, request: { etag: 'foreign' } } }));
+      assert.equal((await lockRef.get()).get(`${field}.proof.runId`), 'original-run');
+      // Restore no authority: only the original checkpoint continues below.
+      options.identityState = attempted;
+    }
     await controlRef.update({ admission: 'open' });
     await assert.rejects(saveResource({ ...options, identityState: { ...options.identityState, stage: 'attempted' } }));
-    assert.equal((await lockRef.get()).get(`${field}.stage`), 'planned');
+    assert.equal((await lockRef.get()).get(`${field}.stage`), kind === 'dispatchActivation' ? 'attempted' : 'planned');
   } finally {
     for (const ref of [lockRef, controlRef, stateRef, immutableReceipt]) await ref.delete();
     await deleteApp(app);
