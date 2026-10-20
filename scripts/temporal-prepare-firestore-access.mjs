@@ -1,8 +1,7 @@
 import { prepareFencedPolicyGrant } from './temporal-preparation-iam.mjs';
 import { proofDigest } from './temporal-release-runtime.mjs';
 import { validateCloudRunReleasePlatform } from './temporal-release-cloud-run.mjs';
-import { renderServerlessWorkerPool } from './temporal-serverless-resources.mjs';
-import { readOwnedPreparationRunner } from './temporal-preparation-resources.mjs';
+import { readOwnedPreparationRunner, renderPreparationWorkload } from './temporal-preparation-resources.mjs';
 const fail = () => { throw new Error('CLOUD_RUN_FIRESTORE_ACCESS_PREPARATION_UNCONFIRMED'); };
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
 /** Project policy binding, with access restricted to the actual default database.
@@ -11,16 +10,16 @@ const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
 export async function prepareCloudRunFirestoreAccess({ platform, role, settings, operationId, releaseId,
   evidenceDigest, identityReceipt, api, save, saved }) {
   validateCloudRunReleasePlatform(platform);
-  const binding = platform.roleBindings.find(binding => binding.role === role);
-  if (!binding || !uuid.test(operationId ?? '') || !uuid.test(releaseId ?? '') ||
+  if (!uuid.test(operationId ?? '') || !uuid.test(releaseId ?? '') ||
     !/^[a-f0-9]{64}$/.test(evidenceDigest ?? '') || typeof api !== 'function' || typeof save !== 'function') fail();
   const database = 'projects/urm-app-staging/databases/(default)';
   const condition = { title: 'urm-temporal-default-firestore', expression: `resource.name=="${database}"` };
-  const pool = renderServerlessWorkerPool(binding, settings).name;
+  const workload = renderPreparationWorkload(platform, role, settings);
   const plan = { schemaVersion: 1, operationId, releaseId, evidenceDigest, role, buildId: platform.workerBuildId,
-    runner: binding.runnerServiceAccount, resource: 'projects/urm-app-staging', database, pool,
+    runner: workload.runner, resource: 'projects/urm-app-staging', database,
+    workload: { type: workload.type, name: workload.body.name },
     settingsSHA256: proofDigest(settings), identityReceiptSHA256: proofDigest(identityReceipt),
-    grants: [{ role: 'roles/datastore.user', members: [`serviceAccount:${binding.runnerServiceAccount}`], condition }] };
+    grants: [{ role: 'roles/datastore.user', members: [`serviceAccount:${workload.runner}`], condition }] };
   const originalDatabase = saved?.prerequisites?.database;
   if (saved && ['attempted', 'acknowledged', 'completed'].includes(saved.stage) &&
       (!originalDatabase || originalDatabase.name !== database || originalDatabase.type !== 'FIRESTORE_NATIVE' ||
@@ -38,7 +37,7 @@ export async function prepareCloudRunFirestoreAccess({ platform, role, settings,
         if (databaseUID !== undefined && databaseUID !== metadata.uid) fail();
         databaseUID = metadata.uid;
         if (!saved || saved.stage === 'planned') {
-          try { await api(`https://run.googleapis.com/v2/${pool}`); fail(); }
+          try { await api(`https://run.googleapis.com/v2/${plan.workload.name}`); fail(); }
           catch (error) { if (error?.status !== 404) throw error; }
         }
         return { runnerUniqueId: account.uniqueId, database: { name: metadata.name, uid: metadata.uid, type: metadata.type, locationId: metadata.locationId } };

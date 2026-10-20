@@ -23,7 +23,7 @@ function platform() {
     roleBindings: workerRoles.map(role => ({ projectId: 'urm-app-staging', region: 'us-central1', namespace: 'urm-app-staging.qwejt', buildId, role, ...serverlessResourceNames(buildId, role), image, maxInstances: 1, stabilizationSeconds: 180 })) };
 }
 
-test('native checkpoint fences control/state drift before create and preserves completed identity receipt', async () => {
+for (const subject of [{ role: 'controls', kind: 'runner' }, { role: 'dispatch', kind: 'event' }]) test(`${subject.role}/${subject.kind} native checkpoint fences control/state drift before create and preserves completed identity receipt`, async () => {
   const app = initializeApp({ projectId: 'demo-preparation-checkpoint' }, randomUUID()), db = getFirestore(app);
   try {
     for (const drift of ['control', 'state', 'none']) {
@@ -37,7 +37,7 @@ test('native checkpoint fences control/state drift before create and preserves c
       let ownedOperation = nativeSnapshotProof(await lockRef.get());
       const expectedAuthority = { control: nativeSnapshotProof(await controlRef.get()), state: nativeSnapshotProof(await stateRef.get()) };
       let posts = 0, account, saves = 0;
-      const options = { platform: platform(), role: 'controls', kind: 'runner', creator: operatorPrincipal.email, operationId: id, evidenceDigest: 'f'.repeat(64),
+      const options = { platform: platform(), ...subject, creator: operatorPrincipal.email, operationId: id, evidenceDigest: 'f'.repeat(64),
         save: async identityState => {
           // Race after the planned transaction but before the HTTP-authorizing attempted checkpoint.
           if (++saves === 2 && drift !== 'none') await (drift === 'control' ? controlRef : stateRef).update({ changedDuringEvidence: true });

@@ -1,17 +1,17 @@
 import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { validateCloudRunReleasePlatform } from './temporal-release-cloud-run.mjs';
+import { preparationIdentityEmail } from './temporal-preparation-resources.mjs';
 
 const fail = () => { throw new Error('CLOUD_RUN_IDENTITY_PREPARATION_UNCONFIRMED'); };
 const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
 function identityPlan({ platform, role, kind, operationId, creator, evidenceDigest }) {
   validateCloudRunReleasePlatform(platform);
-  const binding = platform.roleBindings.find(binding => binding.role === role);
-  if (!binding || !['runner', 'scaler'].includes(kind) || !uuid.test(operationId ?? '') ||
+  if (!uuid.test(operationId ?? '') ||
     typeof creator !== 'string' || !/^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+$/.test(creator) ||
     !/^[a-f0-9]{64}$/.test(evidenceDigest ?? '')) fail();
-  const email = kind === 'runner' ? binding.runnerServiceAccount : binding.invokerServiceAccount;
+  const email = preparationIdentityEmail(platform, role, kind);
   const accountId = email.split('@')[0];
   const marker = digest({ operationId, build: platform.workerBuildId, image: platform.workerImage, role, kind, evidenceDigest });
   return { schemaVersion: 1, operationId, creator, buildId: platform.workerBuildId, role, kind, email, evidenceDigest,
