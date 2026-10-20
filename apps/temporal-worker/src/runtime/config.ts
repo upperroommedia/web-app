@@ -120,6 +120,17 @@ export function loadRuntimeConfig(env: NodeJS.ProcessEnv = process.env): Runtime
   const queues = (env.TEMPORAL_TASK_QUEUES || TASK_QUEUES.join(',')).split(',').map((q) => q.trim());
   if (!queues.length || queues.some((q) => !TASK_QUEUES.includes(q as (typeof TASK_QUEUES)[number])))
     throw new Error('Unknown worker queue');
+  if (hosting === 'cloud-run') {
+    const role = queues[0].slice('urm-'.length);
+    const suffix = projectId === 'urm-app-staging' ? 'staging' : 'production';
+    const deployment = role === 'orchestration' ? `urm-worker-${suffix}` : `urm-worker-${role}-${suffix}`;
+    if (
+      queues.length !== 1 ||
+      required('TEMPORAL_DEPLOYMENT_NAME') !== deployment ||
+      env.GOOGLE_APPLICATION_CREDENTIALS
+    )
+      throw new Error('Cloud Run requires one role deployment and its native service identity');
+  }
   const controlsConcurrency = Number(env.TEMPORAL_CONTROLS_CONCURRENCY || 10);
   if (!Number.isInteger(controlsConcurrency) || controlsConcurrency < 1 || controlsConcurrency > 100)
     throw new Error('Invalid controls concurrency');

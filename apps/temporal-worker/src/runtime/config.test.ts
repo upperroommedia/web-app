@@ -174,6 +174,8 @@ const serverlessEnv = {
   TEMPORAL_WORKER_HOSTING: 'cloud-run',
   TEMPORAL_DISPATCHER_ENABLED: 'false',
   TEMPORAL_MEDIA_CONCURRENCY: '1',
+  TEMPORAL_TASK_QUEUES: 'urm-orchestration',
+  TEMPORAL_DEPLOYMENT_NAME: 'urm-worker-staging',
 };
 test('serverless pools disable the continuous outbox poller and reserve a bounded shutdown window', () => {
   expect(loadRuntimeConfig(serverlessEnv)).toMatchObject({
@@ -186,7 +188,10 @@ test.each([
   { TEMPORAL_DISPATCHER_ENABLED: undefined },
   { TEMPORAL_DISPATCHER_ENABLED: 'true' },
   { TEMPORAL_WORKER_HOSTING: 'unknown' },
-  { TEMPORAL_MEDIA_CONCURRENCY: '2' },
+  { TEMPORAL_TASK_QUEUES: 'urm-media', TEMPORAL_MEDIA_CONCURRENCY: '2' },
+  { TEMPORAL_TASK_QUEUES: undefined },
+  { TEMPORAL_TASK_QUEUES: 'urm-controls' },
+  { GOOGLE_APPLICATION_CREDENTIALS: '/unexpected-account.json' },
   { TEMPORAL_WORKER_POD_NAME: 'pod' },
   { TEMPORAL_CLUSTER_ID: 'cluster' },
 ])('serverless startup rejects an unsafe hosting binding %j', (patch) => {

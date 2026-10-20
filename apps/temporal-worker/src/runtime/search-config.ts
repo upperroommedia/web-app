@@ -60,6 +60,21 @@ export function validateSearchConfigurations(value: unknown, projectId: string):
 
 export function loadSearchConfigurations(projectId: string, selectedQueues: readonly string[], env = process.env) {
   if (!selectedQueues.includes('urm-search')) return {};
+  const json = env.TEMPORAL_SEARCH_CONFIG_JSON;
+  if (json !== undefined) {
+    if (
+      env.TEMPORAL_WORKER_HOSTING !== 'cloud-run' ||
+      env.TEMPORAL_SEARCH_CONFIG_FILE ||
+      Buffer.byteLength(json) > 32768
+    )
+      throw new Error('Invalid Cloud Run search configuration source');
+    try {
+      return validateSearchConfigurations(JSON.parse(json), projectId);
+    } catch {
+      // JSON parse diagnostics can echo the private key; never propagate their message.
+      throw new Error('Invalid private Cloud Run search configuration');
+    }
+  }
   const path = env.TEMPORAL_SEARCH_CONFIG_FILE;
   if (!path) throw new Error('Search workers require TEMPORAL_SEARCH_CONFIG_FILE');
   // Kubernetes Secret volumes use0440; private local files may use0600.
