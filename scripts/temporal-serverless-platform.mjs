@@ -6,7 +6,8 @@ const commit = /^[a-f0-9]{40}$/;
 const roles = { orchestration: 'o', controls: 'c', media: 'm', email: 'e', images: 'i', search: 's' };
 export function serverlessResourceNames(buildId, role) {
   if (typeof buildId !== 'string' || !commit.test(buildId)) throw new Error('A full source commit is required');
-  if (typeof role !== 'string' || !Object.hasOwn(roles, role)) throw new Error('An explicit reviewed worker role is required');
+  if (typeof role !== 'string' || !Object.hasOwn(roles, role))
+    throw new Error('An explicit reviewed worker role is required');
   return {
     deploymentName: role === 'orchestration' ? 'urm-worker-staging' : `urm-worker-${role}-staging`,
     taskQueue: `urm-${role}`,
@@ -43,6 +44,8 @@ function validateBinding(config) {
     !Number.isInteger(config.maxInstances) ||
     config.maxInstances < 1 ||
     config.maxInstances > 3 ||
+    // Media's reviewed regional disk quota covers only one concurrent workspace.
+    (config.role === 'media' && config.maxInstances !== 1) ||
     !Number.isInteger(config.stabilizationSeconds) ||
     config.stabilizationSeconds < 90 ||
     config.stabilizationSeconds > 7200

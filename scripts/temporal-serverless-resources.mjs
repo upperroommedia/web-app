@@ -172,3 +172,35 @@ export function renderServerlessWorkerPool(config, settings) {
     },
   };
 }
+
+/** Additive resource-scoped IAM intents, not replacement policies or live grants.
+ * The caller must merge against fresh policies with their etags. Runtime data
+ * permissions and Temporal's account-specific scaler impersonators are separate
+ * prerequisites. Secret IAM covers the secret resource; pinned versions in the
+ * pool do not imply version-limited access. Inherited grants must be audited too.
+ */
+export function serverlessWorkerResourceGrants(config, settings) {
+  const pool = renderServerlessWorkerPool(config, settings);
+  const runner = `serviceAccount:${config.runnerServiceAccount}`;
+  const scaler = `serviceAccount:${config.invokerServiceAccount}`;
+  const secrets = new Set([
+    ...pool.template.volumes.filter((volume) => volume.secret).map((volume) => volume.secret.secret),
+    ...pool.template.containers[0].env
+      .filter((entry) => entry.valueSource?.secretKeyRef)
+      .map((entry) => entry.valueSource.secretKeyRef.secret),
+  ]);
+  return [
+    ...[...secrets].sort().map((secret) => ({
+      resource: `projects/${config.projectId}/secrets/${secret}`,
+      role: 'roles/secretmanager.secretAccessor',
+      members: [runner],
+    })),
+    { resource: pool.name, role: 'roles/run.viewer', members: [runner] },
+    { resource: pool.name, role: 'roles/run.developer', members: [scaler] },
+    {
+      resource: `projects/${config.projectId}/serviceAccounts/${config.runnerServiceAccount}`,
+      role: 'roles/iam.serviceAccountUser',
+      members: [scaler],
+    },
+  ];
+}

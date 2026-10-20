@@ -65,3 +65,8 @@ test('each queue uses its own deployment, pool and least-privilege service ident
   assert.throws(() => serverlessResourceNames(buildId, ['controls']));
   assert.throws(() => serverlessComputeArguments({ ...binding(), role: 'controls' }));
 });
+test('media scaler cannot exceed the single reviewed regional workspace', () => {
+  const media = { ...binding(), role: 'media', ...serverlessResourceNames(buildId, 'media'), maxInstances: 2 };
+  assert.throws(() => serverlessComputeArguments(media));
+  assert.doesNotThrow(() => serverlessComputeArguments({ ...binding(), maxInstances: 2 }));
+});

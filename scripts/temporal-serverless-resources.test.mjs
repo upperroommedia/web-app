@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { serverlessResourceNames } from './temporal-serverless-platform.mjs';
-import { renderServerlessWorkerPool } from './temporal-serverless-resources.mjs';
+import { renderServerlessWorkerPool, serverlessWorkerResourceGrants } from './temporal-serverless-resources.mjs';
 const buildId = 'c'.repeat(40);
 const config = (role) => ({
   projectId: 'urm-app-staging',
@@ -50,6 +50,7 @@ test('media gets a disk-backed workspace and preserves the full source/output/he
     sizeLimit: '100Gi',
   });
   assert.equal(worker.resources.limits.cpu, '2');
+  assert.throws(() => renderServerlessWorkerPool({ ...config('media'), maxInstances: 2 }, settings()));
 });
 test('search uses an immutable same-project Secret Manager reference, never a literal write key', () => {
   const options = settings();
@@ -81,5 +82,60 @@ test('orchestration preserves approved operational alert recipients and admin UR
   assert.equal(
     pool.template.containers[0].env.find((entry) => entry.name === 'ADMIN_BASE_URL').valueSource.secretKeyRef.version,
     '4'
+  );
+});
+test('controls resource grants never widen to project secrets, other pools, or another role identity', () => {
+  const c = config('controls');
+  const grants = serverlessWorkerResourceGrants(c, settings());
+  const runner = `serviceAccount:${c.runnerServiceAccount}`;
+  const scaler = `serviceAccount:${c.invokerServiceAccount}`;
+  const pool = `projects/${c.projectId}/locations/${c.region}/workerPools/${c.poolName}`;
+  assert.deepEqual(grants, [
+    {
+      resource: `projects/${c.projectId}/secrets/TEMPORAL_WORKER_API_KEY`,
+      role: 'roles/secretmanager.secretAccessor',
+      members: [runner],
+    },
+    { resource: pool, role: 'roles/run.viewer', members: [runner] },
+    { resource: pool, role: 'roles/run.developer', members: [scaler] },
+    {
+      resource: `projects/${c.projectId}/serviceAccounts/${c.runnerServiceAccount}`,
+      role: 'roles/iam.serviceAccountUser',
+      members: [scaler],
+    },
+  ]);
+  assert.throws(() =>
+    serverlessWorkerResourceGrants(
+      { ...c, runnerServiceAccount: config('orchestration').runnerServiceAccount },
+      settings()
+    )
+  );
+  assert.throws(() =>
+    serverlessWorkerResourceGrants(c, {
+      ...settings(),
+      runtimeSecrets: [{ name: 'SUBSPLASH_PASSWORD', secret: 'SUBSPLASH_PASSWORD', version: '1' }],
+    })
+  );
+});
+test('secret grants derive from validated mounted and environment secrets, deduplicated by resource', () => {
+  const c = config('search');
+  const s = settings();
+  s.runtimeSecrets.push({ name: 'TEMPORAL_SEARCH_CONFIG_JSON', secret: 'TEMPORAL_SEARCH_CONFIG', version: '7' });
+  s.runtimeSecrets.push({ name: 'TEMPORAL_SENTRY_DSN', secret: 'TEMPORAL_WORKER_SENTRY_DSN', version: '2' });
+  const secrets = serverlessWorkerResourceGrants(c, s).filter((g) => g.role === 'roles/secretmanager.secretAccessor');
+  assert.deepEqual(
+    secrets.map((g) => g.resource).sort(),
+    ['TEMPORAL_SEARCH_CONFIG', 'TEMPORAL_WORKER_API_KEY', 'TEMPORAL_WORKER_SENTRY_DSN']
+      .map((name) => `projects/${c.projectId}/secrets/${name}`)
+      .sort()
+  );
+  assert.ok(
+    secrets.every((g) => g.members.length === 1 && g.members[0] === `serviceAccount:${c.runnerServiceAccount}`)
+  );
+  const email = serverlessWorkerResourceGrants(config('email'), { ...settings(), emailEgressVersion: '9' });
+  assert.ok(email.some((g) => g.resource.endsWith('/secrets/TEMPORAL_EMAIL_EGRESS_DESCRIPTOR')));
+  assert.equal(
+    email.some((g) => g.role === 'roles/iam.serviceAccountTokenCreator'),
+    false
   );
 });
