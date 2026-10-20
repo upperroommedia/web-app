@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { prepareCloudRunIdentity } from '../temporal-prepare-cloud-identity.mjs';
-import { saveEventarcAuditPreparationCheckpoint, saveDispatchWakeStopCheckpoint, saveDispatchAccessPreparationCheckpoint, saveDispatchServicePreparationCheckpoint, saveIdentityPreparationCheckpoint, savePoolPreparationCheckpoint, saveSecretAccessPreparationCheckpoint, saveScalerAccessPreparationCheckpoint, saveFirestoreAccessPreparationCheckpoint, saveRuntimeRolePreparationCheckpoint, saveRuntimeAccessPreparationCheckpoint } from '../temporal-preparation-checkpoint.mjs';
+import { saveDispatchSchedulerCycleCheckpoint, saveEventarcAuditPreparationCheckpoint, saveDispatchWakeStopCheckpoint, saveDispatchAccessPreparationCheckpoint, saveDispatchServicePreparationCheckpoint, saveIdentityPreparationCheckpoint, savePoolPreparationCheckpoint, saveSecretAccessPreparationCheckpoint, saveScalerAccessPreparationCheckpoint, saveFirestoreAccessPreparationCheckpoint, saveRuntimeRolePreparationCheckpoint, saveRuntimeAccessPreparationCheckpoint } from '../temporal-preparation-checkpoint.mjs';
 import { nativeSnapshotProof } from '../temporal-release-runtime.mjs';
 import { serverlessResourceNames } from '../temporal-serverless-platform.mjs';
 import { dispatchResourceNames } from '../temporal-serverless-dispatch-resources.mjs';
@@ -96,4 +96,30 @@ for (const kind of ['eventarcAudit', 'wakeStop', 'dispatchAccess', 'service', 'p
     for (const ref of [lockRef, controlRef, stateRef, immutableReceipt]) await ref.delete();
     await deleteApp(app);
   }
+});
+
+
+test('scheduler cycle atomically stores original creation receipt before nested stop and rejects authority/receipt drift', async () => {
+ const app=initializeApp({projectId:'demo-preparation-checkpoint'},randomUUID()),db=getFirestore(app);
+ const prefix=`_identityPreparationTests/${randomUUID()}/records`,lockRef=db.doc(`${prefix}/operation`),controlRef=db.doc(`${prefix}/control`),stateRef=db.doc(`${prefix}/state`),immutableReceipt=db.doc(`${prefix}/cycle`),creationReceipt=db.doc(`${prefix}/creation`);
+ const operationId=randomUUID(),releaseId=randomUUID(),bindingDigest='d'.repeat(64),config={releaseId,domains:['publishing']};
+ try {
+  await lockRef.create({operationId,releaseId,bindingDigest,action:'prepare-stop-cloud-run-dispatch-scheduler'});
+  await controlRef.create({releaseId,admission:'paused',domains:{publishing:{admission:'paused'}}});await stateRef.create({releaseId,phase:'provider-usage-ready'});
+  const options={firestore:db,lockRef,controlRef,stateRef,immutableReceipt,creationReceipt,operationId,config,bindingDigest,operatorPrincipal:{email:'operator@example.test'},ownedOperation:nativeSnapshotProof(await lockRef.get()),expectedAuthority:{control:nativeSnapshotProof(await controlRef.get()),state:nativeSnapshotProof(await stateRef.get())}};
+  const plan={creation:{operationId,source:'controlled fixture'}};
+  const creationState={stage:'completed',plan:plan.creation,resource:{name:'controlled-original'}};
+  options.ownedOperation=await saveDispatchSchedulerCycleCheckpoint({...options,identityState:{stage:'planned',plan}});
+  assert.equal((await creationReceipt.get()).exists,false);
+  await assert.rejects(saveDispatchWakeStopCheckpoint({...options,identityState:{stage:'attempted',plan}}));
+  await assert.rejects(saveDispatchSchedulerCycleCheckpoint({...options,identityState:{stage:'created',plan}}));
+  options.ownedOperation=await saveDispatchSchedulerCycleCheckpoint({...options,identityState:{stage:'created',plan,creationState}});
+  const original=await creationReceipt.get();assert.deepEqual(original.get('identityState'),creationState);assert.equal((await immutableReceipt.get()).exists,false);
+  options.ownedOperation=await saveDispatchSchedulerCycleCheckpoint({...options,identityState:{stage:'stopping',plan,creationState,stopState:{stage:'attempted'}}});
+  await assert.rejects(saveDispatchSchedulerCycleCheckpoint({...options,identityState:{stage:'stopping',plan,creationState:{...creationState,resource:{name:'replacement'}}}}));
+  assert.equal((await creationReceipt.get()).updateTime.isEqual(original.updateTime),true);
+  await controlRef.update({changed:true});
+  await assert.rejects(saveDispatchSchedulerCycleCheckpoint({...options,identityState:{stage:'completed',plan,creationState}}));
+  assert.equal((await lockRef.get()).get('cloudDispatchSchedulerCycle.stage'),'stopping');assert.equal((await immutableReceipt.get()).exists,false);
+ } finally {for(const ref of [lockRef,controlRef,stateRef,immutableReceipt,creationReceipt])await ref.delete();await deleteApp(app);}
 });

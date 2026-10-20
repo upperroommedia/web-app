@@ -4,8 +4,9 @@ import { assertNativeSnapshot, nativeSnapshotProof, proofDigest } from './tempor
  * callback can authorize HTTP until this transaction has acknowledged completion.
  */
 async function saveCheckpoint({ firestore, lockRef, controlRef, stateRef,
-  immutableReceipt, ownedOperation, expectedAuthority, config, operationId, bindingDigest, operatorPrincipal, identityState, kind }) {
+  immutableReceipt, creationReceipt, ownedOperation, expectedAuthority, config, operationId, bindingDigest, operatorPrincipal, identityState, kind }) {
   const [field, action] = { identity: ['cloudIdentityPreparation', 'prepare-cloud-run-identity'],
+    schedulerCycle: ['cloudDispatchSchedulerCycle', 'prepare-stop-cloud-run-dispatch-scheduler'],
     eventarcAudit: ['cloudEventarcAuditPreparation', 'prepare-cloud-run-eventarc-audit'],
     wakeStop: ['cloudDispatchWakeStop', 'stop-cloud-run-dispatch-wake'],
     dispatchAccess: ['cloudDispatchAccessPreparation', 'prepare-cloud-run-dispatch-access'],
@@ -17,9 +18,15 @@ async function saveCheckpoint({ firestore, lockRef, controlRef, stateRef,
     scaler: ['cloudScalerAccessPreparation', 'prepare-cloud-run-scaler-access'] }[kind] ?? [];
   if (!field) throw new Error('PREPARATION_KIND_REQUIRED');
   await firestore.runTransaction(async tx => {
-    const [current, control, state, receipt] = await Promise.all([
+    const creationState = kind === 'schedulerCycle' ? identityState.creationState : undefined;
+    if (kind === 'schedulerCycle' && (['created', 'stopping', 'completed'].includes(identityState.stage) && !creationState ||
+      creationState && (creationState.plan?.operationId !== operationId || proofDigest(creationState.plan) !== proofDigest(identityState.plan?.creation))))
+      throw new Error('SCHEDULER_CREATION_PLAN_CHANGED');
+    if (creationState && (!creationReceipt || creationState.stage !== 'completed')) throw new Error('SCHEDULER_CREATION_RECEIPT_REQUIRED');
+    const [current, control, state, receipt, originalCreation] = await Promise.all([
       tx.get(lockRef), tx.get(controlRef), tx.get(stateRef),
       identityState.stage === 'completed' ? tx.get(immutableReceipt) : Promise.resolve(undefined),
+      creationState ? tx.get(creationReceipt) : Promise.resolve(undefined),
     ]);
     assertNativeSnapshot(ownedOperation, current);
     assertNativeSnapshot(expectedAuthority.control, control);
@@ -36,7 +43,11 @@ async function saveCheckpoint({ firestore, lockRef, controlRef, stateRef,
     const record = { operationId, releaseId: config.releaseId, bindingDigest, identityState, operatorPrincipal };
     if (receipt?.exists && proofDigest(receipt.data()) !== proofDigest(record))
       throw new Error('IDENTITY_PREPARATION_RECEIPT_CHANGED');
+    const creationRecord = creationState ? { operationId, releaseId: config.releaseId, bindingDigest, identityState: creationState, operatorPrincipal } : undefined;
+    if (originalCreation?.exists && proofDigest(originalCreation.data()) !== proofDigest(creationRecord))
+      throw new Error('SCHEDULER_CREATION_RECEIPT_CHANGED');
     tx.update(lockRef, { [field]: identityState });
+    if (originalCreation && !originalCreation.exists) tx.create(creationReceipt, creationRecord);
     if (receipt && !receipt.exists) tx.create(immutableReceipt, record);
   });
   return nativeSnapshotProof(await lockRef.get());
@@ -60,3 +71,5 @@ export const saveDispatchAccessPreparationCheckpoint = options => saveCheckpoint
 export const saveDispatchWakeStopCheckpoint = options => saveCheckpoint({ ...options, kind: 'wakeStop' });
 
 export const saveEventarcAuditPreparationCheckpoint = options => saveCheckpoint({ ...options, kind: 'eventarcAudit' });
+
+export const saveDispatchSchedulerCycleCheckpoint = options => saveCheckpoint({ ...options, kind: 'schedulerCycle' });

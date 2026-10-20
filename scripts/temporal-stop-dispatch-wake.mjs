@@ -6,7 +6,7 @@ import { preparedDispatchServiceIdentity } from './temporal-prepare-dispatch-ser
 import { readOwnedPreparationRunner, normalizeStagingResourceName as normalize } from './temporal-preparation-resources.mjs';
 const fail = () => { throw new Error('CLOUD_RUN_DISPATCH_WAKE_STOP_UNCONFIRMED'); };
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
-function identity(plan, resource) {
+export function dispatchWakeIdentity(plan, resource) {
   const body = plan.body;
   if (!resource || normalize(resource.name) !== body.name) fail();
   if (plan.surface === 'scheduler') {
@@ -66,7 +66,7 @@ export async function stopCloudRunDispatchWake({ platform, role, settings, relea
   const read = async () => {
     try {
       const resource = await api(url);
-      if (!isDeepStrictEqual(identity(creation, resource), owned)) fail();
+      if (!isDeepStrictEqual(dispatchWakeIdentity(creation, resource), owned)) fail();
       return resource;
     } catch (error) { if (error?.status === 404 && surface !== 'scheduler') return undefined; throw error; }
   };
@@ -90,7 +90,7 @@ export async function stopCloudRunDispatchWake({ platform, role, settings, relea
       try {
         const ack = await api(request.url, request.method);
         if (surface === 'scheduler') {
-          if (!isDeepStrictEqual(identity(creation, ack), owned) || ack.state !== 'PAUSED') fail();
+          if (!isDeepStrictEqual(dispatchWakeIdentity(creation, ack), owned) || ack.state !== 'PAUSED') fail();
           state = { ...state, stage: 'acknowledged' };
         } else state = { ...state, stage: 'acknowledged', nativeOperation: nativeOperation(ack?.name) };
         await save(state);
