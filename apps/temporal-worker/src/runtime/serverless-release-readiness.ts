@@ -418,7 +418,7 @@ export async function collectServerlessReadinessObservations(options: {
       const { digest, ...evidence } = object(stored.data());
       if (
         Object.keys(evidence).sort().join(',') !==
-          'activityId,attempt,buildId,nonce,observedAt,projectId,role,runId,schemaVersion,taskQueue,worker,workflowId' ||
+          'activityId,attempt,buildId,firebaseRtdb,nonce,observedAt,projectId,role,runId,schemaVersion,taskQueue,worker,workflowId' ||
         evidence.schemaVersion !== 1 ||
         digest !== receipt.digest ||
         workerReadinessDigest(evidence) !== digest ||
@@ -436,6 +436,19 @@ export async function collectServerlessReadinessObservations(options: {
         Date.now() - startedAt > 600000
       )
         fail();
+      if (binding.role === 'orchestration') {
+        const access = object(evidence.firebaseRtdb);
+        if (
+          Object.keys(access).sort().join(',') !== 'databaseURL,observedAt,readPath,readSucceeded' ||
+          access.databaseURL !== 'https://urm-app-staging-default-rtdb.firebaseio.com/' ||
+          access.readPath !== 'bundle-metadata' ||
+          access.readSucceeded !== true ||
+          !Number.isFinite(Date.parse(access.observedAt)) ||
+          Date.parse(access.observedAt) < startedAt - 5000 ||
+          Date.parse(access.observedAt) > Date.parse(evidence.observedAt)
+        )
+          fail();
+      } else if (evidence.firebaseRtdb !== null) fail();
       const completed = (history.events ?? []).find((e) => {
         const done = e.activityTaskCompletedEventAttributes;
         const task = done && scheduled.get(String(done.scheduledEventId));
@@ -481,6 +494,7 @@ export async function collectServerlessReadinessObservations(options: {
         fail();
       roles.push({
         role: binding.role,
+        firebaseRtdb: evidence.firebaseRtdb,
         ...platform,
         receipt,
         ...(await routing(binding)),

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { verifyCloudRunRtdbReadiness } from './cloud-run-rtdb-readiness';
 import { Context } from '@temporalio/activity';
 import type { Firestore } from 'firebase-admin/firestore';
 import type { WorkerWitness } from './worker-witness';
@@ -41,7 +42,8 @@ export interface WorkerReadinessReceipt {
   digest: string;
 }
 
-/** Inert operator probe: writes only private execution evidence. Platform identity
+/** Operator probe: writes only private execution evidence; orchestration also
+ * verifies a fresh serving read with its native RTDB identity. Platform identity
  * was authenticated at startup; the release controller must independently join
  * it to fresh native pool/revision and Temporal routing observations. Nothing
  * returned to workflow history contains instance, service-account or runtime IDs.
@@ -84,7 +86,9 @@ export function createWorkerReadinessActivities(options: {
         !options.witness.instanceId
       )
         throw new Error('WORKER_READINESS_EXECUTION_MISMATCH');
+      const firebaseRtdb = request.role === 'orchestration' ? await verifyCloudRunRtdbReadiness(options.witness) : null;
       const evidence = {
+        firebaseRtdb,
         schemaVersion: 1,
         projectId: request.projectId,
         buildId: request.buildId,

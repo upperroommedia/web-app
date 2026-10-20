@@ -1,3 +1,13 @@
+// Controlled serving-read fixture, alongside the controlled Cloud Run identity.
+// Native SDK execution/Firestore receipts here do NOT prove deployed RTDB access.
+jest.mock('../runtime/cloud-run-rtdb-readiness', () => ({
+  verifyCloudRunRtdbReadiness: jest.fn(async () => ({
+    databaseURL: 'https://urm-app-staging-default-rtdb.firebaseio.com/',
+    readPath: 'bundle-metadata',
+    readSucceeded: true,
+    observedAt: new Date().toISOString(),
+  })),
+}));
 import { randomUUID } from 'node:crypto';
 import { initializeApp, deleteApp } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
