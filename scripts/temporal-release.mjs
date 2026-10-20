@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { collectCloudRunReleaseWorkers, readCloudRunNamespaceEvidence, verifyCloudRunScalerPolicies, verifyCloudRunComputeIsolation } from './temporal-release-cloud-run.mjs';
+import { collectCloudRunDispatchDiagnostic, collectCloudRunReleaseWorkers, readCloudRunNamespaceEvidence, verifyCloudRunScalerPolicies, verifyCloudRunComputeIsolation } from './temporal-release-cloud-run.mjs';
 import { verifyDispatchTemporalKeyIdentity } from './temporal-dispatch-key-identity.mjs';
 import { verifyCloudRunDispatchConfiguration } from './temporal-release-dispatch.mjs';
 import { verifyPreparationEvidence } from './temporal-preparation-evidence.mjs';
@@ -14,6 +14,7 @@ import { prepareStopCloudRunEventarc } from './temporal-prepare-stop-eventarc.mj
 import { prepareStopCloudRunScheduler } from './temporal-prepare-stop-scheduler.mjs';
 import { stopCloudRunDispatchWake } from './temporal-stop-dispatch-wake.mjs';
 import { prepareCloudRunDispatchAccess } from './temporal-prepare-dispatch-access.mjs';
+import { saveDiagnosticWakeCheckpoint, pulseDiagnosticOutbox } from './temporal-diagnostic-wake.mjs';
 import { armCloudRunDispatchDiagnostic } from './temporal-dispatch-diagnostic.mjs';
 import { activateCloudRunDispatchService } from './temporal-activate-dispatch-service.mjs';
 import { prepareCloudRunDispatchService } from './temporal-prepare-dispatch-service.mjs';
@@ -1197,16 +1198,31 @@ await runWithCleanup(
             if (!receipts.every(r => r.exists) || receipts[4].get('identityState.stage') !== 'completed')
               throw new Error('OWNED_COMPLETED_ACTIVATION_REQUIRED');
             const activation = receipts[4].data();
+            const priorManifest = (await lockRef.get()).get('cloudDispatchDiagnostic');
+            const diagnosticAuthority = priorManifest === undefined ? undefined : {firestore,manifest:priorManifest,activationReceipt:activation};
             const nativeActivation = await activateCloudRunDispatchService({platform, role:preparationArguments.role, settings,
               operationId:preparationArguments.activationOperationId, releaseId:config.releaseId,
               evidenceDigest:preparationArguments.digest,artifactDirectory:activation.identityState.plan.artifactDirectory,
               runnerReceipt:receipts[0].data(),eventReceipt:receipts[1].data(),schedulerReceipt:receipts[2].data(),serviceReceipt:receipts[3].data(),
-              api,saved:activation.identityState, save:async()=>{throw new Error('DIAGNOSTIC_CANNOT_WRITE_ACTIVATION');},
+              api,diagnostic:diagnosticAuthority,saved:activation.identityState, save:async()=>{throw new Error('DIAGNOSTIC_CANNOT_WRITE_ACTIVATION');},
               probe:async()=>{throw new Error('DIAGNOSTIC_CANNOT_START_REPLACEMENT_PROBE');} });
             cloudIdentityPending = true;
             ownedOperation = await armCloudRunDispatchDiagnostic({firestore,lockRef,controlRef,stateRef,ownedOperation,expectedAuthority,
               operationId,bindingDigest,config,platform,activationReceipt:activation,nativeActivation});
-            throw new Error('DIAGNOSTIC_ARMED_OWNED_WAKE_AND_NATIVE_PROVENANCE_PENDING');
+            const diagnostic = {firestore,manifest:(await lockRef.get()).get('cloudDispatchDiagnostic'),activationReceipt:activation};
+            const savedWake = (await lockRef.get()).get('cloudDispatchDiagnosticWake');
+            const creationRef = firestore.doc(`_control/temporalDispatchDiagnosticWakeCreation-${operationId}-outbox`);
+            const wake = await prepareStopCloudRunEventarc({platform,role:preparationArguments.role,settings,releaseId:config.releaseId,
+              evidenceDigest:preparationArguments.digest,operationId,creator:operatorPrincipal.email,surface:'outbox-trigger',diagnostic,
+              runnerReceipt:receipts[0].data(),eventReceipt:receipts[1].data(),schedulerReceipt:receipts[2].data(),serviceReceipt:receipts[3].data(),api,saved:savedWake,
+              save:async child=>{ownedOperation=await saveDiagnosticWakeCheckpoint({firestore,lockRef,controlRef,stateRef,ownedOperation,expectedAuthority,diagnostic,operatorPrincipal},child);},
+              readCreationReceipt:async()=>{const r=await creationRef.get();return r.exists?r.data():undefined;},
+              observeDiagnostic:async({signal})=>{await pulseDiagnosticOutbox(diagnostic,signal);
+                return collectCloudRunDispatchDiagnostic({binding,config,platform,firestore,diagnostic,signal});},
+            });
+            if(wake.stage!=='completed'||wake.stopState?.stage!=='completed'||!wake.diagnosticObservation||wake.diagnosticObservationFailed)
+              throw new Error('DIAGNOSTIC_OUTBOX_OBSERVATION_OR_CLEANUP_UNCONFIRMED');
+            throw new Error('DIAGNOSTIC_OUTBOX_CYCLE_COMPLETE_RETRY_SCHEDULER_AND_RECOVERY_PENDING');
           } else if (action === 'activate-cloud-run-dispatch-service') {
             requirePhase(state, ['provider-usage-ready']);
             if (config.environment !== 'staging' || operatorPrincipal.adcAndGcloudAccountMatch !== true)

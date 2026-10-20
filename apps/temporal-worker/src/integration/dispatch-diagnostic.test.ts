@@ -4,7 +4,12 @@ import { resolve } from 'node:path';
 import { initializeApp, deleteApp } from 'firebase-admin/app';
 import { FieldValue, getFirestore } from 'firebase-admin/firestore';
 import { DefaultLogger, Runtime, Worker } from '@temporalio/worker';
-import { DispatchDiagnostic, diagnosticVersion, diagnosticRecordPath } from '../runtime/dispatch-diagnostic';
+import {
+  collectDispatchDiagnosticExecution,
+  DispatchDiagnostic,
+  diagnosticVersion,
+  diagnosticRecordPath,
+} from '../runtime/dispatch-diagnostic';
 import { workerReadinessDigest as digest } from '../runtime/readiness-probe';
 import { createLocalTestEnvironment } from '../test-support/local-test-environment';
 Runtime.install({ logger: new DefaultLogger('ERROR', () => undefined) });
@@ -71,6 +76,26 @@ test('separate paused diagnostic starts only the fixed pinned original and recon
       schedulerSubject: '123456789012345678902',
       serviceRevision,
     };
+    const pulseState = (m: typeof manifest) => {
+      const receipts = Object.fromEntries(
+        (['outbox', 'commands'] as const).map((surface) => [
+          surface,
+          {
+            operationId: m.operationId,
+            releaseId: m.releaseId,
+            bindingDigest: m.bindingDigest,
+            identityState: { stage: 'completed', plan: { operationId: m.operationId, surface: `${surface}-trigger` } },
+          },
+        ])
+      );
+      const pulse = (surface: 'outbox' | 'commands') => ({
+        operationId: m.operationId,
+        nonce: m.nonce,
+        creationReceiptDigest: digest(receipts[surface]),
+      });
+      return { receipts, pulse };
+    };
+    const seeded = pulseState(manifest);
     await db.runTransaction(async (tx) => {
       tx.create(parent, {
         operationId,
@@ -80,13 +105,23 @@ test('separate paused diagnostic starts only the fixed pinned original and recon
         cloudDispatchDiagnostic: manifest,
       });
       tx.create(db.doc(`_control/temporalDispatchDiagnosticAuthorization-${operationId}`), manifest);
-      tx.create(db.doc(`_control/temporalDispatchDiagnostic-${operationId}`), { manifestDigest: digest(manifest) });
-      for (const surface of ['outbox', 'commands'] as const)
+      tx.create(db.doc(`_control/temporalDispatchDiagnostic-${operationId}`), {
+        manifestDigest: digest(manifest),
+        outboxPulse: seeded.pulse('outbox'),
+        commandsPulse: seeded.pulse('commands'),
+      });
+      for (const surface of ['outbox', 'commands'] as const) {
+        tx.create(
+          db.doc(`_control/temporalDispatchDiagnosticWakeCreation-${operationId}-${surface}`),
+          seeded.receipts[surface]
+        );
         tx.create(db.doc(diagnosticRecordPath(operationId, surface)), {
           state: 'diagnostic',
           surface,
           manifestDigest: digest(manifest),
+          diagnosticPulse: seeded.pulse(surface),
         });
+      }
     });
     worker = await Worker.create({
       connection: environment.nativeConnection,
@@ -136,6 +171,21 @@ test('separate paused diagnostic starts only the fixed pinned original and recon
     const workflowId = `dispatch-diagnostic-${operationId}-outbox`;
     const handle = environment.client.workflow.getHandle(workflowId, first.get('runId'), { followRuns: false });
     expect(await handle.result()).toEqual({ nonce: manifest.nonce, runId: first.get('runId') });
+    const completion = await collectDispatchDiagnosticExecution({
+      db,
+      client: environment.client,
+      manifest,
+      deadline: Date.now() + 10000,
+    });
+    expect(completion.runId).toBe(first.get('runId'));
+    expect(completion.callerSubject).toBe(manifest.eventSubject);
+    const outboxRef = db.doc(diagnosticRecordPath(operationId, 'outbox'));
+    await outboxRef.update({ startPulseDigest: FieldValue.delete() });
+    expect(await diagnostic.tick(signal, context('outbox'))).toBe(false);
+    await expect(
+      collectDispatchDiagnosticExecution({ db, client: environment.client, manifest, deadline: Date.now() + 10000 })
+    ).rejects.toThrow();
+    await outboxRef.update({ startPulseDigest: digest(seeded.pulse('outbox')) });
     const history = await handle.fetchHistory();
     expect(history.events?.filter((e) => e.workflowExecutionStartedEventAttributes)).toHaveLength(1);
     expect(
@@ -226,18 +276,27 @@ test('separate paused diagnostic starts only the fixed pinned original and recon
     // A delayed durable intent ACK cannot authorize a new RPC after its original lease.
     const delayedId = randomUUID();
     const delayedManifest = { ...manifest, operationId: delayedId, nonce: 'f'.repeat(32) };
+    const delayedSeed = pulseState(delayedManifest);
     await db.runTransaction(async (tx) => {
       tx.update(parent, { operationId: delayedId, cloudDispatchDiagnostic: delayedManifest });
       tx.create(db.doc(`_control/temporalDispatchDiagnosticAuthorization-${delayedId}`), delayedManifest);
       tx.create(db.doc(`_control/temporalDispatchDiagnostic-${delayedId}`), {
         manifestDigest: digest(delayedManifest),
+        outboxPulse: delayedSeed.pulse('outbox'),
+        commandsPulse: delayedSeed.pulse('commands'),
       });
-      for (const surface of ['outbox', 'commands'] as const)
+      for (const surface of ['outbox', 'commands'] as const) {
+        tx.create(
+          db.doc(`_control/temporalDispatchDiagnosticWakeCreation-${delayedId}-${surface}`),
+          delayedSeed.receipts[surface]
+        );
         tx.create(db.doc(diagnosticRecordPath(delayedId, surface)), {
           state: 'diagnostic',
           surface,
           manifestDigest: digest(delayedManifest),
+          diagnosticPulse: delayedSeed.pulse(surface),
         });
+      }
     });
     let delayAcknowledgement = true;
     const delayedDb = new Proxy(db, {

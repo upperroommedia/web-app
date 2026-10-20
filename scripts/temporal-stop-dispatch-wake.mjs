@@ -1,3 +1,4 @@
+import { dispatchPreparationAuthority } from './temporal-dispatch-authority.mjs';
 import { isDeepStrictEqual } from 'node:util';
 import { proofDigest } from './temporal-release-runtime.mjs';
 import { dispatchWakePlan } from './temporal-dispatch-wake-plan.mjs';
@@ -35,7 +36,8 @@ function nativeOperation(value) {
  * business cancellation, broad resource lookup, or retry of an unknown mutation.
  */
 export async function stopCloudRunDispatchWake({ platform, role, settings, releaseId, evidenceDigest, operationId,
-  surface, runnerReceipt, serviceReceipt, wakeReceipt, api, save, saved }) {
+  surface, runnerReceipt, eventReceipt, schedulerReceipt, diagnostic, serviceReceipt, wakeReceipt, api, save, saved }) {
+  if (diagnostic !== undefined && surface !== 'outbox-trigger') fail();
   if (!uuid.test(operationId ?? '') || [api, save].some(fn => typeof fn !== 'function')) fail();
   const original = wakeReceipt?.identityState;
   if (wakeReceipt?.releaseId !== releaseId || original?.stage !== 'completed' ||
@@ -56,8 +58,12 @@ export async function stopCloudRunDispatchWake({ platform, role, settings, relea
   const request = surface === 'scheduler' ? { url: `${url}:pause`, method: 'POST' }
     : { url: `${url}?etag=${encodeURIComponent(owned.etag)}`, method: 'DELETE' };
   const plan = { schemaVersion: 1, operationId, releaseId, evidenceDigest, role, surface,
-    buildId: platform.workerBuildId, wakeReceiptSHA256: proofDigest(wakeReceipt), creation, request };
+    buildId: platform.workerBuildId, ...(diagnostic ? { diagnosticManifestSHA256: proofDigest(diagnostic.manifest) } : {}), wakeReceiptSHA256: proofDigest(wakeReceipt), creation, request };
   const checkAuthority = async () => {
+    if (diagnostic !== undefined) {
+      await dispatchPreparationAuthority({platform,role,settings,releaseId,evidenceDigest,operationId,runnerReceipt,eventReceipt,schedulerReceipt,serviceReceipt,diagnostic}).verify(api);
+      return;
+    }
     const runner = await readOwnedPreparationRunner({ ...creation, runner: serviceReceipt.identityState.plan.runner }, runnerReceipt, api);
     if (runner.uniqueId !== serviceReceipt.identityState.prerequisites?.runnerUniqueId) fail();
     const service = preparedDispatchServiceIdentity(await observeCloudRunDispatchService(platform, api, 'disabled'), serviceReceipt.identityState.plan);

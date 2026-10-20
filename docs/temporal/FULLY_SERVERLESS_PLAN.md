@@ -546,12 +546,27 @@ run/input/type/queue/candidate version and absence of Activities/children/contin
 are checked before the private dispatch acknowledgement. The literal workflow waits
 two seconds and returns its nonce/run; it has no provider or application activities.
 
-Arming still stops with its parent operation retained. Same-parent enabled-wake
-creation/cleanup, a post-trigger immutable pulse, native delivery provenance and
-completion proof remain unfinished. Records created before a trigger exists do not
-prove delivery; they must not be replayed or rewritten as a substitute. The five-minute
-arming window authorizes initial START only and does not expire cleanup or uncertain
-original-run GETs. No release phase, routing, ownership, WCI or business admission
-advances. Local SDK/emulator tests use controlled arming and authorization, including
-actual elapsed local leases and delayed checkpoint acknowledgements; they do not
-establish Cloud Run, Google delivery, effective permissions or staging readiness.
+Arming now continues through an outbox-only, same-parent Eventarc cycle. Enabled
+service authority requires the original completed activation and current private
+parent/control/state/authorization; the legacy preparation path still requires a
+disabled service. Native creation acknowledgement and immutable creation receipt
+precede one atomic post-trigger journal/record pulse. Runtime claims, START intent,
+ACK and native completion must retain the same creation-receipt/pulse binding.
+Records created before a trigger exists cannot establish this proof.
+
+The observation window is bounded to thirty seconds and checked again after awaits.
+Observation failure or timeout proceeds to conditional owned trigger deletion; the
+operation then waits for outstanding observer work to settle. Unknown creation/stop
+ACKs retain the existing causal-readback/no-resend protocol. Cleanup and existing-pulse
+GET reconciliation do not expire with the five-minute initial-START authorization.
+A new expired pulse, a retroactive pulse for an existing lease/start, changed authority,
+or a replaced resource fails closed. Native GET-only collection joins the exact
+original pinned timer completion and stored verified caller; its scope does not claim
+exclusive transport causality, inherited isolation or in-flight delivery drainage.
+
+The parent remains retained and the controller still stops after this partial outbox
+cycle. Commands/Eventarc retry, independent Scheduler lease wakes, process recovery,
+real Google/Cloud Run API acceptance and remaining readiness gates are unfinished.
+No release phase, routing, ownership, WCI or business admission advances. Tests combine
+controlled Google resource observations, actual dedicated Firestore transactions and
+actual local Temporal execution, rather than deployed Cloud Run delivery evidence.

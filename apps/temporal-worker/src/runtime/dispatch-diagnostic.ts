@@ -66,6 +66,32 @@ export const diagnosticRecordPath = (operationId: string, surface: 'outbox' | 'c
   if (!uuid.test(operationId) || !['outbox', 'commands'].includes(surface)) fail();
   return `${surface === 'outbox' ? 'durableJobOutbox' : 'durableJobCommands'}/diagnostic-${operationId}-${surface}`;
 };
+function pulseBinding(
+  m: DispatchDiagnosticManifest,
+  surface: 'outbox' | 'commands',
+  r: DocumentSnapshot,
+  j: DocumentSnapshot,
+  c: DocumentSnapshot
+): string {
+  if (
+    !c.exists ||
+    c.get('operationId') !== m.operationId ||
+    c.get('releaseId') !== m.releaseId ||
+    c.get('bindingDigest') !== m.bindingDigest ||
+    c.get('identityState.stage') !== 'completed' ||
+    c.get('identityState.plan.operationId') !== m.operationId ||
+    c.get('identityState.plan.surface') !== `${surface}-trigger`
+  )
+    fail();
+  const pulse = { operationId: m.operationId, nonce: m.nonce, creationReceiptDigest: digest(c.data()) };
+  if (
+    j.get('manifestDigest') !== digest(m) ||
+    digest(j.get(`${surface}Pulse`)) !== digest(pulse) ||
+    digest(r.get('diagnosticPulse')) !== digest(pulse)
+  )
+    fail();
+  return digest(pulse);
+}
 /** Separate direct-read capability; never widens the business dispatch predicate.
  * Expired/uncertain attempts permit only GET of their original execution, never a new start.
  */
@@ -116,8 +142,16 @@ export class DispatchDiagnostic {
       for (const surface of surfaces) {
         const recordRef = db.doc(diagnosticRecordPath(m.operationId, surface));
         const authority = async (tx: FirebaseFirestore.Transaction) => {
-          const [p, c, s, a, j, r] = await Promise.all(
-            [parentRef, controlRef, stateRef, authRef, journalRef, recordRef].map((ref) => tx.get(ref))
+          const [p, c, s, a, j, r, creation] = await Promise.all(
+            [
+              parentRef,
+              controlRef,
+              stateRef,
+              authRef,
+              journalRef,
+              recordRef,
+              db.doc(`_control/temporalDispatchDiagnosticWakeCreation-${m.operationId}-${surface}`),
+            ].map((ref) => tx.get(ref))
           );
           if (
             p.get('operationId') !== m.operationId ||
@@ -140,12 +174,16 @@ export class DispatchDiagnostic {
             r.get('surface') !== surface
           )
             fail();
+          pulseBinding(m, surface, r, j, creation);
           return r;
         };
         const claim = await db.runTransaction(async (tx) => {
           const r = await authority(tx),
             now = r.readTime.toMillis();
-          if (r.get('dispatchAcknowledged') === true) return { completed: true, attempt: 0 };
+          if (r.get('dispatchAcknowledged') === true) {
+            if (r.get('startPulseDigest') !== digest(r.get('diagnosticPulse'))) fail();
+            return { completed: true, attempt: 0 };
+          }
           const previous = r.get('lease');
           if (
             previous &&
@@ -195,7 +233,10 @@ export class DispatchDiagnostic {
               r.readTime.toMillis() >= m.expiresAt
             )
               fail();
-            tx.update(recordRef, { startAttemptedAt: r.readTime.toMillis() });
+            tx.update(recordRef, {
+              startAttemptedAt: r.readTime.toMillis(),
+              startPulseDigest: digest(r.get('diagnosticPulse')),
+            });
             return r.get('lease.expiresAt') as number;
           });
           const now = Date.now();
@@ -228,6 +269,7 @@ export class DispatchDiagnostic {
             attempted = r.get('startAttemptedAt');
           if (
             r.get('lease.token') !== token ||
+            r.get('startPulseDigest') !== digest(r.get('diagnosticPulse')) ||
             !Number.isSafeInteger(attempted) ||
             attempted < m.createdAt ||
             attempted >= m.expiresAt ||
@@ -267,6 +309,7 @@ export class DispatchDiagnostic {
           if (
             r.get('lease.token') !== token ||
             r.get('lease.expiresAt') <= r.readTime.toMillis() ||
+            r.get('startPulseDigest') !== digest(r.get('diagnosticPulse')) ||
             (r.get('runId') && r.get('runId') !== description.runId)
           )
             fail();
@@ -283,4 +326,94 @@ export class DispatchDiagnostic {
       return false;
     } // No SDK error, task token, payload or native identity is exported.
   }
+}
+
+/** Native GET-only completion join. Stored dispatch acknowledgement alone is not completion. */
+export async function collectDispatchDiagnosticExecution(options: {
+  db: Firestore;
+  client: Client;
+  manifest: DispatchDiagnosticManifest;
+  deadline: number;
+}) {
+  const m = manifest(options.manifest),
+    { db, client, deadline } = options;
+  if (!Number.isFinite(deadline) || Date.now() >= deadline) fail();
+  const [r, j, c] = await db.getAll(
+    db.doc(diagnosticRecordPath(m.operationId, 'outbox')),
+    db.doc(`_control/temporalDispatchDiagnostic-${m.operationId}`),
+    db.doc(`_control/temporalDispatchDiagnosticWakeCreation-${m.operationId}-outbox`)
+  );
+  const pulseDigest = pulseBinding(m, 'outbox', r, j, c);
+  if (r.get('startPulseDigest') !== pulseDigest) fail();
+  const workflowId = `dispatch-diagnostic-${m.operationId}-outbox`,
+    runId = r.get('runId');
+  if (
+    r.get('state') !== 'diagnostic' ||
+    r.get('manifestDigest') !== digest(m) ||
+    r.get('dispatchAcknowledged') !== true ||
+    !uuid.test(runId ?? '') ||
+    r.get('caller.kind') !== 'event' ||
+    r.get('caller.subject') !== m.eventSubject ||
+    r.get('delivery.kind') !== 'event' ||
+    r.get('delivery.subject') !== `documents/${diagnosticRecordPath(m.operationId, 'outbox')}` ||
+    typeof r.get('delivery.id') !== 'string' ||
+    !r.get('delivery.id') ||
+    !Number.isSafeInteger(r.get('startAttemptedAt')) ||
+    r.get('startAttemptedAt') < m.createdAt ||
+    r.get('startAttemptedAt') >= m.expiresAt
+  )
+    fail();
+  const handle = client.workflow.getHandle(workflowId, runId, { firstExecutionRunId: runId, followRuns: false });
+  const history = await client.connection.withDeadline(Math.min(deadline, Date.now() + 10000), () =>
+    handle.fetchHistory()
+  );
+  const first = history.events?.[0]?.workflowExecutionStartedEventAttributes;
+  const input: DispatchWakeProbeInput = {
+    projectId: 'urm-app-staging',
+    buildId: m.buildId,
+    nonce: m.nonce,
+    operationId: m.operationId,
+    surface: 'outbox',
+  };
+  const completed = history.events?.filter((e) => e.workflowExecutionCompletedEventAttributes) ?? [];
+  if (
+    !first ||
+    first.firstExecutionRunId !== runId ||
+    first.originalExecutionRunId !== runId ||
+    first.continuedExecutionRunId ||
+    first.workflowType?.name !== 'DispatchWakeProbe' ||
+    first.taskQueue?.name !== 'urm-orchestration' ||
+    first.input?.payloads?.length !== 1 ||
+    digest(defaultPayloadConverter.fromPayload(first.input.payloads[0])) !== digest(input) ||
+    first.versioningOverride?.pinned?.behavior !== 1 ||
+    first.versioningOverride.pinned.version?.deploymentName !== 'urm-worker-staging' ||
+    first.versioningOverride.pinned.version?.buildId !== m.buildId ||
+    completed.length !== 1 ||
+    completed[0].workflowExecutionCompletedEventAttributes?.result?.payloads?.length !== 1 ||
+    digest(
+      defaultPayloadConverter.fromPayload(completed[0].workflowExecutionCompletedEventAttributes.result.payloads[0])
+    ) !== digest({ nonce: m.nonce, runId }) ||
+    history.events?.some(
+      (e) =>
+        e.activityTaskScheduledEventAttributes ||
+        e.startChildWorkflowExecutionInitiatedEventAttributes ||
+        e.workflowExecutionContinuedAsNewEventAttributes
+    )
+  )
+    fail();
+  return {
+    schemaVersion: 1,
+    operationId: m.operationId,
+    manifestDigest: digest(m),
+    workflowId,
+    runId,
+    historyDigest: digest(JSON.parse(JSON.stringify(history))),
+    pulseDigest,
+    callerKind: 'event',
+    callerSubject: m.eventSubject,
+    deliveryId: r.get('delivery.id'),
+    serviceRevision: m.serviceRevision,
+    scope:
+      'native original timer completion joined to stored verified-caller dispatch; not exclusive transport causality, inherited isolation or readiness',
+  };
 }

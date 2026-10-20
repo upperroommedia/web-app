@@ -588,3 +588,5 @@ function assertNativeReadinessConnection(client: Client): void {
   )
     fail();
 }
+
+export { collectDispatchDiagnosticExecution } from './dispatch-diagnostic';

@@ -1,3 +1,4 @@
+import { assertDiagnosticWakeAuthority } from './temporal-diagnostic-authority.mjs';
 import { isDeepStrictEqual } from 'node:util';
 import { proofDigest } from './temporal-release-runtime.mjs';
 import { dispatchWakePlan } from './temporal-dispatch-wake-plan.mjs';
@@ -17,6 +18,7 @@ export async function prepareStopCloudRunDispatchWake(options) {
   if ([api, save, readCreationReceipt].some(fn => typeof fn !== 'function') ||
     typeof creator !== 'string' || !/^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+$/.test(creator)) fail();
   if (!['scheduler', 'outbox-trigger', 'commands-trigger'].includes(surface)) fail();
+  if (options.diagnostic !== undefined && surface !== 'outbox-trigger') fail();
   const scheduler = surface === 'scheduler';
   const creation = dispatchWakePlan(options);
   const authority = dispatchPreparationAuthority(options);
@@ -24,6 +26,7 @@ export async function prepareStopCloudRunDispatchWake(options) {
   const opened = Date.parse(openedAt ?? '');
   if (!Number.isFinite(opened) || opened > Date.now() + 1000) fail();
   const plan = { schemaVersion: 1, creation, creator, openedAt,
+    ...(options.diagnostic ? { diagnosticManifestSHA256: proofDigest(options.diagnostic.manifest) } : {}),
     ...(!scheduler ? { action: 'prepare-stop-cloud-run-dispatch-eventarc' } : {}),
     cleanupDueAt: new Date(opened + 300000).toISOString(),
     eventReceiptSHA256: proofDigest(eventReceipt), schedulerReceiptSHA256: proofDigest(schedulerReceipt) };
@@ -56,6 +59,8 @@ export async function prepareStopCloudRunDispatchWake(options) {
       state = { ...state, stage: 'attempted', attemptedAt: new Date().toISOString(), prerequisites };
       await save(state);
       if (Date.now() >= Date.parse(plan.cleanupDueAt)) fail();
+      if (options.diagnostic !== undefined) await assertDiagnosticWakeAuthority(options.diagnostic, true);
+      if (Date.now() >= Date.parse(plan.cleanupDueAt) || options.diagnostic && Date.now() >= options.diagnostic.manifest.expiresAt) fail();
       try {
         const ack = await api(createUrl, 'POST', creation.body);
         state = { ...state, stage: 'acknowledged', ...(scheduler
@@ -109,14 +114,32 @@ export async function prepareStopCloudRunDispatchWake(options) {
     if (receipt?.operationId !== operationId || receipt.releaseId !== releaseId ||
       !isDeepStrictEqual(receipt.identityState, state.creationState) || receipt.operatorPrincipal?.email !== creator) fail();
     await authority.verify(api);
-    if (state.stage === 'created') { state = { ...state, stage: 'stopping' }; await save(state); }
-    const stopped = await stopCloudRunDispatchWake({ platform, role, settings, releaseId, evidenceDigest, operationId,
-      surface, runnerReceipt, serviceReceipt, wakeReceipt: receipt, api,
+    let observationFailed = false, observationWork;
+    if (state.stage === 'created' && options.diagnostic !== undefined) {
+      try {
+        if (typeof options.observeDiagnostic !== 'function') fail();
+        const controller = new AbortController(), observationDeadline = Date.now() + 30000;
+        let timer;
+        observationWork = Promise.resolve().then(() => options.observeDiagnostic({ surface, creationState: state.creationState, signal: controller.signal }));
+        const observation = await Promise.race([observationWork, new Promise((_, reject) => { timer = setTimeout(() => { controller.abort(); reject(new Error('DIAGNOSTIC_OBSERVATION_DEADLINE')); }, 30000); })]).finally(() => clearTimeout(timer));
+        if(controller.signal.aborted||Date.now()>=observationDeadline)fail();
+        state = { ...state, diagnosticObservation: observation };
+      } catch { observationFailed = true; state = { ...state, diagnosticObservationFailed: true }; }
+      // Observation failures never bypass the acknowledged same-parent cleanup below.
+    }
+    let stopped;
+    try {
+      if (state.stage === 'created') { state = { ...state, stage: 'stopping' }; await save(state); }
+      stopped = await stopCloudRunDispatchWake({ platform, role, settings, releaseId, evidenceDigest, operationId,
+      surface, runnerReceipt, eventReceipt, schedulerReceipt, diagnostic: options.diagnostic, serviceReceipt, wakeReceipt: receipt, api,
       saved: state.stopState, save: async stopState => { state = { ...state, stopState }; await save(state); } });
-    if (state.stage === 'completed') return state;
+    } finally { await observationWork?.catch(() => undefined); } // Native wakes are stopped before waiting for an interrupted observation to settle.
+    if (state.stage === 'completed') { if (state.diagnosticObservationFailed) fail(); return state; }
     state = { ...state, stage: 'completed', stopState: stopped,
       scope: scheduler ? 'same original scheduler PAUSED; no effective delivery, in-flight drainage or readiness proof'
         : 'same original Eventarc trigger absent; no effective delivery, in-flight drainage or readiness proof' };
-    await save(state); return state;
+    await save(state);
+    if (observationFailed || state.diagnosticObservationFailed) fail();
+    return state;
   } catch { return fail(); }
 }

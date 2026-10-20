@@ -1,3 +1,4 @@
+import { assertDiagnosticWakeAuthority } from './temporal-diagnostic-authority.mjs';
 import { isDeepStrictEqual } from 'node:util';
 import { proofDigest } from './temporal-release-runtime.mjs';
 import { dispatchPreparationAuthority } from './temporal-dispatch-authority.mjs';
@@ -44,6 +45,13 @@ export async function activateCloudRunDispatchService(options) {
     schedulerReceiptSHA256: proofDigest(options.schedulerReceipt), settingsSHA256: proofDigest(settings) };
   let state = saved;
   const namedWakesAbsent = async () => {
+    if (options.diagnostic !== undefined) {
+      const m = await assertDiagnosticWakeAuthority(options.diagnostic);
+      if (saved?.stage !== 'completed' || proofDigest(saved) !== proofDigest(options.diagnostic.activationReceipt.identityState) ||
+        m.buildId !== platform.workerBuildId || m.image !== platform.workerImage || m.releaseId !== releaseId ||
+        operationId !== options.diagnostic.activationReceipt.operationId) fail();
+      return; // The completed original activation is read-only; owned diagnostic wakes may now exist.
+    }
     const wakes = renderServerlessDispatchWakeups(config, authority.original.service);
     for (const [base, name] of [
       ...wakes.triggers.map(t => ['https://eventarc.googleapis.com/v1/', t.name]),

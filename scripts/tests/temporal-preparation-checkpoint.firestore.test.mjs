@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { saveDiagnosticWakeCheckpoint,pulseDiagnosticOutbox } from '../temporal-diagnostic-wake.mjs';
 import { armCloudRunDispatchDiagnostic } from '../temporal-dispatch-diagnostic.mjs';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
@@ -171,4 +172,33 @@ test('diagnostic atomic producer preserves distinct original activation binding 
   for(const ref of [lockRef,controlRef,stateRef,db.doc(`_control/temporalDispatchDiagnosticAuthorization-${id}`),db.doc(`_control/temporalDispatchDiagnostic-${id}`),db.doc(`durableJobOutbox/diagnostic-${id}-outbox`),db.doc(`durableJobCommands/diagnostic-${id}-commands`)])await ref.delete();
   await deleteApp(app);
  }
+});
+
+
+test('native diagnostic wake checkpoint/pulse preserve original creation and unknown pulse ACK emits no second write',async()=>{
+ const app=initializeApp({projectId:`demo-diagnostic-pulse-${randomUUID().slice(0,8)}`},randomUUID()),db=getFirestore(app);
+ const operationId=randomUUID(),releaseId=randomUUID(),bindingDigest='a'.repeat(64);
+ const lockRef=db.doc('_control/temporalReleaseOperation'),controlRef=db.doc('_control/temporalRelease'),stateRef=db.doc('_control/temporalReleaseState');
+ const activationReceipt={identityState:{stage:'completed'}},version=s=>`${s.updateTime.seconds}:${s.updateTime.nanoseconds}`;
+ const refs=[lockRef,controlRef,stateRef,db.doc(`_control/temporalDispatchDiagnosticAuthorization-${operationId}`),db.doc(`_control/temporalDispatchDiagnostic-${operationId}`),
+  db.doc(`durableJobOutbox/diagnostic-${operationId}-outbox`),db.doc(`_control/temporalDispatchDiagnosticWakeCreation-${operationId}-outbox`)];
+ try{
+  await controlRef.create({releaseId,admission:'paused',domains:Object.fromEntries(['media','publishing','images','emails','accounts','bundles','search'].map(d=>[d,{admission:'paused'}]))});
+  await stateRef.create({releaseId,phase:'provider-usage-ready'});
+  const {proofDigest}=await import('../temporal-release-runtime.mjs');
+  const m={operationId,releaseId,bindingDigest,nonce:'b'.repeat(32),expiresAt:Date.now()+300000,controlVersion:version(await controlRef.get()),stateVersion:version(await stateRef.get()),activationDigest:proofDigest(activationReceipt)};
+  await lockRef.create({action:'prepare-cloud-run-dispatch-diagnostic',operationId,releaseId,bindingDigest,cloudDispatchDiagnostic:m});
+  await refs[3].create(m);await refs[4].create({manifestDigest:proofDigest(m)});await refs[5].create({state:'diagnostic',manifestDigest:proofDigest(m)});
+  const diagnostic={firestore:db,manifest:m,activationReceipt},creation={stage:'completed',plan:{operationId,surface:'outbox-trigger'},resource:{uid:'native-fixture-trigger'}};
+  const child={stage:'created',plan:{creation:creation.plan,diagnosticManifestSHA256:proofDigest(m)},creationState:creation};
+  const options={firestore:db,lockRef,controlRef,stateRef,ownedOperation:nativeSnapshotProof(await lockRef.get()),expectedAuthority:{control:nativeSnapshotProof(await controlRef.get()),state:nativeSnapshotProof(await stateRef.get())},diagnostic,operatorPrincipal:{email:'operator@example.test'}};
+  options.ownedOperation=await saveDiagnosticWakeCheckpoint(options,child);
+  const receipt=await refs[6].get();assert.equal(receipt.get('identityState.resource.uid'),'native-fixture-trigger');
+  await assert.rejects(saveDiagnosticWakeCheckpoint(options,{...child,creationState:{...creation,resource:{uid:'foreign'}}}));
+  let calls=0;const lostDb=new Proxy(db,{get(target,key){if(key==='runTransaction')return async fn=>{const r=await target.runTransaction(fn);if(++calls===2)throw new Error('controlled pulse commit ACK loss');return r;};const v=Reflect.get(target,key);return typeof v==='function'?v.bind(target):v;}});
+  await assert.rejects(pulseDiagnosticOutbox({...diagnostic,firestore:lostDb}));
+  const first=await refs[5].get();assert.ok(first.get('diagnosticPulse'));
+  await pulseDiagnosticOutbox(diagnostic);assert.equal((await refs[5].get()).updateTime.isEqual(first.updateTime),true);
+  await controlRef.update({admission:'open'});await assert.rejects(pulseDiagnosticOutbox(diagnostic));assert.equal((await refs[5].get()).updateTime.isEqual(first.updateTime),true);
+ }finally{for(const ref of refs)await ref.delete();await db.terminate();await deleteApp(app);}
 });

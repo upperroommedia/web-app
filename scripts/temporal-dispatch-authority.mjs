@@ -1,3 +1,5 @@
+import { activateCloudRunDispatchService } from './temporal-activate-dispatch-service.mjs';
+import { assertDiagnosticWakeAuthority } from './temporal-diagnostic-authority.mjs';
 import { isDeepStrictEqual } from 'node:util';
 import { proofDigest } from './temporal-release-runtime.mjs';
 import { renderPreparationWorkload, readOwnedPreparationRunner, readOwnedDispatchCaller } from './temporal-preparation-resources.mjs';
@@ -8,8 +10,8 @@ const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
 /** Re-derive ownership once; native identities and disabled configuration are
  * re-read on every verification. This helper creates no policy or resource.
  */
-export function dispatchPreparationAuthority({ platform, role, settings, releaseId, evidenceDigest,
-  runnerReceipt, eventReceipt, schedulerReceipt, serviceReceipt }) {
+export function dispatchPreparationAuthority(options) {
+  const { platform, role, settings, releaseId, evidenceDigest, runnerReceipt, eventReceipt, schedulerReceipt, serviceReceipt, diagnostic } = options;
   const workload = renderPreparationWorkload(platform, role, settings);
   if (role !== 'dispatch' || !uuid.test(releaseId ?? '') || !/^[a-f0-9]{64}$/.test(evidenceDigest ?? '')) fail();
   const original = serviceReceipt?.identityState;
@@ -32,6 +34,15 @@ export function dispatchPreparationAuthority({ platform, role, settings, release
   };
   return { workload, original, callers, verifyAccounts, async verify(api) {
     const accounts = await verifyAccounts(api);
+    if (diagnostic !== undefined) {
+      const m = await assertDiagnosticWakeAuthority(diagnostic);
+      if (m.operationId !== options.operationId || m.buildId !== platform.workerBuildId || m.image !== platform.workerImage) fail();
+      const receipt = diagnostic.activationReceipt;
+      const observed = await activateCloudRunDispatchService({ ...options, operationId: receipt.operationId, saved: receipt.identityState,
+        artifactDirectory: receipt.identityState.plan.artifactDirectory, api,
+        save: async () => { fail(); }, probe: async () => { fail(); } });
+      return { ...accounts, service: observed.service };
+    }
     const service = preparedDispatchServiceIdentity(await observeCloudRunDispatchService(platform, api, 'disabled'), expected);
     if (!isDeepStrictEqual(service, original.service)) fail();
     return { ...accounts, service };

@@ -1,4 +1,6 @@
 import test from 'node:test';
+import { prepareStopCloudRunEventarc } from './temporal-prepare-stop-eventarc.mjs';
+import { proofDigest } from './temporal-release-runtime.mjs';
 import assert from 'node:assert/strict';
 import { serverlessResourceNames } from './temporal-serverless-platform.mjs';
 import { dispatchResourceNames } from './temporal-serverless-dispatch-resources.mjs';
@@ -249,4 +251,45 @@ test('uncertain attempted-checkpoint acknowledgement never permits the PATCH or 
  f.options.save=async value=>{await save(value);if(value.stage==='attempted')throw new Error('uncertain checkpoint');};
  await assert.rejects(activateCloudRunDispatchService(f.options));assert.equal(f.patches,0);
  f.options.save=save;await assert.rejects(activateCloudRunDispatchService({...f.options,saved:f.saved}));assert.equal(f.patches,0);assert.equal(f.starts,1);
+});
+
+
+for(const observationFails of [false,true,'expiry','late'])test(`owned enabled diagnostic observes only after native creation then deletes even observation failure=${observationFails}`,async()=>{
+ const f=await activationFixture(),activationState=await activateCloudRunDispatchService(f.options),p=f.options.platform;
+ const operationId='66666666-2222-4333-8444-555555555555';
+ const activationReceipt={operationId:f.options.operationId,releaseId:f.options.releaseId,bindingDigest:'9'.repeat(64),identityState:activationState};
+ const manifest={operationId,releaseId:f.options.releaseId,bindingDigest:'8'.repeat(64),buildId:p.workerBuildId,image:p.workerImage,
+  controlVersion:'1:0',stateVersion:'2:0',expiresAt:Date.now()+300000,activationDigest:proofDigest(activationReceipt)};
+ const doc=(path,data,seconds)=>({exists:true,data:()=>data,updateTime:{seconds,nanoseconds:0},readTime:{toMillis:()=>Date.now()},
+  get:key=>key.split('.').reduce((v,k)=>v?.[k],data)});
+ const snapshots={
+  '_control/temporalReleaseOperation':doc('',{action:'prepare-cloud-run-dispatch-diagnostic',operationId,releaseId:manifest.releaseId,bindingDigest:manifest.bindingDigest,cloudDispatchDiagnostic:manifest},3),
+  '_control/temporalRelease':doc('',{releaseId:manifest.releaseId,admission:'paused',domains:Object.fromEntries(['media','publishing','images','emails','accounts','bundles','search'].map(d=>[d,{admission:'paused'}]))},1),
+  '_control/temporalReleaseState':doc('',{releaseId:manifest.releaseId,phase:'provider-usage-ready'},2),
+  [`_control/temporalDispatchDiagnosticAuthorization-${operationId}`]:doc('',manifest,4),
+ };
+ let saved,receipt,resource,creates=0,deletes=0,observations=0;
+ const originalNow=Date.now;let shifted=false;
+ const firestore={doc:path=>({path}),runTransaction:async fn=>{const result=await fn({get:async ref=>snapshots[ref.path]});
+  if(observationFails==='expiry'&&saved?.stage==='attempted'&&!shifted){shifted=true;Date.now=()=>originalNow()+600000;}return result;}};
+ const parent='projects/urm-app-staging/locations/us-central1',createOp=`${parent}/operations/diagnostic-create`,stopOp=`${parent}/operations/diagnostic-stop`,baseApi=f.options.api;
+ const options={...f.options,operationId,creator:'operator@example.test',surface:'outbox-trigger',diagnostic:{firestore,manifest,activationReceipt},
+  save:async value=>{saved=structuredClone(value);if(value.creationState){const r={operationId,releaseId:manifest.releaseId,operatorPrincipal:{email:'operator@example.test'},identityState:value.creationState};if(receipt)assert.deepEqual(receipt,r);else receipt=r;}},
+  readCreationReceipt:async()=>receipt,
+  observeDiagnostic:async()=>{observations++;assert.ok(resource);assert.equal(saved.stage,'created');assert.ok(receipt);if(observationFails===true||observationFails==='late')Date.now=()=>originalNow()+600000;if(observationFails===true)throw new Error('controlled proof failure');return{scope:'controlled observation'};},
+  api:async(url,method='GET',body)=>{
+   if(url.startsWith('https://eventarc.googleapis.com/')){
+    if(url.endsWith(createOp))return{name:createOp,done:true,response:structuredClone(resource)};
+    if(url.endsWith(stopOp))return{name:stopOp,done:true,response:{}};
+    if(method==='POST'){creates++;assert.equal(saved.stage,'attempted');resource={...structuredClone(body),uid:'owned-enabled-trigger',etag:'enabled-trigger-etag'};return{name:createOp};}
+    if(method==='DELETE'){deletes++;assert.ok(receipt);assert.equal(saved.stopState.stage,'attempted');assert.ok(url.endsWith('?etag=enabled-trigger-etag'));resource=undefined;return{name:stopOp};}
+    if(!resource)throw Object.assign(new Error('absent'),{status:404});return structuredClone(resource);
+   }
+   return baseApi(url,method,body);
+  }};
+ if(observationFails==='expiry'){try{await assert.rejects(prepareStopCloudRunEventarc(options));assert.equal(creates,0);assert.equal(deletes,0);assert.equal(saved.stage,'attempted');}finally{Date.now=originalNow;}return;}
+ try {if(observationFails)await assert.rejects(prepareStopCloudRunEventarc(options));else assert.equal((await prepareStopCloudRunEventarc(options)).stage,'completed');}finally{Date.now=originalNow;}
+ assert.equal(creates,1);assert.equal(deletes,1);assert.equal(observations,1);assert.equal(resource,undefined);assert.equal(saved.stopState.stage,'completed');
+ if(observationFails)await assert.rejects(prepareStopCloudRunEventarc({...options,saved}));else await prepareStopCloudRunEventarc({...options,saved});
+ assert.equal(creates,1);assert.equal(deletes,1);assert.equal(observations,1);
 });
