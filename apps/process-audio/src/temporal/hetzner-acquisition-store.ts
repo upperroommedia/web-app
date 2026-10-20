@@ -31,7 +31,7 @@ interface Operation {
 const fail = (): never => {
   throw new Error('YOUTUBE_ACQUISITION_OWNERSHIP');
 };
-function stagingDatabase(database: Firestore): void {
+export function assertStagingAcquisitionDatabase(database: Firestore): void {
   // The native SDK exposes its resolved project through this runtime getter.
   // Narrow it explicitly because its public TypeScript interface omits it.
   if (!('projectId' in database) || database.projectId !== 'urm-app-staging' || database.databaseId !== '(default)')
@@ -146,7 +146,7 @@ export async function prepareYouTubeAcquisition(options: {
   caller: AcquisitionPreparer;
   assertCurrent: (transaction: Transaction, ref: MediaJobRef) => Promise<void>;
 }): Promise<void> {
-  stagingDatabase(options.firestore);
+  assertStagingAcquisitionDatabase(options.firestore);
   const ref = Object.freeze({ ...options.ref });
   const id = youtubeAcquisitionId(ref);
   const caller = preparer(options.caller);
@@ -184,7 +184,7 @@ export function createYouTubeAcquisitionHostStore(options: {
   assertEligible: (transaction: Transaction, ref: MediaJobRef) => Promise<void>;
 }) {
   if (options.projectId !== 'urm-app-staging') return fail();
-  stagingDatabase(options.firestore);
+  assertStagingAcquisitionDatabase(options.firestore);
   const owner = host(options.owner);
   const target = (ref: MediaJobRef) =>
     options.firestore.collection(YOUTUBE_ACQUISITIONS).doc(youtubeAcquisitionId(ref));
