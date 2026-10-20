@@ -55,7 +55,11 @@ export async function observeBootstrapProtection(o) {
       p.get('operationId') !== operationId ||
       p.get('bindingDigest') !== bindingDigest ||
       p.get('releaseId') !== releaseId ||
-      !['bootstrap-stop-cloud-run-controls'].includes(p.get('action')) ||
+      ![
+        'bootstrap-stop-cloud-run-controls',
+        'activate-cloud-run-controls-pool',
+        'stop-cloud-run-controls-activation',
+      ].includes(p.get('action')) ||
       c.get('releaseId') !== releaseId ||
       s.get('releaseId') !== releaseId ||
       c.get('admission') !== 'paused' ||

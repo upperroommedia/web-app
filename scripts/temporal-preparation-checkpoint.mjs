@@ -5,7 +5,7 @@ import { assertNativeSnapshot, nativeSnapshotProof, proofDigest } from './tempor
  */
 async function saveCheckpoint({ firestore, lockRef, controlRef, stateRef,
   immutableReceipt, creationReceipt, ownedOperation, expectedAuthority, config, operationId, bindingDigest, operatorPrincipal, identityState, kind }) {
-  const [field, action] = { bootstrapCycle: ['cloudPoolBootstrapCycle', 'bootstrap-stop-cloud-run-controls'], dispatchActivation: ['cloudDispatchActivation', 'activate-cloud-run-dispatch-service'], identity: ['cloudIdentityPreparation', 'prepare-cloud-run-identity'],
+  const [field, action] = { poolActivation: ['cloudControlsActivation','activate-cloud-run-controls-pool'], poolAbort: ['cloudControlsActivationStop','stop-cloud-run-controls-activation'], bootstrapCycle: ['cloudPoolBootstrapCycle', 'bootstrap-stop-cloud-run-controls'], dispatchActivation: ['cloudDispatchActivation', 'activate-cloud-run-dispatch-service'], identity: ['cloudIdentityPreparation', 'prepare-cloud-run-identity'],
     eventarcCycle: ['cloudDispatchEventarcCycle', 'prepare-stop-cloud-run-dispatch-eventarc'],
     schedulerCycle: ['cloudDispatchSchedulerCycle', 'prepare-stop-cloud-run-dispatch-scheduler'],
     eventarcAudit: ['cloudEventarcAuditPreparation', 'prepare-cloud-run-eventarc-audit'],
@@ -19,11 +19,18 @@ async function saveCheckpoint({ firestore, lockRef, controlRef, stateRef,
     scaler: ['cloudScalerAccessPreparation', 'prepare-cloud-run-scaler-access'] }[kind] ?? [];
   if (!field) throw new Error('PREPARATION_KIND_REQUIRED');
   await firestore.runTransaction(async tx => {
-    const creationState = kind === 'bootstrapCycle' ? identityState.activationState : ['schedulerCycle', 'eventarcCycle'].includes(kind) ? identityState.creationState : undefined;
-    if (kind === 'bootstrapCycle' && (['started', 'stopping', 'completed'].includes(identityState.stage) && !creationState ||
+    const creationState = ['bootstrapCycle','poolActivation'].includes(kind) ? identityState.activationState : ['schedulerCycle', 'eventarcCycle'].includes(kind) ? identityState.creationState : undefined;
+    if (['bootstrapCycle','poolActivation'].includes(kind) && (['started', 'stopping', 'completed'].includes(identityState.stage) && !creationState ||
       creationState && (creationState.stage !== 'completed' || creationState.plan?.operationId !== operationId || creationState.plan?.mode !== 'start' || creationState.plan?.target !== 1 ||
        proofDigest(creationState.plan.origin) !== proofDigest(identityState.plan?.origin) || proofDigest(creationState) !== proofDigest(identityState.start))))
       throw new Error('BOOTSTRAP_ACTIVATION_RECEIPT_REQUIRED');
+    if(kind==='poolActivation'&&identityState.stage==='completed'){
+      const retained=identityState.retainedRegistration;
+      if(identityState.disposition==='retained'?
+        identityState.stop!==undefined||identityState.observation?.status!=='confirmed'||retained?.role!=='controls'||retained.buildId!==identityState.plan?.buildId||
+          !/^[a-f0-9]{64}$/.test(retained.registrationSHA256??'')||!Number.isFinite(Date.parse(retained.observedAt??'')):
+        identityState.disposition!=='stopped'||identityState.stop?.stage!=='completed')throw new Error('CONTROLS_ACTIVATION_OUTCOME_UNCONFIRMED');
+    }
     if (['schedulerCycle', 'eventarcCycle'].includes(kind) && (['created', 'stopping', 'completed'].includes(identityState.stage) && !creationState ||
       creationState && (creationState.plan?.operationId !== operationId || proofDigest(creationState.plan) !== proofDigest(identityState.plan?.creation))))
       throw new Error('SCHEDULER_CREATION_PLAN_CHANGED');
@@ -52,10 +59,10 @@ async function saveCheckpoint({ firestore, lockRef, controlRef, stateRef,
       ['proof', 'request', 'attemptedAt', 'prerequisites'].some(key =>
         proofDigest(current.get(field)[key] ?? null) !== proofDigest(identityState[key] ?? null)))
       throw new Error('DISPATCH_ACTIVATION_AUTHORIZATION_CHANGED');
-    if (kind === 'bootstrapCycle') {
+    if (['bootstrapCycle','poolActivation','poolAbort'].includes(kind)) {
       const previous=current.get(field);
       if(previous){
-        for(const key of ['activationState','observation']) if(Object.hasOwn(previous,key) &&
+        for(const key of ['activationState','observation','retentionFailed','retainedRegistration']) if(Object.hasOwn(previous,key) &&
           proofDigest(previous[key])!==proofDigest(identityState[key]??null)) throw new Error('BOOTSTRAP_ORIGINAL_OBSERVATION_CHANGED');
         for(const key of ['start','stop']) {
           const before=previous[key],after=identityState[key];
@@ -107,3 +114,6 @@ export const saveDispatchEventarcCycleCheckpoint = options => saveCheckpoint({ .
 export const saveDispatchActivationCheckpoint = options => saveCheckpoint({ ...options, kind: 'dispatchActivation' });
 
 export const savePoolBootstrapCycleCheckpoint = options => saveCheckpoint({ ...options, kind: 'bootstrapCycle' });
+
+export const saveControlsActivationCheckpoint = options => saveCheckpoint({ ...options, kind: 'poolActivation' });
+export const saveControlsActivationStopCheckpoint = options => saveCheckpoint({ ...options, kind: 'poolAbort' });

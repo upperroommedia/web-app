@@ -151,6 +151,10 @@ test('native bootstrap protection recognizes original old pinned wait and reject
     await launch('urm-controls', false, { deploymentName, buildId });
     assert.equal((await observeBootstrapRegistration(options)).role, 'controls');
     assert.equal((await observeBootstrapProtection(options)).protectedRunCount, 1);
+    for (const action of ['activate-cloud-run-controls-pool', 'stop-cloud-run-controls-activation']) {
+      await operation.update({ action });
+      assert.equal((await observeBootstrapProtection(options)).protectedRunCount, 1);
+    }
     await lock.create({ state: 'held', sessionId: 'original' });
     const before = await lock.get();
     await assert.rejects(observeBootstrapProtection(options), /CLOUD_RUN_BOOTSTRAP_PROTECTION_UNCONFIRMED/);
@@ -174,6 +178,41 @@ test('native bootstrap protection recognizes original old pinned wait and reject
       await rpc(() => handle.result());
     }
     handles.length = 0;
+    // Establish all other predicates after eventual visibility settles, so the
+    // following denial demonstrates current-routing protection specifically.
+    let noOpenRuns = false;
+    const visibleEnd = Date.now() + 15000;
+    while (Date.now() < visibleEnd) {
+      const visible = await rpc(() =>
+        client.connection.workflowService.listWorkflowExecutions({
+          namespace,
+          pageSize: 100,
+          query: 'ExecutionStatus = "Running"',
+        })
+      );
+      if (!(visible.executions ?? []).length) {
+        noOpenRuns = true;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    assert.equal(noOpenRuns, true);
+    assert.equal((await observeBootstrapProtection(options)).protectedRunCount, 0);
+    // Actual LOCAL conflict-token routing change is a negative fixture only.
+    // The release operations themselves never promote a version.
+    const described = await rpc(() =>
+      client.connection.workflowService.describeWorkerDeployment({ namespace, deploymentName })
+    );
+    await rpc(() =>
+      client.connection.workflowService.setWorkerDeploymentCurrentVersion({
+        namespace,
+        deploymentName,
+        buildId,
+        conflictToken: described.conflictToken,
+        identity: 'owned-negative-protection-fixture',
+      })
+    );
+    await assert.rejects(observeBootstrapProtection(options), /CLOUD_RUN_BOOTSTRAP_PROTECTION_UNCONFIRMED/);
   } catch (error) {
     failures.unshift(error);
   } finally {

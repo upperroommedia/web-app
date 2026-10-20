@@ -227,7 +227,7 @@ async function verifyAccess(o, zeroPlan) {
  * A later handoff activation needs its own reviewed operation; this cycle does
  * not promote routing, attach WCI, retire workers or prove live instance count.
  */
-export async function bootstrapStopCloudRunControlsPool(o) {
+async function runControlsPoolOperation(o, mode) {
   const {
     platform,
     role,
@@ -245,6 +245,7 @@ export async function bootstrapStopCloudRunControlsPool(o) {
   validateCloudRunReleasePlatform(platform);
   if (
     role !== 'controls' ||
+    !['cycle', 'retain', 'abort'].includes(mode) ||
     !uuid.test(operationId ?? '') ||
     !uuid.test(releaseId ?? '') ||
     !/^[a-f0-9]{64}$/.test(evidenceDigest ?? '') ||
@@ -272,9 +273,29 @@ export async function bootstrapStopCloudRunControlsPool(o) {
     zero.pool.desiredManualInstanceCount !== 0
   )
     fail();
-  const plan = {
+  const baseKeys = [
+    'runner',
+    'scaler',
+    'pool',
+    'runnerScaler',
+    'scalerTrust',
+    'poolAccess',
+    'firestore',
+    'projectRole',
+    'projectAccess',
+    'storageRole',
+    'storageAccess',
+  ];
+  const base = Object.fromEntries(baseKeys.map((key) => [key, r[key]]));
+  const expectedKeys = [
+    ...baseKeys,
+    ...(mode !== 'cycle' ? ['bootstrapCycle'] : []),
+    ...(mode === 'abort' ? ['activation'] : []),
+  ];
+  if (Object.keys(r).sort().join(',') !== expectedKeys.sort().join(',')) fail();
+  const originalCyclePlan = (id) => ({
     schemaVersion: 1,
-    operationId,
+    operationId: id,
     releaseId,
     evidenceDigest,
     role,
@@ -282,9 +303,128 @@ export async function bootstrapStopCloudRunControlsPool(o) {
     name: body.name,
     poolReceiptSHA256: proofDigest(r.pool),
     settingsSHA256: proofDigest(settings),
-    receiptsSHA256: proofDigest(r),
+    receiptsSHA256: proofDigest(base),
     origin: zero.pool,
+  });
+  const matchingPool = (pool, origin, count, increment) => {
+    if (
+      !pool ||
+      pool.name !== origin.name ||
+      pool.uid !== origin.uid ||
+      pool.revision !== origin.revision ||
+      pool.desiredManualInstanceCount !== count ||
+      typeof pool.etag !== 'string' ||
+      !pool.etag ||
+      !/^[1-9][0-9]*$/.test(String(pool.generation ?? '')) ||
+      BigInt(pool.generation) !== BigInt(origin.generation) + BigInt(increment)
+    )
+      fail();
+    return pool;
   };
+  const confirmed = (state) => {
+    const p = state.observation?.registration;
+    if (
+      state.observation?.status !== 'confirmed' ||
+      p?.role !== role ||
+      p.buildId !== b.buildId ||
+      !/^[a-f0-9]{64}$/.test(p.registrationSHA256 ?? '') ||
+      !Number.isFinite(Date.parse(p.observedAt ?? ''))
+    )
+      fail();
+  };
+  let origin = zero.pool,
+    cycle;
+  if (mode !== 'cycle') {
+    cycle = completed(r.bootstrapCycle, releaseId);
+    if (
+      !isDeepStrictEqual(cycle.plan, originalCyclePlan(r.bootstrapCycle.operationId)) ||
+      (cycle.disposition !== undefined && cycle.disposition !== 'stopped')
+    )
+      fail();
+    confirmed(cycle);
+    const start = cycle.start,
+      stop = cycle.stop;
+    if (
+      start?.stage !== 'completed' ||
+      stop?.stage !== 'completed' ||
+      !isDeepStrictEqual(cycle.activationState, start) ||
+      !isDeepStrictEqual(start.plan, {
+        operationId: r.bootstrapCycle.operationId,
+        mode: 'start',
+        target: 1,
+        origin: zero.pool,
+      }) ||
+      !isDeepStrictEqual(stop.plan, {
+        operationId: r.bootstrapCycle.operationId,
+        mode: 'stop',
+        target: 0,
+        origin: start.pool,
+      })
+    )
+      fail();
+    matchingPool(start.pool, zero.pool, 1, 1);
+    origin = matchingPool(stop.pool, zero.pool, 0, 2);
+  }
+  const retentionPlan = (id) => ({
+    schemaVersion: 2,
+    operationId: id,
+    releaseId,
+    evidenceDigest,
+    role,
+    mode: 'retain',
+    buildId: b.buildId,
+    name: body.name,
+    poolReceiptSHA256: proofDigest(r.pool),
+    settingsSHA256: proofDigest(settings),
+    receiptsSHA256: proofDigest({ ...base, bootstrapCycle: r.bootstrapCycle }),
+    origin: cycle.stop.pool,
+  });
+  if (mode === 'abort') {
+    const activation = completed(r.activation, releaseId);
+    if (
+      !isDeepStrictEqual(activation.plan, retentionPlan(r.activation.operationId)) ||
+      activation.disposition !== 'retained' ||
+      activation.stop !== undefined ||
+      activation.start?.stage !== 'completed' ||
+      !isDeepStrictEqual(activation.activationState, activation.start) ||
+      !isDeepStrictEqual(activation.start.plan, {
+        operationId: r.activation.operationId,
+        mode: 'start',
+        target: 1,
+        origin,
+      })
+    )
+      fail();
+    confirmed(activation);
+    const retained = activation.retainedRegistration;
+    if (
+      retained?.role !== role ||
+      retained.buildId !== b.buildId ||
+      !/^[a-f0-9]{64}$/.test(retained.registrationSHA256 ?? '') ||
+      !Number.isFinite(Date.parse(retained.observedAt ?? ''))
+    )
+      fail();
+    origin = matchingPool(activation.start.pool, origin, 1, 1);
+  }
+  const plan =
+    mode === 'cycle'
+      ? originalCyclePlan(operationId)
+      : mode === 'retain'
+      ? retentionPlan(operationId)
+      : {
+          schemaVersion: 2,
+          operationId,
+          releaseId,
+          evidenceDigest,
+          role,
+          mode,
+          buildId: b.buildId,
+          name: body.name,
+          poolReceiptSHA256: proofDigest(r.pool),
+          settingsSHA256: proofDigest(settings),
+          receiptsSHA256: proofDigest(r),
+          origin,
+        };
   const url = `https://run.googleapis.com/v2/${body.name}`;
   let state = saved;
   const persist = async (next) => {
@@ -359,11 +499,25 @@ export async function bootstrapStopCloudRunControlsPool(o) {
       // Recheck native account/grants and protection AFTER the awaited checkpoint.
       await verifyAccess(o, zeroPlan);
       const fresh = await guard();
-      if (fresh.protectionSHA256 !== protection.protectionSHA256 || Date.now() - Date.parse(fresh.observedAt) > 5000)
+      if (
+        fresh.protectionSHA256 !== protection.protectionSHA256 ||
+        fresh.computeInventorySHA256 !== protection.computeInventorySHA256 ||
+        Date.now() - Date.parse(fresh.observedAt) > 5000
+      )
         fail();
       let ack;
       try {
-        ack = await api(request.url, request.method, request.body);
+        ack = await api(request.url, request.method, request.body, async () => {
+          // The controller invokes this source-owned fence after obtaining its
+          // Google credential. A slow credential refresh cannot renew authority.
+          const atSend = await guard();
+          if (
+            atSend.protectionSHA256 !== protection.protectionSHA256 ||
+            atSend.computeInventorySHA256 !== protection.computeInventorySHA256 ||
+            Math.abs(Date.now() - Date.parse(atSend.observedAt)) > 5000
+          )
+            fail();
+        });
       } catch (error) {
         if (
           Number.isInteger(error?.status) &&
@@ -444,13 +598,53 @@ export async function bootstrapStopCloudRunControlsPool(o) {
     if (state.stage === 'completed') {
       await verifyAccess(o, zeroPlan);
       await guard();
+      if (mode === 'retain' && state.disposition === 'retained') {
+        if (
+          state.stop ||
+          !isDeepStrictEqual(state.activationState, state.start) ||
+          !isDeepStrictEqual(await current(1), state.start?.pool)
+        )
+          fail();
+        confirmed(state);
+        if (
+          state.retainedRegistration?.role !== role ||
+          state.retainedRegistration.buildId !== b.buildId ||
+          !/^[a-f0-9]{64}$/.test(state.retainedRegistration.registrationSHA256 ?? '') ||
+          !Number.isFinite(Date.parse(state.retainedRegistration.observedAt ?? ''))
+        )
+          fail();
+        const fresh = await observeRegistration();
+        if (
+          fresh?.role !== role ||
+          fresh.buildId !== b.buildId ||
+          !/^[a-f0-9]{64}$/.test(fresh.registrationSHA256 ?? '') ||
+          !Number.isFinite(Date.parse(fresh.observedAt ?? '')) ||
+          Math.abs(Date.now() - Date.parse(fresh.observedAt)) > 5000
+        )
+          fail();
+        await guard();
+        if (!isDeepStrictEqual(await current(1), state.start.pool)) fail();
+        return state;
+      }
       if (!state.stop || !isDeepStrictEqual(await current(0), state.stop.pool)) fail();
-      if (state.observation?.status !== 'confirmed') fail();
+      if (mode === 'retain' || (mode !== 'abort' && state.observation?.status !== 'confirmed')) fail();
+      return state;
+    }
+    if (mode === 'abort') {
+      await persist({ ...state, stage: 'stopping' });
+      await scale('stop', 0, origin);
+      await persist({
+        ...state,
+        stage: 'completed',
+        disposition: 'stopped',
+        verifiedAt: new Date().toISOString(),
+        scope: 'owned unused non-current activation stop; desired zero not observed process termination or drainage',
+      });
       return state;
     }
     if (!state.activationState) {
       await persist({ ...state, stage: 'starting' });
-      const start = await scale('start', 1, zero.pool);
+      const start = await scale('start', 1, origin);
       // Atomic immutable activation record before native observation or cleanup.
       await persist({ ...state, stage: 'started', activationState: start });
     }
@@ -475,18 +669,68 @@ export async function bootstrapStopCloudRunControlsPool(o) {
       }
       await persist({ ...state, stage: 'stopping', observation });
     }
+    if (mode === 'retain' && state.observation.status === 'confirmed' && !state.stop && !state.retentionFailed) {
+      let retainedRegistration;
+      try {
+        await verifyAccess(o, zeroPlan);
+        retainedRegistration = await observeRegistration();
+        if (
+          retainedRegistration?.role !== role ||
+          retainedRegistration.buildId !== b.buildId ||
+          !/^[a-f0-9]{64}$/.test(retainedRegistration.registrationSHA256 ?? '') ||
+          !Number.isFinite(Date.parse(retainedRegistration.observedAt ?? ''))
+        )
+          fail();
+        await guard();
+        if (
+          !isDeepStrictEqual(await current(1), state.start.pool) ||
+          Math.abs(Date.now() - Date.parse(retainedRegistration.observedAt)) > 5000
+        )
+          fail();
+      } catch {
+        // This decision is persisted before any cleanup attempt and never expires.
+        await persist({ ...state, stage: 'stopping', retentionFailed: true });
+      }
+      if (!state.retentionFailed) {
+        // Unknown completion-checkpoint ACK retains ownership, never infers a
+        // cleanup decision or stops a possibly committed retained activation.
+        await persist({
+          ...state,
+          stage: 'completed',
+          disposition: 'retained',
+          retainedRegistration,
+          verifiedAt: new Date().toISOString(),
+          scope:
+            'owned controls desired-one non-current registration retained for separate guarded handoff; not live count, effective runtime access, promotion, WCI or readiness',
+        });
+        return state;
+      }
+    }
     // Failure/timeout does not bypass owned cleanup, and cleanup never expires.
     await scale('stop', 0, state.start.pool);
     await persist({
       ...state,
       stage: 'completed',
+      disposition: 'stopped',
       verifiedAt: new Date().toISOString(),
       scope:
         'owned controls bootstrap/stop cycle; desired counts not live process counts; unknown ACK not causal; no promotion/WCI/drainage/readiness',
     });
-    if (state.observation.status !== 'confirmed') fail();
+    if (state.observation.status !== 'confirmed' || mode === 'retain') fail();
     return state;
   } catch {
     return fail();
   }
 }
+
+// Fixed entrypoints: descriptors cannot choose a cleanup policy or role.
+const execute = async (o, mode) => {
+  try {
+    return await runControlsPoolOperation(o, mode);
+  } catch {
+    return fail();
+  }
+};
+export const bootstrapStopCloudRunControlsPool = (o) => execute(o, 'cycle');
+export const activateCloudRunControlsPool = (o) => execute(o, 'retain');
+export const stopCloudRunControlsActivation = (o) => execute(o, 'abort');

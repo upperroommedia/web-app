@@ -281,7 +281,8 @@ export function controlsBootstrapFixture() {
       observedAt: new Date().toISOString(),
       registrationSHA256: 'f'.repeat(64),
     }),
-    api: async (url, method = 'GET', request) => {
+    api: async (url, method = 'GET', request, beforeSend) => {
+      if(beforeSend)await beforeSend();
       calls.push({ url, method, request: structuredClone(request) });
       if (method === 'PATCH') {
         if (

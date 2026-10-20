@@ -138,3 +138,244 @@ for (const bad of ['uid', 'generation', 'revision', 'secret', 'role', 'db', 'buc
     await assert.rejects(cycle(f.options));
     assert.equal(f.calls.filter((c) => c.method === 'PATCH').length, 0);
   });
+
+// Controlled Cloud identities/receipts only. No native Cloud Run attestation.
+const { activateCloudRunControlsPool: retain, stopCloudRunControlsActivation: abort } = await import(
+  './temporal-bootstrap-pool.mjs'
+);
+const { randomUUID } = await import('node:crypto');
+async function afterCycle() {
+  const f = fixture(),
+    result = await cycle(f.options);
+  f.options.receipts.bootstrapCycle = {
+    operationId: f.options.operationId,
+    releaseId: f.options.releaseId,
+    identityState: structuredClone(result),
+  };
+  f.options.operationId = randomUUID();
+  return f;
+}
+async function afterRetain() {
+  const f = await afterCycle(),
+    result = await retain(f.options);
+  f.options.receipts.activation = {
+    operationId: f.options.operationId,
+    releaseId: f.options.releaseId,
+    identityState: structuredClone(result),
+  };
+  f.options.operationId = randomUUID();
+  return f;
+}
+test('kept activation starts only from exact completed-cycle origin and leaves desired one without routing promotion', async () => {
+  const f = await afterCycle(),
+    r = await retain(f.options);
+  assert.equal(r.disposition, 'retained');
+  assert.equal(r.stop, undefined);
+  assert.equal(r.start.pool.generation, '4');
+  assert.equal(r.plan.origin.generation, '3');
+  assert.equal(f.pool.scaling.manualInstanceCount, 1);
+  assert.deepEqual(
+    f.calls.filter((c) => c.method === 'PATCH').map((c) => c.request.scaling.manualInstanceCount),
+    [1, 0, 1]
+  );
+  const original = structuredClone(r);
+  await retain({ ...f.options, saved: r });
+  assert.deepEqual(f.saved, original);
+  assert.equal(f.calls.filter((c) => c.method === 'PATCH').length, 3);
+});
+test('a separately guarded unused activation stop consumes exact kept receipt and does no start', async () => {
+  const f = await afterRetain();
+  f.options.observeRegistration = async () => {
+    throw new Error('stop must not launch/observe new work');
+  };
+  const r = await abort(f.options);
+  assert.equal(r.disposition, 'stopped');
+  assert.equal(r.start, undefined);
+  assert.equal(r.stop.pool.generation, '5');
+  await abort({ ...f.options, saved: r });
+  assert.equal(f.calls.filter((c) => c.method === 'PATCH').length, 4);
+});
+for (const bad of [
+  'absent-cycle',
+  'failed-cycle',
+  'cycle-plan',
+  'cycle-start',
+  'cycle-stop',
+  'cycle-observation',
+  'origin-etag',
+  'origin-generation',
+  'extra-manifest',
+])
+  test(`kept activation denies ${bad} without another PATCH`, async () => {
+    const f = await afterCycle(),
+      r = f.options.receipts.bootstrapCycle;
+    if (bad === 'absent-cycle') delete f.options.receipts.bootstrapCycle;
+    if (bad === 'failed-cycle') r.identityState.stage = 'attempted';
+    if (bad === 'cycle-plan') r.identityState.plan.receiptsSHA256 = 'f'.repeat(64);
+    if (bad === 'cycle-start') r.identityState.start.plan.origin.uid = 'foreign';
+    if (bad === 'cycle-stop') r.identityState.stop.plan.target = 1;
+    if (bad === 'cycle-observation') r.identityState.observation.status = 'unconfirmed';
+    if (bad === 'origin-etag') f.pool.etag = 'changed';
+    if (bad === 'origin-generation') {
+      f.pool.generation = '4';
+      f.pool.observedGeneration = '4';
+    }
+    if (bad === 'extra-manifest') f.options.receipts.extra = {};
+    await assert.rejects(retain(f.options));
+    assert.equal(f.calls.filter((c) => c.method === 'PATCH').length, 2);
+  });
+for (const bad of [
+  'not-retained',
+  'activation-plan',
+  'activation-origin',
+  'activation-start',
+  'activation-observation',
+  'activation-replaced',
+])
+  test(`separate stop denies ${bad} without PATCH`, async () => {
+    const f = await afterRetain(),
+      r = f.options.receipts.activation;
+    if (bad === 'not-retained') r.identityState.disposition = 'stopped';
+    if (bad === 'activation-plan') r.identityState.plan.receiptsSHA256 = 'f'.repeat(64);
+    if (bad === 'activation-origin') r.identityState.plan.origin.uid = 'replacement';
+    if (bad === 'activation-start') r.identityState.activationState.pool.generation = '3';
+    if (bad === 'activation-observation') r.identityState.observation.status = 'unconfirmed';
+    if (bad === 'activation-replaced') f.pool.uid = 'replacement';
+    await assert.rejects(abort(f.options));
+    assert.equal(f.calls.filter((c) => c.method === 'PATCH').length, 3);
+  });
+test('retained activation never claims success after failed native observation; same parent stops', async () => {
+  const f = await afterCycle();
+  f.options.observeRegistration = async () => {
+    throw new Error('not verified');
+  };
+  await assert.rejects(retain(f.options));
+  assert.equal(f.saved.disposition, 'stopped');
+  assert.equal(f.saved.observation.status, 'unconfirmed');
+  assert.equal(f.pool.scaling.manualInstanceCount, 0);
+  assert.equal(f.calls.filter((c) => c.method === 'PATCH').length, 4);
+  await assert.rejects(retain({ ...f.options, saved: f.saved }));
+});
+test('fresh retained registration failure cleans up even after initial confirmed observation', async () => {
+  const f = await afterCycle(),
+    original = f.options.observeRegistration;
+  let calls = 0;
+  f.options.observeRegistration = async () => {
+    if (++calls === 2) throw new Error('final observation failed');
+    return original();
+  };
+  await assert.rejects(retain(f.options));
+  assert.equal(f.saved.retentionFailed, true);
+  assert.equal(f.saved.disposition, 'stopped');
+  assert.equal(f.pool.scaling.manualInstanceCount, 0);
+});
+for (const mode of ['retain', 'abort'])
+  test(`${mode} unknown accepted scaling ACK is GET-only with original pool identity`, async () => {
+    const f = mode === 'retain' ? await afterCycle() : await afterRetain(),
+      api = f.options.api;
+    let injected = false;
+    f.options.api = async (...args) => {
+      const r = await api(...args);
+      if (args[1] === 'PATCH' && !injected) {
+        injected = true;
+        throw new Error('lost');
+      }
+      return r;
+    };
+    const r = await (mode === 'retain' ? retain : abort)(f.options);
+    assert.match(r[mode === 'retain' ? 'start' : 'stop'].outcome, /unknown-ack/);
+    assert.equal(f.calls.filter((c) => c.method === 'PATCH').length, mode === 'retain' ? 3 : 4);
+  });
+test('unknown retained completion checkpoint ACK cannot trigger cleanup or another start', async () => {
+  const f = await afterCycle(),
+    save = f.options.save;
+  f.options.save = async (state) => {
+    await save(state);
+    if (state.disposition === 'retained') throw new Error('unknown checkpoint');
+  };
+  await assert.rejects(retain(f.options));
+  assert.equal(f.pool.scaling.manualInstanceCount, 1);
+  const count = f.calls.filter((c) => c.method === 'PATCH').length;
+  f.options.save = save;
+  await retain({ ...f.options, saved: f.saved });
+  assert.equal(f.calls.filter((c) => c.method === 'PATCH').length, count);
+});
+test('a newly current/protected candidate cannot be separately stopped', async () => {
+  const f = await afterRetain();
+  f.options.observeProtection = async () => {
+    throw new Error('candidate current or work active');
+  };
+  await assert.rejects(abort(f.options));
+  assert.equal(f.pool.scaling.manualInstanceCount, 1);
+  assert.equal(f.calls.filter((c) => c.method === 'PATCH').length, 3);
+});
+for (const mode of ['retain', 'abort'])
+  for (const status of [403, 409])
+    test(`${mode} known ${status} rejection cannot become desired observation or resend`, async () => {
+      const f = mode === 'retain' ? await afterCycle() : await afterRetain(),
+        api = f.options.api;
+      let attempts = 0;
+      f.options.api = async (...args) => {
+        if (args[1] === 'PATCH') {
+          attempts++;
+          throw Object.assign(new Error('denied'), { status });
+        }
+        return api(...args);
+      };
+      await assert.rejects((mode === 'retain' ? retain : abort)(f.options));
+      assert.equal(f.saved[mode === 'retain' ? 'start' : 'stop'].stage, 'rejected');
+      await assert.rejects((mode === 'retain' ? retain : abort)({ ...f.options, saved: f.saved }));
+      assert.equal(attempts, 1);
+    });
+test('a retained receipt missing its final immutable registration cannot authorize separate stop', async () => {
+  const f = await afterRetain();
+  delete f.options.receipts.activation.identityState.retainedRegistration;
+  await assert.rejects(abort(f.options));
+  assert.equal(f.calls.filter((c) => c.method === 'PATCH').length, 3);
+});
+test('late credential acquisition cannot bypass immediate pre-send protected-work authorization', async () => {
+  const f = await afterCycle(),
+    api = f.options.api,
+    observe = f.options.observeProtection;
+  let changed = false,
+    writes = 0;
+  f.options.observeProtection = async () => {
+    const p = await observe();
+    if (changed) p.protectionSHA256 = '1'.repeat(64);
+    return p;
+  };
+  f.options.api = async (...args) => {
+    if (args[1] === 'PATCH') {
+      // The actual controller transport obtains credentials before this callback.
+      changed = true;
+      await args[3]();
+      writes++;
+    }
+    return api(...args);
+  };
+  await assert.rejects(retain(f.options));
+  assert.equal(writes, 0);
+  assert.equal(f.pool.scaling.manualInstanceCount, 0);
+});
+test('post-credential namespace inventory drift cannot reuse the saved compute observation', async () => {
+  const f = await afterCycle(),
+    api = f.options.api,
+    observe = f.options.observeProtection;
+  let changed = false,
+    writes = 0;
+  f.options.observeProtection = async () => {
+    const p = await observe();
+    if (changed) p.computeInventorySHA256 = '1'.repeat(64);
+    return p;
+  };
+  f.options.api = async (...args) => {
+    if (args[1] === 'PATCH') {
+      changed = true;
+      await args[3]();
+      writes++;
+    }
+    return api(...args);
+  };
+  await assert.rejects(retain(f.options));
+  assert.equal(writes, 0);
+});

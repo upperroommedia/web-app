@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { prepareCloudRunIdentity } from '../temporal-prepare-cloud-identity.mjs';
 import { saveDispatchActivationCheckpoint, saveDispatchEventarcCycleCheckpoint, saveDispatchSchedulerCycleCheckpoint, saveEventarcAuditPreparationCheckpoint, saveDispatchWakeStopCheckpoint, saveDispatchAccessPreparationCheckpoint, saveDispatchServicePreparationCheckpoint, saveIdentityPreparationCheckpoint, savePoolPreparationCheckpoint, saveSecretAccessPreparationCheckpoint, saveScalerAccessPreparationCheckpoint, saveFirestoreAccessPreparationCheckpoint, saveRuntimeRolePreparationCheckpoint, saveRuntimeAccessPreparationCheckpoint } from '../temporal-preparation-checkpoint.mjs';
-import { nativeSnapshotProof } from '../temporal-release-runtime.mjs';
+import { assertNativeSnapshot,nativeSnapshotProof } from '../temporal-release-runtime.mjs';
 import { serverlessResourceNames } from '../temporal-serverless-platform.mjs';
 import { dispatchResourceNames } from '../temporal-serverless-dispatch-resources.mjs';
 const harness = JSON.parse(readFileSync(new URL('../../firebase.test.json', import.meta.url)));
@@ -262,6 +262,67 @@ test('controls bootstrap uses native authority checkpoints, immutable activation
     assert.equal(result.stop.pool.desiredManualInstanceCount,0);assert.equal((await immutableReceipt.get()).get('identityState.stage'),'completed');
     assert.equal(f.calls.filter(c=>c.method==='PATCH').length,2);
    }else{await assert.rejects(bootstrapStopCloudRunControlsPool(f.options));assert.equal(f.calls.filter(c=>c.method==='PATCH').length,0);assert.equal((await creationReceipt.get()).exists,false);}
+   for(const ref of [lockRef,controlRef,stateRef,immutableReceipt,creationReceipt])await ref.delete();
+  }
+ }finally{await deleteApp(app);}
+});
+
+for(const mode of ['retain','abort'])test(`controls ${mode} native checkpoints retain exact origin, deny rollback/drift and distinguish immutable outcomes`,async()=>{
+ const {saveControlsActivationCheckpoint,saveControlsActivationStopCheckpoint}=await import('../temporal-preparation-checkpoint.mjs');
+ const {bootstrapStopCloudRunControlsPool,activateCloudRunControlsPool,stopCloudRunControlsActivation}=await import('../temporal-bootstrap-pool.mjs');
+ const {controlsBootstrapFixture}=await import('./fixtures/controls-bootstrap.mjs');
+ const app=initializeApp({projectId:'demo-preparation-checkpoint'},randomUUID()),db=getFirestore(app);
+ try{
+  for(const drift of ['control','state','credential-control','credential-state','none']){
+   const f=controlsBootstrapFixture(),cycle=await bootstrapStopCloudRunControlsPool(f.options);
+   f.options.receipts.bootstrapCycle={operationId:f.options.operationId,releaseId:f.options.releaseId,identityState:structuredClone(cycle)};
+   f.options.operationId=randomUUID();
+   if(mode==='abort'){
+    const kept=await activateCloudRunControlsPool(f.options);
+    f.options.receipts.activation={operationId:f.options.operationId,releaseId:f.options.releaseId,identityState:structuredClone(kept)};
+    f.options.operationId=randomUUID();
+   }
+   const {operationId,releaseId}=f.options,prefix=`_identityPreparationTests/${randomUUID()}/records`,baseline=f.calls.filter(c=>c.method==='PATCH').length;
+   const lockRef=db.doc(`${prefix}/operation`),controlRef=db.doc(`${prefix}/control`),stateRef=db.doc(`${prefix}/state`),immutableReceipt=db.doc(`${prefix}/receipt`),creationReceipt=db.doc(`${prefix}/activation`);
+   const config={releaseId,domains:['publishing']},bindingDigest='e'.repeat(64),operatorPrincipal={email:'operator@example.test'};
+   const action=mode==='retain'?'activate-cloud-run-controls-pool':'stop-cloud-run-controls-activation',key=mode==='retain'?'start':'stop';
+   await lockRef.create({operationId,releaseId,bindingDigest,action});
+   await controlRef.create({releaseId,admission:'paused',domains:{publishing:{admission:'paused'}}});await stateRef.create({releaseId,phase:'provider-usage-ready'});
+   let ownedOperation=nativeSnapshotProof(await lockRef.get());
+   const expectedAuthority={control:nativeSnapshotProof(await controlRef.get()),state:nativeSnapshotProof(await stateRef.get())},save=f.options.save;
+   const options={firestore:db,lockRef,controlRef,stateRef,immutableReceipt,creationReceipt,config,operationId,bindingDigest,operatorPrincipal,expectedAuthority};
+   const checkpoint=mode==='retain'?saveControlsActivationCheckpoint:saveControlsActivationStopCheckpoint;
+   const guard=f.options.observeProtection,api=f.options.api;
+   f.options.observeProtection=async()=>{
+    assertNativeSnapshot(expectedAuthority.control,await controlRef.get());assertNativeSnapshot(expectedAuthority.state,await stateRef.get());return guard();
+   };
+   f.options.api=async(...args)=>{
+    if(args[1]==='PATCH'&&drift.startsWith('credential-'))await (drift==='credential-control'?controlRef:stateRef).update({changedDuringCredential:true});
+    return api(...args);
+   };
+
+   f.options.save=async identityState=>{
+    if(['control','state'].includes(drift)&&identityState[key]?.stage==='attempted')await (drift==='control'?controlRef:stateRef).update({changed:true});
+    if(drift==='none'&&identityState.disposition==='retained'){
+      const bad={...identityState};delete bad.retainedRegistration;
+      await assert.rejects(checkpoint({...options,ownedOperation,identityState:bad}));
+      assert.equal((await immutableReceipt.get()).exists,false);
+    }
+    ownedOperation=await checkpoint({...options,ownedOperation,identityState});await save(identityState);
+    if(drift==='none'&&identityState[key]?.stage==='attempted')
+      await assert.rejects(checkpoint({...options,ownedOperation,identityState:{...identityState,[key]:{...identityState[key],stage:'planned'}}}));
+   };
+   const observe=f.options.observeRegistration;
+   if(mode==='retain')f.options.observeRegistration=async()=>{assert.equal((await creationReceipt.get()).get('identityState.stage'),'completed');return observe();};
+   const run=mode==='retain'?activateCloudRunControlsPool:stopCloudRunControlsActivation;
+   if(drift==='none'){
+    const result=await run(f.options);assert.equal(result.disposition,mode==='retain'?'retained':'stopped');
+    assert.equal((await immutableReceipt.get()).get('identityState.disposition'),result.disposition);
+    assert.equal(f.calls.filter(c=>c.method==='PATCH').length,baseline+1);
+    await run({...f.options,saved:f.saved});assert.equal(f.calls.filter(c=>c.method==='PATCH').length,baseline+1);
+   }else{
+    await assert.rejects(run(f.options));assert.equal(f.calls.filter(c=>c.method==='PATCH').length,baseline);assert.equal((await immutableReceipt.get()).exists,false);
+   }
    for(const ref of [lockRef,controlRef,stateRef,immutableReceipt,creationReceipt])await ref.delete();
   }
  }finally{await deleteApp(app);}

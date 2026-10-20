@@ -5,8 +5,9 @@ source. It joins the owned zero-pool/account/grant receipts, starts desired manu
 count one, observes the native non-current Activity queue, then stops the same
 owned pool under the original parent. Observation failure also enters owned stop;
 uncertain authority, protected work or an unknown result retains the fence.
-This has not been applied to Cloud Run. A handoff activation that keeps a candidate
-running for separately guarded promotion remains unimplemented.
+The source also connects a kept-running controls activation and a separate stop of
+that exact unused activation. None of these operations has been applied to Cloud Run.
+Other role activation and guarded promotion remain unimplemented.
 
 The final native role-readiness collector still requires candidate versions current,
 with no ramp, on the real role queues. The cycle cannot replace that collector.
@@ -41,7 +42,7 @@ TypeScript SDK 1.24.0 configuration. They do not establish general no-work isola
 Cloud Run process replacement, native cloud delivery, effective IAM or readiness.
 In particular, non-current is not a fence against explicitly routed tasks.
 
-## Connected controls-only cycle and remaining handoff activation
+## Connected controls-only cycle and kept activation
 
 `bootstrap-stop-cloud-run-controls` uses a SHA-pinned private manifest containing
 exactly eleven distinct completed preparation operation IDs: runner, scaler, pool,
@@ -59,14 +60,39 @@ session, unresolved dispatch record/lease or candidate execution denies the cycl
 These conservative checks can reject retained old work; do not clear any record to
 make them pass. They are observations, not a cross-API exclusion or drainage proof.
 
+The source-owned controls authorization callback also executes at the HTTP boundary
+**after** the controller obtains its Google credential. It rechecks the original
+protection and complete namespace-compute inventory digests and component freshness;
+a slow credential refresh or intervening authority/routing/inventory change cannot
+reuse the earlier authorization. Existing API callers retain their response/status
+semantics; JSON descriptors cannot supply this callback.
+
 The same-parent cycle always targets desired zero after observation, including
 unconfirmed observation. It refuses a stop after candidate work/routing/authority
-drift. Desired zero does not establish native process termination or drain. A later
-operation must use a newly reviewed origin/generation and keep a candidate running
-for handoff; repeating the original zero-pool receipt cannot authorize that operation.
-Other roles, media capacity and active-candidate promotion remain out of scope.
+drift. Desired zero does not establish native process termination or drain. `activate-cloud-run-controls-pool` consumes that exact completed cycle as its new
+origin: same UID/revision and original generation plus two, desired zero and its
+native etag. Its twelve-ID manifest adds `bootstrapCycle` to the eleven original
+receipts. After one saved scaling PATCH it commits the native activation record
+before observation. Only fresh non-current registration/protection and exact
+count-one identity produce a completed `retained` receipt. Count one remains
+transitional billed compute; it proves neither live poller identity nor readiness.
 
-The remaining handoff activation must retain these requirements:
+An observation failure produces a distinct same-parent stopped outcome, never a
+successful kept-activation receipt. An unknown retained-completion checkpoint ACK
+retains the fence; it never infers a cleanup decision. Resume observes the existing
+pool and native registration without resending the start or renewing old receipts.
+
+`stop-cloud-run-controls-activation` adds that exact completed retained `activation`
+receipt to the manifest. It checks the original cycle/activation plans, current
+UID/revision/generation/etag, grants, compute absence and unused/non-current work
+protection before its sole saved conditional stop. A current or working candidate
+cannot be forced to zero. Cleanup has no authorization-expiry shortcut. Desired
+zero still proves neither process termination nor drain. After this stop, the
+original cycle origin cannot authorize another activation; a new origin requires a
+separately reviewed contract. Other roles, media capacity and guarded promotion
+remain out of scope.
+
+Any extension to other roles and the later handoff must retain these requirements:
 
 1. Retain the existing full source/CI/tree/image and paused release-authority
    guards. Join immutable completed runner, zero-pool and scoped-access receipts,
