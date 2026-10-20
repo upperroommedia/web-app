@@ -31,10 +31,13 @@ function desiredPolicy(before, grants) {
   const result = structuredClone(before);
   result.bindings ??= [];
   for (const grant of grants) {
-    if (!grant || Object.keys(grant).sort().join(',') !== 'members,role' || !/^roles\/[A-Za-z0-9.]+$/.test(grant.role ?? '') ||
+    if (!grant || !['members,role', 'condition,members,role'].includes(Object.keys(grant).sort().join(',')) || !/^roles\/[A-Za-z0-9.]+$/.test(grant.role ?? '') ||
       !Array.isArray(grant.members) || !grant.members.length || new Set(grant.members).size !== grant.members.length ||
       grant.members.some(member => !/^serviceAccount:[A-Za-z0-9._+-]+@[A-Za-z0-9.-]+\.gserviceaccount\.com$/.test(member))) fail();
-    const binding = result.bindings.find(binding => binding.role === grant.role && binding.condition === undefined);
+    // Conditions are constructed by the source-bound adapter, never user input.
+    // Never merge a conditional grant into an unconditional binding of the role.
+    policyValue({ version: 3, etag: before.etag, bindings: [grant] });
+    const binding = result.bindings.find(binding => binding.role === grant.role && isDeepStrictEqual(binding.condition, grant.condition));
     if (binding) { for (const member of grant.members) if (!binding.members.includes(member)) binding.members.push(member); }
     else result.bindings.push(structuredClone(grant));
   }
