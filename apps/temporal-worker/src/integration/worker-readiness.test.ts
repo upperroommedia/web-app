@@ -1,3 +1,14 @@
+// Explicit no-network email fixture; local tests do not prove deployed mail authentication.
+jest.mock('@upperroom/function-kit-firestore-send-email/lib/temporal/provider', () => ({
+  verifyEmailTransportNoSendBounded: jest.fn(async () => ({
+    provider: 'smtp',
+    tlsVerified: true,
+    authenticationVerified: true,
+    mailPermissionVerified: false,
+    noMessageSent: true,
+    observedAt: new Date().toISOString(),
+  })),
+}));
 // Controlled serving-read fixture, alongside the controlled Cloud Run identity.
 // Native SDK execution/Firestore receipts here do NOT prove deployed RTDB access.
 jest.mock('../runtime/cloud-run-rtdb-readiness', () => ({

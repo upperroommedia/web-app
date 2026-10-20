@@ -418,7 +418,7 @@ export async function collectServerlessReadinessObservations(options: {
       const { digest, ...evidence } = object(stored.data());
       if (
         Object.keys(evidence).sort().join(',') !==
-          'activityId,attempt,buildId,firebaseRtdb,nonce,observedAt,projectId,role,runId,schemaVersion,taskQueue,worker,workflowId' ||
+          'activityId,attempt,buildId,email,firebaseRtdb,nonce,observedAt,projectId,role,runId,schemaVersion,taskQueue,worker,workflowId' ||
         evidence.schemaVersion !== 1 ||
         digest !== receipt.digest ||
         workerReadinessDigest(evidence) !== digest ||
@@ -449,6 +449,22 @@ export async function collectServerlessReadinessObservations(options: {
         )
           fail();
       } else if (evidence.firebaseRtdb !== null) fail();
+      if (binding.role === 'email') {
+        const mail = object(evidence.email);
+        if (
+          Object.keys(mail).sort().join(',') !==
+            'authenticationVerified,mailPermissionVerified,noMessageSent,observedAt,provider,tlsVerified' ||
+          !['smtp', 'sendgrid'].includes(mail.provider) ||
+          mail.tlsVerified !== true ||
+          mail.authenticationVerified !== true ||
+          mail.noMessageSent !== true ||
+          mail.mailPermissionVerified !== (mail.provider === 'sendgrid') ||
+          !Number.isFinite(Date.parse(mail.observedAt)) ||
+          Date.parse(mail.observedAt) < startedAt - 5000 ||
+          Date.parse(mail.observedAt) > Date.parse(evidence.observedAt)
+        )
+          fail();
+      } else if (evidence.email !== null) fail();
       const completed = (history.events ?? []).find((e) => {
         const done = e.activityTaskCompletedEventAttributes;
         const task = done && scheduled.get(String(done.scheduledEventId));
@@ -495,6 +511,7 @@ export async function collectServerlessReadinessObservations(options: {
       roles.push({
         role: binding.role,
         firebaseRtdb: evidence.firebaseRtdb,
+        email: evidence.email,
         ...platform,
         receipt,
         ...(await routing(binding)),

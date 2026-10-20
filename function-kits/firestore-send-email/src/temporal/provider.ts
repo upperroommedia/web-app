@@ -164,10 +164,14 @@ async function reviewedHttpsRequest(
   path: string,
   headers: Record<string, string>,
   payload?: string,
-  beforeRequest?: () => Promise<void>
+  beforeRequest?: () => Promise<void>,
+  signal?: AbortSignal
 ): Promise<{ statusCode: number; headers: Record<string, any>; body: unknown }> {
+  signal?.throwIfAborted();
   const endpoint = await resolveReviewedEmailEndpoint(descriptor);
+  signal?.throwIfAborted();
   if (beforeRequest) await beforeRequest();
+  signal?.throwIfAborted();
   return new Promise((resolve, reject) => {
     const request = httpsRequest(
       {
@@ -177,6 +181,7 @@ async function reviewedHttpsRequest(
         rejectUnauthorized: true,
         minVersion: 'TLSv1.2',
         agent: false,
+        signal,
         method,
         path,
         timeout: 15000,
@@ -227,7 +232,8 @@ async function sendGridRequest(
   apiKey: string,
   method: 'GET' | 'POST',
   body?: unknown,
-  beforeRequest?: () => Promise<void>
+  beforeRequest?: () => Promise<void>,
+  signal?: AbortSignal
 ) {
   if (!apiKey || /[\r\n]/.test(apiKey)) throw new Error('EMAIL_SENDGRID_API_KEY_REQUIRED');
   return reviewedHttpsRequest(
@@ -236,12 +242,14 @@ async function sendGridRequest(
     method === 'GET' ? '/v3/scopes' : '/v3/mail/send',
     { Authorization: `Bearer ${apiKey}`, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
     body === undefined ? undefined : JSON.stringify(body),
-    beforeRequest
+    beforeRequest,
+    signal
   );
 }
 async function refreshReviewedOAuthToken(
   endpoint: NonNullable<EmailEgressDescriptor['oauthTokenEgress']>,
-  credentials: Record<string, any>
+  credentials: Record<string, any>,
+  signal?: AbortSignal
 ): Promise<{ token: string; expires: number }> {
   if (
     ![credentials.clientId, credentials.clientSecret, credentials.refreshToken].every(
@@ -260,7 +268,9 @@ async function refreshReviewedOAuthToken(
     'POST',
     endpoint.hostname === 'accounts.google.com' ? '/o/oauth2/token' : '/token',
     { 'Content-Type': 'application/x-www-form-urlencoded', 'Accept-Encoding': 'identity' },
-    body
+    body,
+    undefined,
+    signal
   );
   const result = response.body as { access_token?: unknown; expires_in?: unknown };
   if (
@@ -275,7 +285,10 @@ async function refreshReviewedOAuthToken(
     throw new Error('EMAIL_OAUTH_TOKEN_RESPONSE_INVALID');
   return { token: result.access_token, expires: Date.now() + Number(result.expires_in) * 1000 };
 }
-export function createEmailProviderRuntime(provided?: EmailEgressDescriptor): {
+export function createEmailProviderRuntime(
+  provided?: EmailEgressDescriptor,
+  verificationSignal?: AbortSignal
+): {
   verify(): Promise<void>;
   send(options: nodemailer.SendMailOptions, beforeSend?: () => Promise<void>): Promise<any>;
   close(): void;
@@ -302,11 +315,16 @@ export function createEmailProviderRuntime(provided?: EmailEgressDescriptor): {
   }
   const descriptor = validateEmailEgressDescriptor(provided || configuredDescriptor());
   const tls = strictTls();
+  let closed = false;
+  const assertOpen = () => {
+    if (closed || verificationSignal?.aborted) throw new Error('EMAIL_PROVIDER_CLOSED');
+  };
   if (descriptor.provider === 'sendgrid') {
     let key = config.smtpPassword || '';
     return {
       async verify() {
-        const response = await sendGridRequest(descriptor, key, 'GET');
+        assertOpen();
+        const response = await sendGridRequest(descriptor, key, 'GET', undefined, undefined, verificationSignal);
         if (
           !Array.isArray((response.body as { scopes?: unknown })?.scopes) ||
           !(response.body as { scopes: string[] }).scopes.includes('mail.send')
@@ -316,7 +334,10 @@ export function createEmailProviderRuntime(provided?: EmailEgressDescriptor): {
       send: async (options, beforeSend) => {
         const messageClient: SendGridProviderClient = {
           setApiKey: () => undefined,
-          send: async (data) => [await sendGridRequest(descriptor, key, 'POST', data, beforeSend)],
+          send: async (data) => {
+            assertOpen();
+            return [await sendGridRequest(descriptor, key, 'POST', data, beforeSend, verificationSignal)];
+          },
         };
         const transport = nodemailer.createTransport(new SendGridTransport({ client: messageClient }));
         try {
@@ -325,14 +346,18 @@ export function createEmailProviderRuntime(provided?: EmailEgressDescriptor): {
           transport.close();
         }
       },
-      close: () => undefined,
+      close: () => {
+        closed = true;
+      },
     };
   }
   const options = smtpOptions();
   const live = new Set<nodemailer.Transporter>();
   let verified = false;
   async function boundTransport(): Promise<nodemailer.Transporter> {
+    assertOpen();
     const endpoint = await resolveReviewedEmailEndpoint(descriptor);
+    assertOpen();
     const tokenEndpoint = descriptor.oauthTokenEgress;
     const auth = tokenEndpoint
       ? {
@@ -347,8 +372,15 @@ export function createEmailProviderRuntime(provided?: EmailEgressDescriptor): {
               callback(new Error('EMAIL_OAUTH_USER_MISMATCH'));
               return;
             }
-            refreshReviewedOAuthToken(tokenEndpoint, options.auth).then(
-              ({ token, expires }) => callback(null, token, expires),
+            if (closed || verificationSignal?.aborted) {
+              callback(new Error('EMAIL_PROVIDER_CLOSED'));
+              return;
+            }
+            refreshReviewedOAuthToken(tokenEndpoint, options.auth, verificationSignal).then(
+              ({ token, expires }) => {
+                if (closed || verificationSignal?.aborted) callback(new Error('EMAIL_PROVIDER_CLOSED'));
+                else callback(null, token, expires);
+              },
               () => callback(new Error('EMAIL_OAUTH_TOKEN_EXCHANGE_FAILED'))
             );
           },
@@ -372,6 +404,7 @@ export function createEmailProviderRuntime(provided?: EmailEgressDescriptor): {
     async verify() {
       const transport = await boundTransport();
       try {
+        assertOpen();
         await transport.verify();
         verified = true;
       } finally {
@@ -386,6 +419,7 @@ export function createEmailProviderRuntime(provided?: EmailEgressDescriptor): {
       const transport = await boundTransport();
       try {
         if (beforeSend) await beforeSend();
+        assertOpen();
         return await transport.sendMail(mail);
       } finally {
         transport.close();
@@ -393,6 +427,7 @@ export function createEmailProviderRuntime(provided?: EmailEgressDescriptor): {
       }
     },
     close() {
+      closed = true;
       for (const transport of live) transport.close();
       live.clear();
     },
@@ -418,4 +453,68 @@ export async function verifyEmailTransportNoSend(descriptor: EmailEgressDescript
   } finally {
     provider.close();
   }
+}
+
+/** Whole-deadline authentication-only probe. Cancellation fences late DNS/auth
+ * before opening a connection; HTTPS requests receive the same abort signal.
+ * The SMTP transports are closed on abort. No envelope, DATA or send API is used.
+ */
+export async function verifyEmailTransportNoSendBounded(
+  provided?: EmailEgressDescriptor,
+  cancellation?: AbortSignal
+): Promise<{
+  provider: 'smtp' | 'sendgrid';
+  tlsVerified: true;
+  authenticationVerified: true;
+  mailPermissionVerified: boolean;
+  noMessageSent: true;
+  observedAt: string;
+}> {
+  const controller = new AbortController();
+  const signal = cancellation ? AbortSignal.any([controller.signal, cancellation]) : controller.signal;
+  const timer = setTimeout(() => controller.abort(), 20000);
+  let runtime: ReturnType<typeof createEmailProviderRuntime> | undefined;
+  let abort: (() => void) | undefined;
+  let proof: Awaited<ReturnType<typeof verifyEmailTransportNoSendBounded>> | undefined;
+  let failed = false;
+  try {
+    if (config.testing || signal.aborted) throw new Error('EMAIL_BOUNDED_CANARY_UNCONFIRMED');
+    const descriptor = provided ?? configuredDescriptor();
+    runtime = createEmailProviderRuntime(descriptor, signal);
+    const cancelled = new Promise<never>((_, reject) => {
+      abort = () => {
+        try {
+          runtime?.close();
+        } catch {
+          /* Failure remains unconfirmed. */
+        }
+        reject(new Error('EMAIL_BOUNDED_CANARY_UNCONFIRMED'));
+      };
+      signal.addEventListener('abort', abort, { once: true });
+      if (signal.aborted) abort();
+    });
+    await Promise.race([runtime.verify(), cancelled]);
+    if (signal.aborted) throw new Error('EMAIL_BOUNDED_CANARY_UNCONFIRMED');
+    proof = {
+      provider: descriptor.provider,
+      tlsVerified: true,
+      authenticationVerified: true,
+      mailPermissionVerified: descriptor.provider === 'sendgrid',
+      noMessageSent: true,
+      observedAt: new Date().toISOString(),
+    };
+  } catch {
+    failed = true;
+  } finally {
+    clearTimeout(timer);
+    if (abort) signal.removeEventListener('abort', abort);
+    controller.abort();
+    try {
+      runtime?.close();
+    } catch {
+      failed = true;
+    }
+  }
+  if (failed || !proof) throw new Error('EMAIL_BOUNDED_CANARY_UNCONFIRMED');
+  return proof;
 }

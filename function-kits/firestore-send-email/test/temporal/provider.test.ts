@@ -65,6 +65,7 @@ import {
   describeEmailProvider,
   validateEmailEgressDescriptor,
   verifyEmailTransportNoSend,
+  verifyEmailTransportNoSendBounded,
   createEmailProviderRuntime,
   resolveReviewedEmailEndpoint,
 } from '../../src/temporal/provider';
@@ -81,11 +82,11 @@ beforeEach(() => {
   mockConfig.authenticationType = 'UsernamePassword';
   mockConfig.testing = false;
   mockConfig.tls = '{}';
-  mockLookup.mockResolvedValue([{ address: '64.233.179.109', family: 4 }]);
+  mockLookup.mockReset().mockResolvedValue([{ address: '64.233.179.109', family: 4 }]);
   mockScopes = ['mail.send'];
   mockHttpsOptions.length = 0;
   mockTransports.length = 0;
-  mockVerify.mockClear();
+  mockVerify.mockReset().mockResolvedValue(true);
   mockSend.mockReset().mockResolvedValue({ messageId: 'id' });
   mockClose.mockClear();
 });
@@ -159,7 +160,8 @@ test('OAuth requires reviewed canonical token endpoint and preserves strict SMTP
     ...descriptor,
     oauthTokenEgress: { hostname: 'oauth2.googleapis.com', port: 443, addresses: ['64.233.179.109'] },
   };
-  await verifyEmailTransportNoSend(oauth);
+  const runtime = createEmailProviderRuntime(oauth);
+  await runtime.verify();
   const auth = mockTransports[mockTransports.length - 1].auth;
   expect(auth.provisionCallback).toEqual(expect.any(Function));
   await new Promise<void>((resolve, reject) =>
@@ -179,6 +181,7 @@ test('OAuth requires reviewed canonical token endpoint and preserves strict SMTP
     rejectUnauthorized: true,
   });
   expect(mockTransports[mockTransports.length - 1].tls.servername).toBe('smtp.example.org');
+  runtime.close();
 });
 test('SMTP send cannot happen before provider verification', async () => {
   const provider = createEmailProviderRuntime(descriptor);
@@ -319,7 +322,8 @@ test('OAuth public DNS binds token refresh to literal IPv4/SNI and rejects rebin
     ...publicDescriptor,
     oauthTokenEgress: { hostname: 'oauth2.googleapis.com', port: 443, dnsMode: 'public-ipv4' },
   };
-  await verifyEmailTransportNoSend(oauth);
+  const runtime = createEmailProviderRuntime(oauth);
+  await runtime.verify();
   const auth = mockTransports.at(-1).auth;
   const provision = () =>
     new Promise((resolve, reject) =>
@@ -343,6 +347,7 @@ test('OAuth public DNS binds token refresh to literal IPv4/SNI and rejects rebin
   ]);
   await expect(provision()).rejects.toThrow('EMAIL_OAUTH_TOKEN_EXCHANGE_FAILED');
   expect(mockHttpsOptions).toHaveLength(requests);
+  runtime.close();
   expect(mockSend).not.toHaveBeenCalled();
 });
 
@@ -365,3 +370,81 @@ test.each(['0x7f000001', '2130706433', '0177.0.0.1', '127.1', 'invalid-address']
     await expect(resolveReviewedEmailEndpoint(publicDescriptor)).rejects.toThrow('EMAIL_EGRESS_DNS_NONPUBLIC');
   }
 );
+
+afterEach(() => jest.useRealTimers());
+test('bounded no-send verification cannot open a transport after DNS resolves past cancellation', async () => {
+  let finish: ((addresses: { address: string; family: number }[]) => void) | undefined;
+  mockLookup.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      })
+  );
+  const cancellation = new AbortController();
+  const pending = expect(verifyEmailTransportNoSendBounded(descriptor, cancellation.signal)).rejects.toThrow(
+    'EMAIL_BOUNDED_CANARY_UNCONFIRMED'
+  );
+  while (!finish) await new Promise((resolve) => setImmediate(resolve));
+  cancellation.abort();
+  await pending;
+  const transportsAfterAbort = mockTransports.length;
+  finish([{ address: '64.233.179.109', family: 4 }]);
+  await new Promise((resolve) => setImmediate(resolve));
+  expect(mockTransports).toHaveLength(transportsAfterAbort);
+  expect(mockVerify).not.toHaveBeenCalled();
+  expect(mockSend).not.toHaveBeenCalled();
+});
+test('bounded no-send verification closes stalled SMTP on its whole deadline', async () => {
+  jest.useFakeTimers();
+  mockVerify.mockImplementationOnce(() => new Promise(() => {}));
+  const pending = expect(verifyEmailTransportNoSendBounded(descriptor)).rejects.toThrow(
+    'EMAIL_BOUNDED_CANARY_UNCONFIRMED'
+  );
+  await jest.advanceTimersByTimeAsync(21000);
+  await pending;
+  expect(mockClose).toHaveBeenCalled();
+  expect(mockSend).not.toHaveBeenCalled();
+});
+test('bounded no-send verification returns only reviewed success fields and never transmits a message', async () => {
+  const proof = await verifyEmailTransportNoSendBounded(descriptor);
+  expect(proof).toMatchObject({
+    provider: 'smtp',
+    authenticationVerified: true,
+    tlsVerified: true,
+    noMessageSent: true,
+  });
+  expect(mockSend).not.toHaveBeenCalled();
+  expect(JSON.stringify(proof)).not.toContain('private-');
+});
+
+test('closed OAuth verification cannot start a late token request', async () => {
+  mockConfig.authenticationType = 'OAuth2';
+  const cancellation = new AbortController();
+  const runtime = createEmailProviderRuntime(
+    {
+      ...descriptor,
+      oauthTokenEgress: { hostname: 'oauth2.googleapis.com', port: 443, addresses: ['64.233.179.109'] },
+    },
+    cancellation.signal
+  );
+  await runtime.verify();
+  const auth = mockTransports.at(-1).auth;
+  let finish: ((addresses: { address: string; family: number }[]) => void) | undefined;
+  mockLookup.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      })
+  );
+  const callback = new Promise((resolve, reject) =>
+    auth.provisionCallback('user', false, (error: Error, token: string) => (error ? reject(error) : resolve(token)))
+  );
+  const rejected = expect(callback).rejects.toThrow('EMAIL_OAUTH_TOKEN_EXCHANGE_FAILED');
+  while (!finish) await new Promise((resolve) => setImmediate(resolve));
+  cancellation.abort();
+  runtime.close();
+  finish([{ address: '64.233.179.109', family: 4 }]);
+  await rejected;
+  expect(mockHttpsOptions).toHaveLength(0);
+  expect(mockSend).not.toHaveBeenCalled();
+});

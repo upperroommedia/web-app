@@ -1,3 +1,14 @@
+// Explicit no-network email fixture; local tests do not prove deployed mail authentication.
+jest.mock('@upperroom/function-kit-firestore-send-email/lib/temporal/provider', () => ({
+  verifyEmailTransportNoSendBounded: jest.fn(async () => ({
+    provider: 'smtp',
+    tlsVerified: true,
+    authenticationVerified: true,
+    mailPermissionVerified: false,
+    noMessageSent: true,
+    observedAt: new Date().toISOString(),
+  })),
+}));
 // Controlled serving-read fixture, alongside the controlled Cloud Run identity.
 // Native SDK execution/Firestore receipts here do NOT prove deployed RTDB access.
 jest.mock('../runtime/cloud-run-rtdb-readiness', () => ({
@@ -49,16 +60,16 @@ test('collector joins actual version routing, native activity history and privat
   const client = new Client({ connection: environment.connection, namespace });
   const buildId = 'a'.repeat(40),
     image = `us-central1-docker.pkg.dev/urm-app-staging/urm-temporal/worker@sha256:${'b'.repeat(64)}`;
-  const bindings: ServerlessRoleBinding[] = ['orchestration', 'controls'].map((role, i) => ({
+  const bindings: ServerlessRoleBinding[] = ['orchestration', 'controls', 'email'].map((role, i) => ({
     projectId: 'urm-app-staging',
     region: 'us-central1',
     namespace,
-    role: role as 'orchestration' | 'controls',
+    role: role as 'orchestration' | 'controls' | 'email',
     buildId,
     image,
     poolName: `urm-worker-${role}-${buildId.slice(0, 20)}`,
-    deploymentName: i === 0 ? 'urm-worker-staging' : 'urm-worker-controls-staging',
-    runnerServiceAccount: `tw-${i === 0 ? 'o' : 'c'}-${buildId.slice(0, 20)}@urm-app-staging.iam.gserviceaccount.com`,
+    deploymentName: i === 0 ? 'urm-worker-staging' : `urm-worker-${role}-staging`,
+    runnerServiceAccount: `tw-${i === 0 ? 'o' : role === 'email' ? 'e' : 'c'}-${buildId.slice(0, 20)}@urm-app-staging.iam.gserviceaccount.com`,
   }));
   // Official-schema fixtures isolate Cloud Run GETs only. They are NOT real cloud attestations.
   const resources = new Map<string, unknown>();
@@ -187,7 +198,7 @@ test('collector joins actual version routing, native activity history and privat
       },
     });
     expect(persistedIntentId).toBe(proof.workflowId);
-    expect(proof.roles.map((r) => r.role)).toEqual(['orchestration', 'controls']);
+    expect(proof.roles.map((r) => r.role)).toEqual(['orchestration', 'controls', 'email']);
     expect(proof.roles[0].poolGeneration).toBe('9007199254740993');
     for (const role of proof.roles) {
       const snapshot = await db.collection(WORKER_READINESS_COLLECTION).doc(role.receipt.id).get();

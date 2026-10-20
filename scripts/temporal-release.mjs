@@ -276,7 +276,7 @@ await runWithCleanup(
             // Never substitute role execution for the remaining native guards.
             // This hosting branch cannot advance a release until their actual
             // implementations are connected; no descriptor boolean can bypass it.
-            throw new Error('CLOUD_RUN_RECOVERY_DISPATCH_AND_DATA_ACCESS_GATES_REQUIRED');
+            throw new Error('CLOUD_RUN_RECOVERY_AND_DISPATCH_GATES_REQUIRED');
           }
           // Read-only preflight verifies actual host/access and original-run worker restart evidence in Cloud mode.
           // Database backup/restore evidence applies only to the separate self-hosted mode.

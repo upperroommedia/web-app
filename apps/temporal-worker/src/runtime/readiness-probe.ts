@@ -57,7 +57,8 @@ export function createWorkerReadinessActivities(options: {
 }) {
   return {
     async recordWorkerReadiness(request: WorkerReadinessRequest): Promise<WorkerReadinessReceipt> {
-      const { info } = Context.current(); // Never accept a caller-supplied native execution context.
+      const context = Context.current();
+      const { info } = context; // Never accept a caller-supplied native execution context.
       const cloud = options.witness.cloudRun;
       const execution = info.workflowExecution;
       if (
@@ -87,7 +88,14 @@ export function createWorkerReadinessActivities(options: {
       )
         throw new Error('WORKER_READINESS_EXECUTION_MISMATCH');
       const firebaseRtdb = request.role === 'orchestration' ? await verifyCloudRunRtdbReadiness(options.witness) : null;
+      const email =
+        request.role === 'email'
+          ? await (
+              await import('@upperroom/function-kit-firestore-send-email/lib/temporal/provider')
+            ).verifyEmailTransportNoSendBounded(undefined, context.cancellationSignal)
+          : null;
       const evidence = {
+        email,
         firebaseRtdb,
         schemaVersion: 1,
         projectId: request.projectId,
