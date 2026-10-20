@@ -7,10 +7,12 @@ import type { MediaJobRef, MediaOutcome } from './types';
 export interface AcquiredYouTubeSource {
   path: string;
   generation: string;
-  duration: number;
+  bytes: number;
+  crc32c: string;
 }
 export type RemoteYouTubeResult =
   | { kind: 'source'; artifact: AcquiredYouTubeSource }
+  | { kind: 'source_available' }
   | Exclude<MediaOutcome, { kind: 'ready' }>;
 export interface AcquisitionRequest {
   operationId: string;
@@ -57,6 +59,30 @@ export function validateAcquiredYouTubeSource(ref: MediaJobRef, value: unknown):
   const artifact = record(value);
   const prefix = `workflow-audio/${ref.sermonId}/${ref.requestVersion}/source-`;
   if (
+    Object.keys(artifact).sort().join(',') !== 'bytes,crc32c,generation,path' ||
+    typeof artifact.path !== 'string' ||
+    !artifact.path.startsWith(prefix) ||
+    !/^[A-Za-z0-9_-]+\.(mp3|m4a|webm|ogg|wav|opus|flac|mp4|bin)$/.test(artifact.path.slice(prefix.length)) ||
+    typeof artifact.generation !== 'string' ||
+    !/^[1-9][0-9]{0,29}$/.test(artifact.generation) ||
+    !Number.isSafeInteger(artifact.bytes) ||
+    typeof artifact.bytes !== 'number' ||
+    artifact.bytes <= 0 ||
+    artifact.bytes > 20 * 1024 ** 3 ||
+    typeof artifact.crc32c !== 'string' ||
+    !/^[A-Za-z0-9+/]{6}==$/.test(artifact.crc32c)
+  )
+    return failure('YOUTUBE_ACQUISITION_PROTOCOL');
+  return { path: artifact.path, generation: artifact.generation, bytes: artifact.bytes, crc32c: artifact.crc32c };
+}
+/** Existing canonical sources already have a duration measured by the native
+ * Activity. This is separate from the host's unmeasured byte locator protocol.
+ */
+export function validateCanonicalYouTubeSource(ref: MediaJobRef, value: unknown): void {
+  const artifact = record(value);
+  const prefix = `workflow-audio/${ref.sermonId}/${ref.requestVersion}/source-`;
+  youtubeAcquisitionId(ref);
+  if (
     Object.keys(artifact).sort().join(',') !== 'duration,generation,path' ||
     typeof artifact.path !== 'string' ||
     !artifact.path.startsWith(prefix) ||
@@ -69,7 +95,6 @@ export function validateAcquiredYouTubeSource(ref: MediaJobRef, value: unknown):
     artifact.duration > 86400
   )
     return failure('YOUTUBE_ACQUISITION_PROTOCOL');
-  return { path: artifact.path, generation: artifact.generation, duration: artifact.duration };
 }
 function observation(
   value: unknown,
@@ -93,7 +118,8 @@ function observation(
     data.status === 'cancelled' ||
     data.status === 'superseded' ||
     data.status === 'deleted' ||
-    data.status === 'completed'
+    data.status === 'completed' ||
+    data.status === 'source_available'
   )
     return { kind: data.status };
   return failure('YOUTUBE_ACQUISITION_PROTOCOL');

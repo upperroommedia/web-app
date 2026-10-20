@@ -89,6 +89,7 @@ function operation(raw: unknown, ref: MediaJobRef): Operation {
       'prepared',
       'running',
       'source',
+      'source_available',
       'completed',
       'waiting_auth',
       'waiting_archive',
@@ -182,7 +183,7 @@ export function createYouTubeAcquisitionHostStore(options: {
   firestore: Firestore;
   projectId: string;
   owner: AcquisitionHostProcess;
-  assertEligible: (transaction: Transaction, ref: MediaJobRef) => Promise<void>;
+  assertEligible: (transaction: Transaction, ref: MediaJobRef, purpose?: 'source_available') => Promise<void>;
 }) {
   if (options.projectId !== 'urm-app-staging') return fail();
   assertStagingAcquisitionDatabase(options.firestore);
@@ -374,7 +375,15 @@ export function createYouTubeAcquisitionHostStore(options: {
           ? { kind: 'source', artifact: validateAcquiredYouTubeSource(ref, result.artifact) }
           : result.kind === 'waiting_auth'
           ? { kind: 'waiting_auth', recoveryGeneration: null }
-          : ['completed', 'waiting_archive', 'restricted', 'cancelled', 'superseded', 'deleted'].includes(result.kind)
+          : [
+              'completed',
+              'source_available',
+              'waiting_archive',
+              'restricted',
+              'cancelled',
+              'superseded',
+              'deleted',
+            ].includes(result.kind)
           ? { kind: result.kind }
           : fail();
       await drain();
@@ -386,6 +395,7 @@ export function createYouTubeAcquisitionHostStore(options: {
         // A ready source must still be eligible. Inert stop/defer receipts may
         // settle after cancellation/deletion so resource drain remains visible.
         if (safe.kind === 'source') await options.assertEligible(tx, ref);
+        if (safe.kind === 'source_available') await options.assertEligible(tx, ref, 'source_available');
         tx.update(doc, { status: safe.kind, result: safe, drainedAt: Date.now() });
       });
     },

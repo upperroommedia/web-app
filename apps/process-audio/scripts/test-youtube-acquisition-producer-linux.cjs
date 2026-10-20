@@ -8,6 +8,7 @@ const { createHash, randomUUID } = require('node:crypto');
 const ts = require('typescript');
 const root = resolve(__dirname, '..');
 const source = readFileSync(join(root, 'src/temporal/hetzner-acquisition-producer.ts'), 'utf8');
+const identitySource = readFileSync(join(root, 'src/temporal/hetzner-acquisition-identity.ts'), 'utf8');
 const directory = mkdtempSync(join(tmpdir(), 'yt-native-producer-proof-'));
 const fixture = String.raw`
 const {startNativeYouTubeProducer}=require('./producer.cjs');
@@ -17,6 +18,18 @@ const assert=require('node:assert/strict');
 const path=mkdtempSync('/scratch/attempt-');
 const mode=process.argv[2];
 async function run(){
+ if(mode==='native-identity'){
+  const {inspectNativeYouTubeProcess}=require('./identity.cjs');
+  const build='a'.repeat(40);const own=await inspectNativeYouTubeProcess(process.pid,build);
+  assert.equal(own.processId,process.pid);assert.equal(own.buildId,build);
+  assert.equal(own.pidNamespace,require('node:fs').readlinkSync('/proc/self/ns/pid'));
+  await assert.rejects(inspectNativeYouTubeProcess(process.ppid,build));
+  const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{detached:true,stdio:'ignore'});
+  const closed=new Promise(resolve=>child.once('close',resolve));await new Promise(resolve=>child.once('spawn',resolve));
+  try{const actual=await inspectNativeYouTubeProcess(child.pid,build);assert.equal(actual.processId,child.pid);assert.equal(actual.bootId,own.bootId);}
+  finally{process.kill(-child.pid,'SIGTERM');await closed;}
+  await assert.rejects(inspectNativeYouTubeProcess(child.pid,build));return;
+ }
  if(mode==='unsupported-kernel'){
   await assert.rejects(startNativeYouTubeProducer({binary:process.execPath,args:['-e',"require('node:fs').writeFileSync('never','bad')"],directory:path}));
   assert.equal(existsSync(path+'/never'),false);return;
@@ -78,6 +91,7 @@ const allowed = [
   'private-permissions',
   'bounded-diagnostics',
   'unsupported-kernel',
+  'native-identity',
 ];
 if (selected.some((value) => !allowed.includes(value))) throw new Error('Unknown native fixture scenario');
 const containerName = 'urm-yt-native-proof-' + randomUUID();
@@ -86,6 +100,13 @@ try {
     join(directory, 'producer.cjs'),
     ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } })
       .outputText,
+    { mode: 0o600 }
+  );
+  writeFileSync(
+    join(directory, 'identity.cjs'),
+    ts.transpileModule(identitySource, {
+      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+    }).outputText,
     { mode: 0o600 }
   );
   writeFileSync(join(directory, 'fixture.cjs'), fixture, { mode: 0o600 });
@@ -130,6 +151,7 @@ try {
     JSON.stringify({
       sourceSha256: createHash('sha256').update(source).digest('hex'),
       imageId,
+      identitySourceSha256: createHash('sha256').update(identitySource).digest('hex'),
       proof: 'local Linux native process + bounded tmpfs only; not provider/staging readiness',
     }) + '\n'
   );

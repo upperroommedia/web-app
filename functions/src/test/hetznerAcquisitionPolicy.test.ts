@@ -155,7 +155,7 @@ test('an already attached immutable source is reused without another acquisition
     duration: 40,
   };
   await db.doc(paths[0]).update({ 'artifacts.source': artifact });
-  await expect(read()).resolves.toEqual({ kind: 'source', artifact });
+  await expect(read()).resolves.toEqual({ kind: 'source_available' });
 });
 
 test('an admitted continuation survives a pause but cannot cross release ownership transfer', async () => {
@@ -168,3 +168,19 @@ test('missing release control fails closed rather than using an earlier prepared
   await db.doc('_control/temporalRelease').delete();
   await expect(read()).rejects.toThrow('YOUTUBE_ACQUISITION_INELIGIBLE');
 });
+
+test.each([0, 86401, NaN])(
+  'existing canonical source duration remains authoritative and bounded: %s',
+  async (duration) => {
+    await db
+      .doc(paths[0])
+      .update({
+        'artifacts.source': {
+          path: `workflow-audio/${ref.sermonId}/${ref.requestVersion}/source-existing.m4a`,
+          generation: '123',
+          duration,
+        },
+      });
+    await expect(read()).rejects.toThrow('YOUTUBE_ACQUISITION_INELIGIBLE');
+  }
+);

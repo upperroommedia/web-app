@@ -10,7 +10,7 @@ import {
 import { durableEntityKey } from '@upperroom/orchestration/job-store';
 import { validateAddIntroOutroData } from '../utils';
 import type { MediaJobRef } from './types';
-import { youtubeAcquisitionId, validateAcquiredYouTubeSource, type RemoteYouTubeResult } from './hetzner-acquisition';
+import { youtubeAcquisitionId, validateCanonicalYouTubeSource, type RemoteYouTubeResult } from './hetzner-acquisition';
 import { assertStagingAcquisitionDatabase } from './hetzner-acquisition-store';
 
 export type EligibleYouTubeAcquisition =
@@ -115,7 +115,10 @@ export async function readEligibleYouTubeAcquisition(options: {
     )
       return deny();
     const source = request.get('artifacts.source');
-    if (source !== undefined) return { kind: 'source', artifact: validateAcquiredYouTubeSource(ref, source) };
+    if (source !== undefined) {
+      validateCanonicalYouTubeSource(ref, source);
+      return { kind: 'source_available' };
+    }
     const sanitized = sanitizeProcessAudioPayload(payload);
     if (!('youtubeUrl' in sanitized)) return deny();
     return { kind: 'ready', payload: sanitized };

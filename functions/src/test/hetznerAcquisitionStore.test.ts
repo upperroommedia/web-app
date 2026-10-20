@@ -127,7 +127,8 @@ test('source settlement requires current eligibility and records no canonical st
   const artifact = {
     path: `workflow-audio/${ref.sermonId}/${ref.requestVersion}/source-test.m4a`,
     generation: '1234',
-    duration: 40,
+    bytes: 4000,
+    crc32c: 'AAAAAA==',
   };
   await db.doc(gatePath()).update({ allowed: false });
   await expect(store().settle(ref, { kind: 'source', artifact }, async () => undefined)).rejects.toThrow(
@@ -203,4 +204,24 @@ test('a named database cannot receive the default-database delegation', async ()
     await named.terminate();
     await deleteApp(namedApp);
   }
+});
+
+test('source-available settlement cannot grant another acquisition after a canonical source appears', async () => {
+  const guarded = createYouTubeAcquisitionHostStore({
+    firestore: db,
+    projectId: ref.projectId,
+    owner,
+    assertEligible: async (tx, _ref, purpose) => {
+      const gate = await tx.get(db.doc(gatePath()));
+      if (!gate.get('allowed') || Boolean(gate.get('sourceAvailable')) !== (purpose === 'source_available'))
+        throw new Error('PURPOSE_INELIGIBLE');
+    },
+  });
+  await prepare();
+  await guarded.claim(ref, caller.serviceAccount);
+  await db.doc(gatePath()).update({ sourceAvailable: true });
+  await expect(guarded.assertCurrent(ref)).rejects.toThrow('PURPOSE_INELIGIBLE');
+  await guarded.settle(ref, { kind: 'source_available' }, async () => undefined);
+  expect((await guarded.read(ref))?.result).toEqual({ kind: 'source_available' });
+  expect((await db.doc(`temporalMediaRequests/${ref.jobId}`).get()).exists).toBe(false);
 });

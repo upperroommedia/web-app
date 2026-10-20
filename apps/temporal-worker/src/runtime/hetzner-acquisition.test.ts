@@ -22,7 +22,8 @@ const ref: MediaJobRef = {
 const artifact = {
   path: `workflow-audio/${ref.sermonId}/${ref.requestVersion}/source-one.m4a`,
   generation: '123',
-  duration: 200,
+  bytes: 1234,
+  crc32c: 'AAAAAA==',
 };
 const state = (status: string, extra = {}) => ({ status, operationId: youtubeAcquisitionId(ref), ...extra });
 const setup = (responses: Array<unknown | Error>) => {
@@ -91,20 +92,26 @@ test('cancellation stops polling without claiming the remote process was cancell
   expect(request).toHaveBeenCalledTimes(1);
   expect(request.mock.calls[0][0]).toBe('GET');
 });
-test.each(['waiting_auth', 'waiting_archive', 'restricted', 'cancelled', 'superseded', 'deleted', 'completed'])(
-  'preserves safe outcome %s without raw failure payloads',
-  async (status) => {
-    const { client } = setup([state(status)]);
-    await expect(client.acquire(ref, new AbortController().signal)).resolves.toEqual(
-      status === 'waiting_auth' ? { kind: status, recoveryGeneration: null } : { kind: status }
-    );
-  }
-);
+test.each([
+  'waiting_auth',
+  'waiting_archive',
+  'restricted',
+  'cancelled',
+  'superseded',
+  'deleted',
+  'completed',
+  'source_available',
+])('preserves safe outcome %s without raw failure payloads', async (status) => {
+  const { client } = setup([state(status)]);
+  await expect(client.acquire(ref, new AbortController().signal)).resolves.toEqual(
+    status === 'waiting_auth' ? { kind: status, recoveryGeneration: null } : { kind: status }
+  );
+});
 test.each([
   state('ready', { artifact: { ...artifact, path: 'https://private.example/?token=secret' } }),
   state('ready', { artifact: { ...artifact, path: artifact.path.replace('sermon-one', 'other') } }),
   state('ready', { artifact: { ...artifact, generation: 'latest' } }),
-  state('ready', { artifact: { ...artifact, duration: 0 } }),
+  state('ready', { artifact: { ...artifact, bytes: 0 } }),
   { status: 'ready', operationId: 'other', artifact },
   state('ready', { artifact, privateUrl: 'do not retain' }),
 ])('rejects an invalid or mismatched private artifact response', async (response) => {
@@ -197,10 +204,10 @@ test('response reading is bounded before JSON parsing', async () => {
     transport('GET', { operationId: youtubeAcquisitionId(ref), ref }, new AbortController().signal)
   ).rejects.toMatchObject({ type: 'YOUTUBE_ACQUISITION_UNAVAILABLE' });
 });
-test.each([86400, 86401])('remote source preserves duration ceiling: %s', async (duration) => {
-  const { client } = setup([state('ready', { artifact: { ...artifact, duration } })]);
+test.each([20 * 1024 ** 3, 20 * 1024 ** 3 + 1])('remote source preserves byte ceiling: %s', async (bytes) => {
+  const { client } = setup([state('ready', { artifact: { ...artifact, bytes } })]);
   const result = client.acquire(ref, new AbortController().signal);
-  if (duration === 86400) await expect(result).resolves.toMatchObject({ kind: 'source' });
+  if (bytes === 20 * 1024 ** 3) await expect(result).resolves.toMatchObject({ kind: 'source' });
   else await expect(result).rejects.toMatchObject({ type: 'YOUTUBE_ACQUISITION_PROTOCOL' });
 });
 test('transport refuses a static service-account credential override', () => {
@@ -212,4 +219,35 @@ test('transport refuses a static service-account credential override', () => {
     if (previous === undefined) delete process.env.GOOGLE_APPLICATION_CREDENTIALS;
     else process.env.GOOGLE_APPLICATION_CREDENTIALS = previous;
   }
+});
+
+test('an unmeasured remote source reports verified bytes and CRC rather than claiming duration', async () => {
+  const locator = { path: artifact.path, generation: artifact.generation, bytes: 1234, crc32c: 'AAAAAA==' };
+  const { client } = setup([state('ready', { artifact: locator })]);
+  await expect(client.acquire(ref, new AbortController().signal)).resolves.toEqual({
+    kind: 'source',
+    artifact: locator,
+  });
+});
+
+test.each([
+  { ...artifact, duration: 100 },
+  { ...artifact, bytes: 0 },
+  { ...artifact, bytes: -1 },
+  { ...artifact, bytes: 1.5 },
+  { ...artifact, bytes: Infinity },
+  { ...artifact, crc32c: 'invalid' },
+  { ...artifact, crc32c: undefined },
+])('rejects unverified or duration-bearing remote byte receipts', async (locator) => {
+  const { client } = setup([state('ready', { artifact: locator })]);
+  await expect(client.acquire(ref, new AbortController().signal)).rejects.toMatchObject({
+    type: 'YOUTUBE_ACQUISITION_PROTOCOL',
+  });
+});
+
+test('an existing-source signal cannot smuggle an unmeasured artifact or claim job completion', async () => {
+  const { client } = setup([state('source_available', { artifact })]);
+  await expect(client.acquire(ref, new AbortController().signal)).rejects.toMatchObject({
+    type: 'YOUTUBE_ACQUISITION_PROTOCOL',
+  });
 });
