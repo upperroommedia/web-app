@@ -1,3 +1,7 @@
+import {
+  readRestoredMediaActivationPool,
+  readRestoredMediaActivationQuota,
+} from '../temporal-restored-media-resources.mjs';
 import { activateRestoredCloudRunMedia } from '../temporal-media-restored-activation.mjs';
 import { saveRestoredMediaActivationCheckpoint } from '../temporal-media-restored-checkpoint.mjs';
 import { restoredActivationFixture } from '../tests/fixtures/restored-media-activation.mjs';
@@ -38,6 +42,7 @@ for (const mode of [
   'capsule',
   'activation-access',
   'restored-activation',
+  'restored-resources',
   'restored-startup',
   'restored-startup-drain',
   'phase-resource',
@@ -598,7 +603,7 @@ for (const mode of [
       if (
         mode === 'normal' ||
         mode === 'capsule' ||
-        ['activation-access', 'restored-activation'].includes(mode) ||
+        ['activation-access', 'restored-activation', 'restored-resources'].includes(mode) ||
         mode.startsWith('restored-startup') ||
         mode === 'phase-resource' ||
         ['idle-startup', 'idle-poller'].includes(mode)
@@ -642,7 +647,10 @@ for (const mode of [
           ownedOperation = nativeSnapshotProof(await lockRef.get());
           assert.equal((await confirmCompletedMediaRecoveryCapsule(options())).capsuleSHA256, proof.capsuleSHA256);
         }
-        if (['activation-access', 'restored-activation'].includes(mode) || mode.startsWith('restored-startup')) {
+        if (
+          ['activation-access', 'restored-activation', 'restored-resources'].includes(mode) ||
+          mode.startsWith('restored-startup')
+        ) {
           const newId = randomUUID(),
             newBinding = 'e'.repeat(64);
           await lockRef.set({
@@ -666,7 +674,7 @@ for (const mode of [
           const proof = await readRestoredMediaActivationAccess(args);
           assert.equal(proof.pool.uid, result.restore.pool.uid);
           assert.equal(proof.pool.etag, result.restore.pool.etag);
-          if (mode === 'restored-activation' || mode.startsWith('restored-startup')) {
+          if (['restored-activation', 'restored-resources'].includes(mode) || mode.startsWith('restored-startup')) {
             const controlled = restoredActivationFixture();
             const origin = {
               ...controlled.origin,
@@ -871,8 +879,47 @@ for (const mode of [
             let currentOwned = args.ownedOperation;
             const ownReceipt = db.doc(`_control/temporalCloudRestoredMediaActivation-${newId}`);
             idlePrivate.push(ownReceipt);
+
+            if (mode === 'restored-resources') {
+              const prefixes = {
+                runner: 'temporalCloudIdentityPreparation',
+                scaler: 'temporalCloudIdentityPreparation',
+                pool: 'temporalCloudPoolPreparation',
+                runnerScaler: 'temporalCloudScalerAccessPreparation',
+                scalerTrust: 'temporalCloudScalerAccessPreparation',
+                poolAccess: 'temporalCloudScalerAccessPreparation',
+                firestore: 'temporalCloudFirestoreAccessPreparation',
+                projectRole: 'temporalCloudRuntimeRolePreparation',
+                projectAccess: 'temporalCloudRuntimeAccessPreparation',
+                storageRole: 'temporalCloudRuntimeRolePreparation',
+                storageAccess: 'temporalCloudRuntimeAccessPreparation',
+                bootstrapCycle: 'temporalCloudMediaBootstrapCycle',
+              };
+              for (const [key, prefix] of Object.entries(prefixes)) {
+                const ref = db.doc(`_control/${prefix}-${f.options.receipts[key].operationId}`);
+                await ref.create(f.options.receipts[key]);
+                idlePrivate.push(ref);
+              }
+              idleRuntime.restoredResourcePatches = 0;
+              controlled.options.api = (...v) => {
+                if (v[1] === 'PATCH') idleRuntime.restoredResourcePatches++;
+                return f.options.api(...v);
+              };
+              const resources = () => ({
+                ...args,
+                receipts: controlled.options.receipts,
+                ownedOperation: currentOwned,
+                observeProtection: undefined,
+              });
+              idleRuntime.restoredResources = resources;
+              controlled.options.runtime.readPool = (scope) =>
+                readRestoredMediaActivationPool({ ...resources(), ...scope });
+              controlled.options.runtime.quota = (scope) =>
+                readRestoredMediaActivationQuota({ ...resources(), ...scope });
+            }
             let completionAckLost = false;
             controlled.options.save = async (identityState) => {
+              if (mode === 'restored-resources') await fixtureSave(identityState);
               currentOwned = await saveRestoredMediaActivationCheckpoint({
                 ...args,
                 config,
@@ -889,12 +936,12 @@ for (const mode of [
             await assert.rejects(activateRestoredCloudRunMedia(controlled.options), /CONTROLLED_RETAINED_ACK_LOST/);
             const retained = (await lockRef.get()).get('cloudRestoredMediaActivation');
             assert.equal(retained.disposition, 'retained');
-            assert.equal(controlled.patches, 1);
+            assert.equal(mode === 'restored-resources' ? idleRuntime.restoredResourcePatches : controlled.patches, 1);
             assert.equal((await ownReceipt.get()).get('identityState.disposition'), 'retained');
             const frozen = (await ownReceipt.get()).data();
             controlled.options.saved = retained;
             await activateRestoredCloudRunMedia(controlled.options);
-            assert.equal(controlled.patches, 1);
+            assert.equal(mode === 'restored-resources' ? idleRuntime.restoredResourcePatches : controlled.patches, 1);
             assert.equal(hash((await ownReceipt.get()).data()), hash(frozen));
             const bad = structuredClone(retained);
             bad.start.attemptedAt = new Date(Date.parse(bad.start.attemptedAt) + 1).toISOString();
@@ -938,6 +985,57 @@ for (const mode of [
                 ),
                 /RESTORED_MEDIA_STARTUP_UNCONFIRMED/
               );
+              await new Promise((resolve) => setTimeout(resolve, 200));
+            }
+
+            if (mode === 'restored-resources') {
+              const resources = idleRuntime.restoredResources();
+              assert.equal(
+                (await readRestoredMediaActivationPool({ ...resources, plan: retained.plan, count: 1 })).uid,
+                retained.start.pool.uid
+              );
+              await assert.rejects(readRestoredMediaActivationPool({ ...resources, plan: retained.plan, count: 0 }));
+              await assert.rejects(
+                readRestoredMediaActivationPool({
+                  ...resources,
+                  plan: retained.plan,
+                  count: 1,
+                  nativeResponse: { foreign: true },
+                })
+              );
+              const api = resources.api;
+              await assert.rejects(
+                readRestoredMediaActivationPool({
+                  ...resources,
+                  plan: retained.plan,
+                  count: 1,
+                  api: async (...v) => {
+                    const value = await api(...v);
+                    return v[0] === `https://run.googleapis.com/v2/${retained.plan.origin.pool.revision}`
+                      ? { ...value, uid: 'foreign-revision' }
+                      : value;
+                  },
+                })
+              );
+              const nativeTx = db.runTransaction.bind(db);
+              let reads = 0;
+              const delayed = new Proxy(db, {
+                get(target, key) {
+                  if (key === 'runTransaction')
+                    return async (...v) => {
+                      const result = await nativeTx(...v);
+                      reads++;
+                      if (reads === 4) await new Promise((resolve) => setTimeout(resolve, 5100));
+                      return result;
+                    };
+                  const value = Reflect.get(target, key, target);
+                  return typeof value === 'function' ? value.bind(target) : value;
+                },
+              });
+              await assert.rejects(
+                readRestoredMediaActivationPool({ ...resources, firestore: delayed, plan: retained.plan, count: 1 })
+              );
+              assert.equal(reads, 4);
               await new Promise((resolve) => setTimeout(resolve, 200));
             }
             args.ownedOperation = currentOwned;
