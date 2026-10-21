@@ -461,3 +461,34 @@ canonical checkpoint and create/readback protocol with controlled Cloud metadata
 Actual Cloud Run allocation/mount acceptance and same-host execution, processing,
 interruption recovery and image-byte verification remain required. The media
 promotion denial remains fixed with no bypass flag.
+
+
+## Synthetic native media processing and child cancellation
+
+The owned startup intent now requires `filesystem-and-native-audio-v2`; the
+capacity receipt uses schema 2 and includes mandatory processing evidence.
+Earlier filesystem-only intents or receipts cannot authorize the new observation.
+The actual startup entrypoint uses the immutable image's exact root-owned,
+non-writable `/usr/local/bin/ffmpeg` and `ffprobe` executables and hashes their
+resolved bytes. Test callers may select installed local tools, whose digests do
+not establish the image's tool identity.
+
+Within the existing private reserved workspace, the source creates a fixed
+one-second, mono, 16 kHz PCM WAV. A file-only realtime ffmpeg pass loops this
+synthetic input until measured positive progress triggers deliberate cancellation.
+The existing application command runner must observe child close before rejection;
+unknown termination, no progress or ordinary failure blocks the retry. A fresh
+command then transcodes to a new private output with a fixed half-volume filter.
+The probe checks duration and stream format through ffprobe and verifies every
+actual PCM sample against the expected transformation. Exit status alone cannot
+produce a successful receipt.
+
+No source URL, provider call, network protocol, user media, SMTP or task authority
+is involved. The fixed overall startup deadline still covers the processing pass,
+with checks after native settlement and cleanup. A failed pass releases the real
+workspace reservation before another attempt can use it. The diagnostic evidence
+proves synthetic processing and child cancellation/retry on that startup process;
+it does not prove application Activity execution, large-input capacity, an original
+Cloud Run worker's replacement, durable media-job adoption or pinned-image bytes.
+The unconditional media-promotion denial remains until those separate gates are
+implemented and proven.

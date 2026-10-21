@@ -101,7 +101,7 @@ export function applicationStages(root = ROOT) {
           'auth,firestore,database,storage',
           '--config',
           '../firebase.test.json',
-          'node ../scripts/tests/temporal-release-runtime.firestore.test.mjs && node ../scripts/tests/temporal-preparation-checkpoint.firestore.test.mjs && node ../scripts/integration/temporal-compute-isolation.native.mjs && node ../scripts/integration/temporal-controls-bootstrap.native.mjs && node ../scripts/integration/temporal-controls-promotion.native.mjs && node ../scripts/integration/temporal-media-startup.native.mjs'
+          'node ../scripts/tests/temporal-release-runtime.firestore.test.mjs && node ../scripts/tests/temporal-preparation-checkpoint.firestore.test.mjs && node ../scripts/integration/temporal-compute-isolation.native.mjs && node ../scripts/integration/temporal-controls-bootstrap.native.mjs && node ../scripts/integration/temporal-controls-promotion.native.mjs && node ../scripts/integration/temporal-media-startup.native.mjs && node ../scripts/integration/temporal-media-processing.native.mjs'
         ),
         pnpm(
           '--dir',

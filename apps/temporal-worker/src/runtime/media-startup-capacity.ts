@@ -1,3 +1,4 @@
+import { runNativeMediaProcessingCanary, MEDIA_STARTUP_CANARY_KIND } from './media-processing-canary';
 import { createHash, randomBytes } from 'node:crypto';
 import { open, readFile, mkdtemp, rm, stat, statfs, realpath } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -72,7 +73,8 @@ export function mediaStartupIntent(raw: unknown) {
     start.request.url !== `https://run.googleapis.com/v2/${plan.name}?updateMask=scaling` ||
     plan.name !==
       `projects/urm-app-staging/locations/us-central1/workerPools/urm-worker-media-${plan.buildId.slice(0, 20)}` ||
-    Object.keys(p).sort().join(',') !== 'budgets,image,runner' ||
+    Object.keys(p).sort().join(',') !== 'budgets,canary,image,runner' ||
+    p.canary !== MEDIA_STARTUP_CANARY_KIND ||
     workerReadinessDigest(p.budgets) !== workerReadinessDigest(mediaStartupBudget) ||
     !/^us-central1-docker\.pkg\.dev\/urm-app-staging\/urm-temporal\/worker@sha256:[a-f0-9]{64}$/.test(p.image ?? '') ||
     p.runner !== `tw-m-${plan.buildId.slice(0, 20)}@urm-app-staging.iam.gserviceaccount.com`
@@ -114,7 +116,10 @@ function sameTime(a: any, b: any) {
 /** One MiB real write/read/fsync, actual application reservation and exact budgets.
  * Await native filesystem settlement and cleanup; a deadline is not proof that an
  * outstanding syscall stopped. No sparse/full-budget allocation claim is made. */
-export async function runMediaFilesystemCanary(isDraining: () => boolean = () => false) {
+export async function runMediaFilesystemCanary(
+  isDraining: () => boolean = () => false,
+  processing = runNativeMediaProcessingCanary
+) {
   const end = Date.now() + 10000,
     signal = AbortSignal.timeout(10000),
     check = () => {
@@ -142,6 +147,7 @@ export async function runMediaFilesystemCanary(isDraining: () => boolean = () =>
   let release: (() => void) | undefined;
   let file: Awaited<ReturnType<typeof open>> | undefined;
   let confirmed = false;
+  let audio: Awaited<ReturnType<typeof runNativeMediaProcessingCanary>> | undefined;
   try {
     check();
     release = await reserveMediaWorkspace(directory);
@@ -157,6 +163,8 @@ export async function runMediaFilesystemCanary(isDraining: () => boolean = () =>
     const stored = await readFile(join(directory, 'source.bin'));
     check();
     if (stored.length !== bytes.length || createHash('sha256').update(stored).digest('hex') !== digest) failure();
+    audio = await processing({ directory, signal });
+    check();
     await checkMediaWorkspace(directory);
     check();
     confirmed = true;
@@ -172,13 +180,14 @@ export async function runMediaFilesystemCanary(isDraining: () => boolean = () =>
     }
   }
   check();
-  if (!confirmed) failure();
+  if (!confirmed || !audio) failure();
   // A second application reservation verifies that the first was released.
   const again = await reserveMediaWorkspace('/tmp');
   again();
   check();
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
+    processing: audio,
     budgets: { ...mediaStartupBudget },
     totalBytes,
     availableBytes,
@@ -282,8 +291,8 @@ function validateCapacity(raw: unknown, attemptedAt: string) {
     at = Date.parse(c.observedAt ?? '');
   if (
     Object.keys(c).sort().join(',') !==
-      'availableBytes,budgets,canaryBytes,cleanupConfirmed,observedAt,reservationReleased,schemaVersion,totalBytes,writeReadFsync' ||
-    c.schemaVersion !== 1 ||
+      'availableBytes,budgets,canaryBytes,cleanupConfirmed,observedAt,processing,reservationReleased,schemaVersion,totalBytes,writeReadFsync' ||
+    c.schemaVersion !== 2 ||
     workerReadinessDigest(c.budgets) !== workerReadinessDigest(mediaStartupBudget) ||
     !Number.isSafeInteger(c.totalBytes) ||
     !Number.isSafeInteger(c.availableBytes) ||
@@ -297,6 +306,27 @@ function validateCapacity(raw: unknown, attemptedAt: string) {
     at < Date.parse(attemptedAt) ||
     at > Date.now() + 5000 ||
     Date.now() - at > 120000
+  )
+    failure();
+  const p = object(c.processing);
+  if (
+    Object.keys(p).sort().join(',') !==
+      'cancelledChildDrained,channels,durationSeconds,ffmpegSHA256,ffprobeSHA256,outputBytes,pcmSamplesVerified,progressBeforeCancellation,retryCompleted,sampleRate,schemaVersion,sourceBytes' ||
+    p.schemaVersion !== 1 ||
+    !hash(p.ffmpegSHA256) ||
+    !hash(p.ffprobeSHA256) ||
+    p.sourceBytes !== 32044 ||
+    !Number.isSafeInteger(p.outputBytes) ||
+    p.outputBytes < 32044 ||
+    p.outputBytes > 65536 ||
+    p.sampleRate !== 16000 ||
+    p.channels !== 1 ||
+    !Number.isFinite(p.durationSeconds) ||
+    Math.abs(p.durationSeconds - 1) > 0.005 ||
+    p.pcmSamplesVerified !== 16000 ||
+    p.progressBeforeCancellation !== true ||
+    p.cancelledChildDrained !== true ||
+    p.retryCompleted !== true
   )
     failure();
   return c;
@@ -420,7 +450,8 @@ async function collectStartup(options: {
     receiptSHA256: workerReadinessDigest(evidence),
     intentSHA256: owned.intentSHA256,
     capacityObservedAt: capacity.observedAt,
-    scope: 'owned startup filesystem canary only; not Activity, processing, interruption recovery or readiness',
+    scope:
+      'owned startup filesystem and synthetic audio/child cancellation-retry only; not Activity, worker restart, provider processing or readiness',
   };
 }
 

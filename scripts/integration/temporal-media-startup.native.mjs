@@ -21,7 +21,17 @@ const { initializeApp, deleteApp } = require('firebase-admin/app'),
 const harness = require(fileURLToPath(new URL('../../firebase.test.json', import.meta.url)));
 if (process.env.FIRESTORE_EMULATOR_HOST !== `127.0.0.1:${harness.emulators.firestore.port}`)
   throw new Error('Dedicated emulator required');
-for (const drift of ['none', 'control', 'state', 'intent', 'lost-ack', 'delayed', 'rejected'])
+for (const drift of [
+  'none',
+  'control',
+  'state',
+  'intent',
+  'lost-ack',
+  'delayed',
+  'rejected',
+  'old-receipt',
+  'uncertain-child',
+])
   test(`actual startup checkpoint/private receipt and native readback / ${drift}`, async () => {
     const f = controlsBootstrapFixture('media'),
       { operationId, releaseId, platform } = f.options,
@@ -116,8 +126,22 @@ for (const drift of ['none', 'control', 'state', 'intent', 'lost-ack', 'delayed'
           await lockRef.update({
             'cloudMediaBootstrapCycle.start.attemptedAt': new Date(Date.now() - 1000).toISOString(),
           });
-        return {
-          schemaVersion: 1,
+        const result = {
+          schemaVersion: 2,
+          processing: {
+            schemaVersion: 1,
+            ffmpegSHA256: 'a'.repeat(64),
+            ffprobeSHA256: 'b'.repeat(64),
+            sourceBytes: 32044,
+            outputBytes: 32044,
+            sampleRate: 16000,
+            channels: 1,
+            durationSeconds: 1,
+            pcmSamplesVerified: 16000,
+            progressBeforeCancellation: true,
+            cancelledChildDrained: true,
+            retryCompleted: true,
+          },
           budgets: { ...mediaStartupBudget },
           totalBytes: 100 * 1024 ** 3,
           availableBytes: 90 * 1024 ** 3,
@@ -127,6 +151,12 @@ for (const drift of ['none', 'control', 'state', 'intent', 'lost-ack', 'delayed'
           reservationReleased: true,
           observedAt: new Date().toISOString(),
         };
+        if (drift === 'old-receipt') {
+          result.schemaVersion = 1;
+          delete result.processing;
+        }
+        if (drift === 'uncertain-child') result.processing.cancelledChildDrained = false;
+        return result;
       };
       const registration = async () => {
         const record = () => recordMediaStartupCapacity({ firestore: db, buildId: b.buildId, witness, canary });

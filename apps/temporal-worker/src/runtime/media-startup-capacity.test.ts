@@ -1,5 +1,19 @@
 import { randomUUID } from 'node:crypto';
 import { mediaStartupIntent, runMediaFilesystemCanary, mediaStartupBudget } from './media-startup-capacity';
+const mockProcessing = jest.fn(async () => ({
+  schemaVersion: 1 as const,
+  ffmpegSHA256: 'a'.repeat(64),
+  ffprobeSHA256: 'b'.repeat(64),
+  sourceBytes: 32044,
+  outputBytes: 32044,
+  sampleRate: 16000 as const,
+  channels: 1 as const,
+  durationSeconds: 1,
+  pcmSamplesVerified: 16000 as const,
+  progressBeforeCancellation: true as const,
+  cancelledChildDrained: true as const,
+  retryCompleted: true as const,
+}));
 const GiB = 1024 ** 3;
 const disk = { blocks: (100 * GiB) / 4096, bavail: (90 * GiB) / 4096, bsize: 4096 };
 let mockDisk = { ...disk },
@@ -39,6 +53,7 @@ function operation() {
         evidenceDigest: 'd'.repeat(64),
         name,
         mediaStartup: {
+          canary: 'filesystem-and-native-audio-v2',
           budgets: { ...mediaStartupBudget },
           image: `us-central1-docker.pkg.dev/urm-app-staging/urm-temporal/worker@sha256:${'b'.repeat(64)}`,
           runner: `tw-m-${buildId.slice(0, 20)}@urm-app-staging.iam.gserviceaccount.com`,
@@ -72,7 +87,7 @@ test('attempted source startup intent binds original authority and survives ACK 
   o.cloudMediaBootstrapCycle.start.stage = 'acknowledged';
   expect(mediaStartupIntent(o).intentSHA256).toBe(first.intentSHA256);
 });
-for (const bad of ['role', 'no-attempt', 'rejected', 'stop', 'runner', 'budget', 'source', 'array'])
+for (const bad of ['role', 'no-attempt', 'rejected', 'stop', 'runner', 'budget', 'source', 'array', 'filesystem-only'])
   test(`startup intent rejects ${bad}`, () => {
     const o = operation(),
       s = o.cloudMediaBootstrapCycle;
@@ -82,12 +97,13 @@ for (const bad of ['role', 'no-attempt', 'rejected', 'stop', 'runner', 'budget',
     if (bad === 'stop') Object.assign(s, { stop: {} });
     if (bad === 'runner') s.plan.mediaStartup.runner = 'foreign@example.test';
     if (bad === 'budget') s.plan.mediaStartup.budgets.workspaceBytes = GiB;
+    if (bad === 'filesystem-only') s.plan.mediaStartup.canary = 'filesystem-only-v1';
     if (bad === 'source') s.plan.name = 'foreign';
     expect(() => mediaStartupIntent(bad === 'array' ? [] : o)).toThrow('MEDIA_STARTUP_CAPACITY_UNCONFIRMED');
   });
 test('actual private filesystem canary writes reads fsyncs cleans and releases reservations under controlled mount metadata', async () => {
-  const a = await runMediaFilesystemCanary(),
-    b = await runMediaFilesystemCanary();
+  const a = await runMediaFilesystemCanary(undefined, mockProcessing),
+    b = await runMediaFilesystemCanary(undefined, mockProcessing);
   expect(a.canaryBytes).toBe(1024 * 1024);
   expect(a.cleanupConfirmed).toBe(true);
   expect(b.reservationReleased).toBe(true);
@@ -99,11 +115,21 @@ for (const bad of ['root', 'low', 'nan', 'oversize', 'draining'])
     if (bad === 'low') mockDisk.bavail = 1024;
     if (bad === 'nan') mockDisk.bavail = NaN;
     if (bad === 'oversize') mockDisk.bavail = Number.MAX_SAFE_INTEGER;
-    await expect(runMediaFilesystemCanary(() => bad === 'draining')).rejects.toThrow();
+    await expect(runMediaFilesystemCanary(() => bad === 'draining', mockProcessing)).rejects.toThrow();
   });
 
 test('wall-clock expiry after filesystem settlement cannot pass before timeout callback runs', async () => {
   mockNowBefore = Date.now();
   mockJumpTime = true;
-  await expect(runMediaFilesystemCanary()).rejects.toThrow();
+  await expect(runMediaFilesystemCanary(undefined, mockProcessing)).rejects.toThrow();
+});
+
+test('processing failure releases the real application reservation before a later canary', async () => {
+  await expect(
+    runMediaFilesystemCanary(undefined, async () => {
+      throw new Error('Controlled processing failure');
+    })
+  ).rejects.toThrow('Controlled processing failure');
+  const result = await runMediaFilesystemCanary(undefined, mockProcessing);
+  expect(result.reservationReleased).toBe(true);
 });
