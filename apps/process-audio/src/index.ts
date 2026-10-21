@@ -6,6 +6,8 @@ import {
   sentryRelease,
   sentryTracesSampleRate,
 } from './instrument';
+import { hostIsolationEnabled } from './host/resources';
+import { runIsolatedLegacyWork, runIsolatedHostCanary } from './host/isolated';
 import { createHetznerAcquisitionRouter } from './temporal/hetzner-acquisition-http';
 import express, { Request } from 'express';
 import {
@@ -324,10 +326,18 @@ async function executeYouTubeMediaByteCanary(
       throw new Error('YouTube media-byte canaries are available only on the Hetzner YouTube worker.');
     }
     const operation = scope === 'guest' ? 'youtube-guest-media-canary' : 'youtube-auth-media-canary';
-    const report =
-      scope === 'guest'
-        ? await runGuestYouTubeMediaByteCanary(ytdlpPath, realtimeDB, createContext(undefined, operation))
-        : await runAuthenticatedYouTubeMediaByteCanary(ytdlpPath, realtimeDB, createContext(undefined, operation));
+    const projectId = firebaseAdmin.app().options.projectId;
+    if (hostIsolationEnabled(runtimeProfile) && projectId !== 'urm-app' && projectId !== 'urm-app-staging')
+      throw new Error('Host project unconfirmed');
+    const report = hostIsolationEnabled(runtimeProfile)
+      ? await runIsolatedHostCanary({
+          projectId: projectId as 'urm-app' | 'urm-app-staging',
+          scope,
+          ctx: createContext(undefined, operation),
+        })
+      : scope === 'guest'
+      ? await runGuestYouTubeMediaByteCanary(ytdlpPath, realtimeDB, createContext(undefined, operation))
+      : await runAuthenticatedYouTubeMediaByteCanary(ytdlpPath, realtimeDB, createContext(undefined, operation));
     if (report.scope !== scope) {
       throw new Error(`YouTube media-byte canary returned scope ${report.scope}; expected ${scope}.`);
     }
@@ -901,24 +911,35 @@ const legacyProcessAudioHandler = async (
         const cancelToken = new CancelToken();
         const processAudioResult = await executeWithTimeout(
           () =>
-            processAudio(
-              ytdlpPath ?? 'yt-dlp',
-              cancelToken,
-              bucket,
-              realtimeDB,
-              db,
-              audioSource,
-              docRef,
-              sermonStatus,
-              data.startTime,
-              data.duration,
-              data.deleteOriginal,
-              data.skipTranscode,
-              data.introUrl,
-              data.outroUrl,
-              ctx,
-              taskId,
-              sourceBucket
+            (hostIsolationEnabled(runtimeProfile)
+              ? runIsolatedLegacyWork({
+                  projectId: firebaseAdmin.app().options.projectId as 'urm-app' | 'urm-app-staging',
+                  data,
+                  bucketName: bucket.name,
+                  originalSource,
+                  taskId: taskId ?? null,
+                  ctx,
+                  cancelToken,
+                })
+              : processAudio(
+                  ytdlpPath ?? 'yt-dlp',
+                  cancelToken,
+                  bucket,
+                  realtimeDB,
+                  db,
+                  audioSource,
+                  docRef,
+                  sermonStatus,
+                  data.startTime,
+                  data.duration,
+                  data.deleteOriginal,
+                  data.skipTranscode,
+                  data.introUrl,
+                  data.outroUrl,
+                  ctx,
+                  taskId,
+                  sourceBucket
+                )
             )
               .catch((error) => {
                 cancelToken.cancel();

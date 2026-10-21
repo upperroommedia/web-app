@@ -55,6 +55,10 @@ jobs:
       - name: Validate the complete application
         id: application_validation
         run: node scripts/validate-application.mjs
+      - name: Validate host coordinator source and immutable journals
+        # Root is needed only for the owned temporary socket permission fixture;
+        # it drops its client UID and never starts the host daemon.
+        run: sudo python3 -B -m unittest discover -s ops/process-audio-hetzner/coordinator -p test_coordinator.py
       - name: Preserve authenticated media failure traces
         if: ${{ failure() && steps.application_validation.outputs.media_failed == 'true' }}
         uses: actions/upload-artifact@v7.0.2
