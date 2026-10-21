@@ -1,3 +1,9 @@
+import {
+  allocateMediaCapacity,
+  MEDIA_ALLOCATION_BYTES,
+  MEDIA_ALLOCATION_PROGRAM_SHA256,
+  type MediaAllocationEvidence,
+} from './media-capacity-allocation';
 import { runNativeMediaProcessingCanary, MEDIA_STARTUP_CANARY_KIND } from './media-processing-canary';
 import { createHash, randomBytes } from 'node:crypto';
 import { open, readFile, mkdtemp, rm, stat, statfs, realpath } from 'node:fs/promises';
@@ -115,10 +121,12 @@ function sameTime(a: any, b: any) {
 
 /** One MiB real write/read/fsync, actual application reservation and exact budgets.
  * Await native filesystem settlement and cleanup; a deadline is not proof that an
- * outstanding syscall stopped. No sparse/full-budget allocation claim is made. */
+ * outstanding syscall stopped. A separate same-filesystem 64GiB allocation stays held through processing; no lifetime capacity guarantee is made. */
 export async function runMediaFilesystemCanary(
   isDraining: () => boolean = () => false,
-  processing = runNativeMediaProcessingCanary
+  processing = runNativeMediaProcessingCanary,
+  allocate = allocateMediaCapacity,
+  assertAuthority: () => Promise<void> = async () => undefined
 ) {
   const end = Date.now() + 10000,
     signal = AbortSignal.timeout(10000),
@@ -146,11 +154,16 @@ export async function runMediaFilesystemCanary(
   const directory = await mkdtemp('/tmp/temporal-media-capacity-');
   let release: (() => void) | undefined;
   let file: Awaited<ReturnType<typeof open>> | undefined;
+  let allocation: Awaited<ReturnType<typeof allocateMediaCapacity>> | undefined;
+  let allocationEvidence: MediaAllocationEvidence | undefined;
   let confirmed = false;
   let audio: Awaited<ReturnType<typeof runNativeMediaProcessingCanary>> | undefined;
   try {
     check();
     release = await reserveMediaWorkspace(directory);
+    check();
+    allocation = await allocate(signal);
+    await assertAuthority();
     check();
     const bytes = randomBytes(1024 * 1024),
       digest = createHash('sha256').update(bytes).digest('hex');
@@ -163,14 +176,24 @@ export async function runMediaFilesystemCanary(
     const stored = await readFile(join(directory, 'source.bin'));
     check();
     if (stored.length !== bytes.length || createHash('sha256').update(stored).digest('hex') !== digest) failure();
+    await allocation.assertHeld();
+    await assertAuthority();
+    check();
     audio = await processing({ directory, signal });
+    await allocation.assertHeld();
     check();
     await checkMediaWorkspace(directory);
     check();
+    allocationEvidence = await allocation.release();
+    allocation = undefined;
     confirmed = true;
   } finally {
     try {
-      await file?.close();
+      try {
+        await allocation?.cleanup();
+      } finally {
+        await file?.close();
+      }
     } finally {
       try {
         await rm(directory, { recursive: true, force: false });
@@ -180,13 +203,14 @@ export async function runMediaFilesystemCanary(
     }
   }
   check();
-  if (!confirmed || !audio) failure();
+  if (!confirmed || !audio || !allocationEvidence) failure();
   // A second application reservation verifies that the first was released.
   const again = await reserveMediaWorkspace('/tmp');
   again();
   check();
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
+    allocation: allocationEvidence,
     processing: audio,
     budgets: { ...mediaStartupBudget },
     totalBytes,
@@ -239,18 +263,6 @@ async function recordStartup(options: {
     !uuid(witness.instanceId)
   )
     failure();
-  const capacity = await (options.canary ?? runMediaFilesystemCanary)(options.isDraining);
-  validateCapacity(capacity, owned.start.attemptedAt);
-  const evidence = {
-    schemaVersion: 1,
-    intentSHA256: owned.intentSHA256,
-    operationId: owned.intent.operationId,
-    worker: witness,
-    capacity,
-    observedAt: new Date().toISOString(),
-  };
-  const digest = workerReadinessDigest(evidence),
-    receipt = db.collection(MEDIA_STARTUP_CAPACITY_COLLECTION).doc(owned.intent.operationId);
   const verify = async (tx: any) => {
     const [o, c, s] = await Promise.all([tx.get(op), tx.get(control), tx.get(state)]);
     paused(o.data(), c.data(), s.data());
@@ -262,6 +274,21 @@ async function recordStartup(options: {
     )
       failure();
   };
+  const capacity = await (options.canary ?? runMediaFilesystemCanary)(options.isDraining, undefined, undefined, () =>
+    db.runTransaction(verify, { readOnly: true })
+  );
+  validateCapacity(capacity, owned.start.attemptedAt);
+  const evidence = {
+    schemaVersion: 1,
+    intentSHA256: owned.intentSHA256,
+    operationId: owned.intent.operationId,
+    worker: witness,
+    capacity,
+    observedAt: new Date().toISOString(),
+  };
+  const digest = workerReadinessDigest(evidence),
+    receipt = db.collection(MEDIA_STARTUP_CAPACITY_COLLECTION).doc(owned.intent.operationId);
+
   try {
     await db.runTransaction(
       async (tx) => {
@@ -291,8 +318,8 @@ function validateCapacity(raw: unknown, attemptedAt: string) {
     at = Date.parse(c.observedAt ?? '');
   if (
     Object.keys(c).sort().join(',') !==
-      'availableBytes,budgets,canaryBytes,cleanupConfirmed,observedAt,processing,reservationReleased,schemaVersion,totalBytes,writeReadFsync' ||
-    c.schemaVersion !== 2 ||
+      'allocation,availableBytes,budgets,canaryBytes,cleanupConfirmed,observedAt,processing,reservationReleased,schemaVersion,totalBytes,writeReadFsync' ||
+    c.schemaVersion !== 3 ||
     workerReadinessDigest(c.budgets) !== workerReadinessDigest(mediaStartupBudget) ||
     !Number.isSafeInteger(c.totalBytes) ||
     !Number.isSafeInteger(c.availableBytes) ||
@@ -306,6 +333,30 @@ function validateCapacity(raw: unknown, attemptedAt: string) {
     at < Date.parse(attemptedAt) ||
     at > Date.now() + 5000 ||
     Date.now() - at > 120000
+  )
+    failure();
+  const a = object(c.allocation);
+  if (
+    Object.keys(a).sort().join(',') !==
+      'allocatedBytes,availableBytesAfterAllocation,cleanupConfirmed,fileInode,filesystemDevice,minimumAvailableBytesWhileHeld,programSHA256,pythonSHA256,releasedAt,requestedBytes,schemaVersion,startedAt' ||
+    a.schemaVersion !== 1 ||
+    a.requestedBytes !== MEDIA_ALLOCATION_BYTES ||
+    !Number.isSafeInteger(a.allocatedBytes) ||
+    a.allocatedBytes < MEDIA_ALLOCATION_BYTES ||
+    !hash(a.pythonSHA256) ||
+    a.programSHA256 !== MEDIA_ALLOCATION_PROGRAM_SHA256 ||
+    ![a.fileInode, a.filesystemDevice].every(Number.isSafeInteger) ||
+    !Number.isSafeInteger(a.minimumAvailableBytesWhileHeld) ||
+    a.minimumAvailableBytesWhileHeld < 16 * GiB ||
+    !Number.isSafeInteger(a.availableBytesAfterAllocation) ||
+    a.availableBytesAfterAllocation < a.minimumAvailableBytesWhileHeld ||
+    !Number.isFinite(Date.parse(a.startedAt)) ||
+    !Number.isFinite(Date.parse(a.releasedAt)) ||
+    Date.parse(a.startedAt) < Date.parse(attemptedAt) ||
+    Date.parse(a.releasedAt) < Date.parse(a.startedAt) ||
+    Date.parse(a.releasedAt) - Date.parse(a.startedAt) > 8000 ||
+    Date.parse(a.releasedAt) > at ||
+    a.cleanupConfirmed !== true
   )
     failure();
   const p = object(c.processing);

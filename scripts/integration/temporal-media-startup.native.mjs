@@ -13,6 +13,9 @@ require('ts-node').register({
   transpileOnly: true,
   compilerOptions: { module: 'CommonJS', target: 'ES2022', esModuleInterop: true, moduleResolution: 'node' },
 });
+const { MEDIA_ALLOCATION_PROGRAM_SHA256 } = require(fileURLToPath(
+  new URL('../../apps/temporal-worker/src/runtime/media-capacity-allocation.ts', import.meta.url)
+));
 const { recordMediaStartupCapacity, collectMediaStartupCapacity, mediaStartupBudget } = require(fileURLToPath(
   new URL('../../apps/temporal-worker/src/runtime/media-startup-capacity.ts', import.meta.url)
 ));
@@ -31,6 +34,11 @@ for (const drift of [
   'rejected',
   'old-receipt',
   'uncertain-child',
+  'missing-allocation',
+  'sparse-allocation',
+  'low-allocation-headroom',
+  'foreign-program',
+  'old-audio-schema',
 ])
   test(`actual startup checkpoint/private receipt and native readback / ${drift}`, async () => {
     const f = controlsBootstrapFixture('media'),
@@ -118,7 +126,7 @@ for (const drift of [
           }
           return value;
         };
-      const canary = async () => {
+      const canary = async (_draining, _processing, _allocation, assertAuthority) => {
         canaryCalls++;
         if (drift === 'control') await controlRef.update({ admission: 'open' });
         if (drift === 'state') await stateRef.update({ phase: 'changed' });
@@ -126,8 +134,23 @@ for (const drift of [
           await lockRef.update({
             'cloudMediaBootstrapCycle.start.attemptedAt': new Date(Date.now() - 1000).toISOString(),
           });
+        await assertAuthority();
         const result = {
-          schemaVersion: 2,
+          schemaVersion: 3,
+          allocation: {
+            schemaVersion: 1,
+            requestedBytes: 64 * 1024 ** 3,
+            allocatedBytes: 64 * 1024 ** 3,
+            pythonSHA256: 'a'.repeat(64),
+            programSHA256: MEDIA_ALLOCATION_PROGRAM_SHA256,
+            filesystemDevice: 2,
+            fileInode: 123,
+            availableBytesAfterAllocation: 32 * 1024 ** 3,
+            minimumAvailableBytesWhileHeld: 32 * 1024 ** 3,
+            startedAt: new Date().toISOString(),
+            releasedAt: new Date().toISOString(),
+            cleanupConfirmed: true,
+          },
           processing: {
             schemaVersion: 1,
             ffmpegSHA256: 'a'.repeat(64),
@@ -155,6 +178,11 @@ for (const drift of [
           result.schemaVersion = 1;
           delete result.processing;
         }
+        if (drift === 'missing-allocation') delete result.allocation;
+        if (drift === 'sparse-allocation') result.allocation.allocatedBytes = 1024;
+        if (drift === 'low-allocation-headroom') result.allocation.minimumAvailableBytesWhileHeld = 1024;
+        if (drift === 'foreign-program') result.allocation.programSHA256 = 'f'.repeat(64);
+        if (drift === 'old-audio-schema') result.schemaVersion = 2;
         if (drift === 'uncertain-child') result.processing.cancelledChildDrained = false;
         return result;
       };

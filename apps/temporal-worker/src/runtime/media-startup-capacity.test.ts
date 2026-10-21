@@ -14,6 +14,24 @@ const mockProcessing = jest.fn(async () => ({
   cancelledChildDrained: true as const,
   retryCompleted: true as const,
 }));
+const mockAllocate = jest.fn(async () => ({
+  assertHeld: async () => 32 * 1024 ** 3,
+  cleanup: async () => undefined,
+  release: async () => ({
+    schemaVersion: 1 as const,
+    requestedBytes: 64 * 1024 ** 3,
+    allocatedBytes: 64 * 1024 ** 3,
+    pythonSHA256: 'a'.repeat(64),
+    programSHA256: 'b'.repeat(64),
+    filesystemDevice: 2,
+    fileInode: 123,
+    availableBytesAfterAllocation: 32 * 1024 ** 3,
+    minimumAvailableBytesWhileHeld: 32 * 1024 ** 3,
+    startedAt: new Date().toISOString(),
+    releasedAt: new Date().toISOString(),
+    cleanupConfirmed: true as const,
+  }),
+}));
 const GiB = 1024 ** 3;
 const disk = { blocks: (100 * GiB) / 4096, bavail: (90 * GiB) / 4096, bsize: 4096 };
 let mockDisk = { ...disk },
@@ -53,7 +71,7 @@ function operation() {
         evidenceDigest: 'd'.repeat(64),
         name,
         mediaStartup: {
-          canary: 'filesystem-and-native-audio-v2',
+          canary: 'filesystem-allocation-and-native-audio-v3',
           budgets: { ...mediaStartupBudget },
           image: `us-central1-docker.pkg.dev/urm-app-staging/urm-temporal/worker@sha256:${'b'.repeat(64)}`,
           runner: `tw-m-${buildId.slice(0, 20)}@urm-app-staging.iam.gserviceaccount.com`,
@@ -102,8 +120,8 @@ for (const bad of ['role', 'no-attempt', 'rejected', 'stop', 'runner', 'budget',
     expect(() => mediaStartupIntent(bad === 'array' ? [] : o)).toThrow('MEDIA_STARTUP_CAPACITY_UNCONFIRMED');
   });
 test('actual private filesystem canary writes reads fsyncs cleans and releases reservations under controlled mount metadata', async () => {
-  const a = await runMediaFilesystemCanary(undefined, mockProcessing),
-    b = await runMediaFilesystemCanary(undefined, mockProcessing);
+  const a = await runMediaFilesystemCanary(undefined, mockProcessing, mockAllocate),
+    b = await runMediaFilesystemCanary(undefined, mockProcessing, mockAllocate);
   expect(a.canaryBytes).toBe(1024 * 1024);
   expect(a.cleanupConfirmed).toBe(true);
   expect(b.reservationReleased).toBe(true);
@@ -115,21 +133,49 @@ for (const bad of ['root', 'low', 'nan', 'oversize', 'draining'])
     if (bad === 'low') mockDisk.bavail = 1024;
     if (bad === 'nan') mockDisk.bavail = NaN;
     if (bad === 'oversize') mockDisk.bavail = Number.MAX_SAFE_INTEGER;
-    await expect(runMediaFilesystemCanary(() => bad === 'draining', mockProcessing)).rejects.toThrow();
+    await expect(runMediaFilesystemCanary(() => bad === 'draining', mockProcessing, mockAllocate)).rejects.toThrow();
   });
 
 test('wall-clock expiry after filesystem settlement cannot pass before timeout callback runs', async () => {
   mockNowBefore = Date.now();
   mockJumpTime = true;
-  await expect(runMediaFilesystemCanary(undefined, mockProcessing)).rejects.toThrow();
+  await expect(runMediaFilesystemCanary(undefined, mockProcessing, mockAllocate)).rejects.toThrow();
 });
 
 test('processing failure releases the real application reservation before a later canary', async () => {
   await expect(
-    runMediaFilesystemCanary(undefined, async () => {
-      throw new Error('Controlled processing failure');
-    })
+    runMediaFilesystemCanary(
+      undefined,
+      async () => {
+        throw new Error('Controlled processing failure');
+      },
+      mockAllocate
+    )
   ).rejects.toThrow('Controlled processing failure');
-  const result = await runMediaFilesystemCanary(undefined, mockProcessing);
+  const result = await runMediaFilesystemCanary(undefined, mockProcessing, mockAllocate);
   expect(result.reservationReleased).toBe(true);
 });
+
+for (const bad of ['allocation', 'held-space', 'authority'])
+  test(`allocation failure ${bad} cleans owned lease and preserves application reservation`, async () => {
+    const held = await mockAllocate();
+    const cleanup = jest.fn(held.cleanup);
+    held.cleanup = cleanup;
+    const allocation = jest.fn(async () => {
+      if (bad === 'allocation') throw new Error('allocation denied');
+      return held;
+    });
+    if (bad === 'held-space')
+      held.assertHeld = async () => {
+        throw new Error('headroom denied');
+      };
+    const processing = jest.fn(mockProcessing);
+    await expect(
+      runMediaFilesystemCanary(undefined, processing, allocation, async () => {
+        if (bad === 'authority') throw new Error('authority changed');
+      })
+    ).rejects.toThrow();
+    expect(processing).not.toHaveBeenCalled();
+    if (bad !== 'allocation') expect(cleanup).toHaveBeenCalledTimes(1);
+    expect((await runMediaFilesystemCanary(undefined, mockProcessing, mockAllocate)).reservationReleased).toBe(true);
+  });

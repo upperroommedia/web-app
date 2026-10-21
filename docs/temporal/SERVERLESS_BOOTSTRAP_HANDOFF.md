@@ -581,3 +581,23 @@ native receipt to match. Old schema, missing evidence and changed image digests
 are fenced, including GET-only reconciliation. Controlled filesystem and native
 LOCAL SDK/Firestore tests do not establish final image or Cloud Run acceptance.
 Media promotion remains fixed-denied and orchestration promotion unavailable.
+
+
+Owned media startup intent v3 and capacity receipt schema 3 now require a separate
+64GiB filesystem-accounted allocation before the synthetic audio check. The
+source-fixed isolated Python program uses `posix_fallocate`, fsyncs and verifies
+size, allocated blocks and the original descriptor identity. Unsupported systems,
+sparse results, insufficient sampled headroom and uncertain child drain fail
+closed. There is no smaller-file fallback. The allocation stays outside the
+application workspace, on the same scratch filesystem, until audio processing
+settles. Native original paused authority is rechecked after allocation and before
+audio; all owned allocation/workspace cleanup finishes before reservation release.
+
+The receipt joins the original operation, image, runner, revision and instance to
+the fixed program hash, interpreter hash, filesystem sample, allocation duration
+and confirmed cleanup. It establishes a point-in-time filesystem sample only.
+Headroom is sampled, not guaranteed continuously; neither physical backing nor a
+lasting capacity lease is claimed. The native child test allocates only one MiB
+on supported Linux and must fail closed on this local macOS host. No 64GiB local
+allocation, final-image execution or Cloud Run allocation has been performed.
+Media promotion remains unconditionally denied pending its other native gates.
