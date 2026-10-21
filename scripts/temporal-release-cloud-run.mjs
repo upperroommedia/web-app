@@ -1,3 +1,4 @@
+import {observeMediaRecoveryProtection} from './temporal-media-recovery-protection.mjs';
 import {observeMediaRecoveryDiagnosticZeroPool,mediaDiagnosticConfirmationProof} from './temporal-media-stop-confirmation.mjs';
 import {waitForMediaDiagnosticDrain,assertFreshMediaDiagnosticDrain,observeMediaDiagnosticStopped,observeMediaDiagnosticNeverStarted} from './temporal-media-diagnostic-drain.mjs';
 import {assertMediaRecoveryAuthority} from './temporal-media-recovery-checkpoint.mjs';
@@ -439,4 +440,26 @@ export const observeCloudRunMediaIdleStartup=o=>withNativeCloudRunClient(o,async
   if(!Number.isFinite(Date.parse(result.observedAt))||!Number.isFinite(Date.parse(o.phasePool.observedAt))||Math.abs(Date.now()-Date.parse(result.observedAt))>=5000||Math.abs(Date.now()-Date.parse(o.phasePool.observedAt))>=5000)throw Error();
   return result;
  }catch{throw new Error('MEDIA_RECOVERY_IDLE_STARTUP_UNCONFIRMED');}
+});
+
+/** Complete source-fixed diagnostic namespace policy. Preflight stays denied
+ * pending separate native platform evidence and restored-origin activation. */
+export const protectCloudRunMediaRecovery=o=>withNativeCloudRunClient(o,async(client,application)=>{
+ try{
+  const began=Date.now(),monotonic=performance.now();
+  const fresh=()=>{if(Date.now()-began<0||Date.now()-began>=5000||performance.now()-monotonic<0||performance.now()-monotonic>=5000)throw Error();};
+  const read=async fn=>{let timer;try{fresh();const value=await Promise.race([Promise.resolve().then(()=>{fresh();return fn();}),new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('MEDIA_RECOVERY_PHASE_PROTECTION_UNCONFIRMED')),Math.max(1,5000-(Date.now()-began)));})]);fresh();return value;}finally{clearTimeout(timer);}};
+  await read(()=>assertMediaRecoveryAuthority(o));
+  let readIdle;
+  if(o.phase==='start'){
+   const startup=await read(()=>o.firestore.doc(`_control/temporalMediaRecoveryStartup-${o.operationId}`).get());
+   const image=startup.exists?await createMediaRecoveryImageReplayObserver({image:o.plan.image,buildId:o.plan.buildId,operationId:o.operationId,bindingDigest:o.bindingDigest,evidenceDigest:o.plan.evidenceDigest,historyToJSON:application.historyToJSON}):undefined;
+   readIdle=()=>application.collectMediaRecoveryIdleStartup({db:o.firestore,auth:o.firebaseAuth,operationId:o.operationId,plan:o.plan,phasePool:o.phasePool,expectedRootSHA256:o.ownedOperation.dataDigest,expectedControlSHA256:o.expectedAuthority.control.dataDigest,expectedStateSHA256:o.expectedAuthority.state.dataDigest,...(image?{image:{bundleSHA256:image.bundleSHA256,tools:image.tools}}:{})});
+  }
+  const result=await observeMediaRecoveryProtection({...o,client,readIdle});
+  await read(()=>assertMediaRecoveryAuthority(o));
+  if(!Number.isFinite(Date.parse(result.observedAt))||Math.abs(Date.now()-Date.parse(result.observedAt))>=5000||Math.abs(Date.now()-Date.parse(o.phasePool.observedAt))>=5000)throw Error();
+  fresh();
+  return result;
+ }catch{throw new Error('MEDIA_RECOVERY_PHASE_PROTECTION_UNCONFIRMED');}
 });

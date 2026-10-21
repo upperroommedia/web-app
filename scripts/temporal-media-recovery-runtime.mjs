@@ -1,8 +1,8 @@
 import {observeMediaRecoveryPhasePool} from './temporal-media-recovery-phase-pool.mjs';
-import {startCloudRunMediaRecovery,collectCloudRunMediaRecovery,drainCloudRunMediaRecovery,confirmCloudRunMediaRecoveryStopped,confirmCloudRunMediaRecoveryNeverStarted,observeCloudRunMediaIdleStartup} from './temporal-release-cloud-run.mjs';
+import {startCloudRunMediaRecovery,collectCloudRunMediaRecovery,drainCloudRunMediaRecovery,confirmCloudRunMediaRecoveryStopped,confirmCloudRunMediaRecoveryNeverStarted,protectCloudRunMediaRecovery} from './temporal-release-cloud-run.mjs';
 import { prepareMediaRecoveryJournal } from './temporal-media-recovery-checkpoint.mjs';
 /** Canonical preflight stays unavailable. Source preparation, episode and drain
- * adapters are connected below; phase protection,
+ * adapters are connected below; native platform acceptance,
  * explicit restored-origin normal activation and actual platform proof remain.
  * Local/controlled adapters cannot be selected by a CLI flag. Deny BEFORE any
  * cycle checkpoint or native mutation, including preparation at zero. */
@@ -46,11 +46,10 @@ export const mediaRecoveryStoppedConfirmation=o=>scope=>confirmCloudRunMediaReco
 export const mediaRecoveryNeverStartedConfirmation=o=>scope=>confirmCloudRunMediaRecoveryNeverStarted({...o.options(),...scope});
 
 /** A real native resource sub-fence, not complete mutation protection. The
- * separate namespace/poller/own-startup policy stays unavailable; this cannot
- * manufacture its proof or enable canonical preflight. */
+ * source-fixed namespace/poller/own-startup policy follows below. This cannot
+ * enable canonical preflight or replace native platform acceptance. */
 export const mediaRecoveryProtection=o=>async scope=>{
  const options=o.options();
  const phasePool=await observeMediaRecoveryPhasePool({...options,...scope});
- const idleStartup=scope.phase==='start'?await observeCloudRunMediaIdleStartup({...options,...scope,phasePool}):null;
- return canonicalMediaRecoveryRuntime.observeProtection({...options,scope,phasePool,idleStartup});
+ return protectCloudRunMediaRecovery({...options,...scope,phasePool});
 };

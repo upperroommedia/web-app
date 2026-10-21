@@ -123,8 +123,12 @@ export async function collectMediaRecoveryIdleStartup(o: Options) {
                 facts.map((f) => ({
                   exists: f.exists,
                   data: f.data() ?? null,
-                  createTime: f.createTime ?? null,
-                  updateTime: f.updateTime ?? null,
+                  createTime: f.createTime
+                    ? { seconds: f.createTime.seconds, nanoseconds: f.createTime.nanoseconds }
+                    : null,
+                  updateTime: f.updateTime
+                    ? { seconds: f.updateTime.seconds, nanoseconds: f.updateTime.nanoseconds }
+                    : null,
                 }))
               ),
               root: root.data()!,
@@ -236,6 +240,9 @@ export async function collectMediaRecoveryIdleStartup(o: Options) {
       operationId: o.operationId,
       planSHA256: hash(o.plan),
       ownFactsSHA256: after.factsSHA256,
+      originSHA256: k ? hash({ context: k.context, intent: k.intent }) : null,
+      birthSHA256: k?.birth ? hash(k.birth) : null,
+      workerSHA256: k?.worker ? hash(k.worker) : null,
       stage: k?.stage ?? 'absent',
       allowedPollerIdentity,
       buildId: o.plan.buildId,

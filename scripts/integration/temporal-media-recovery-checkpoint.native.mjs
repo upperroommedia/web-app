@@ -1,3 +1,4 @@
+import { observeMediaRecoveryProtection } from '../temporal-media-recovery-protection.mjs';
 /** Actual Firestore checkpoint/authority; CONTROLLED Cloud/runtime protocol. */
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -25,6 +26,7 @@ for (const mode of [
   'normal',
   'phase-resource',
   'idle-startup',
+  'idle-poller',
   'control-drift',
   'state-drift',
   'never-started',
@@ -49,7 +51,9 @@ for (const mode of [
       recoveryCalls = 0,
       drainCalls = 0,
       idleActor,
-      idlePrivate = [];
+      idlePrivate = [],
+      idleRuntime = { active: true };
+    let cycleTask;
     const config = { releaseId: f.options.releaseId },
       base = {
         firestore: db,
@@ -62,7 +66,7 @@ for (const mode of [
         bindingDigest: f.options.bindingDigest,
         operatorPrincipal: {
           email: 'controlled@example.test',
-          ...(mode === 'idle-startup' ? { adcAndGcloudAccountMatch: true } : {}),
+          ...(['idle-startup', 'idle-poller'].includes(mode) ? { adcAndGcloudAccountMatch: true } : {}),
         },
       };
     const options = () => ({ ...base, ownedOperation, expectedAuthority });
@@ -155,7 +159,7 @@ for (const mode of [
           return baseline(scope);
         };
       }
-      if (mode === 'idle-startup') {
+      if (['idle-startup', 'idle-poller'].includes(mode)) {
         const service = require('ts-node').register({
           skipProject: true,
           transpileOnly: true,
@@ -329,6 +333,217 @@ for (const mode of [
           await auth.updateUser(idleActor.uid, { disabled: true });
           await assert.rejects(collectMediaRecoveryIdleStartup(readOptions));
           await auth.updateUser(idleActor.uid, { disabled: false });
+          if (mode === 'idle-poller') {
+            const { createLocalTestEnvironment } = require(fileURLToPath(
+              new URL('../../apps/temporal-worker/src/test-support/local-test-environment.ts', import.meta.url)
+            ));
+            const { Client } = require('@temporalio/client'),
+              { Worker, Runtime, DefaultLogger } = require('@temporalio/worker');
+            Runtime.install({ shutdownSignals: [], logger: new DefaultLogger('ERROR', () => undefined) });
+            idleRuntime.Runtime = Runtime;
+            const env = await bounded(createLocalTestEnvironment({ testServer: { server: { extraArgs: [] } } }), 30000);
+            idleRuntime.env = env;
+            const namespace = 'urm-app-staging.qwejt',
+              deploymentName = 'urm-worker-media-recovery-staging',
+              queue = 'urm-media-kernel-recovery';
+            const client = new Client({ connection: env.connection, namespace });
+            const tracedService = new Proxy(env.connection.workflowService, {
+              get(t, key) {
+                const v = Reflect.get(t, key);
+                return typeof v === 'function'
+                  ? async (...args) => {
+                      try {
+                        // Server 1.32 has no Nexus visibility implementation.
+                        // First prove raw native failure closes the gate; only
+                        // the fixture may then supply an explicitly controlled
+                        // empty Nexus inventory to exercise remaining joins.
+                        if (key === 'listNexusOperationExecutions' && idleRuntime.controlledNexus)
+                          return { operations: [] };
+                        return await v.apply(t, args);
+                      } catch (error) {
+                        idleRuntime.lastNativeError = {
+                          method: String(key),
+                          code: Number.isInteger(error?.code) ? error.code : null,
+                        };
+                        throw error;
+                      }
+                    }
+                  : v;
+              },
+            });
+            const guardedClient = {
+              options: client.options,
+              connection: {
+                workflowService: tracedService,
+                withDeadline: env.connection.withDeadline.bind(env.connection),
+              },
+            };
+
+            await bounded(
+              client.workflowService.registerNamespace({
+                namespace,
+                workflowExecutionRetentionPeriod: { seconds: 86400 },
+              })
+            );
+            const worker = await bounded(
+              Worker.create({
+                connection: env.nativeConnection,
+                namespace,
+                taskQueue: queue,
+                identity: `media-recovery-${k.worker.instanceId}`,
+                workflowsPath: fileURLToPath(
+                  new URL('../../apps/temporal-worker/src/workflows/verification/index.ts', import.meta.url)
+                ),
+                activities: {
+                  neverCalled: async () => {
+                    throw Error('Unexpected Activity');
+                  },
+                },
+                workerDeploymentOptions: {
+                  useWorkerVersioning: true,
+                  defaultVersioningBehavior: 'PINNED',
+                  version: { deploymentName, buildId: scope.plan.buildId },
+                },
+                shutdownGraceTime: '1 second',
+                shutdownForceTime: '5 seconds',
+              }),
+              15000
+            );
+            idleRuntime.worker = worker;
+            idleRuntime.running = worker.run();
+            void idleRuntime.running.catch(() => {});
+            let protection;
+            const until = Date.now() + 15000;
+            do {
+              if (!idleRuntime.active) throw Error('Owned fixture cancelled');
+              readOptions.phasePool = await observeMediaRecoveryPhasePool({
+                ...f.options,
+                ...options(),
+                plan: scope.plan,
+                phase: 'start',
+                pool: f.saved.diagnostic.pool,
+              });
+              try {
+                protection = await observeMediaRecoveryProtection({
+                  ...f.options,
+                  ...options(),
+                  plan: scope.plan,
+                  phase: 'start',
+                  pool: f.saved.diagnostic.pool,
+                  phasePool: readOptions.phasePool,
+                  client: guardedClient,
+                  readIdle: () => collectMediaRecoveryIdleStartup(readOptions),
+                });
+                break;
+              } catch (error) {
+                if (
+                  !idleRuntime.controlledNexus &&
+                  idleRuntime.lastNativeError?.method === 'listNexusOperationExecutions' &&
+                  idleRuntime.lastNativeError.code === 12
+                ) {
+                  assert.match(String(error?.message), /PHASE_PROTECTION_UNCONFIRMED/);
+                  idleRuntime.controlledNexus = true;
+                  idleRuntime.lastNativeError = null;
+                  console.error('OWNED_LOCAL_UNSUPPORTED_NEXUS_FAIL_CLOSED_CONTROLLED_EMPTY_FOR_REMAINING_FIXTURE');
+                }
+                if (Date.now() >= until) {
+                  console.error(
+                    'OWNED_IDLE_NATIVE_POLICY_FAILURE',
+                    JSON.stringify(idleRuntime.lastNativeError ?? { method: 'policy-invariant', code: null })
+                  );
+                  throw error;
+                }
+                await new Promise((r) => setTimeout(r, 200));
+              }
+            } while (Date.now() < until);
+            if (!protection)
+              console.error(
+                'OWNED_IDLE_NATIVE_POLICY_FAILURE',
+                JSON.stringify(idleRuntime.lastNativeError ?? { method: 'policy-invariant', code: null })
+              );
+            assert(protection);
+            assert.equal(protection.phase, 'start');
+            await startupRef.delete();
+            readOptions.phasePool = await observeMediaRecoveryPhasePool({
+              ...f.options,
+              ...options(),
+              plan: scope.plan,
+              phase: 'start',
+              pool: f.saved.diagnostic.pool,
+            });
+            await assert.rejects(
+              bounded(
+                observeMediaRecoveryProtection({
+                  ...f.options,
+                  ...options(),
+                  plan: scope.plan,
+                  phase: 'start',
+                  pool: f.saved.diagnostic.pool,
+                  phasePool: readOptions.phasePool,
+                  client: guardedClient,
+                  readIdle: () => collectMediaRecoveryIdleStartup(readOptions),
+                }),
+                10000
+              ),
+              /PHASE_PROTECTION_UNCONFIRMED/
+            );
+            await startupRef.create(record);
+            const h = await bounded(
+              client.workflow.start('WorkerRestartProbe', {
+                workflowId: `owned-idle-negative-${base.operationId}`,
+                taskQueue: queue,
+                args: [{}],
+                versioningOverride: { pinnedTo: { deploymentName, buildId: scope.plan.buildId } },
+              })
+            );
+            idleRuntime.handle = h;
+            const visibleUntil = Date.now() + 10000;
+            while (
+              !(
+                await client.workflowService.listWorkflowExecutions({
+                  namespace,
+                  pageSize: 100,
+                  query: 'ExecutionStatus = "Running"',
+                })
+              ).executions.some((x) => x.execution.runId === h.firstExecutionRunId)
+            ) {
+              if (Date.now() >= visibleUntil) throw Error('Owned run visibility timeout');
+              await new Promise((r) => setTimeout(r, 100));
+            }
+            readOptions.phasePool = await observeMediaRecoveryPhasePool({
+              ...f.options,
+              ...options(),
+              plan: scope.plan,
+              phase: 'start',
+              pool: f.saved.diagnostic.pool,
+            });
+            await assert.rejects(
+              bounded(
+                observeMediaRecoveryProtection({
+                  ...f.options,
+                  ...options(),
+                  plan: scope.plan,
+                  phase: 'start',
+                  pool: f.saved.diagnostic.pool,
+                  phasePool: readOptions.phasePool,
+                  client: guardedClient,
+                  readIdle: () => collectMediaRecoveryIdleStartup(readOptions),
+                }),
+                10000
+              ),
+              /PHASE_PROTECTION_UNCONFIRMED/
+            );
+            await bounded(h.terminate('Owned LOCAL idle protection negative cleanup'));
+            idleRuntime.handle = undefined;
+            await assert.rejects(bounded(h.result()));
+            worker.shutdown();
+            await bounded(idleRuntime.running, 15000);
+            idleRuntime.worker = undefined;
+            await bounded(env.teardown(), 20000);
+            idleRuntime.env = undefined;
+            await bounded(Runtime.instance().shutdown(), 10000);
+            idleRuntime.Runtime = undefined;
+          }
           await startupRef.delete();
           await kernelRef.delete();
           const result = await originalExecute(scope);
@@ -343,8 +558,9 @@ for (const mode of [
         if (denyQuota && args[0].includes('cloudquotas')) throw new Error('CONTROLLED_QUOTA_UNAVAILABLE');
         return api(...args);
       };
-      if (mode === 'normal' || mode === 'phase-resource' || mode === 'idle-startup') {
-        const result = await bounded(runMediaRecoveryCycle(f.options));
+      if (mode === 'normal' || mode === 'phase-resource' || ['idle-startup', 'idle-poller'].includes(mode)) {
+        cycleTask = runMediaRecoveryCycle(f.options);
+        const result = await bounded(cycleTask, mode === 'idle-poller' ? 90000 : 15000);
         assert.equal((await bounded(immutableReceipt.get())).get('identityState.stage'), 'completed');
         if (mode === 'phase-resource') {
           const scope = { plan: result.plan, phase: 'completed', pool: result.restore.pool };
@@ -515,7 +731,18 @@ for (const mode of [
         );
       }
     } finally {
-      if (mode === 'idle-startup') {
+      idleRuntime.active = false;
+      if (cycleTask)
+        await bounded(
+          cycleTask.catch(() => undefined),
+          20000
+        );
+      if (idleRuntime.handle) await bounded(idleRuntime.handle.terminate('Owned LOCAL cleanup'));
+      if (idleRuntime.worker && idleRuntime.worker.getStatus().runState === 'RUNNING') idleRuntime.worker.shutdown();
+      if (idleRuntime.running) await bounded(idleRuntime.running, 15000);
+      if (idleRuntime.env) await bounded(idleRuntime.env.teardown(), 20000);
+      if (idleRuntime.Runtime) await bounded(idleRuntime.Runtime.instance().shutdown(), 10000);
+      if (['idle-startup', 'idle-poller'].includes(mode)) {
         if (idleActor) await getAuth(app).deleteUser(idleActor.uid);
         for (const ref of idlePrivate) await ref.delete();
       }
