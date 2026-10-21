@@ -1,3 +1,4 @@
+import {startMediaRecoveryWorkflow} from './temporal-media-recovery-start.mjs';
 import {independentPromotionRoles,denyUnprovedMediaPromotion} from './temporal-promotion-roles.mjs';
 import {loadNativeReleaseApplication} from './temporal-native-application.mjs';
 import {promoteCloudRunControls,promoteCloudRunSearch,promoteCloudRunEmail,promoteCloudRunImages,promoteCloudRunMedia} from './temporal-promote-controls.mjs';
@@ -352,7 +353,7 @@ export const runCloudRunMediaPromotion=async()=>denyUnprovedMediaPromotion();
 
 /** Fixed promotion purposes use one transport attempt, including SDK interceptors. */
 export function nativePromotionConnectionOptions(purpose){
- return independentPromotionRoles.some(role=>purpose===`${role}-promotion`)?{interceptors:[],channelArgs:{'grpc.enable_retries':0}}:{};
+ return (purpose==='media-recovery-start'||independentPromotionRoles.some(role=>purpose===`${role}-promotion`))?{interceptors:[],channelArgs:{'grpc.enable_retries':0}}:{};
 }
 
 export function joinMediaStartupRegistration(registration,capacity){
@@ -361,3 +362,6 @@ export function joinMediaStartupRegistration(registration,capacity){
  if(!Number.isFinite(at)||Math.abs(Date.now()-at)>5000||!Number.isFinite(capacityAt)||capacityAt>Date.now()+5000||Date.now()-capacityAt>120000)throw new Error('MEDIA_STARTUP_REGISTRATION_EXPIRED');
  return {...registration,mediaStartupCapacity:capacity};
 }
+
+/** Source/CI/image/authority loader and a fixed nonretrying native START purpose. */
+export const startCloudRunMediaRecovery=o=>withNativeCloudRunClient(o,(client,application)=>startMediaRecoveryWorkflow({...o,client,application}),'media-recovery-start');

@@ -47,6 +47,21 @@ export function mediaRecoveryPCM() {
   return b;
 }
 
+/** Both original and current overrides must retain the exact explicit pin. */
+export function mediaRecoveryPinnedVersion(value: any, expected: any) {
+  if (
+    !value?.pinned ||
+    value.autoUpgrade ||
+    value.pinned.behavior !== 1 ||
+    value.pinned.deployment ||
+    hash(value.pinned.version) !== hash(expected) ||
+    expected?.deploymentName !== MEDIA_RECOVERY_DEPLOYMENT ||
+    !/^[a-f0-9]{40}$/.test(expected?.buildId ?? '')
+  )
+    fail();
+  return true;
+}
+
 /** Native original-start evidence, independent of later name/current routing.
  * Return only a hash; no payload, actor, header or token is exported. */
 export function mediaRecoveryNativeStart(
@@ -76,6 +91,7 @@ export function mediaRecoveryNativeStart(
     !uuid(start.nonce)
   )
     fail();
+  mediaRecoveryPinnedVersion(a.versioningOverride, start.deploymentVersion);
   const seconds = BigInt(String(first.eventTime.seconds)),
     nanos = Number(first.eventTime.nanos ?? 0);
   if (
@@ -151,6 +167,10 @@ export function createMediaRecoveryWorkActivities(o: {
           vi.deploymentVersion.buildId !== witness.buildId
         )
           fail();
+        mediaRecoveryPinnedVersion(vi.versioningOverride, {
+          deploymentName: MEDIA_RECOVERY_DEPLOYMENT,
+          buildId: witness.buildId,
+        });
         const history = await client.connection.withDeadline(Date.now() + 5000, () =>
           client.workflowService.getWorkflowExecutionHistory({
             namespace: info.namespace,

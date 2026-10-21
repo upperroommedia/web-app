@@ -198,3 +198,8 @@ for(const age of [-6000,121000])test(`media startup sample own time is preserved
  const {joinMediaStartupRegistration}=await import('./temporal-release-cloud-run.mjs');
  assert.throws(()=>joinMediaStartupRegistration({observedAt:new Date().toISOString()},{capacityObservedAt:new Date(Date.now()-age).toISOString()}),/MEDIA_STARTUP_REGISTRATION_EXPIRED/);
 });
+
+test('media diagnostic native START connection disables SDK and gRPC retries',async()=>{
+ const {nativePromotionConnectionOptions}=await import('./temporal-release-cloud-run.mjs');
+ assert.deepEqual(nativePromotionConnectionOptions('media-recovery-start'),{interceptors:[],channelArgs:{'grpc.enable_retries':0}});
+});

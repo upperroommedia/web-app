@@ -10,6 +10,7 @@ import { bounded } from './fixtures/owned-media-process.mjs';
 import { mediaRecoveryFixture } from '../tests/fixtures/media-recovery.mjs';
 import { runMediaRecoveryCycle } from '../temporal-media-recovery-cycle.mjs';
 import { prepareMediaRecoveryJournal } from '../temporal-media-recovery-checkpoint.mjs';
+import { startMediaRecoveryWorkflow } from '../temporal-media-recovery-start.mjs';
 import { nativeSnapshotProof, proofDigest as hash } from '../temporal-release-runtime.mjs';
 const require = createRequire(new URL('../../package.json', import.meta.url));
 require(fileURLToPath(new URL('./fixtures/current-workspace-source.cjs', import.meta.url)));
@@ -30,14 +31,16 @@ const { initializeApp, deleteApp } = require('firebase-admin/app'),
   { getStorage } = require('firebase-admin/storage'),
   { getDatabase } = require('firebase-admin/database');
 const { Worker, Runtime, DefaultLogger } = require('@temporalio/worker'),
-  { Client } = require('@temporalio/client');
+  { Client, Connection } = require('@temporalio/client');
 const { ApplicationFailure } = require('@temporalio/common');
 const { createLocalTestEnvironment } = require(fileURLToPath(
   new URL('../../apps/temporal-worker/src/test-support/local-test-environment.ts', import.meta.url)
 ));
-const { createMediaRecoveryWorkActivities } = require(fileURLToPath(
-  new URL('../../apps/temporal-worker/src/runtime/media-recovery-work.ts', import.meta.url)
-));
+const {
+  createMediaRecoveryWorkActivities,
+  mediaRecoveryNativeStart,
+  mediaRecoveryPinnedVersion,
+} = require(fileURLToPath(new URL('../../apps/temporal-worker/src/runtime/media-recovery-work.ts', import.meta.url)));
 const harness = require('./firebase.test.json');
 for (const [key, port] of [
   ['FIREBASE_AUTH_EMULATOR_HOST', harness.emulators.auth.port],
@@ -59,6 +62,7 @@ test(
       bucket,
       auth,
       environment,
+      mutationConnection,
       worker,
       running,
       handle,
@@ -101,11 +105,29 @@ test(
           workflowExecutionRetentionPeriod: { seconds: 86400 },
         })
       );
-      const client = new Client({ connection: environment.client.connection, namespace });
+      mutationConnection = await bounded(
+        Connection.connect({
+          address: environment.connection.options.address,
+          connectTimeout: 5000,
+          interceptors: [],
+          channelArgs: { 'grpc.enable_retries': 0 },
+        })
+      );
+      const client = new Client({ connection: mutationConnection, namespace });
       let version;
       for (const mode of [
+        'start-late-authority',
         'normal',
         'admission-ack-loss',
+        'start-ack-loss',
+        'start-receipt-ack-loss',
+        'start-confirmed-ack-loss',
+        'start-pool-drift',
+        'intent-ack-loss',
+        'start-control-drift',
+        'start-state-drift',
+        'start-definite-rejection',
+        'start-unknown-unaccepted',
         'actor-revoked-after-upload',
         'preexisting-native-run',
         'source-collision',
@@ -122,6 +144,10 @@ test(
           throw new Error('CONTROLLED_CAPTURE');
         };
         await assert.rejects(runMediaRecoveryCycle(f.options));
+        if (mode === 'normal') {
+          cycle.plan.createdAt = new Date(Date.now() - 290000).toISOString();
+          cycle.plan.expiresAt = Date.parse(cycle.plan.createdAt) + 300000;
+        }
         const plan = cycle.plan,
           op = plan.operationId,
           id = `media-recovery-${op}`,
@@ -181,18 +207,22 @@ test(
         await bounded(
           lockRef.update({
             cloudMediaRecovery: cycle,
-            mediaRecoveryWorkflowStart: {
-              stage: 'attempted',
-              operationId: op,
-              planSHA256: hash(plan),
-              workflowId: id,
-              workflowType: 'MediaRecoveryProbe',
-              taskQueue: queue,
-              inputSHA256: hash(input),
-              nonce,
-              deploymentVersion: { deploymentName: 'urm-worker-media-recovery-staging', buildId: plan.buildId },
-              attemptedAt: new Date(Date.now() + (mode === 'preexisting-native-run' ? 5000 : 0)).toISOString(),
-            },
+            ...(mode === 'preexisting-native-run'
+              ? {
+                  mediaRecoveryWorkflowStart: {
+                    stage: 'attempted',
+                    operationId: op,
+                    planSHA256: hash(plan),
+                    workflowId: id,
+                    workflowType: 'MediaRecoveryProbe',
+                    taskQueue: queue,
+                    inputSHA256: hash(input),
+                    nonce,
+                    deploymentVersion: { deploymentName: 'urm-worker-media-recovery-staging', buildId: plan.buildId },
+                    attemptedAt: new Date(Date.now() + (mode === 'preexisting-native-run' ? 5000 : 0)).toISOString(),
+                  },
+                }
+              : {}),
           })
         );
         const witness = {
@@ -326,20 +356,203 @@ test(
         }
         assert.equal(version.buildId, plan.buildId);
         stage = `${mode}/native-start`;
-        handle = await rpc(() =>
-          client.workflow.start('MediaRecoveryProbe', {
-            workflowId: id,
-            taskQueue: queue,
-            args: [input],
-            versioningOverride: { pinnedTo: version },
-            workflowExecutionTimeout: '2 minutes',
-            workflowIdReusePolicy: 'REJECT_DUPLICATE',
-            workflowIdConflictPolicy: 'FAIL',
-          })
-        );
-        if (['normal', 'admission-ack-loss'].includes(mode)) {
+        let startCalls = 0,
+          startOptions;
+        if (mode === 'preexisting-native-run') {
+          handle = await rpc(() =>
+            client.workflow.start('MediaRecoveryProbe', {
+              workflowId: id,
+              taskQueue: queue,
+              args: [input],
+              versioningOverride: { pinnedTo: version },
+              workflowExecutionTimeout: '2 minutes',
+              workflowIdReusePolicy: 'REJECT_DUPLICATE',
+              workflowIdConflictPolicy: 'FAIL',
+            })
+          );
+        } else {
+          const nativeTx = db.runTransaction.bind(db);
+          let checkpointFault = false,
+            lateAuthority = false,
+            receiptFault = false,
+            poolReads = 0;
+          const writerDB = {
+            projectId: db.projectId,
+            databaseId: db.databaseId,
+            doc: db.doc.bind(db),
+            runTransaction: async (fn, opts) => {
+              const result = await nativeTx(fn, opts);
+              if (mode === 'start-late-authority' && opts?.readOnly && poolReads >= 2 && !lateAuthority) {
+                lateAuthority = true;
+                await new Promise((done) => setTimeout(done, 5100));
+              }
+              if (
+                !opts?.readOnly &&
+                !checkpointFault &&
+                (await bounded(lockRef.get())).get('mediaRecoveryWorkflowStart')
+              ) {
+                checkpointFault = true;
+                if (mode === 'intent-ack-loss') throw new Error('CONTROLLED_NATIVE_INTENT_ACK_LOST');
+                if (mode === 'start-control-drift') await bounded(controlRef.update({ admission: 'open' }));
+                if (mode === 'start-state-drift') await bounded(stateRef.update({ phase: 'opened' }));
+              }
+              if (!opts?.readOnly && !receiptFault) {
+                const fact = (await bounded(db.doc(`_control/temporalMediaRecoveryStart-${op}`).get())).data();
+                if (
+                  (mode === 'start-receipt-ack-loss' && fact?.stage === 'acknowledged') ||
+                  (mode === 'start-confirmed-ack-loss' && fact?.stage === 'confirmed')
+                ) {
+                  receiptFault = true;
+                  throw new Error('CONTROLLED_NATIVE_RECEIPT_ACK_LOST');
+                }
+              }
+              return result;
+            },
+          };
+          const startClient = {
+            connection: client.connection,
+            workflowService: client.workflowService,
+            workflow: {
+              getHandle: (...args) => ({
+                describe: async () => {
+                  assert.equal(args[2]?.followRuns, false);
+                  if (['normal', 'admission-ack-loss'].includes(mode)) {
+                    const ack = (await bounded(db.doc(`_control/temporalMediaRecoveryStart-${op}`).get())).data();
+                    assert.ok(['acknowledged', 'confirmed'].includes(ack?.stage));
+                    assert.equal(args[1], ack.runId);
+                  }
+                  return client.workflow.getHandle(...args).describe();
+                },
+              }),
+              start: async (...args) => {
+                startCalls++;
+                if (mode === 'start-definite-rejection')
+                  throw Object.assign(new Error('PRIVATE-NATIVE-SENTINEL-DO-NOT-EXPORT'), { code: 7 });
+                if (mode === 'start-unknown-unaccepted') throw new Error('PRIVATE-NATIVE-SENTINEL-DO-NOT-EXPORT');
+                handle = await client.workflow.start(...args);
+                if (mode === 'start-ack-loss') throw new Error('CONTROLLED_START_RESPONSE_LOST');
+                return handle;
+              },
+            },
+          };
+          startOptions = {
+            firestore: writerDB,
+            client: startClient,
+            application: { mediaRecoveryNativeStart, mediaRecoveryPinnedVersion },
+            api: async (url) => {
+              if (url.includes('/revisions/'))
+                return {
+                  ...structuredClone(plan.diagnosticTemplate),
+                  name: cycle.start.pool.revision,
+                  uid: cycle.start.pool.revisionUid,
+                };
+              poolReads++;
+              return {
+                name: plan.name,
+                uid: mode === 'start-pool-drift' && poolReads === 2 ? 'foreign-uid' : cycle.start.pool.uid,
+                generation: cycle.start.pool.generation,
+                observedGeneration: cycle.start.pool.generation,
+                etag: cycle.start.pool.etag,
+                template: structuredClone(plan.diagnosticTemplate),
+                scaling: { manualInstanceCount: 1 },
+                terminalCondition: { state: 'CONDITION_SUCCEEDED' },
+                latestCreatedRevision: cycle.start.pool.revision,
+                latestReadyRevision: cycle.start.pool.revision,
+              };
+            },
+            plan,
+            pool: cycle.start.pool,
+            prepared: cycle.prepared,
+            lockRef,
+            controlRef,
+            stateRef,
+            operationId: op,
+            bindingDigest: plan.bindingDigest,
+            config: { releaseId: plan.releaseId },
+            ownedOperation: nativeSnapshotProof(await bounded(lockRef.get())),
+            expectedAuthority: {
+              control: nativeSnapshotProof(await bounded(controlRef.get())),
+              state: nativeSnapshotProof(await bounded(stateRef.get())),
+            },
+          };
+          if (
+            [
+              'normal',
+              'admission-ack-loss',
+              'start-ack-loss',
+              'start-receipt-ack-loss',
+              'start-confirmed-ack-loss',
+            ].includes(mode)
+          ) {
+            const result = await bounded(startMediaRecoveryWorkflow(startOptions));
+            assert.equal(result.start.runId, handle.firstExecutionRunId);
+            assert.equal(result.start.stage, 'confirmed');
+            const parent = (await bounded(lockRef.get())).data(),
+              receipt = (await bounded(db.doc(`_control/temporalMediaRecoveryStart-${op}`).get())).data();
+            const resumed = await bounded(
+              startMediaRecoveryWorkflow({ ...startOptions, ownedOperation: result.ownedOperation })
+            );
+            assert.equal(resumed.start.runId, result.start.runId);
+            assert.equal(startCalls, 1);
+            assert.deepEqual((await bounded(lockRef.get())).data(), parent);
+            assert.deepEqual(
+              (await bounded(db.doc(`_control/temporalMediaRecoveryStart-${op}`).get())).data(),
+              receipt
+            );
+          } else if (mode.startsWith('start-') || mode === 'intent-ack-loss') {
+            await assert.rejects(bounded(startMediaRecoveryWorkflow(startOptions)));
+            const noSend = [
+              'intent-ack-loss',
+              'start-control-drift',
+              'start-state-drift',
+              'start-pool-drift',
+              'start-late-authority',
+            ].includes(mode);
+            assert.equal(startCalls, noSend ? 0 : 1);
+            const updated = { ...startOptions, ownedOperation: nativeSnapshotProof(await bounded(lockRef.get())) };
+            await assert.rejects(bounded(startMediaRecoveryWorkflow(updated)));
+            assert.equal(startCalls, noSend ? 0 : 1);
+            if (mode.startsWith('start-') || mode === 'intent-ack-loss') {
+              assert.equal(acquireCalls, 0);
+              assert.equal((await bounded(db.doc(`durableJobs/${id}`).get())).exists, false);
+              if (mode === 'start-definite-rejection')
+                assert.equal(
+                  (await bounded(db.doc(`_control/temporalMediaRecoveryStart-${op}`).get())).get('stage'),
+                  'rejected'
+                );
+              continue;
+            }
+          } else {
+            try {
+              await bounded(startMediaRecoveryWorkflow(startOptions));
+            } catch {}
+            assert.equal(startCalls, 1);
+          }
+        }
+        if (
+          [
+            'normal',
+            'admission-ack-loss',
+            'start-ack-loss',
+            'start-receipt-ack-loss',
+            'start-confirmed-ack-loss',
+          ].includes(mode)
+        ) {
           const result = await bounded(handle.result(), 45000);
           assert.equal(result.runId, handle.firstExecutionRunId);
+          if (mode === 'normal') {
+            await new Promise((done) => setTimeout(done, Math.max(0, plan.expiresAt - Date.now() + 25)));
+            const historical = await bounded(
+              startMediaRecoveryWorkflow({
+                ...startOptions,
+                ownedOperation: nativeSnapshotProof(await bounded(lockRef.get())),
+              })
+            );
+            assert.equal(historical.start.runId, handle.firstExecutionRunId);
+            assert.equal(historical.authorizationExpired, true);
+            assert.equal(startCalls, 1);
+          }
+
           assert.equal(acquireCalls, 1);
           assert.equal(admissionCalls, mode === 'admission-ack-loss' ? 2 : 1);
           const record = await bounded(db.doc(`_control/temporalMediaRecoveryWork-${op}`).get());
@@ -425,6 +638,7 @@ test(
       if (handle) await cleanup(() => handle.terminate('Owned LOCAL fixture cleanup'));
       if (worker) await cleanup(() => worker.shutdown());
       if (running) await cleanup(() => running);
+      if (mutationConnection) await cleanup(() => mutationConnection.close());
       if (environment) await cleanup(() => environment.teardown());
       for (const { op, id } of owned) {
         if (db) {
@@ -437,7 +651,11 @@ test(
             'sermons',
           ])
             await cleanup(() => db.doc(`${collection}/${id}`).delete());
-          for (const name of [`temporalMediaRecoveryWork-${op}`, `temporalMediaRecoveryJournal-${op}`])
+          for (const name of [
+            `temporalMediaRecoveryWork-${op}`,
+            `temporalMediaRecoveryJournal-${op}`,
+            `temporalMediaRecoveryStart-${op}`,
+          ])
             await cleanup(() => db.doc(`_control/${name}`).delete());
           const { durableEntityKey, DURABLE_COLLECTIONS } = require('@upperroom/orchestration/job-store');
           await cleanup(() =>

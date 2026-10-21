@@ -1,3 +1,4 @@
+import {startCloudRunMediaRecovery} from './temporal-release-cloud-run.mjs';
 import { prepareMediaRecoveryJournal } from './temporal-media-recovery-checkpoint.mjs';
 /** Canonical boundary, deliberately unavailable until the real image protocol,
  * fixed diagnostic queues, native original-run recovery and authoritative drain
@@ -25,4 +26,14 @@ export function mediaRecoveryPreparation(o) {
     o.setOwnedOperation(result.ownedOperation);
     return result.prepared;
   };
+}
+
+/** The START journal is operational source; execution acceptance remains unavailable
+ * until the same-image supervisor death/rebirth and native adoption collector exist. */
+export function mediaRecoveryExecution(o){
+ return async scope=>{
+   const result=await startCloudRunMediaRecovery({...o.options(),...scope,onOwnedOperation:o.setOwnedOperation});
+   o.setOwnedOperation(result.ownedOperation);
+   return unavailable();
+ };
 }

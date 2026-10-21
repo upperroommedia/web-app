@@ -736,9 +736,33 @@ atomic race fence, and actual backend conditional-write acceptance remains a
 required native platform check.
 
 This source is not reachable through the canonical diagnostic CLI: preflight
-continues to deny execution. The canonical SDK-start writer, diagnostic image
-queue registration, supervisor fault/death/replacement/adoption collector and
+continues to deny execution. Diagnostic image queue registration, supervisor
+fault/death/replacement/adoption collector and
 restored-normal lineage consumer remain pending. Ordinary media remains
 Activity-only, media promotion remains denied, and orchestration promotion
 remains unavailable. No Cloud Run or immutable-image execution is established by
 the local producer case.
+
+
+The canonical execution adapter now calls the fixed native SDK START writer
+through the verified source/CI/image loader. Its dedicated connection disables
+SDK interceptors and gRPC retries. Exact paused native authority, original ARMING
+journal, completed diagnostic start and native pool/revision UID, generation,
+etag and template are rechecked before the immutable parent start intent and
+before the sole RPC. The original five-second pool observation deadline and
+monotonic sample survive the final authority await and are checked immediately
+before sending. ACK facts live in a separate private journal, preserving the
+parent version while an Activity starts before the RPC response returns. A known
+Run ID is saved before polling; uncertain acknowledgement uses original native
+GET-only joins and never another START. Definite rejection remains fenced.
+
+A bounded GET loop handles the interval before the first Workflow task applies
+its deployment pin. Both the original event and current override must retain the
+exact explicit pinned version. Historical readback may confirm an original start
+after its capability expires; it returns an expired-authorization marker and
+grants no renewed work permission. Native event 1 must still fall within the
+original window. A final atomic read joins the original authority and unchanged
+confirmation receipt. START confirmation is separate from recovery acceptance:
+the execution adapter continues to deny recovery success, and canonical preflight
+remains fixed-deny until image queue registration, supervisor replacement and
+native adoption/drain collectors are complete.

@@ -45,7 +45,7 @@ test('native Describe private errors never enter Activity failures or causes', a
   expect((failure as Error).cause).toBeUndefined();
 });
 
-import { mediaRecoveryNativeStart } from './media-recovery-work';
+import { mediaRecoveryNativeStart, mediaRecoveryPinnedVersion } from './media-recovery-work';
 import { defaultPayloadConverter } from '@temporalio/common';
 import { workerReadinessDigest as hash } from './readiness-probe';
 const nativeInput = {
@@ -59,12 +59,19 @@ const nativeFirst = () => ({
   workflowExecutionStartedEventAttributes: {
     workflowType: { name: 'MediaRecoveryProbe' },
     taskQueue: { name: 'urm-media-kernel-recovery' },
+    versioningOverride: {
+      pinned: {
+        behavior: 1,
+        version: { deploymentName: 'urm-worker-media-recovery-staging', buildId: 'a'.repeat(40) },
+      },
+    },
     originalExecutionRunId: nativeRun,
     firstExecutionRunId: nativeRun,
     input: { payloads: [defaultPayloadConverter.toPayload(nativeInput)] },
   },
 });
 const nativeAttempt = () => ({
+  deploymentVersion: { deploymentName: 'urm-worker-media-recovery-staging', buildId: 'a'.repeat(40) },
   nonce: nativeInput.startNonce,
   inputSHA256: hash(nativeInput),
   attemptedAt: new Date(1999999).toISOString(),
@@ -89,5 +96,40 @@ test.each(['preexisting', 'wrong-input', 'wrong-queue', 'continued', 'foreign-or
       event.workflowExecutionStartedEventAttributes.originalExecutionRunId = nativeInput.startNonce;
     if (mode === 'missing-nonce') attempt.nonce = '';
     expect(() => mediaRecoveryNativeStart(event, attempt, nativeInput, nativeRun)).toThrow();
+  }
+);
+
+test('native original-start proof denies an original pinned-override mismatch', () => {
+  const event = nativeFirst();
+  Object.assign(event.workflowExecutionStartedEventAttributes, {
+    versioningOverride: { pinned: { behavior: 1, version: { deploymentName: 'foreign', buildId: 'b'.repeat(40) } } },
+  });
+  expect(() =>
+    mediaRecoveryNativeStart(
+      event,
+      {
+        ...nativeAttempt(),
+        deploymentVersion: { deploymentName: 'urm-worker-media-recovery-staging', buildId: 'a'.repeat(40) },
+      },
+      nativeInput,
+      nativeRun
+    )
+  ).toThrow();
+});
+
+test.each(['missing', 'auto', 'other-build', 'deprecated', 'ambiguous'])(
+  'current native override denies %s despite last deployment match',
+  (mode) => {
+    const expected = { deploymentName: 'urm-worker-media-recovery-staging', buildId: 'a'.repeat(40) };
+    const v: any = { pinned: { behavior: 1, version: expected } };
+    if (mode === 'missing') delete v.pinned;
+    if (mode === 'auto') {
+      delete v.pinned;
+      v.autoUpgrade = {};
+    }
+    if (mode === 'other-build') v.pinned.version = { ...expected, buildId: 'b'.repeat(40) };
+    if (mode === 'deprecated') v.pinned.deployment = { seriesName: expected.deploymentName, buildId: expected.buildId };
+    if (mode === 'ambiguous') v.autoUpgrade = {};
+    expect(() => mediaRecoveryPinnedVersion(v, expected)).toThrow();
   }
 );
