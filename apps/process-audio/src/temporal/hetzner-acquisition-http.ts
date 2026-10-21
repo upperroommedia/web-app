@@ -91,6 +91,7 @@ export function createHetznerAcquisitionRouter(o: { firestore: Firestore; auth: 
           if (originalExecution && !sameStamp(originalExecution, execution)) throw unavailable();
           originalExecution ??= execution;
           const record = readYouTubeAcquisitionOperation(execution.data(), ref);
+          if (record.unclaimedClose !== undefined) throw unavailable();
           const eligibility = await readEligibleYouTubeAcquisition({
             firestore: o.firestore,
             auth: o.auth,

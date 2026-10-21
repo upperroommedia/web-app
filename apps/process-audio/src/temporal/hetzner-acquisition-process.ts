@@ -67,7 +67,7 @@ export async function runYouTubeAcquisitionProcess(options: {
   authorize: (processId: number, signal: AbortSignal) => Promise<boolean>;
   /** Called only from the original live handle after CLOSE and positive group
    * absence. A rejected/unknown durable ACK must retain the physical reservation. */
-  onNativeClose?: (fact: Readonly<YouTubeNativeClose>) => Promise<void>;
+  onNativeClose?: (fact: Readonly<YouTubeNativeClose>, boundary: Readonly<{ ipcAttempted: boolean }>) => Promise<void>;
 }): Promise<'completed' | 'cancelled' | 'failed'> {
   const ref = Object.freeze({ ...options.ref });
   youtubeAcquisitionId(ref);
@@ -92,6 +92,7 @@ export async function runYouTubeAcquisitionProcess(options: {
   let stopped: 'cancelled' | 'failed' | undefined;
   let drain: Promise<void> | undefined;
   let nativeSettled = false;
+  let ipcAttempted = false;
   const closed = new Promise<void>((resolve) => {
     child.once('error', () => {
       spawnFailed = true;
@@ -147,20 +148,28 @@ export async function runYouTubeAcquisitionProcess(options: {
       }
     }
     if (!stopped) {
-      child.send(
-        {
-          operationId: youtubeAcquisitionId(ref),
-          ref,
-          directory: options.directory,
-          ...(options.episodeId ? { episodeId: options.episodeId } : {}),
-        },
-        (error) => {
-          if (error) {
-            spawnFailed = true;
-            stop('failed');
+      try {
+        // Crossing this line ends never-IPC cleanup authority, including a
+        // synchronous send failure or an unknown callback acknowledgement.
+        ipcAttempted = true;
+        child.send(
+          {
+            operationId: youtubeAcquisitionId(ref),
+            ref,
+            directory: options.directory,
+            ...(options.episodeId ? { episodeId: options.episodeId } : {}),
+          },
+          (error) => {
+            if (error) {
+              spawnFailed = true;
+              stop('failed');
+            }
           }
-        }
-      );
+        );
+      } catch {
+        spawnFailed = true;
+        stop('failed');
+      }
     }
     await closed;
     if (drain) await drain;
@@ -175,7 +184,10 @@ export async function runYouTubeAcquisitionProcess(options: {
     options.signal.removeEventListener('abort', abort);
     if (options.onNativeClose) {
       if (!child.pid || closedAt === undefined || groupAlive(child.pid)) throw failure();
-      await options.onNativeClose(Object.freeze({ processId: child.pid, exitCode, exitSignal, outcome, closedAt }));
+      await options.onNativeClose(
+        Object.freeze({ processId: child.pid, exitCode, exitSignal, outcome, closedAt }),
+        Object.freeze({ ipcAttempted })
+      );
     }
     return outcome;
   } finally {

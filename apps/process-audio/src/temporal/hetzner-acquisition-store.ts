@@ -41,6 +41,7 @@ interface Operation {
   drainedAt?: number;
   nativeClose?: NativeCloseReceipt;
   preparedEpisode?: string;
+  unclaimedClose?: unknown;
 }
 const fail = (): never => {
   throw new Error('YOUTUBE_ACQUISITION_OWNERSHIP');
@@ -294,7 +295,7 @@ export function createYouTubeAcquisitionHostStore(options: {
           const current = operation(snapshot.data(), ref);
           await options.assertEligible(tx, ref);
           if (current.preparedBy.serviceAccount !== verifiedCallerEmail) return fail();
-          if (current.status !== 'prepared') return { launch: false };
+          if (current.unclaimedClose !== undefined || current.status !== 'prepared') return { launch: false };
           if (!Number.isSafeInteger(startedAt) || startedAt < current.createdAt || startedAt > Date.now())
             return fail();
           if (current.preparedEpisode !== undefined)

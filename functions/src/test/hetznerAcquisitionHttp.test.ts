@@ -550,3 +550,11 @@ test('actual HTTP and SAME-object source consumer select successor execution rat
     await db.recursiveDelete(db.doc(`${MEDIA_ARTIFACTS}/${mediaArtifactId(ref.projectId, artifact.path)}`));
   }
 });
+
+test('an unclaimed-closure link is never advertised as missing launchable work', async () => {
+  // Negative readback fixture only. No claimed owner or valid cleanup is invented.
+  await db
+    .doc(`${YOUTUBE_ACQUISITIONS}/${youtubeAcquisitionId(ref)}`)
+    .update({ unclaimedClose: { CONTROLLED_NEGATIVE_ONLY: true } });
+  expect(await call()).toEqual({ status: 503, body: { error: 'Acquisition readback is unavailable.' } });
+});

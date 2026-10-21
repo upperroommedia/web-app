@@ -254,3 +254,43 @@ test('abort while parent closure ACK is pending cannot signal the already-closed
     })
   ).resolves.toBe('completed');
 });
+
+test.each(['delivered', 'synchronous-send-failure'])(
+  'native IPC disposition stays attempted for %s until original CLOSE',
+  async (mode) => {
+    const childProcess = jest.requireActual<typeof import('node:child_process')>('node:child_process');
+    const actualFork = childProcess.fork;
+    const helperPath = await helper("process.once('message', () => process.exit(0)); setInterval(()=>{},1000);");
+    const spy =
+      mode === 'synchronous-send-failure'
+        ? jest.spyOn(childProcess, 'fork').mockImplementationOnce((...args: Parameters<typeof actualFork>) => {
+            const child = actualFork(...args);
+            child.send = () => {
+              throw Error('CONTROLLED_SEND_FAILURE');
+            };
+            return child;
+          })
+        : undefined;
+    let observed = false;
+    try {
+      await expect(
+        runYouTubeAcquisitionProcess({
+          helperPath,
+          directory,
+          ref,
+          signal: new AbortController().signal,
+          authorize: async () => true,
+          onNativeClose: async (closed, boundary) => {
+            observed = true;
+            expect(Object.isFrozen(boundary)).toBe(true);
+            expect(boundary).toEqual({ ipcAttempted: true });
+            expect(() => process.kill(-closed.processId, 0)).toThrow(expect.objectContaining({ code: 'ESRCH' }));
+          },
+        })
+      ).resolves.toBe(mode === 'delivered' ? 'completed' : 'failed');
+      expect(observed).toBe(true);
+    } finally {
+      spy?.mockRestore();
+    }
+  }
+);

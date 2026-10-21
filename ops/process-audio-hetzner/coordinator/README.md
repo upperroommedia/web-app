@@ -143,3 +143,14 @@ or archive wait remains fenced. Same-host authentication canary/generation and
 bounded archive-resume integration are still required; a local Cloud Run canary
 cannot substitute for retained-host authentication recovery. All physical and
 operational activation gates above remain denied.
+
+A positively never-IPC acquisition child has a separate cleanup path. The live
+parent records attempted IPC before calling `send`, including a synchronous
+throw or uncertain callback. Only a failed/cancelled original CLOSE with no send
+attempt can use unclaimed cleanup. Known original reservation/enrollment, held
+scope drain and absence of owner/birth/uploads are checked; an atomic execution
+link fences any pending claim transaction. A claim that committed despite a lost
+ACK requires its exact original owned closure instead. Physical release follows
+an independent immutable unclaimed-close/seal readback. This link grants no
+retry, successor, source adoption or reset to `prepared`; launch and HTTP
+readback reject it. Unknown/mismatched facts retain the reservation.

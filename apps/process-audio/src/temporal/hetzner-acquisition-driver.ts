@@ -5,7 +5,7 @@ import type { MediaJobRef } from './types';
 import { youtubeAcquisitionId } from './hetzner-acquisition';
 import { runYouTubeAcquisitionProcess } from './hetzner-acquisition-process';
 import { closeYouTubeAcquisitionNativeProcess, type AcquisitionHostProcess } from './hetzner-acquisition-store';
-import { readPreparedYouTubeEpisode } from './hetzner-acquisition-episode';
+import { readPreparedYouTubeEpisode, closeUnclaimedYouTubeEpisode } from './hetzner-acquisition-episode';
 import { reserveYouTubeEpisodeResources } from './hetzner-acquisition-resources';
 import { readEligibleYouTubeAcquisition } from './hetzner-acquisition-policy';
 import { createNativeYouTubeAuthorization } from './hetzner-acquisition-authorization';
@@ -95,9 +95,19 @@ export async function executeCanonicalYouTubeAcquisition(o: {
     signal: reservation.signal,
     episodeId: episode.id,
     assertStartFresh: fresh,
-    onNativeClose: async (fact) => {
-      if (!originalOwner || originalStartedAt === undefined) throw new Error('YOUTUBE_NATIVE_OWNER_UNCONFIRMED');
+    onNativeClose: async (fact, boundary) => {
       const sealed = await reservation.sealAfterNativeClose();
+      if (!boundary.ipcAttempted) {
+        try {
+          await closeUnclaimedYouTubeEpisode({ firestore: o.firestore, episode, proof: sealed, fact, boundary });
+          return;
+        } catch {
+          // A claim may have committed despite its lost ACK. Only the captured
+          // exact original inspected owner/start can reconcile that owned path.
+          // Any other failure remains fenced; no status reset or second claim.
+        }
+      }
+      if (!originalOwner || originalStartedAt === undefined) throw new Error('YOUTUBE_NATIVE_OWNER_UNCONFIRMED');
       await closeYouTubeAcquisitionNativeProcess({
         firestore: o.firestore,
         ref,

@@ -1,3 +1,4 @@
+import type { YouTubeNativeClose } from './hetzner-acquisition-process';
 import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import type { Firestore, Transaction, DocumentSnapshot } from 'firebase-admin/firestore';
@@ -252,6 +253,7 @@ export async function prepareNativeYouTubeEpisode(o: {
         if (parsed.id !== saved || !isDeepStrictEqual(allowed.data(), { schemaVersion: 1, episode: parsed }))
           return fail();
         await o.assertCurrent(tx, ref);
+        if (execution.get('unclaimedClose') !== undefined) return fail();
         if (isDeepStrictEqual(parsed.invocation, episode.invocation)) return;
         // An ordinary retry cannot reinterpret unknown ownership, upload ACKs,
         // or an auth/archive wait as permission for a new producer.
@@ -351,6 +353,7 @@ export async function readPreparedYouTubeEpisode(o: {
       const root = await tx.get(parent);
       const snapshot = await readAcquisitionExecution(tx, root),
         current = readYouTubeAcquisitionOperation(snapshot.data(), o.ref);
+      if (snapshot.get('unclaimedClose') !== undefined) return fail();
       const id = snapshot.get('preparedEpisode');
       if (!uuid(id) || current.status !== 'prepared' || current.preparedBy.serviceAccount !== o.verifiedCallerEmail)
         return fail();
@@ -435,7 +438,7 @@ export async function claimYouTubeEpisode(
   owner: AcquisitionHostProcess,
   startedAt: number
 ): Promise<void> {
-  if (!uuid(id) || parent.get('preparedEpisode') !== id) return fail();
+  if (!uuid(id) || parent.get('preparedEpisode') !== id || parent.get('unclaimedClose') !== undefined) return fail();
   const doc = acquisitionDelegationRef(parent).collection('episodes').doc(id);
   const [original, authorized, reserved, enrolled, birth] = await Promise.all([
     tx.get(doc),
@@ -523,6 +526,177 @@ export function validateEpisodeDrain(proof: HostResourceReply, id: string, state
   )
     fail();
 }
+function validateUnclaimedFact(fact: Readonly<YouTubeNativeClose>): void {
+  if (
+    !fact ||
+    Object.keys(fact).sort().join(',') !== 'closedAt,exitCode,exitSignal,outcome,processId' ||
+    !Number.isSafeInteger(fact.processId) ||
+    fact.processId < 1 ||
+    !Number.isSafeInteger(fact.closedAt) ||
+    fact.closedAt < 0 ||
+    !['failed', 'cancelled'].includes(fact.outcome) ||
+    (fact.exitCode !== null && (!Number.isInteger(fact.exitCode) || fact.exitCode < 0 || fact.exitCode > 255)) ||
+    (fact.exitSignal !== null && !/^SIG[A-Z0-9]+$/.test(fact.exitSignal))
+  )
+    return fail();
+}
+interface UnclaimedEpisodeClose {
+  schemaVersion: 1;
+  kind: 'unclaimed';
+  episodeId: string;
+  ipcAttempted: false;
+  fact: Readonly<YouTubeNativeClose>;
+  reservationReceiptHash: string;
+  enrollmentReceiptHash: string;
+}
+async function unclaimedInputs(tx: Transaction, execution: DocumentSnapshot, episode: AcquisitionEpisode) {
+  const rootRef = acquisitionDelegationRef(execution);
+  const root = rootRef.path === execution.ref.path ? execution : await tx.get(rootRef);
+  if (
+    (root.get('headEpisode') ?? root.get('preparedEpisode')) !== episode.id ||
+    execution.get('preparedEpisode') !== episode.id ||
+    execution.get('status') !== 'prepared' ||
+    ['owner', 'startedAt', 'result', 'drainedAt', 'activeUpload', 'nativeClose'].some(
+      (key) => execution.get(key) !== undefined
+    )
+  )
+    return fail();
+  const doc = rootRef.collection('episodes').doc(episode.id),
+    facts = doc.collection('facts');
+  const [original, authorized, reserved, enrolled, born, uploads] = await Promise.all([
+    tx.get(doc),
+    tx.get(facts.doc('authorized')),
+    tx.get(facts.doc('reserved')),
+    tx.get(facts.doc('enrolled')),
+    tx.get(facts.doc('birth')),
+    tx.get(execution.ref.collection('uploads').limit(1)),
+  ]);
+  for (const saved of [original, authorized, reserved, enrolled]) immutable(saved);
+  await episodeOriginal(tx, execution, original, episode);
+  resource(reserved.get('proof'), episode.id, 'reserved');
+  resource(enrolled.get('proof'), episode.id, 'enrolled');
+  if (
+    !isDeepStrictEqual(original.data(), episode) ||
+    !isDeepStrictEqual(authorized.data(), { schemaVersion: 1, episode }) ||
+    born.exists ||
+    !uploads.empty
+  )
+    return fail();
+  return { facts, reserved, enrolled };
+}
+async function assertUnclaimedClose(
+  tx: Transaction,
+  execution: DocumentSnapshot,
+  episode: AcquisitionEpisode,
+  proof: HostResourceReply
+) {
+  const inputs = await unclaimedInputs(tx, execution, episode);
+  const [closed, sealed] = await Promise.all([
+    tx.get(execution.ref.collection('unclaimedClose').doc('original')),
+    tx.get(inputs.facts.doc('sealed')),
+  ]);
+  immutable(closed);
+  immutable(sealed);
+  const value = closed.data() as UnclaimedEpisodeClose;
+  if (
+    !value ||
+    Object.keys(value).sort().join(',') !==
+      'enrollmentReceiptHash,episodeId,fact,ipcAttempted,kind,reservationReceiptHash,schemaVersion' ||
+    value.schemaVersion !== 1 ||
+    value.kind !== 'unclaimed' ||
+    value.episodeId !== episode.id ||
+    value.ipcAttempted !== false ||
+    value.reservationReceiptHash !== inputs.reserved.get('proof.receiptHash') ||
+    value.enrollmentReceiptHash !== inputs.enrolled.get('proof.receiptHash') ||
+    !isDeepStrictEqual(execution.get('unclaimedClose'), value) ||
+    !execution.updateTime?.isEqual(closed.createTime!) ||
+    !closed.createTime?.isEqual(sealed.createTime!) ||
+    !isDeepStrictEqual(sealed.get('proof'), proof)
+  )
+    return fail();
+  validateUnclaimedFact(value.fact);
+  return closed;
+}
+/** Parent cleanup only, from ORIGINAL live CLOSE with positively never-attempted
+ * execution IPC and original held-scope drain. Atomic execution fence conflicts
+ * with an in-flight claim; an unknown claim which committed is NOT unclaimed.
+ * Unknown closure ACK reconciles exact immutable GETs and is never resent. */
+export async function closeUnclaimedYouTubeEpisode(o: {
+  firestore: Firestore;
+  episode: AcquisitionEpisode;
+  proof: HostResourceReply;
+  fact: Readonly<YouTubeNativeClose>;
+  boundary: Readonly<{ ipcAttempted: boolean }>;
+}): Promise<void> {
+  assertStagingAcquisitionDatabase(o.firestore);
+  const episode = intent(o.episode, o.episode.ref),
+    fact = Object.freeze({ ...o.fact });
+  validateEpisodeDrain(o.proof, episode.id, 'drained');
+  if (o.boundary.ipcAttempted !== false) return fail();
+  validateUnclaimedFact(fact);
+  const rootRef = o.firestore.collection(YOUTUBE_ACQUISITIONS).doc(episode.operationId);
+  let expected: UnclaimedEpisodeClose | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const wall = Date.now(),
+    mono = performance.now();
+  const fresh = () => {
+    if (Date.now() < wall || Date.now() - wall >= 5000 || performance.now() - mono >= 5000) return fail();
+  };
+  const work = async () => {
+    try {
+      await o.firestore.runTransaction(
+        async (tx) => {
+          const root = await tx.get(rootRef),
+            execution = await readAcquisitionExecution(tx, root, episode.id);
+          const inputs = await unclaimedInputs(tx, execution, episode);
+          const closeRef = execution.ref.collection('unclaimedClose').doc('original');
+          const [closed, sealed] = await Promise.all([tx.get(closeRef), tx.get(inputs.facts.doc('sealed'))]);
+          fresh();
+          if (execution.get('unclaimedClose') !== undefined || closed.exists || sealed.exists) return fail();
+          expected = {
+            schemaVersion: 1,
+            kind: 'unclaimed',
+            episodeId: episode.id,
+            ipcAttempted: false,
+            fact,
+            reservationReceiptHash: inputs.reserved.get('proof.receiptHash'),
+            enrollmentReceiptHash: inputs.enrolled.get('proof.receiptHash'),
+          };
+          tx.create(closeRef, expected);
+          tx.create(inputs.facts.doc('sealed'), { schemaVersion: 1, episodeId: episode.id, proof: { ...o.proof } });
+          tx.update(execution.ref, { unclaimedClose: expected });
+        },
+        { maxAttempts: 1 }
+      );
+      fresh();
+    } catch {
+      fresh();
+      if (!expected) return fail();
+      await o.firestore.runTransaction(
+        async (tx) => {
+          const root = await tx.get(rootRef),
+            execution = await readAcquisitionExecution(tx, root, episode.id);
+          const closed = await assertUnclaimedClose(tx, execution, episode, o.proof);
+          fresh();
+          if (!isDeepStrictEqual(closed.data(), expected)) return fail();
+        },
+        { maxAttempts: 1 }
+      );
+      fresh();
+    }
+  };
+  try {
+    await Promise.race([
+      work(),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('YOUTUBE_UNCLAIMED_CLOSE_UNCONFIRMED')), 5000);
+      }),
+    ]);
+    fresh();
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 export async function assertPersistedYouTubeEpisodeClose(o: {
   firestore: Firestore;
   episode: AcquisitionEpisode;
@@ -533,6 +707,10 @@ export async function assertPersistedYouTubeEpisodeClose(o: {
     async (tx) => {
       const root = await tx.get(o.firestore.collection(YOUTUBE_ACQUISITIONS).doc(o.episode.operationId));
       const parent = await readAcquisitionExecution(tx, root, o.episode.id);
+      if (parent.get('unclaimedClose') !== undefined) {
+        await assertUnclaimedClose(tx, parent, o.episode, o.proof);
+        return;
+      }
       await assertOwnedYouTubeEpisode(tx, parent, o.episode.id, parent.get('owner'));
       const [sealed, closed] = await Promise.all([
         tx.get(
@@ -566,6 +744,15 @@ export async function recordReleasedYouTubeEpisode(o: {
       async (tx) => {
         const delegation = await tx.get(parent);
         const root = await readAcquisitionExecution(tx, delegation, o.episode.id);
+        if (root.get('unclaimedClose') !== undefined) {
+          const sealed = await tx.get(doc.parent.doc('sealed'));
+          immutable(sealed);
+          validateEpisodeDrain(sealed.get('proof'), o.episode.id, 'drained');
+          await assertUnclaimedClose(tx, root, o.episode, sealed.get('proof'));
+          if (sealed.get('proof.receiptHash') !== o.proof.receiptHash) return fail();
+          tx.create(doc, expected);
+          return;
+        }
         await assertOwnedYouTubeEpisode(tx, root, o.episode.id, root.get('owner'));
         const closed = await tx.get(root.ref.collection('nativeClose').doc('original'));
         const sealed = await tx.get(doc.parent.doc('sealed'));
