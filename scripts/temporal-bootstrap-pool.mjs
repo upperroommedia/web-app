@@ -242,7 +242,7 @@ async function runReviewedPoolOperation(o, mode, expectedRole) {
   if (
     role !== expectedRole ||
     !['controls','orchestration','search','email','images','media'].includes(expectedRole) ||
-    !['cycle', 'retain', 'abort', 'inspect-controls-promotion'].includes(mode) ||
+    !['cycle', 'retain', 'abort', 'inspect-promotion'].includes(mode) ||
     !uuid.test(operationId ?? '') ||
     !uuid.test(releaseId ?? '') ||
     !/^[a-f0-9]{64}$/.test(evidenceDigest ?? '') ||
@@ -286,7 +286,7 @@ async function runReviewedPoolOperation(o, mode, expectedRole) {
   const expectedKeys = [
     ...baseKeys,
     ...(mode !== 'cycle' ? ['bootstrapCycle'] : []),
-    ...(['abort','inspect-controls-promotion'].includes(mode) ? ['activation'] : []),
+    ...(['abort','inspect-promotion'].includes(mode) ? ['activation'] : []),
   ];
   if (Object.keys(r).sort().join(',') !== expectedKeys.sort().join(',')) fail();
   const originalCyclePlan = (id) => ({
@@ -376,7 +376,7 @@ async function runReviewedPoolOperation(o, mode, expectedRole) {
     receiptsSHA256: proofDigest({ ...base, bootstrapCycle: r.bootstrapCycle }),
     origin: cycle.stop.pool,
   });
-  if (['abort','inspect-controls-promotion'].includes(mode)) {
+  if (['abort','inspect-promotion'].includes(mode)) {
     const activation = completed(r.activation, releaseId);
     if(role==='media')assertMediaDiskQuotaProof(activation.start?.protection?.mediaDiskQuota);
     if (
@@ -458,10 +458,10 @@ async function runReviewedPoolOperation(o, mode, expectedRole) {
       fail();
     return { ...pool, etag: resource.etag };
   };
-  if(mode==='inspect-controls-promotion') {
+  if(mode==='inspect-promotion') {
     // Fixed read-only entrypoint rederives the original retained chain and all
     // native resource permissions. No scale/checkpoint or noncurrent assumption.
-    if(role!=='controls'||saved!==undefined)fail();
+    if(!['controls','search'].includes(role)||saved!==undefined)fail();
     const access=await verifyAccess(o,zeroPlan);
     const pool=await current(1);
     if(!isDeepStrictEqual(pool,origin))fail();
@@ -769,4 +769,6 @@ export const bootstrapStopCloudRunMediaPool=o=>execute(o,'cycle','media');
 export const activateCloudRunMediaPool=o=>execute(o,'retain','media');
 export const stopCloudRunMediaActivation=o=>execute(o,'abort','media');
 
-export const verifyControlsPromotionResources=o=>execute(o,'inspect-controls-promotion','controls');
+export const verifyControlsPromotionResources=o=>execute(o,'inspect-promotion','controls');
+
+export const verifySearchPromotionResources=o=>execute(o,'inspect-promotion','search');

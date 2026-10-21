@@ -1,5 +1,5 @@
-import {promoteCloudRunControls} from './temporal-promote-controls.mjs';
-import { observeBootstrapProtection, observeBootstrapRegistration, observeControlsPromotionBefore, observeControlsPromotionAfter } from './temporal-bootstrap-observations.mjs';
+import {promoteCloudRunControls,promoteCloudRunSearch} from './temporal-promote-controls.mjs';
+import { observeBootstrapProtection, observeBootstrapRegistration, observeControlsPromotionBefore, observeControlsPromotionAfter,observeSearchPromotionBefore,observeSearchPromotionAfter } from './temporal-bootstrap-observations.mjs';
 import { createHash } from 'node:crypto';
 import { isAbsolute, resolve } from 'node:path';
 import { realpath, open } from 'node:fs/promises';
@@ -90,14 +90,14 @@ async function withNativeCloudRunClient({ binding, config, platform, firestore }
       compilerOptions: { module: 'CommonJS', target: 'ES2022', esModuleInterop: true, moduleResolution: 'node' } });
     try {
       const workerRequire = createRequire(resolve(binding.runtimeRoot, 'apps/temporal-worker/package.json'));
-      return { ...(purpose==='controls-promotion'?{...workerRequire('@temporalio/worker'),workflowsPath:resolve(binding.runtimeRoot,'apps/temporal-worker/src/workflows/index.ts')}:{}),...workerRequire('@temporalio/client'),
+      return { ...(['controls-promotion','search-promotion'].includes(purpose)?{...workerRequire('@temporalio/worker'),workflowsPath:resolve(binding.runtimeRoot,'apps/temporal-worker/src/workflows/index.ts')}:{}),...workerRequire('@temporalio/client'),
         ...workerRequire(resolve(binding.runtimeRoot, 'apps/temporal-worker/src/runtime/serverless-release-readiness.ts')) };
     } finally { service.enabled(false); }
   });
   let connection;
   try {
     connection = await application.Connection.connect({ address: platform.cloudAddress, tls: true, apiKey: key,
-      connectTimeout: 15000,...(purpose==='controls-promotion'?{interceptors:[],channelArgs:{'grpc.enable_retries':0}}:{}) });
+      connectTimeout: 15000,...(['controls-promotion','search-promotion'].includes(purpose)?{interceptors:[],channelArgs:{'grpc.enable_retries':0}}:{}) });
     const client = new application.Client({ connection, namespace: platform.temporalNamespace });
     return await observe(client, application);
 
@@ -272,7 +272,7 @@ export async function verifyCloudRunBootstrapRegistration(options) {
 }
 
 /** Source/CI/image guards are established by the canonical release controller. */
-export async function runCloudRunControlsPromotion(options){
+async function runPromotion(options,role){
  return withNativeCloudRunClient(options,async(client,application)=>{
   const bounded=async(p,ms)=>{let timer;try{return await Promise.race([p,new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('CONTROLS_PROMOTION_NATIVE_DEADLINE')),ms);})]);}finally{clearTimeout(timer);}};
   application.Runtime.install({logger:new application.DefaultLogger('ERROR',()=>undefined)});
@@ -285,6 +285,9 @@ export async function runCloudRunControlsPromotion(options){
    replayed.add(digest);
   };
   const observe={...options,client,bundleSHA256,replayHistory};
-  return promoteCloudRunControls({...options,client,before:()=>observeControlsPromotionBefore(observe),after:()=>observeControlsPromotionAfter(observe)});
- },'controls-promotion');
+  return (role==='controls'?promoteCloudRunControls:promoteCloudRunSearch)({...options,client,before:()=>role==='controls'?observeControlsPromotionBefore(observe):observeSearchPromotionBefore(observe),after:()=>role==='controls'?observeControlsPromotionAfter(observe):observeSearchPromotionAfter(observe)});
+ },`${role}-promotion`);
 }
+
+export const runCloudRunControlsPromotion=o=>runPromotion(o,'controls');
+export const runCloudRunSearchPromotion=o=>runPromotion(o,'search');

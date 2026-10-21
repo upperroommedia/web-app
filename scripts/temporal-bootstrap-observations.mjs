@@ -26,11 +26,11 @@ function queueInventory(role,infos,complete=false){
  * any pending Activity, unversioned open run, active provider session/lock or
  * unresolved dispatch lease stops bootstrap. Never settles or edits old work.
  */
-async function observeProtection(o, transition) {
+async function observeProtection(o, transition, expectedRole) {
   const { client, firestore: db, platform, role, operationId, bindingDigest, expectedAuthority, releaseId } = o;
   if (
     !Object.hasOwn(actions,role) ||
-    (transition && (role!=='controls'||typeof o.replayHistory!=='function'||!/^[a-f0-9]{64}$/.test(o.bundleSHA256??''))) ||
+    (transition && (role!==expectedRole||!['controls','search'].includes(expectedRole)||typeof o.replayHistory!=='function'||!/^[a-f0-9]{64}$/.test(o.bundleSHA256??''))) ||
     db.projectId !== 'urm-app-staging' ||
     db.databaseId !== '(default)' ||
     client.options.namespace !== platform.temporalNamespace
@@ -73,7 +73,7 @@ async function observeProtection(o, transition) {
       p.get('operationId') !== operationId ||
       p.get('bindingDigest') !== bindingDigest ||
       p.get('releaseId') !== releaseId ||
-      !(transition ? p.get('action')==='promote-cloud-run-controls' : actions[role].includes(p.get('action'))) ||
+      !(transition ? p.get('action')===`promote-cloud-run-${expectedRole}` : actions[role].includes(p.get('action'))) ||
       c.get('releaseId') !== releaseId ||
       s.get('releaseId') !== releaseId ||
       c.get('admission') !== 'paused' ||
@@ -224,7 +224,7 @@ async function observeProtection(o, transition) {
     let queueRouting;
     if(transition){
       if(queueInventory(role,candidateQueues,true)===undefined)fail();
-      const report=await rpc(()=>service.describeTaskQueue({namespace,taskQueue:{name:'urm-controls'},taskQueueType:2,reportStats:true}));
+      const report=await rpc(()=>service.describeTaskQueue({namespace,taskQueue:{name:`urm-${role}`} ,taskQueueType:2,reportStats:true}));
       const q=report.versioningInfo,old=platform.roleBindings.find(b=>b.role==='orchestration');
       const current=q?.currentDeploymentVersion;
       if(!current?.deploymentName||!current.buildId||q.rampingDeploymentVersion||Number(q.rampingVersionPercentage??0)!==0||!Array.isArray(report.pollers))fail();
@@ -280,19 +280,24 @@ async function observeProtection(o, transition) {
 
 export const observeBootstrapProtection=o=>observeProtection(o);
 // Fixed source entrypoints: callers cannot turn bootstrap/stop into a current-role check.
-export const observeControlsPromotionBefore=o=>observeProtection(o,'before');
-export async function observeControlsPromotionAfter(o){
-  const binding=o.platform.roleBindings.find(b=>b.role==='controls'),end=Date.now()+15000;
+export const observeControlsPromotionBefore=o=>observeProtection(o,'before','controls');
+export const observeSearchPromotionBefore=o=>observeProtection(o,'before','search');
+async function observePromotionAfter(o,role){
+  if(o.role!==role)fail();
+  const binding=o.platform.roleBindings.find(b=>b.role===role),end=Date.now()+15000;
   // SetCurrent's acknowledgement may precede matching's queue routing update.
   // Wait by GET only, then perform the complete protected-work/authority scan.
   while(Date.now()<end){
-    const report=await o.client.connection.withDeadline(Math.min(end,Date.now()+5000),()=>o.client.connection.workflowService.describeTaskQueue({namespace:o.platform.temporalNamespace,taskQueue:{name:'urm-controls'},taskQueueType:2}));
+    const report=await o.client.connection.withDeadline(Math.min(end,Date.now()+5000),()=>o.client.connection.workflowService.describeTaskQueue({namespace:o.platform.temporalNamespace,taskQueue:{name:`urm-${role}`} ,taskQueueType:2}));
     const current=report.versioningInfo?.currentDeploymentVersion;
-    if(current?.deploymentName===binding.deploymentName&&current.buildId===binding.buildId)return observeProtection(o,'after');
+    if(current?.deploymentName===binding.deploymentName&&current.buildId===binding.buildId)return observeProtection(o,'after',role);
     await new Promise(resolve=>setTimeout(resolve,100));
   }
   return fail();
 }
+
+export const observeControlsPromotionAfter=o=>observePromotionAfter(o,'controls');
+export const observeSearchPromotionAfter=o=>observePromotionAfter(o,'search');
 
 export async function observeBootstrapRegistration({ client, platform, role }) {
   const b = platform.roleBindings.find((x) => x.role === role),

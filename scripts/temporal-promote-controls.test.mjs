@@ -18,7 +18,7 @@ async function fixture(){
  const proof=()=>({role:'controls',buildId:binding.buildId,namespace:f.options.platform.temporalNamespace,
   protectionSHA256:'a'.repeat(64),protectedWorkSHA256:'b'.repeat(64),computeInventorySHA256:'c'.repeat(64),
   peerRoutingSHA256:'d'.repeat(64),bundleSHA256:'e'.repeat(64),observedAt:new Date().toISOString(),
-  queueRouting:{current:target}});
+  queueRouting:{current:target??{deploymentName:'urm-worker-staging',buildId:'old-shared'},pollers:[{identity:'owned-controls',deploymentOptions:{deploymentName:binding.deploymentName,buildId:binding.buildId}}]}});
  const service={
   describeWorkerDeployment:async()=>({conflictToken:token,workerDeploymentInfo:{routingConfig:{...(target?{currentDeploymentVersion:target}:{})}}}),
   setWorkerDeploymentCurrentVersion:async request=>{

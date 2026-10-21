@@ -7,8 +7,8 @@ owned pool under the original parent. Observation failure also enters owned stop
 uncertain authority, protected work or an unknown result retains the fence.
 The source also connects a kept-running role-specific activation and a separate stop of
 that exact unused activation. None of these operations has been applied to Cloud Run.
-Controls-only guarded native promotion is connected in source. Promotion of the
-other roles remains unimplemented, and no promotion has been applied to staging.
+Controls and search guarded native promotion are connected in source. Promotion
+of the other roles remains unimplemented, and no promotion has been applied to staging.
 
 The final native role-readiness collector still requires candidate versions current,
 with no ramp, on the real role queues. The cycle cannot replace that collector.
@@ -113,6 +113,32 @@ SDK CAS, full original-run replay and dedicated Firestore intent/checkpoint path
 Cloud Run resources and permissions in that fixture remain controlled responses.
 Native routing/history records are projected into plain metadata before Firestore
 checkpointing; raw SDK message instances are not persisted.
+
+`promote-cloud-run-search` follows controls. Its twelve distinct receipt IDs are
+its own nine preparation receipts, completed bootstrap cycle, retained activation
+and the completed controls promotion. Search still accepts no Storage receipt or
+bucket policy authority. Its mounted numeric search configuration metadata and
+owned project/Auth/Firestore permissions are rechecked without vendor calls.
+
+The controls predecessor must retain its original CAS token/request, attempt and
+completion times, resource identities, replay/protection hashes and pre/post
+routing evidence. The controls producer and search consumer share the same pure
+completed-receipt validator; current routing cannot replace a missing original
+intent. Each producer plan preserves its own operation binding, joined to its
+immutable receipt. Controls and search bindings are deliberately distinct because
+their controller arguments include different roles, settings, runners and receipt
+manifests. Shared release, source/CI/image evidence and build identity must match;
+the consumer never substitutes its binding for the producer's.
+
+Search also reads controls' native current deployment, exact Activity-only queue
+inventory, actual queue routing and pollers before its attempt and on readback.
+Its own fixed search observers, checkpoint field and immutable receipt prefix
+cannot accept a controls action or another role. All original history/lease,
+paused authority, single-CAS, definite-rejection and unknown-ACK fences remain.
+The native fixture runs controls first, consumes its actual completed Firestore
+receipt under a distinct search binding, and checks both roles' authority drift
+without additional mutations. This is local SDK evidence with controlled Cloud
+resource observations, not deployed search delivery or effective credential proof.
 
 ## Connected role cycles and kept activation
 

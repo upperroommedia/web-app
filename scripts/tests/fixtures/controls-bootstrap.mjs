@@ -6,7 +6,7 @@ import { temporalCloudScalerPrincipals } from '../../temporal-release-cloud-run.
 import { runtimeRolePreparationPlan } from '../../temporal-prepare-runtime-role.mjs';
 import { proofDigest } from '../../temporal-release-runtime.mjs';
 /** Controlled Cloud/creation receipts only; never native attestation. */
-export function controlsBootstrapFixture(role='controls') {
+export function controlsBootstrapFixture(role='controls',scope={}) {
   const buildId = 'a'.repeat(40),
     image = `us-central1-docker.pkg.dev/urm-app-staging/urm-temporal/worker@sha256:${'b'.repeat(64)}`,
     workerRoles = ['orchestration', 'controls', 'search', 'email', 'images', 'media'];
@@ -48,7 +48,7 @@ export function controlsBootstrapFixture(role='controls') {
     })),
   };
   const b = platform.roleBindings.find(b=>b.role===role),
-    releaseId = randomUUID(),
+    releaseId = scope.releaseId ?? randomUUID(),
     operationId = randomUUID(),
     evidenceDigest = 'c'.repeat(64),
     settings = { apiKeyVersion: '2', ...(role==='email'?{emailEgressVersion:'2'}:{}), runtimeSecrets:role==='email'?[{name:'SMTP_CONNECTION_URI',secret:'SMTP_CONNECTION_URI',version:'2'}]: role==='search'?[{name:'TEMPORAL_SEARCH_CONFIG_JSON',secret:'TEMPORAL_SEARCH_CONFIG',version:'2'}]:role==='orchestration'?['RUNTIME_ALERT_RECIPIENTS','ADMIN_BASE_URL'].map(name=>({name,secret:name,version:'2'})):[] };
@@ -259,7 +259,7 @@ export function controlsBootstrapFixture(role='controls') {
       latestReadyRevision: original.revision,
     };
   const operations = new Map();
-  const options = {
+  const options = {bindingDigest:'d'.repeat(64),
     platform,
     role,
     settings,
