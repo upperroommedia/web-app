@@ -1,3 +1,5 @@
+import {readRestoredMediaRecoveryPlan} from './temporal-restored-media-registration.mjs';
+import {scanRestoredMediaInventory} from './temporal-restored-media-inventory.mjs';
 import {readRestoredMediaActivationPool} from './temporal-restored-media-resources.mjs';
 import {assertRestoredMediaActivationAuthority,readRestoredMediaActivationAccess} from './temporal-media-restored-origin.mjs';
 import {scanPrivateMediaInventory} from './temporal-media-private-inventory.mjs';
@@ -515,3 +517,146 @@ export const readRestoredMediaStartupWitness=o=>withNativeCloudRunClient(o,async
   return {...second,imageSHA256:recoveryHash(image.imageProof),scope:'historical-startup-only-no-polling-or-registration-authority'};
  }catch{throw new Error('RESTORED_MEDIA_STARTUP_READBACK_UNCONFIRMED');}
 });
+
+/** Fixed retained normal-media readback. The original episode and current
+ * activation remain separate throughout; no zero-origin reader runs here. */
+export const readRestoredMediaRegistration = (o) =>
+  withNativeCloudRunClient(o, async (client, application) => {
+    try {
+      const pool = await readRestoredMediaActivationPool({ ...o, count: 1 });
+      const p = await readRestoredMediaRecoveryPlan(o);
+      const image = await createMediaRecoveryImageReplayObserver({
+        image: p.image,
+        buildId: p.buildId,
+        operationId: o.recoveryOperationId,
+        bindingDigest: p.bindingDigest,
+        evidenceDigest: p.evidenceDigest,
+        historyToJSON: application.historyToJSON,
+      });
+      const args = {
+        db: o.firestore,
+        client,
+        recoveryOperationId: o.recoveryOperationId,
+        activationOperationId: o.operationId,
+        activationBindingDigest: o.bindingDigest,
+        releaseId: o.releaseId,
+        expectedRootSHA256: o.ownedOperation.dataDigest,
+        expectedControlSHA256: o.expectedAuthority.control.dataDigest,
+        expectedStateSHA256: o.expectedAuthority.state.dataDigest,
+        buildId: p.buildId,
+        imageDigest: p.image,
+        image: { bundleSHA256: image.bundleSHA256, tools: image.tools },
+      };
+      const first = await application.collectCompletedMediaRecoveryExecution(args);
+      const replay = await image.replayHistory(first.history, first.workflowId, first.runId);
+      assertMediaRecoveryImageReplayReceipt(replay, {
+        image: p.image,
+        buildId: p.buildId,
+        operationId: o.recoveryOperationId,
+        bindingDigest: p.bindingDigest,
+        evidenceDigest: p.evidenceDigest,
+        bundleSHA256: image.bundleSHA256,
+        workflowId: first.workflowId,
+        runId: first.runId,
+        historySHA256: recoveryHash(first.history),
+      });
+      const second = await application.collectCompletedMediaRecoveryExecution(args);
+      if (first.evidenceSHA256 !== second.evidenceSHA256 || first.provenanceSHA256 !== second.provenanceSHA256)
+        throw Error();
+      const at = Date.now(),
+        mono = performance.now();
+      const fresh = () => {
+        if (Date.now() < at || Date.now() - at >= 5000 || performance.now() < mono || performance.now() - mono >= 5000)
+          throw Error();
+      };
+      const read = async (fn) => {
+        let timer;
+        try {
+          fresh();
+          const value = await Promise.race([
+            Promise.resolve().then(() => {
+              fresh();
+              return fn();
+            }),
+            new Promise((_, reject) => {
+              timer = setTimeout(
+                () => reject(new Error('RESTORED_MEDIA_REGISTRATION_UNCONFIRMED')),
+                Math.max(1, 5000 - (Date.now() - at))
+              );
+            }),
+          ]);
+          fresh();
+          return value;
+        } finally {
+          clearTimeout(timer);
+        }
+      };
+      const rpc = (fn) => read(() => client.connection.withDeadline(at + 5000, fn));
+      const startupArgs = {
+        db: o.firestore,
+        auth: o.firebaseAuth,
+        operationId: o.operationId,
+        bindingDigest: o.bindingDigest,
+        plan: o.plan,
+        pool,
+        expectedRootSHA256: o.ownedOperation.dataDigest,
+        expectedControlSHA256: o.expectedAuthority.control.dataDigest,
+        expectedStateSHA256: o.expectedAuthority.state.dataDigest,
+        image: image.tools,
+      };
+      const startup = await read(() => application.collectRestoredMediaStartup(startupArgs));
+      const ready = await read(() =>
+        o.firestore.doc(`_control/temporalMediaRecoveryOriginalReady-${o.recoveryOperationId}`).get()
+      );
+      const kernel = await read(() =>
+        o.firestore.doc(`_control/temporalMediaRecoveryReplacementKernel-${o.recoveryOperationId}`).get()
+      );
+      const scan = async () => ({
+        normal: await scanRestoredMediaInventory({ client, plan: o.plan, startup, rpc }),
+        diagnostic: await scanPrivateMediaInventory({
+          client,
+          db: o.firestore,
+          plan: p,
+          operationId: o.recoveryOperationId,
+          read,
+          rpc,
+          auth: { ready: ready.data(), worker: kernel.get('worker') },
+        }),
+        compute: await read(() => observeNamespaceComputeIsolation(client, 'urm-app-staging.qwejt')),
+      });
+      const before = await scan(),
+        after = await scan();
+      if (
+        recoveryHash(before) !== recoveryHash(after) ||
+        !after.normal.ownedPollers.some((row) => row.type === 2 && row.key === 'urm-media')
+      )
+        throw Error();
+      const finalPool = await read(() => readRestoredMediaActivationPool({ ...o, count: 1 }));
+      if (recoveryHash(pool) !== recoveryHash(finalPool)) throw Error();
+      const finalStartup = await read(() =>
+        application.collectRestoredMediaStartup({ ...startupArgs, pool: finalPool })
+      );
+      if (startup.proofSHA256 !== finalStartup.proofSHA256 || startup.identity !== finalStartup.identity) throw Error();
+      const proven = await read(() => application.confirmCompletedMediaRecoveryProvenance(args));
+      if (proven.provenanceSHA256 !== first.provenanceSHA256) throw Error();
+      await read(() => assertRestoredMediaActivationAuthority(o));
+      fresh();
+      return {
+        kind: 'restored-media-normal-registration-v1',
+        operationId: o.operationId,
+        planSHA256: recoveryHash(o.plan),
+        pool: finalPool,
+        proofSHA256: recoveryHash({
+          episode: first.evidenceSHA256,
+          provenance: first.provenanceSHA256,
+          replay,
+          image: image.imageProof,
+          startup: startup.proofSHA256,
+          inventory: after,
+        }),
+        observedAt: new Date(at).toISOString(),
+      };
+    } catch {
+      throw new Error('RESTORED_MEDIA_REGISTRATION_UNCONFIRMED');
+    }
+  });

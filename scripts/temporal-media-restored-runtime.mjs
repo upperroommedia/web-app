@@ -2,12 +2,16 @@ import {
   readRestoredMediaActivationPool,
   readRestoredMediaActivationQuota,
 } from './temporal-restored-media-resources.mjs';
-import { readRestoredMediaActivationOrigin, readRestoredMediaStartupWitness } from './temporal-release-cloud-run.mjs';
+import {
+  readRestoredMediaActivationOrigin,
+  readRestoredMediaStartupWitness,
+  readRestoredMediaRegistration,
+} from './temporal-release-cloud-run.mjs';
 const unavailable = async () => {
   throw new Error('RESTORED_MEDIA_NORMAL_RUNTIME_UNAVAILABLE');
 };
-/** Read-only origin/pool/quota adapters are connected. Separate source-owned
- * namespace/phase, startup registration and unused-work collectors still deny.
+/** Read-only origin/pool/quota/startup and retained registration are connected.
+ * Phase/unused-work collectors and canonical execution preflight still deny.
  * No descriptor or receipt enables the canonical preflight. */
 export function restoredMediaActivationRuntime(o) {
   return Object.freeze({
@@ -21,7 +25,7 @@ export function restoredMediaActivationRuntime(o) {
     readStartup: (scope) => readRestoredMediaStartupWitness({ ...o.options(), ...scope }),
     phase: unavailable,
     quota: (scope) => readRestoredMediaActivationQuota({ ...o.options(), ...scope }),
-    registration: unavailable,
+    registration: (scope) => readRestoredMediaRegistration({ ...o.options(), ...scope }),
     unused: unavailable,
   });
 }
