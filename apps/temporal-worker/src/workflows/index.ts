@@ -13,3 +13,5 @@ export { WorkerRestartProbe } from './verification';
 export { WorkerRuntimeProbe } from './verification/runtime';
 
 export { DispatchWakeProbe } from './verification/dispatch';
+
+export { MediaRecoveryProbe } from './verification/media-recovery';

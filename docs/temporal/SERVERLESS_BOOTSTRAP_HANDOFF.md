@@ -714,3 +714,31 @@ resend; only exact completed native state can reconcile. Cleanup retains the
 original journal and expiry, without renewing work permission. The runtime
 preflight remains unconditionally unavailable, so the CLI cannot reach this
 arming stage until the complete private execution protocol is implemented.
+
+The fixed `MediaRecoveryProbe` Workflow and private work admission Activity are
+implemented in source. Admission joins the exact saved SDK start nonce and time
+to native event 1, the original Run ID, pinned diagnostic deployment, paused
+journal and current Firebase admin. It uploads only source-fixed synthetic PCM,
+then transactionally uses the production durable-job builder while withholding
+its ordinary outbox write. The resulting private acquire-only grant binds the
+original run, source generation and request. Existing object names or canonical
+owners cannot be adopted. Unknown upload acknowledgement permits owned readback
+only; native failures cross a fixed sanitized Activity boundary.
+
+The dedicated local integration case runs this Workflow and the actual media
+Activity factory with real emulator-backed authorization. It covers admission
+acknowledgement loss without another upload/job, revoked actors, preexisting
+native runs, object/owner collisions and private-error sanitization. Cloud pool,
+revision and startup witnesses remain controlled. A local SDK/emulator collision
+case accepted an upload despite its generation-zero option; the source now also
+requires observed absence before the first upload intent. That read is not an
+atomic race fence, and actual backend conditional-write acceptance remains a
+required native platform check.
+
+This source is not reachable through the canonical diagnostic CLI: preflight
+continues to deny execution. The canonical SDK-start writer, diagnostic image
+queue registration, supervisor fault/death/replacement/adoption collector and
+restored-normal lineage consumer remain pending. Ordinary media remains
+Activity-only, media promotion remains denied, and orchestration promotion
+remains unavailable. No Cloud Run or immutable-image execution is established by
+the local producer case.
