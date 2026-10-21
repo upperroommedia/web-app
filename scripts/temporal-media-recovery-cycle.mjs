@@ -39,6 +39,11 @@ function diagnosticTemplate(normal, operationId) {
     if (rows.length !== 1 || typeof rows[0].value !== 'string') fail();
     rows[0].value = value;
   }
+  if (env.some((v) => v.name === 'TEMPORAL_WORKFLOW_BUNDLE')) fail();
+  env.push({
+    name: 'TEMPORAL_WORKFLOW_BUNDLE',
+    value: '/workspace/apps/temporal-worker/lib/media-recovery-workflow-bundle.js',
+  });
   if (env.some((v) => v.name === 'TEMPORAL_MEDIA_RECOVERY_OPERATION')) fail();
   env.push({ name: 'TEMPORAL_MEDIA_RECOVERY_OPERATION', value: operationId });
   return t;

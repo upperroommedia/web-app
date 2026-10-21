@@ -1,0 +1,64 @@
+let mockRegistered = true;
+const mockClose = jest.fn(async () => {}),
+  mockDelete = jest.fn(async () => {
+    mockRegistered = false;
+  }),
+  mockCap = jest.fn(async () => ({ context: { operationId: 'owned' } })),
+  mockSupervise = jest.fn(async (..._args: unknown[]) => ({ code: 0 })),
+  mockNormal = jest.fn();
+jest.mock('./runtime/media-recovery-config', () => ({
+  isMediaRecoveryConfiguration: () => true,
+  loadMediaRecoveryRuntimeConfig: () => ({
+    projectId: 'urm-app-staging',
+    buildId: 'a'.repeat(40),
+    operationId: 'owned',
+  }),
+}));
+jest.mock('@upperroom/shared/firebase/firebaseAdmin', () => ({}));
+jest.mock('@upperroom/shared/firebase/firebaseAdminOwnership', () => ({
+  getSharedFirebaseAppOwnership: () => ({
+    app: { name: '[DEFAULT]', options: { projectId: 'urm-app-staging' } },
+    isRegistered: () => mockRegistered,
+    terminateFirestore: mockClose,
+    deleteApp: mockDelete,
+  }),
+}));
+jest.mock('firebase-admin/firestore', () => ({ getFirestore: () => ({}) }));
+jest.mock('firebase-admin/auth', () => ({ getAuth: () => ({}) }));
+jest.mock('./runtime/worker-witness', () => ({ loadWorkerWitness: async () => ({ buildId: 'a'.repeat(40) }) }));
+jest.mock('./runtime/media-recovery-capability', () => ({ mediaRecoveryKernelContext: () => mockCap() }));
+jest.mock('./runtime/media-kernel-supervisor', () => ({
+  superviseMediaRecoveryKernel: (...args: any[]) => mockSupervise(...args),
+}));
+jest.mock('./index', () => ({ startWorkerProcess: mockNormal }));
+import { launchApplicationWorker } from './launcher';
+beforeEach(() => {
+  jest.clearAllMocks();
+  mockRegistered = true;
+});
+afterEach(() => {
+  process.exitCode = undefined;
+});
+test('image private branch supervises actual index.js and retains independent resource cleanup', async () => {
+  await launchApplicationWorker();
+  expect(mockSupervise).toHaveBeenCalledTimes(1);
+  expect(mockSupervise.mock.calls[0][2]).toMatch(/index.js$/);
+  expect(mockCap).toHaveBeenCalledTimes(1);
+  expect(mockNormal).not.toHaveBeenCalled();
+  expect(mockClose).toHaveBeenCalledTimes(1);
+  expect(mockDelete).toHaveBeenCalledTimes(1);
+});
+test('denied private capability has no normal fallback or child', async () => {
+  mockCap.mockRejectedValueOnce(new Error('CONTROLLED_PRIVATE_CAPABILITY_DENIED'));
+  await expect(launchApplicationWorker()).rejects.toThrow('CONTROLLED_PRIVATE_CAPABILITY_DENIED');
+  expect(mockSupervise).not.toHaveBeenCalled();
+  expect(mockNormal).not.toHaveBeenCalled();
+  expect(mockDelete).toHaveBeenCalledTimes(1);
+});
+test('private parent cleanup independently attempts app deletion after Firestore cleanup rejects', async () => {
+  mockClose.mockRejectedValueOnce(new Error('CONTROLLED_CLEANUP_FAILURE'));
+  await launchApplicationWorker();
+  expect(mockDelete).toHaveBeenCalledTimes(1);
+  expect(process.exitCode).toBe(1);
+  expect(mockNormal).not.toHaveBeenCalled();
+});

@@ -11,3 +11,9 @@ const destination = resolve(root, 'apps/temporal-worker/lib/workflow-bundle.js')
 await mkdir(resolve(root, 'apps/temporal-worker/lib'), { recursive: true });
 await writeFile(destination, bundle.code);
 console.log('Temporal workflow bundle built.');
+
+// Separate fixed private surface: it exports exactly one diagnostic Workflow.
+const diagnostic = await bundleWorkflowCode({
+  workflowsPath: resolve(root, 'apps/temporal-worker/src/workflows/verification/media-recovery.ts'),
+});
+await writeFile(resolve(root, 'apps/temporal-worker/lib/media-recovery-workflow-bundle.js'), diagnostic.code);

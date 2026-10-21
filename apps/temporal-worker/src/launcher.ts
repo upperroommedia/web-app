@@ -1,6 +1,8 @@
 /** Fixed image entrypoint. Supervision is capability-bound to a canonical media
  * start; ordinary workers keep their original in-process entrypoint. */
 export async function launchApplicationWorker() {
+  const { isMediaRecoveryConfiguration } = await import('./runtime/media-recovery-config');
+  if (isMediaRecoveryConfiguration()) return launchMediaRecoveryApplication();
   if (
     process.env.FIREBASE_PROJECT_ID === 'urm-app-staging' &&
     process.env.TEMPORAL_WORKER_HOSTING === 'cloud-run' &&
@@ -47,3 +49,42 @@ if (require.main === module)
     process.exitCode = 1;
     console.error('Application worker launch failed.');
   });
+
+/** Explicit private branch; no expired/missing capability falls back to normal. */
+async function launchMediaRecoveryApplication() {
+  const { loadMediaRecoveryRuntimeConfig } = await import('./runtime/media-recovery-config');
+  const config = loadMediaRecoveryRuntimeConfig();
+  await import('@upperroom/shared/firebase/firebaseAdmin');
+  const { getSharedFirebaseAppOwnership } = await import('@upperroom/shared/firebase/firebaseAdminOwnership');
+  const ownership = getSharedFirebaseAppOwnership();
+  if (!ownership || ownership.app.options.projectId !== config.projectId || !ownership.isRegistered())
+    throw new Error('MEDIA_RECOVERY_FIREBASE_OWNER_REQUIRED');
+  try {
+    const { getFirestore } = await import('firebase-admin/firestore'),
+      { getAuth } = await import('firebase-admin/auth');
+    const { loadWorkerWitness } = await import('./runtime/worker-witness');
+    const { mediaRecoveryKernelContext } = await import('./runtime/media-recovery-capability');
+    const { superviseMediaRecoveryKernel } = await import('./runtime/media-kernel-supervisor');
+    const parent = await loadWorkerWitness(config.buildId, true);
+    const cap = await mediaRecoveryKernelContext(
+      getFirestore(ownership.app),
+      getAuth(ownership.app),
+      parent,
+      config.operationId
+    );
+    const result = await superviseMediaRecoveryKernel(
+      getFirestore(ownership.app),
+      cap,
+      require('node:path').resolve(__dirname, 'index.js')
+    );
+    if (result.code !== 0) process.exitCode = 1;
+  } finally {
+    if (ownership.isRegistered()) {
+      const results = await Promise.allSettled([
+        Promise.resolve().then(() => ownership.terminateFirestore()),
+        Promise.resolve().then(() => ownership.deleteApp()),
+      ]);
+      if (results.some((r) => r.status === 'rejected')) process.exitCode = 1;
+    }
+  }
+}

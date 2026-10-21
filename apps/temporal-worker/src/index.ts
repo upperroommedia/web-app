@@ -16,6 +16,11 @@ import { WorkerLifecycle, WorkerLifecycleFailure } from './runtime/worker-lifecy
 import { verifyProviderSandboxReadiness, type ProviderSandboxReadiness } from './runtime/provider-sandbox-readiness';
 
 export async function runWorkerProcess(bindShutdown?: (shutdown: () => Promise<void>) => void): Promise<void> {
+  const { isMediaRecoveryConfiguration } = await import('./runtime/media-recovery-config');
+  if (isMediaRecoveryConfiguration()) {
+    const { runMediaRecoveryApplication } = await import('./media-recovery-entrypoint');
+    return runMediaRecoveryApplication(bindShutdown);
+  }
   const config = loadRuntimeConfig();
   // One Runtime installation retains telemetry and disables SDK signal ownership
   // before any native connection/worker can initialize Runtime implicitly.

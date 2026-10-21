@@ -531,3 +531,7 @@ export async function collectMediaStartupCapacity(options: Parameters<typeof col
     failure();
   }
 }
+
+/** Shared strict evidence reader only; normal intent/receipt collectors stay separate. */
+export const validateMediaStartupCapacityEvidence = (raw: unknown, attemptedAt: string) =>
+  validateCapacity(raw, attemptedAt);

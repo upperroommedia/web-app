@@ -58,10 +58,10 @@ export async function readStableBundleBytes(path: string, maxBytes: number, root
   }
 }
 
-export async function loadConsumedWorkflowBundle(path: string, buildId: string) {
+async function loadConsumedBundle(path: string, buildId: string, fixedPath: string) {
   const deadline = Date.now() + 8000;
   try {
-    if (path !== IMAGE_WORKFLOW_BUNDLE || !/^[a-f0-9]{40}$/.test(buildId)) fail();
+    if (path !== fixedPath || !/^[a-f0-9]{40}$/.test(buildId)) fail();
     const baked = (await readStableBundleBytes('/etc/temporal-worker-build-id', 128, true)).toString('utf8').trim();
     if (baked !== buildId || Date.now() >= deadline) fail();
     const bytes = await readStableBundleBytes(path, 64 * 1024 * 1024);
@@ -86,3 +86,9 @@ export function consumeWorkflowBundleBytes(bytes: Buffer, buildId: string) {
     return fail();
   }
 }
+
+export const IMAGE_MEDIA_RECOVERY_BUNDLE = '/workspace/apps/temporal-worker/lib/media-recovery-workflow-bundle.js';
+export const loadConsumedWorkflowBundle = (path: string, buildId: string) =>
+  loadConsumedBundle(path, buildId, IMAGE_WORKFLOW_BUNDLE);
+export const loadConsumedMediaRecoveryBundle = (path: string, buildId: string) =>
+  loadConsumedBundle(path, buildId, IMAGE_MEDIA_RECOVERY_BUNDLE);

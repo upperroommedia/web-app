@@ -25,6 +25,7 @@ require(fileURLToPath(
 ));
 process.env.FIREBASE_PROJECT_ID = 'urm-app-staging';
 process.env.GCLOUD_PROJECT = 'urm-app-staging';
+process.env.FIREBASE_STORAGE_BUCKET = 'urm-app-staging.firebasestorage.app';
 const { initializeApp, deleteApp } = require('firebase-admin/app'),
   { getAuth } = require('firebase-admin/auth'),
   { getFirestore } = require('firebase-admin/firestore'),
@@ -41,6 +42,12 @@ const {
   mediaRecoveryNativeStart,
   mediaRecoveryPinnedVersion,
 } = require(fileURLToPath(new URL('../../apps/temporal-worker/src/runtime/media-recovery-work.ts', import.meta.url)));
+const { mediaRecoveryKernelContext } = require(fileURLToPath(
+  new URL('../../apps/temporal-worker/src/runtime/media-recovery-capability.ts', import.meta.url)
+));
+const { createMediaRecoveryRegistration } = require(fileURLToPath(
+  new URL('../../apps/temporal-worker/src/runtime/media-recovery-registration.ts', import.meta.url)
+));
 const harness = require('./firebase.test.json');
 for (const [key, port] of [
   ['FIREBASE_AUTH_EMULATOR_HOST', harness.emulators.auth.port],
@@ -74,11 +81,12 @@ test(
     let ownsControls = false;
     let admissionCalls = 0,
       acquireCalls = 0,
+      productionCalls = 0,
       lostAck = false;
     try {
       app = initializeApp({
         projectId,
-        storageBucket: `${projectId}.appspot.com`,
+        storageBucket: `${projectId}.firebasestorage.app`,
         databaseURL: `https://${projectId}-default-rtdb.firebaseio.com`,
       });
       db = getFirestore(app);
@@ -128,6 +136,8 @@ test(
         'start-state-drift',
         'start-definite-rejection',
         'start-unknown-unaccepted',
+        'private-grant-drift',
+        'private-birth-drift',
         'actor-revoked-after-upload',
         'preexisting-native-run',
         'source-collision',
@@ -203,6 +213,8 @@ test(
         );
         cycle.prepared = prepared.prepared;
         cycle.start.pool.revision = `${plan.name}/revisions/${plan.name.split('/').at(-1)}-00001`;
+        cycle.start.plan.before.revision = cycle.start.pool.revision;
+        cycle.diagnostic.pool.revision = cycle.start.pool.revision;
         const input = { operationId: op, startNonce: nonce };
         await bounded(
           lockRef.update({
@@ -306,9 +318,47 @@ test(
           mode,
           id,
         };
+        if (
+          [
+            'normal',
+            'admission-ack-loss',
+            'start-ack-loss',
+            'start-receipt-ack-loss',
+            'start-confirmed-ack-loss',
+            'private-grant-drift',
+            'private-birth-drift',
+          ].includes(mode)
+        ) {
+          const cap = await bounded(mediaRecoveryKernelContext(db, auth, witness, op));
+          const context = { ...cap.context, parent: { ...witness, instanceId: randomUUID() } },
+            intent = { parentPid: process.ppid, launchId: randomUUID(), createdAt: new Date().toISOString() },
+            birth = { pid: process.pid, nonce: randomUUID(), spawnedAt: new Date().toISOString() };
+          const value = { schemaVersion: 1, stage: 'running', context, intent, birth, worker: witness };
+          await bounded(db.doc(`_control/temporalMediaRecoveryKernel-${op}`).create(value));
+          const kernel = { operationId: op, birthDigest: hash({ context, intent, birth, worker: witness }) };
+          const registered = await bounded(
+            createMediaRecoveryRegistration({
+              firestore: db,
+              auth,
+              bucket: selected,
+              client,
+              witness,
+              operationId: op,
+              kernel,
+              acquire: async (ref) => {
+                productionCalls++;
+                return media.acquireMedia(ref);
+              },
+            })
+          );
+          assert.deepEqual(Object.keys(registered.activities).sort(), ['acquireMedia', 'admitMediaRecoveryWork']);
+          current.producer = registered.activities;
+          current.media = registered.activities;
+        }
         lostAck = false;
         admissionCalls = 0;
         acquireCalls = 0;
+        productionCalls = 0;
         if (!worker) {
           version = { deploymentName: 'urm-worker-media-recovery-staging', buildId: plan.buildId };
           worker = await rpc(() =>
@@ -333,6 +383,17 @@ test(
                 acquireMedia: async (ref) => {
                   acquireCalls++;
                   assert.equal(ref.jobId, current.id);
+                  const op = current.id.slice('media-recovery-'.length);
+                  if (current.mode === 'private-grant-drift')
+                    await bounded(
+                      db
+                        .doc(`_control/temporalMediaRecoveryWork-${op}`)
+                        .update({ 'grant.source.generation': '9999999999' })
+                    );
+                  if (current.mode === 'private-birth-drift')
+                    await bounded(
+                      db.doc(`_control/temporalMediaRecoveryKernel-${op}`).update({ 'worker.instanceId': randomUUID() })
+                    );
                   return current.media.acquireMedia(ref);
                 },
               },
@@ -568,6 +629,13 @@ test(
             await bounded(bucket.getFiles({ prefix: `temporal-diagnostics/media/${op}/source.wav`, versions: true }))
           )[0];
           assert.equal(versions.length, 1);
+        } else if (mode.startsWith('private-')) {
+          await assert.rejects(bounded(handle.result(), 30000));
+          assert.equal(acquireCalls, 1);
+          assert.equal(productionCalls, 0);
+          assert.equal((await bounded(db.doc(`durableJobs/${id}`).get())).exists, true);
+          assert.equal((await bounded(db.doc(`temporalMediaRequests/${id}`).get())).get('artifacts'), undefined);
+          assert.equal((await bounded(db.doc(`durableJobOutbox/${id}`).get())).exists, false);
         } else {
           await assert.rejects(bounded(handle.result(), 30000));
           if (mode.endsWith('private-error')) {
@@ -655,6 +723,8 @@ test(
             `temporalMediaRecoveryWork-${op}`,
             `temporalMediaRecoveryJournal-${op}`,
             `temporalMediaRecoveryStart-${op}`,
+            `temporalMediaRecoveryKernel-${op}`,
+            `temporalMediaRecoveryStartup-${op}`,
           ])
             await cleanup(() => db.doc(`_control/${name}`).delete());
           const { durableEntityKey, DURABLE_COLLECTIONS } = require('@upperroom/orchestration/job-store');

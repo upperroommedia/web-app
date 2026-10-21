@@ -123,14 +123,15 @@ async function writeOnce(
     if (!current.exists || digest(current.data()) !== digest(next)) fail();
   }
 }
-export async function readMediaKernelBirth(
+async function readKernelBirth(
   db: Firestore,
   operationId: string,
   intentSHA256: string,
   link: unknown,
-  witness: WorkerWitness
+  witness: WorkerWitness,
+  journalPath: string
 ) {
-  const value = (await db.doc(path(operationId)).get()).data() ?? fail();
+  const value = (await db.doc(journalPath).get()).data() ?? fail();
   const x = link as { operationId?: string; birthDigest?: string };
   if (
     !x ||
@@ -181,12 +182,13 @@ async function absent(child: ChildProcess) {
 }
 /** One original ChildProcess, no replacement/restart capability. Native close
  * plus group absence is required for a closed fact; never signal a saved PID. */
-export async function superviseMediaKernel(
+async function superviseKernel(
   db: Firestore,
   cap: NonNullable<Awaited<ReturnType<typeof mediaKernelContext>>>,
-  entrypoint: string
+  entrypoint: string,
+  journalPath: string
 ) {
-  const ref = db.doc(path(cap.context.operationId));
+  const ref = db.doc(journalPath);
   const grant = async () => {
     await db.runTransaction(cap.authorize, { readOnly: true });
     cap.checkFresh();
@@ -359,3 +361,42 @@ export async function reportMediaKernelWitness(witness: WorkerWitness) {
   gate.link = { operationId: m.operationId, birthDigest: m.birthDigest };
   return gate.link;
 }
+
+export const readMediaKernelBirth = (
+  db: Firestore,
+  operationId: string,
+  intentSHA256: string,
+  link: unknown,
+  witness: WorkerWitness
+) => readKernelBirth(db, operationId, intentSHA256, link, witness, path(operationId));
+export const readMediaRecoveryKernelBirth = (
+  db: Firestore,
+  operationId: string,
+  intentSHA256: string,
+  link: unknown,
+  witness: WorkerWitness
+) =>
+  readKernelBirth(
+    db,
+    operationId,
+    intentSHA256,
+    link,
+    witness,
+    path(operationId).replace('temporalMediaKernel-', 'temporalMediaRecoveryKernel-')
+  );
+export const superviseMediaKernel = (
+  db: Firestore,
+  cap: NonNullable<Awaited<ReturnType<typeof mediaKernelContext>>>,
+  entrypoint: string
+) => superviseKernel(db, cap, entrypoint, path(cap.context.operationId));
+export const superviseMediaRecoveryKernel = (
+  db: Firestore,
+  cap: NonNullable<Awaited<ReturnType<typeof mediaKernelContext>>>,
+  entrypoint: string
+) =>
+  superviseKernel(
+    db,
+    cap,
+    entrypoint,
+    path(cap.context.operationId).replace('temporalMediaKernel-', 'temporalMediaRecoveryKernel-')
+  );

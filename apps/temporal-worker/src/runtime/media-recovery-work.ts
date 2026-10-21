@@ -136,7 +136,7 @@ export function createMediaRecoveryWorkActivities(o: {
           !('projectId' in db) ||
           db.projectId !== projectId ||
           db.databaseId !== '(default)' ||
-          bucket.name !== `${projectId}.appspot.com` ||
+          bucket.name !== 'urm-app-staging.firebasestorage.app' ||
           bucket.storage.retryOptions.autoRetry !== false
         )
           fail();

@@ -15,17 +15,18 @@ jest.mock('@temporalio/activity', () => ({
 import { createMediaRecoveryWorkActivities } from './media-recovery-work';
 test('native Describe private errors never enter Activity failures or causes', async () => {
   const sentinel = 'PRIVATE-OPERATOR@example.test request-token-NEVER-EXPORT';
+  const nativeDescribe = jest.fn(async () => {
+    throw new Error(sentinel);
+  });
   const activities = createMediaRecoveryWorkActivities({
     firestore: { projectId: 'urm-app-staging', databaseId: '(default)' } as never,
     auth: {} as never,
-    bucket: { name: 'urm-app-staging.appspot.com', storage: { retryOptions: { autoRetry: false } } } as never,
+    bucket: { name: 'urm-app-staging.firebasestorage.app', storage: { retryOptions: { autoRetry: false } } } as never,
     client: {
       connection: { withDeadline: async (_: unknown, run: () => Promise<unknown>) => run() },
       workflow: {
         getHandle: () => ({
-          describe: async () => {
-            throw new Error(sentinel);
-          },
+          describe: nativeDescribe,
         }),
       },
     } as never,
@@ -40,6 +41,7 @@ test('native Describe private errors never enter Activity failures or causes', a
   } catch (e) {
     failure = e;
   }
+  expect(nativeDescribe).toHaveBeenCalledTimes(1);
   expect(failure).toMatchObject({ type: 'MEDIA_RECOVERY_WORK_UNCONFIRMED', nonRetryable: true });
   expect(String(failure)).not.toContain(sentinel);
   expect((failure as Error).cause).toBeUndefined();

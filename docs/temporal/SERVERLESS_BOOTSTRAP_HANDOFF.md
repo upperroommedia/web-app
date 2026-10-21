@@ -766,3 +766,37 @@ confirmation receipt. START confirmation is separate from recovery acceptance:
 the execution adapter continues to deny recovery success, and canonical preflight
 remains fixed-deny until image queue registration, supervisor replacement and
 native adoption/drain collectors are complete.
+
+The image now has a separate private configuration and an explicit launcher /
+`index.js` branch for the diagnostic queue. Normal configuration still rejects
+that queue. The private branch validates staging Cloud credentials through a
+source-fixed copy of the normal credential validator, without mutating the
+process environment or adding a normal-mode flag. It requires the original
+paused journal and enabled actor, and binds the immutable attempted diagnostic
+start and native revision identity. Startup may precede scale completion; work
+admission still requires the separately completed start and causal SDK intent.
+
+A dedicated baked `media-recovery-workflow-bundle.js` exports only the fixed
+Workflow. The worker reads and hashes that file once and passes the same held
+code to the SDK. It registers only private admission and a grant-fenced call into
+the actual production `acquireMedia` path. The fixed staging bucket is
+`urm-app-staging.firebasestorage.app`; there is no legacy bucket fallback. The
+wrapper joins run, reference, source generation, actor, intent, current native
+pin, image/revision and the exact live child birth before acquisition. The
+normal dispatcher and ordinary readiness Activities are absent.
+
+Normal and diagnostic one-child supervisors share the original IPC/close
+implementation through separate fixed journal wrappers. Their receipt paths
+and intent domains differ. Diagnostic startup requires its live birth, the same
+64 GiB allocation/audio canary and strict evidence validation before polling.
+Its separate startup record grants no recovery proof. Parent/child ownership
+and failed-start cleanup remain explicit; private denial never falls back to
+normal startup.
+
+This is a source implementation, with local native registration / production
+Activity tests under controlled Cloud and birth metadata, plus real OS child
+IPC/close regressions. It is not final-image or Cloud Run execution. Forced
+signal/death/replacement, replacement-child authorization, original artifact
+adoption collection, authoritative drain and restored-normal-origin consumption
+remain pending. Canonical preflight, media promotion and orchestration gates
+remain closed.
