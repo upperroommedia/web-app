@@ -1,3 +1,4 @@
+import { readMediaKernelBirth, MEDIA_KERNEL_KIND } from './media-kernel-supervisor';
 import {
   allocateMediaCapacity,
   MEDIA_ALLOCATION_BYTES,
@@ -79,8 +80,9 @@ export function mediaStartupIntent(raw: unknown) {
     start.request.url !== `https://run.googleapis.com/v2/${plan.name}?updateMask=scaling` ||
     plan.name !==
       `projects/urm-app-staging/locations/us-central1/workerPools/urm-worker-media-${plan.buildId.slice(0, 20)}` ||
-    Object.keys(p).sort().join(',') !== 'budgets,canary,image,runner' ||
+    Object.keys(p).sort().join(',') !== 'budgets,canary,image,kernel,runner' ||
     p.canary !== MEDIA_STARTUP_CANARY_KIND ||
+    p.kernel !== MEDIA_KERNEL_KIND ||
     workerReadinessDigest(p.budgets) !== workerReadinessDigest(mediaStartupBudget) ||
     !/^us-central1-docker\.pkg\.dev\/urm-app-staging\/urm-temporal\/worker@sha256:[a-f0-9]{64}$/.test(p.image ?? '') ||
     p.runner !== `tw-m-${plan.buildId.slice(0, 20)}@urm-app-staging.iam.gserviceaccount.com`
@@ -231,6 +233,7 @@ async function recordStartup(options: {
   witness: WorkerWitness;
   isDraining?: () => boolean;
   canary?: typeof runMediaFilesystemCanary;
+  kernel?: { operationId: string; birthDigest: string };
 }) {
   const { firestore: db, witness, buildId } = options;
   if (!('projectId' in db) || db.projectId !== 'urm-app-staging' || db.databaseId !== '(default)') failure();
@@ -244,7 +247,10 @@ async function recordStartup(options: {
     },
     { readOnly: true }
   );
-  if (!['bootstrap-stop-cloud-run-media', 'activate-cloud-run-media-pool'].includes(original.o.get('action'))) return;
+  if (!['bootstrap-stop-cloud-run-media', 'activate-cloud-run-media-pool'].includes(original.o.get('action'))) {
+    if (options.kernel) failure();
+    return;
+  }
   const owned = mediaStartupIntent(original.o.data());
   paused(original.o.data(), original.c.data(), original.s.data());
   const cloud = witness.cloudRun;
@@ -263,6 +269,8 @@ async function recordStartup(options: {
     !uuid(witness.instanceId)
   )
     failure();
+  const kernel = await readMediaKernelBirth(db, owned.intent.operationId, owned.intentSHA256, options.kernel, witness);
+  if (kernel.value.birth.pid !== process.pid) failure();
   const verify = async (tx: any) => {
     const [o, c, s] = await Promise.all([tx.get(op), tx.get(control), tx.get(state)]);
     paused(o.data(), c.data(), s.data());
@@ -279,7 +287,8 @@ async function recordStartup(options: {
   );
   validateCapacity(capacity, owned.start.attemptedAt);
   const evidence = {
-    schemaVersion: 1,
+    schemaVersion: 2,
+    kernel: options.kernel,
     intentSHA256: owned.intentSHA256,
     operationId: owned.intent.operationId,
     worker: witness,
@@ -443,8 +452,9 @@ async function collectStartup(options: {
   if (
     !hash(digest) ||
     workerReadinessDigest(value) !== digest ||
-    Object.keys(value).sort().join(',') !== 'capacity,intentSHA256,observedAt,operationId,schemaVersion,worker' ||
-    value.schemaVersion !== 1 ||
+    Object.keys(value).sort().join(',') !==
+      'capacity,intentSHA256,kernel,observedAt,operationId,schemaVersion,worker' ||
+    value.schemaVersion !== 2 ||
     value.operationId !== operationId ||
     value.intentSHA256 !== owned.intentSHA256 ||
     owned.plan.buildId !== binding.buildId ||
@@ -452,6 +462,7 @@ async function collectStartup(options: {
     owned.plan.mediaStartup.runner !== binding.runnerServiceAccount
   )
     failure();
+  await readMediaKernelBirth(db, operationId, owned.intentSHA256, value.kernel, value.worker);
   const capacity = validateCapacity(value.capacity, owned.start.attemptedAt),
     worker = object(value.worker),
     cloud = object(worker.cloudRun);

@@ -1,3 +1,4 @@
+import { awaitMediaKernelLaunch, reportMediaKernelWitness } from './runtime/media-kernel-supervisor';
 import { recordMediaStartupCapacity } from './runtime/media-startup-capacity';
 import { loadConsumedWorkflowBundle } from './runtime/consumed-workflow-bundle';
 import { queuePollsWorkflows } from './runtime/queue-polling';
@@ -126,6 +127,7 @@ export async function runWorkerProcess(bindShutdown?: (shutdown: () => Promise<v
       config.buildId,
       process.env.NODE_ENV === 'production' && config.queues.includes('urm-orchestration')
     );
+    const mediaKernel = await reportMediaKernelWitness(witness);
     if (lifecycle.draining) return;
     // Capture creator identity, not an app-list snapshot: static imports may
     // already have initialized our shared app. Never claim a pre-existing app.
@@ -151,6 +153,7 @@ export async function runWorkerProcess(bindShutdown?: (shutdown: () => Promise<v
         firestore: db,
         buildId: config.buildId,
         witness,
+        kernel: mediaKernel,
         isDraining: () => lifecycle.draining,
       });
       if (lifecycle.draining) return;
@@ -346,4 +349,10 @@ export async function startWorkerProcess(): Promise<void> {
   }
   // Let Node exit naturally after all owned SDK handles and telemetry settle.
 }
-if (require.main === module) void startWorkerProcess();
+if (require.main === module)
+  void awaitMediaKernelLaunch()
+    .then(startWorkerProcess)
+    .catch(() => {
+      process.exitCode = 1;
+      console.error('Worker launch authorization failed.');
+    });

@@ -73,4 +73,4 @@ COPY --from=build --chown=node:node /workspace/apps/temporal-worker ./apps/tempo
 USER node
 EXPOSE 8080
 ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["node", "apps/temporal-worker/lib/apps/temporal-worker/src/index.js"]
+CMD ["node", "apps/temporal-worker/lib/apps/temporal-worker/src/launcher.js"]

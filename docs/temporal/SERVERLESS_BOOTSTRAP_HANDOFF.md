@@ -601,3 +601,41 @@ lasting capacity lease is claimed. The native child test allocates only one MiB
 on supported Linux and must fail closed on this local macOS host. No 64GiB local
 allocation, final-image execution or Cloud Run allocation has been performed.
 Media promotion remains unconditionally denied pending its other native gates.
+
+## Owned application child birth and normal close
+
+The image's fixed launcher now supervises one real application `index.js` child
+for an exact in-progress, paused media bootstrap or retained activation. Its
+private `_control/temporalMediaKernel-<operationId>` journal binds the original
+canonical intent, control/state versions, native pool/revision/image/runner,
+parent witness, birth intent, actual ChildProcess PID and distinct child witness.
+Intent v4 and outer capacity receipt schema 2 require the birth link; the inner
+allocation/processing evidence remains schema 3. Old startup evidence cannot be
+relabelled. Ordinary cold starts without this capability retain their original
+entrypoint and create no kernel journal.
+
+The parent persists intent before its sole fork and acknowledges birth before
+allowing the child to enter startup. A second journal acknowledgement joins the
+child's native witness before capacity admission or polling. Original authority
+and the original 120-second start deadline are rechecked after awaited writes or
+unknown-ACK GET reconciliation and immediately before each IPC grant. A linked
+child whose original operation disappears fails closed. The journal accepts only
+allowlisted bounded IPC, with no task tokens or credentials.
+
+Normal shutdown forwards SIGTERM once through the original live ChildProcess
+handle. Error events initiate that same owned stop; they do not establish death.
+A closed fact requires actual child close and positive process-group absence.
+An uncertain descendant drain produces no closed fact. Cleanup facts may finish
+after authority expiry and confer no restart authority. A new parent cannot adopt
+an existing journal or spawn again. Creator-owned Firebase resources are cleaned
+independently, including initialization or fallback failures.
+
+Local tests exercise actual OS children and the production IPC gate with
+controlled journal/authority metadata. Dedicated Firestore tests exercise the
+canonical authority and linked receipt protocol with controlled native Cloud and
+birth metadata. These do not run the real application bootstrap in an immutable
+image or on Cloud Run. This step does **not** implement diagnostic forced death,
+a replacement child, diagnostic Workflow/Activity queues, original Activity
+adoption, Cloud Run instance replacement, or recovery acceptance. Those remain
+required. Media promotion remains unconditionally denied and orchestration
+promotion remains unavailable; no handoff, admission or retirement advances.

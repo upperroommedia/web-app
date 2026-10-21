@@ -9,7 +9,7 @@ const rate = 16000,
 const fail = (): never => {
   throw new Error('MEDIA_NATIVE_PROCESSING_CANARY_UNCONFIRMED');
 };
-export const MEDIA_STARTUP_CANARY_KIND = 'filesystem-allocation-and-native-audio-v3';
+export const MEDIA_STARTUP_CANARY_KIND = 'filesystem-allocation-native-audio-and-kernel-v4';
 export interface NativeMediaProcessingEvidence {
   schemaVersion: 1;
   ffmpegSHA256: string;

@@ -71,7 +71,8 @@ function operation() {
         evidenceDigest: 'd'.repeat(64),
         name,
         mediaStartup: {
-          canary: 'filesystem-allocation-and-native-audio-v3',
+          canary: 'filesystem-allocation-native-audio-and-kernel-v4',
+          kernel: 'owned-application-child-v1',
           budgets: { ...mediaStartupBudget },
           image: `us-central1-docker.pkg.dev/urm-app-staging/urm-temporal/worker@sha256:${'b'.repeat(64)}`,
           runner: `tw-m-${buildId.slice(0, 20)}@urm-app-staging.iam.gserviceaccount.com`,

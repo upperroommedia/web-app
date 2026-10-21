@@ -16,8 +16,19 @@ require('ts-node').register({
 const { MEDIA_ALLOCATION_PROGRAM_SHA256 } = require(fileURLToPath(
   new URL('../../apps/temporal-worker/src/runtime/media-capacity-allocation.ts', import.meta.url)
 ));
-const { recordMediaStartupCapacity, collectMediaStartupCapacity, mediaStartupBudget } = require(fileURLToPath(
+const {
+  mediaStartupIntent,
+  recordMediaStartupCapacity,
+  collectMediaStartupCapacity,
+  mediaStartupBudget,
+} = require(fileURLToPath(
   new URL('../../apps/temporal-worker/src/runtime/media-startup-capacity.ts', import.meta.url)
+));
+const { mediaKernelContext } = require(fileURLToPath(
+  new URL('../../apps/temporal-worker/src/runtime/media-kernel-supervisor.ts', import.meta.url)
+));
+const { workerReadinessDigest } = require(fileURLToPath(
+  new URL('../../apps/temporal-worker/src/runtime/readiness-probe.ts', import.meta.url)
 ));
 const { initializeApp, deleteApp } = require('firebase-admin/app'),
   { getFirestore } = require('firebase-admin/firestore');
@@ -51,7 +62,9 @@ for (const drift of [
       stateRef = db.doc('_control/temporalReleaseState');
     const immutableReceipt = db.doc(`_control/temporalCloudMediaBootstrapCycle-${operationId}`),
       creationReceipt = db.doc(`_control/temporalCloudMediaBootstrapActivation-${operationId}`),
-      startup = db.doc(`temporalMediaStartupCapacity/${operationId}`);
+      startup = db.doc(`temporalMediaStartupCapacity/${operationId}`),
+      kernelRef = db.doc(`_control/temporalMediaKernel-${operationId}`);
+    let kernel;
     let sourceCalls = 0,
       canaryCalls = 0;
     try {
@@ -59,6 +72,10 @@ for (const drift of [
         releaseId,
         admission: 'paused',
         domains: {
+          media: { admission: 'paused' },
+          images: { admission: 'paused' },
+          accounts: { admission: 'paused' },
+          bundles: { admission: 'paused' },
           publishing: { admission: 'paused' },
           emails: { admission: 'paused' },
           search: { admission: 'paused' },
@@ -187,7 +204,37 @@ for (const drift of [
         return result;
       };
       const registration = async () => {
-        const record = () => recordMediaStartupCapacity({ firestore: db, buildId: b.buildId, witness, canary });
+        const owned = mediaStartupIntent((await lockRef.get()).data());
+        const cap = await mediaKernelContext(db, { ...witness, instanceId: randomUUID() });
+        assert(cap);
+        await db.runTransaction(cap.authorize, { readOnly: true });
+        cap.checkFresh();
+        if (drift === 'none')
+          await assert.rejects(
+            mediaKernelContext(db, {
+              ...witness,
+              cloudRun: { ...witness.cloudRun, serviceAccount: 'foreign@example.test' },
+            })
+          );
+        const body = {
+          schemaVersion: 1,
+          stage: 'running',
+          context: cap.context,
+          intent: { parentPid: process.pid + 1, launchId: randomUUID(), createdAt: new Date().toISOString() },
+          birth: { pid: process.pid, nonce: randomUUID(), spawnedAt: new Date().toISOString() },
+          worker: witness,
+        };
+        await kernelRef.create(body);
+        kernel = {
+          operationId,
+          birthDigest: workerReadinessDigest({
+            context: body.context,
+            intent: body.intent,
+            birth: body.birth,
+            worker: body.worker,
+          }),
+        };
+        const record = () => recordMediaStartupCapacity({ firestore: db, buildId: b.buildId, witness, canary, kernel });
         if (drift !== 'delayed') await record();
         const parent = f.options.receipts.pool.identityState.plan.body.name;
         const readResource = async (name) =>
@@ -242,6 +289,7 @@ for (const drift of [
             buildId: b.buildId,
             witness: { ...witness, instanceId: randomUUID() },
             canary,
+            kernel,
           })
         );
         assert.deepEqual((await startup.get()).data(), existing);
@@ -252,7 +300,7 @@ for (const drift of [
       }
     } finally {
       const failures = [];
-      for (const ref of [startup, immutableReceipt, creationReceipt, lockRef, controlRef, stateRef])
+      for (const ref of [kernelRef, startup, immutableReceipt, creationReceipt, lockRef, controlRef, stateRef])
         try {
           await ref.delete();
         } catch {
@@ -271,3 +319,29 @@ for (const drift of [
       if (failures.length) throw new AggregateError(failures, 'Owned capacity fixture cleanup failed');
     }
   });
+
+// A supervised child may never fall back to ordinary polling after parent loss.
+test('kernel-linked startup rejects missing original parent before canary', async () => {
+  const app = initializeApp({ projectId: 'urm-app-staging' }, `kernel-missing-${randomUUID()}`);
+  const db = getFirestore(app);
+  let calls = 0;
+  try {
+    const witness = { buildId: 'a'.repeat(40), instanceId: randomUUID(), cloudRun: null };
+    const base = {
+      firestore: db,
+      buildId: witness.buildId,
+      witness,
+      canary: async () => {
+        calls++;
+      },
+    };
+    await assert.rejects(
+      recordMediaStartupCapacity({ ...base, kernel: { operationId: randomUUID(), birthDigest: 'c'.repeat(64) } })
+    );
+    await recordMediaStartupCapacity(base);
+    assert.equal(calls, 0);
+  } finally {
+    await db.terminate();
+    await deleteApp(app);
+  }
+});
