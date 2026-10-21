@@ -35,7 +35,7 @@ const emulatorNames = [
 for (const [name, port] of emulatorNames)
   if (process.env[name] !== `127.0.0.1:${port}`) throw new Error('Dedicated emulator required');
 const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
-function launch(address, holdAck) {
+function launch(address, holdAck, remoteCase) {
   const child = fork(fileURLToPath(new URL('./fixtures/media-adoption-child.cjs', import.meta.url)), [], {
     detached: true,
     execArgv: [],
@@ -44,6 +44,8 @@ function launch(address, holdAck) {
       PATH: process.env.PATH,
       HOME: process.env.HOME,
       NODE_ENV: 'test',
+      URM_MEDIA_REMOTE_ONLY: process.env.URM_MEDIA_REMOTE_ONLY,
+      URM_MEDIA_REMOTE_CASE: remoteCase,
       FIREBASE_PROJECT_ID: 'urm-app-staging',
       GCLOUD_PROJECT: 'urm-app-staging',
       ...Object.fromEntries(emulatorNames.map(([key]) => [key, process.env[key]])),
@@ -137,14 +139,9 @@ function pcm() {
   return bytes;
 }
 
-for (const mode of [
-  'adopt',
-  'replaced-generation',
-  'superseded',
-  'role-revoked',
-  'actor-disabled',
-  'canonical-owner-changed',
-])
+for (const mode of process.env.URM_MEDIA_REMOTE_ONLY === '1'
+  ? (process.env.URM_MEDIA_REMOTE_CASES ?? 'remote-adopt').split(',')
+  : ['adopt', 'replaced-generation', 'superseded', 'role-revoked', 'actor-disabled', 'canonical-owner-changed'])
   test(`real source media acquisition/OS replacement / ${mode}`, async () => {
     const id = `adoption-${randomUUID()}`,
       children = [],
@@ -160,7 +157,7 @@ for (const mode of [
       app = initializeApp(
         {
           projectId,
-          storageBucket: `${projectId}.appspot.com`,
+          storageBucket: mode.startsWith('remote-') ? `${projectId}.firebasestorage.app` : `${projectId}.appspot.com`,
           databaseURL: `https://${projectId}-default-rtdb.firebaseio.com`,
         },
         id
@@ -170,7 +167,21 @@ for (const mode of [
       const source = bucket.file(`sermons/${id}.wav`);
       await bounded(source.save(pcm(), { resumable: false, preconditionOpts: { ifGenerationMatch: 0 } }));
       const [metadata] = await bounded(source.getMetadata());
-      const payload = { id, storageFilePath: source.name, startTime: 0, duration: 1 };
+      const remote = mode.startsWith('remote-'),
+        remoteNegative = remote && mode !== 'remote-adopt';
+      const payload = remote
+        ? { id, youtubeUrl: 'https://www.youtube.com/watch?v=aaaaaaaaaaa', startTime: 0, duration: 1 }
+        : { id, storageFilePath: source.name, startTime: 0, duration: 1 };
+      if (remote) {
+        assert.equal((await db.doc('_control/temporalRelease').get()).exists, false);
+        await db.doc('_control/temporalRelease').create({
+          schemaVersion: 1,
+          revision: 1,
+          admission: 'open',
+          domains: { media: { owner: 'temporal', admission: 'open' } },
+          releaseId: id,
+        });
+      }
       const ref = {
         projectId,
         jobId: id,
@@ -183,7 +194,7 @@ for (const mode of [
         request.create({
           ref,
           payload,
-          sources: { storage: { path: source.name, generation: String(metadata.generation) } },
+          sources: remote ? {} : { storage: { path: source.name, generation: String(metadata.generation) } },
         })
       );
       await bounded(db.doc(`temporalMediaState/${id}`).create({ owner: 'temporal', ref }));
@@ -201,7 +212,7 @@ for (const mode of [
             kind: 'audio.process',
             entity: { type: 'sermon', id },
             actorUid: id,
-            payload,
+            payload: remote ? { mediaRequestId: id } : payload,
             requestId: id,
             generation: 1,
             createdAt: Date.now(),
@@ -230,7 +241,7 @@ for (const mode of [
       );
       running = workflowWorker.run();
       void running.catch(() => {});
-      const first = launch(environment.address, true);
+      const first = launch(environment.address, !remoteNegative, mode);
       children.push(first);
       stage = 'first-ready';
       const before = await first.ready;
@@ -247,6 +258,24 @@ for (const mode of [
           })
         )
       );
+      if (remoteNegative) {
+        stage = 'remote-adoption-authority-denial';
+        await assert.rejects(
+          bounded(handle.result(), 30000),
+          (error) =>
+            error.cause?.cause?.type ===
+            (['remote-generation-drift', 'remote-checksum-drift'].includes(mode)
+              ? 'INVALID_MEDIA_ARTIFACT'
+              : 'PERMISSION_CHANGED')
+        );
+        const rejectedRequest = await request.get();
+        assert.equal(rejectedRequest.get('artifacts.source'), undefined);
+        assert.equal(rejectedRequest.get('artifacts.processed'), undefined);
+        first.child.send({ type: 'stop' });
+        await bounded(first.exited);
+        await groupAbsent(first);
+        return;
+      }
       stage = 'first-acquired';
       const accepted = await first.next('acquired').catch(async (error) => {
         const diagnostic = await bounded(request.get());
@@ -312,7 +341,7 @@ for (const mode of [
       if (mode === 'canonical-owner-changed')
         await bounded(db.doc(`sermons/${id}`).update({ uploaderId: `foreign-${id}` }));
       const authorityDenied = ['role-revoked', 'actor-disabled', 'canonical-owner-changed'].includes(mode);
-      const second = launch(environment.address, false);
+      const second = launch(environment.address, false, mode);
       children.push(second);
       stage = 'second-ready';
       const after = await second.ready;
@@ -351,6 +380,21 @@ for (const mode of [
         assert.ok(objectsAfter.every((file) => objectsBefore.some((old) => old.name === file.name)));
       }
       assert.equal((await bounded(db.doc(`sermons/${id}`).get())).get('status.subsplash'), 'UPLOADED');
+      if (remote) {
+        const { youtubeAcquisitionId } = require(fileURLToPath(
+          new URL('../../apps/process-audio/src/temporal/hetzner-acquisition.ts', import.meta.url)
+        ));
+        const host = await db.doc(`temporalYouTubeAcquisitions/${youtubeAcquisitionId(ref)}`).get();
+        assert.equal(host.get('status'), 'source');
+        assert.equal(host.get('ref.jobId'), id);
+        assert.equal((await request.get()).get('artifacts.source.path'), host.get('result.artifact.path'));
+        assert.equal((await host.ref.collection('uploads').get()).size, 1);
+        assert.equal(
+          (await bucket.getFiles({ prefix: `workflow-audio/${id}/${ref.requestVersion}/source-` }))[0].length,
+          1
+        );
+      }
+
       const history = await bounded(handle.fetchHistory());
       assert.equal(history.events.filter((e) => e.workflowExecutionStartedEventAttributes).length, 1);
       assert.equal(history.events.filter((e) => e.activityTaskScheduledEventAttributes).length, 1);
@@ -378,6 +422,16 @@ for (const mode of [
       assert.deepEqual(await bounded(second.exited), { code: 0, signal: null });
       await groupAbsent(second);
     } catch (error) {
+      const frame = String(error?.stack ?? '').match(/temporal-media-adoption\.native\.mjs:(\d+):\d+/);
+      if (frame) error.fixtureLine = frame[1];
+      error.safeFailure =
+        error?.code === 'ERR_ASSERTION'
+          ? error.message === 'Missing expected rejection.'
+            ? 'unexpected-success'
+            : 'assertion'
+          : error instanceof Error && /^(Owned|Dedicated)/.test(error.message)
+          ? error.message
+          : 'other';
       failures.push(error);
     } finally {
       // Every owned cleanup runs independently; preserve the primary assertion failure.
@@ -398,6 +452,19 @@ for (const mode of [
         failures.push(error);
       }
       if (app) {
+        if (mode.startsWith('remote-'))
+          try {
+            const db = getFirestore(app),
+              control = db.doc('_control/temporalRelease'),
+              value = await bounded(control.get());
+            if (value.get('releaseId') === id) await bounded(control.delete());
+            const records = await bounded(
+              db.collection('temporalYouTubeAcquisitions').where('ref.jobId', '==', id).get()
+            );
+            for (const record of records.docs) await bounded(db.recursiveDelete(record.ref));
+          } catch (error) {
+            failures.push(error);
+          }
         const db = getFirestore(app);
         for (const collection of [
           'temporalMediaRequests',
@@ -478,7 +545,7 @@ for (const mode of [
             .map((error) =>
               error instanceof Error && /^(Owned|Dedicated)/.test(error.message)
                 ? error.message
-                : 'assertion-or-cleanup'
+                : `assertion-or-cleanup-line-${error?.fixtureLine ?? 'unknown'}-${error?.safeFailure ?? 'cleanup'}`
             )
             .join('; ')}`
         );

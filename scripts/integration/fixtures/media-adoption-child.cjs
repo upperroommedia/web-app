@@ -56,7 +56,10 @@ process.once('message', async (message) => {
     stage = 'firebase';
     app = initializeApp({
       projectId: 'urm-app-staging',
-      storageBucket: 'urm-app-staging.appspot.com',
+      storageBucket:
+        process.env.URM_MEDIA_REMOTE_ONLY === '1'
+          ? 'urm-app-staging.firebasestorage.app'
+          : 'urm-app-staging.appspot.com',
       databaseURL: 'https://urm-app-staging-default-rtdb.firebaseio.com',
     });
     const db = getFirestore(app);
@@ -64,10 +67,106 @@ process.once('message', async (message) => {
     connection = await NativeConnection.connect({ address: message.address });
     clientConnection = await Connection.connect({ address: message.address });
     const client = new Client({ connection: clientConnection, namespace: 'default' });
+    const remoteMode = process.env.URM_MEDIA_REMOTE_ONLY === '1';
+    if (remoteMode) {
+      process.env.TEMPORAL_MEDIA_YOUTUBE_ACQUISITION = 'hetzner-v1';
+      process.env.TEMPORAL_WORKER_HOSTING = 'cloud-run';
+      const acquisition = require('../../../apps/process-audio/src/temporal/hetzner-acquisition.ts');
+      const provider = require('../../../apps/process-audio/src/processYouTubeUrl.ts');
+      provider.downloadYouTubeAudioToFile = async () => {
+        throw Error('TEST_VENDOR_NETWORK_FORBIDDEN');
+      };
+      const { getStorage } = rootRequire('firebase-admin/storage'),
+        { getAuth } = rootRequire('firebase-admin/auth'),
+        { Readable } = require('node:stream');
+      const {
+        createYouTubeAcquisitionHostStore,
+        YOUTUBE_ACQUISITIONS,
+      } = require('../../../apps/process-audio/src/temporal/hetzner-acquisition-store.ts');
+      const {
+        readEligibleYouTubeAcquisition,
+      } = require('../../../apps/process-audio/src/temporal/hetzner-acquisition-policy.ts');
+      const { uploadYouTubeObject } = require('../../../apps/process-audio/src/temporal/hetzner-acquisition-upload.ts');
+      acquisition.createHetznerAcquisitionTransport = () => async (method, request, signal) => {
+        if (method !== 'GET') throw Error('Unexpected repeated remote admission');
+        const record = db.doc(`${YOUTUBE_ACQUISITIONS}/${request.operationId}`),
+          prepared = await record.get();
+        if (prepared.get('status') === 'source')
+          return { status: 'ready', operationId: request.operationId, artifact: prepared.get('result.artifact') };
+        if (prepared.get('preparedBy.instanceId') !== `CONTROLLED_CLOUD_${instanceId}`)
+          throw Error('Native preparer not bound');
+        // CONTROLLED host identity and drain only. Real SDK Activity/actor/canonical
+        // guard, private store/upload, actual emulator bytes and local tools below.
+        const host = createYouTubeAcquisitionHostStore({
+          firestore: db,
+          projectId: 'urm-app-staging',
+          owner: {
+            bootId: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+            pidNamespace: 'pid:[1234]',
+            processId: process.pid,
+            startTicks: '100',
+            buildId: 'b'.repeat(40),
+          },
+          assertEligible: async (tx, ref, purpose) => {
+            const result = await readEligibleYouTubeAcquisition({
+              firestore: db,
+              auth: getAuth(app),
+              transaction: tx,
+              ref,
+            });
+            if (result.kind !== (purpose === 'source_available' ? 'source_available' : 'ready'))
+              throw Error('Host canonical authority denied');
+          },
+        });
+        if (!(await host.claim(request.ref, prepared.get('preparedBy.serviceAccount'))).launch)
+          throw Error('Unexpected host claim');
+        const [bytes] = await getStorage(app).bucket().file(`sermons/${request.ref.sermonId}.wav`).download();
+        const journal = host.upload(request.ref, randomUUID());
+        const artifact = await uploadYouTubeObject({
+          journal,
+          signal,
+          start: async () => ({
+            output: Readable.from([bytes]),
+            completion: Promise.resolve('succeeded'),
+            drain: async () => undefined,
+          }),
+        });
+        await host.settle(request.ref, { kind: 'source', artifact }, async () => undefined);
+        if (process.env.URM_MEDIA_REMOTE_CASE === 'remote-revoked')
+          await getAuth(app).setCustomUserClaims(request.ref.jobId, { role: 'guest' });
+        if (process.env.URM_MEDIA_REMOTE_CASE === 'remote-owner-changed')
+          await db.doc(`sermons/${request.ref.sermonId}`).update({ uploaderId: 'CONTROLLED_FOREIGN_OWNER' });
+        if (process.env.URM_MEDIA_REMOTE_CASE === 'remote-generation-drift')
+          await getStorage(app)
+            .bucket()
+            .file(artifact.path)
+            .save(Buffer.from('owned-generation-replacement'), {
+              resumable: false,
+              preconditionOpts: { ifGenerationMatch: artifact.generation },
+            });
+        if (process.env.URM_MEDIA_REMOTE_CASE === 'remote-checksum-drift')
+          return { status: 'ready', operationId: request.operationId, artifact: { ...artifact, crc32c: 'AAAAAA==' } };
+        return { status: 'ready', operationId: request.operationId, artifact };
+      };
+    }
     const { createRuntimeActivities } = require('../../../apps/temporal-worker/src/runtime/activities.ts');
     const activities = createRuntimeActivities('urm-app-staging', ['urm-media'], client, {
       instanceId,
       buildId: 'a'.repeat(40),
+      ...(remoteMode
+        ? {
+            cloudRun: {
+              projectId: 'urm-app-staging',
+              region: 'us-central1',
+              pool: 'controlled-media',
+              revision: 'controlled-media-r1',
+              revisionUid: 'CONTROLLED_REVISION_UID',
+              imageDigest: 'sha256:' + 'a'.repeat(64),
+              serviceAccount: 'tw-m-' + 'a'.repeat(20) + '@urm-app-staging.iam.gserviceaccount.com',
+              instanceId: `CONTROLLED_CLOUD_${instanceId}`,
+            },
+          }
+        : {}),
     }).queues['urm-media'];
     stage = 'worker';
     worker = await Worker.create({

@@ -1,3 +1,4 @@
+import { createRuntimeYouTubeAcquisition } from './hetzner-media';
 import { createReviewedCreateActivities } from './reviewed-create';
 import { beginClaimedPublishingStep } from './activity-step-start';
 import { readAuthoritativeCriticalRepairStepIds } from '../../../../functions/src/temporal/publishing/criticalRepairStepAuthority';
@@ -75,7 +76,13 @@ import { createMutationSettlementProjection } from './mutation-settlement';
 import { assertLiveProviderMutationProject } from './provider-isolation';
 import { isSandboxProviderIntent } from '../../../../functions/src/providerSandbox/admission';
 import { withSandboxRequestContext } from '../../../../functions/src/providerSandbox/http';
-import { getProviderExecutionProfile, assertSandboxIntentProfile, assertMatchingSandboxProfile, assertSandboxCatalogReady, sandboxProfileDocumentPath } from '../../../../functions/src/providerSandbox/profile';
+import {
+  getProviderExecutionProfile,
+  assertSandboxIntentProfile,
+  assertMatchingSandboxProfile,
+  assertSandboxCatalogReady,
+  sandboxProfileDocumentPath,
+} from '../../../../functions/src/providerSandbox/profile';
 import { safeActivities, safeCancellation, type ActivityFailureProjection } from './safe-activities';
 
 export function createRuntimeActivities(
@@ -423,7 +430,23 @@ export function createRuntimeActivities(
       await domainStep(ref, 'entity', result);
     },
   });
+  const assertMediaActorInTransaction = async (
+    tx: Parameters<typeof store.assertCurrentInTransaction>[0],
+    ref: DurableJobRef
+  ) => {
+    const intent = await store.assertCurrentInTransaction(tx, ref);
+    await authorizeActor(intent, tx);
+    return intent;
+  };
+  const acquireYouTubeSource = createRuntimeYouTubeAcquisition({
+    projectId,
+    firestore: db,
+    witness,
+    assertCurrent: assertMediaActorInTransaction,
+  });
   const media = createMediaActivities({
+    acquireYouTubeSource,
+    assertAuthorizedInTransaction: assertMediaActorInTransaction,
     assertAuthorized: assertCurrent,
     projectId,
     firestore: db,
@@ -632,7 +655,8 @@ export function createRuntimeActivities(
                 const job = await store.loadJob(ref);
                 const pinned = assertSandboxIntentProfile(profile, intent);
                 assertMatchingSandboxProfile(profile, job.providerExecution);
-                if (job.providerExecution?.scenario !== pinned.scenario) throw new Error('PROVIDER_INTENT_PROFILE_MISMATCH');
+                if (job.providerExecution?.scenario !== pinned.scenario)
+                  throw new Error('PROVIDER_INTENT_PROFILE_MISMATCH');
                 const marker = await db.doc(sandboxProfileDocumentPath(profile)).get();
                 assertSandboxCatalogReady(profile, marker.data());
               }
@@ -871,7 +895,12 @@ export function createRuntimeActivities(
         ...createReviewedCreateActivities(db, store, projectId),
         ...createLifecycleActivities(store, { authorizeCriticalRepair: criticalRepair.loadCertificate }),
         ...createEmailControlActivities({ db, store, projectId }),
-        ...createImageControlActivities({ imagesBucket: getFirebaseImagesBucket(), firestore: db, loadIntent: store.loadIntent, project }),
+        ...createImageControlActivities({
+          imagesBucket: getFirebaseImagesBucket(),
+          firestore: db,
+          loadIntent: store.loadIntent,
+          project,
+        }),
         ...createSearchControlActivities({ firestore: db, project }),
         ...createProviderOrphanReviewActivities(db, projectId, project),
       }),

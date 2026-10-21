@@ -1,7 +1,9 @@
+import { consumeAcquiredYouTubeSource } from './acquired-youtube-source';
+import type { RemoteYouTubeResult } from './hetzner-acquisition';
 import { Context } from '@temporalio/activity';
 import { ApplicationFailure } from '@temporalio/common';
 import type { Bucket } from '@google-cloud/storage';
-import type { Firestore } from 'firebase-admin/firestore';
+import type { Firestore, Transaction } from 'firebase-admin/firestore';
 import type { Database } from 'firebase-admin/database';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -39,6 +41,8 @@ type PrivateRequest = {
 export interface MediaActivityDependencies {
   projectId: string;
   assertAuthorized: (ref: MediaJobRef) => Promise<void>;
+  acquireYouTubeSource?: (ref: MediaJobRef, signal: AbortSignal) => Promise<RemoteYouTubeResult>;
+  assertAuthorizedInTransaction?: (tx: Transaction, ref: MediaJobRef) => Promise<unknown>;
   firestore: Firestore;
   database: Database;
   bucket: Bucket;
@@ -359,7 +363,7 @@ export function createMediaActivities(dependencies: MediaActivityDependencies): 
     acquireMedia: async (ref) => {
       const eligible = await eligibility(ref);
       if (eligible.kind !== 'ready') return eligible;
-      const request = await load(ref);
+      let request = await load(ref);
       if (request.artifacts?.processed) {
         await verifyArtifact(request.artifacts.processed);
         return { kind: 'ready' };
@@ -368,9 +372,41 @@ export function createMediaActivities(dependencies: MediaActivityDependencies): 
       try {
         return await withNativeActivity(ref, 'downloading', async (directory, signal) => {
           let input = join(directory, 'source');
+          let adoptRemote: ((duration: number) => Promise<void>) | undefined;
           await project(ref, 'downloading', 5);
           if (request.artifacts?.source) {
             await download(request.artifacts.source.path, input, signal, request.artifacts.source.generation);
+          } else if ('youtubeUrl' in payload && dependencies.acquireYouTubeSource) {
+            if (!dependencies.assertAuthorizedInTransaction)
+              throw ApplicationFailure.nonRetryable(
+                'Remote media adoption authorization is unavailable.',
+                'PERMISSION_CHANGED'
+              );
+            const remote = await dependencies.acquireYouTubeSource(ref, signal);
+            signal.throwIfAborted();
+            if (remote.kind !== 'source' && remote.kind !== 'source_available') return remote;
+            request = await load(ref);
+            if (request.artifacts?.processed) {
+              await verifyArtifact(request.artifacts.processed);
+              return { kind: 'ready' };
+            }
+            if (remote.kind === 'source')
+              adoptRemote = await consumeAcquiredYouTubeSource({
+                db,
+                bucket,
+                ref,
+                source: remote.artifact,
+                destination: input,
+                signal,
+                assertCurrent: dependencies.assertAuthorizedInTransaction,
+              });
+            else if (request.artifacts?.source)
+              await download(request.artifacts.source.path, input, signal, request.artifacts.source.generation);
+            else
+              throw ApplicationFailure.create({
+                message: 'Canonical acquired source is not yet available.',
+                type: 'YOUTUBE_ACQUISITION_PENDING',
+              });
           } else if ('youtubeUrl' in payload) {
             const { downloadYouTubeAudioToFile } = await import('../processYouTubeUrl');
             const cancellation = new CancelToken();
@@ -400,10 +436,13 @@ export function createMediaActivities(dependencies: MediaActivityDependencies): 
             await download(source.path, input, signal, source.generation);
           }
           signal.throwIfAborted();
-          const sourceDuration = request.artifacts?.source?.duration ?? (await measure(input, signal));
+          const sourceDuration = adoptRemote
+            ? await measure(input, signal)
+            : request.artifacts?.source?.duration ?? (await measure(input, signal));
           if (payload.startTime >= sourceDuration || payload.startTime + payload.duration > sourceDuration + 1)
             throw ApplicationFailure.nonRetryable('Requested trim exceeds available audio', 'INVALID_MEDIA_RANGE');
-          if (!request.artifacts?.source) {
+          if (adoptRemote) await adoptRemote(sourceDuration);
+          else if (!request.artifacts?.source) {
             const duration = sourceDuration;
             const pinned = request.sources.storage;
             if (pinned?.path.startsWith(`workflow-audio/${ref.sermonId}/`)) {

@@ -1,3 +1,4 @@
+import { writeMediaUploadIntent } from '@upperroom/orchestration/media-artifacts';
 import { createHash } from 'node:crypto';
 import { FieldValue, type Firestore, type Transaction } from 'firebase-admin/firestore';
 import type { YouTubeStreamReceipt } from '../processYouTubeUrl';
@@ -135,6 +136,22 @@ function operation(raw: unknown, ref: MediaJobRef): Operation {
     }
   }
   return value;
+}
+
+/** Pure receipt parser for the real Activity's native transaction. This validates
+ * original host identity/settlement; it never starts work or grants adoption. */
+export function validateYouTubeAcquisitionSourceReceipt(
+  raw: unknown,
+  ref: MediaJobRef,
+  source: unknown
+): AcquisitionHostProcess {
+  const value = operation(raw, ref);
+  if (value.status !== 'source' || value.result?.kind !== 'source') return fail();
+  const actual = validateAcquiredYouTubeSource(ref, value.result.artifact),
+    expected = validateAcquiredYouTubeSource(ref, source);
+  if (Object.keys(actual).some((key) => actual[key as keyof typeof actual] !== expected[key as keyof typeof expected]))
+    return fail();
+  return host(value.owner!);
 }
 
 /** Called ONLY by a real registered native media Activity. The mandatory guard
@@ -316,6 +333,13 @@ export function createYouTubeAcquisitionHostStore(options: {
               };
             }
             if (snapshot.get('activeUpload') !== undefined) return fail();
+            writeMediaUploadIntent(tx, options.firestore, {
+              projectId: ref.projectId,
+              sermonId: ref.sermonId,
+              jobId: ref.jobId,
+              path,
+              createdAt: Date.now(),
+            });
             tx.create(doc, { state: 'streaming', path, owner, createdAt: Date.now() });
             tx.update(parent, { activeUpload: attemptId });
             return { launch: true };
