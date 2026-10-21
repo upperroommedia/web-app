@@ -1,10 +1,10 @@
+import {loadNativeReleaseApplication} from './temporal-native-application.mjs';
 import {promoteCloudRunControls,promoteCloudRunSearch} from './temporal-promote-controls.mjs';
 import { observeBootstrapProtection, observeBootstrapRegistration, observeControlsPromotionBefore, observeControlsPromotionAfter,observeSearchPromotionBefore,observeSearchPromotionAfter } from './temporal-bootstrap-observations.mjs';
 import { createHash } from 'node:crypto';
-import { isAbsolute, resolve } from 'node:path';
+import { isAbsolute } from 'node:path';
 import { realpath, open } from 'node:fs/promises';
 import { constants } from 'node:fs';
-import { createRequire } from 'node:module';
 import { firebaseResourceEnvironment, validateConfig } from './temporal-platform.mjs';
 import { serverlessComputeArguments } from './temporal-serverless-platform.mjs';
 import { observeNamespaceComputeIsolation } from './temporal-compute-isolation.mjs';
@@ -84,15 +84,7 @@ async function withNativeCloudRunClient({ binding, config, platform, firestore }
   const key = await readCloudRunOperatorKey(platform.operatorApiKeyFile, platform.operatorApiKeySHA256);
   const { loadVerifiedRuntimeApplication } = await import('./temporal-release-runtime.mjs');
   const application = await loadVerifiedRuntimeApplication(binding, config, firestore, () => {
-    if (process[Symbol.for('ts-node.register.instance')]) throw new Error('RELEASE_COMPILER_ALREADY_ACTIVE');
-    const runtimeRequire = createRequire(resolve(binding.runtimeRoot, 'package.json'));
-    const service = runtimeRequire('ts-node').register({ skipProject: true, transpileOnly: true, preferTsExts: true,
-      compilerOptions: { module: 'CommonJS', target: 'ES2022', esModuleInterop: true, moduleResolution: 'node' } });
-    try {
-      const workerRequire = createRequire(resolve(binding.runtimeRoot, 'apps/temporal-worker/package.json'));
-      return { ...(['controls-promotion','search-promotion'].includes(purpose)?{...workerRequire('@temporalio/worker'),workflowsPath:resolve(binding.runtimeRoot,'apps/temporal-worker/src/workflows/index.ts')}:{}),...workerRequire('@temporalio/client'),
-        ...workerRequire(resolve(binding.runtimeRoot, 'apps/temporal-worker/src/runtime/serverless-release-readiness.ts')) };
-    } finally { service.enabled(false); }
+    return loadNativeReleaseApplication(binding.runtimeRoot,purpose);
   });
   let connection;
   try {
