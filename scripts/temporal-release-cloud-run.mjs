@@ -1,3 +1,4 @@
+import {readRestoredMediaActivationPool} from './temporal-restored-media-resources.mjs';
 import {assertRestoredMediaActivationAuthority,readRestoredMediaActivationAccess} from './temporal-media-restored-origin.mjs';
 import {scanPrivateMediaInventory} from './temporal-media-private-inventory.mjs';
 import {observeMediaRecoveryProtection} from './temporal-media-recovery-protection.mjs';
@@ -493,4 +494,24 @@ export const readRestoredMediaActivationOrigin=o=>withNativeCloudRunClient(o,asy
   if(!Number.isFinite(Date.parse(after.observedAt))||Math.abs(Date.now()-Date.parse(after.observedAt))>=5000)throw Error();
   return {kind:'restored-media-activation-origin-v1',operationId:o.operationId,recoveryOperationId:o.recoveryOperationId,bindingDigest:o.bindingDigest,releaseId:o.releaseId,buildId:p.buildId,image:p.image,pool:after.pool,capsuleSHA256:after.capsuleSHA256,proofSHA256:recoveryHash({before:after.provenanceSHA256,access:after.accessSHA256,evidence:first.evidenceSHA256,image:image.imageProof,replay,inventory:native2,compute}),observedAt:new Date(at).toISOString(),scope:'historical-origin-only-no-scale-or-promotion-authority'};
  }catch{throw new Error('RESTORED_MEDIA_ORIGIN_UNCONFIRMED');}
+});
+
+/** Source/image-bound historical startup only. Namespace policy, queue permission
+ * and registration are deliberately separate and remain unavailable. */
+export const readRestoredMediaStartupWitness=o=>withNativeCloudRunClient(o,async(_client,application)=>{
+ try{
+  const before=await readRestoredMediaActivationPool({...o,count:1});
+  const image=await createMediaRecoveryImageReplayObserver({image:o.plan.image,buildId:o.plan.buildId,operationId:o.operationId,bindingDigest:o.bindingDigest,evidenceDigest:o.plan.evidenceDigest,historyToJSON:application.historyToJSON});
+  const at=Date.now(),mono=performance.now();
+  const fresh=()=>{if(Date.now()<at||Date.now()-at>=5000||performance.now()-mono>=5000)throw Error();};
+  const read=async fn=>{let timer;try{fresh();const value=await Promise.race([Promise.resolve().then(()=>{fresh();return fn();}),new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('RESTORED_MEDIA_STARTUP_READBACK_UNCONFIRMED')),Math.max(1,5000-(Date.now()-at)));})]);fresh();return value;}finally{clearTimeout(timer);}};
+  const args={db:o.firestore,auth:o.firebaseAuth,operationId:o.operationId,bindingDigest:o.bindingDigest,plan:o.plan,pool:before,expectedRootSHA256:o.ownedOperation.dataDigest,expectedControlSHA256:o.expectedAuthority.control.dataDigest,expectedStateSHA256:o.expectedAuthority.state.dataDigest,image:image.tools};
+  const first=await read(()=>application.collectRestoredMediaStartup(args));
+  const after=await read(()=>readRestoredMediaActivationPool({...o,count:1}));
+  if(recoveryHash(before)!==recoveryHash(after))throw Error();
+  const second=await read(()=>application.collectRestoredMediaStartup({...args,pool:after}));
+  if(first.proofSHA256!==second.proofSHA256||first.identity!==second.identity||first.kernelBirthSHA256!==second.kernelBirthSHA256||first.startupSHA256!==second.startupSHA256)throw Error();
+  await read(()=>assertRestoredMediaActivationAuthority(o));fresh();
+  return {...second,imageSHA256:recoveryHash(image.imageProof),scope:'historical-startup-only-no-polling-or-registration-authority'};
+ }catch{throw new Error('RESTORED_MEDIA_STARTUP_READBACK_UNCONFIRMED');}
 });

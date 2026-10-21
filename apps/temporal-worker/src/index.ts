@@ -148,6 +148,7 @@ export async function runWorkerProcess(bindShutdown?: (shutdown: () => Promise<v
     if (lifecycle.draining) return;
     const { createRuntimeActivities } = await import('./runtime/activities');
     const { db, queues } = createRuntimeActivities(config.projectId, config.queues, client, witness);
+    let restoredMediaIdentity: string | undefined;
     if (
       config.projectId === 'urm-app-staging' &&
       config.hosting === 'cloud-run' &&
@@ -164,6 +165,7 @@ export async function runWorkerProcess(bindShutdown?: (shutdown: () => Promise<v
         kernel: mediaKernel,
         isDraining: () => lifecycle.draining,
       });
+      if (restored) restoredMediaIdentity = `media-restored-${witness.instanceId}`;
       if (!restored)
         await recordMediaStartupCapacity({
           firestore: db,
@@ -182,6 +184,7 @@ export async function runWorkerProcess(bindShutdown?: (shutdown: () => Promise<v
         connection: native,
         namespace: config.namespace,
         taskQueue: queue,
+        ...(restoredMediaIdentity ? { identity: restoredMediaIdentity } : {}),
         workflowBundle: queuePollsWorkflows(config.hosting, queue)
           ? consumedBundle
             ? { code: consumedBundle.code }

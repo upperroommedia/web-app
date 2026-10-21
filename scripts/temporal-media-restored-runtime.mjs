@@ -2,7 +2,7 @@ import {
   readRestoredMediaActivationPool,
   readRestoredMediaActivationQuota,
 } from './temporal-restored-media-resources.mjs';
-import { readRestoredMediaActivationOrigin } from './temporal-release-cloud-run.mjs';
+import { readRestoredMediaActivationOrigin, readRestoredMediaStartupWitness } from './temporal-release-cloud-run.mjs';
 const unavailable = async () => {
   throw new Error('RESTORED_MEDIA_NORMAL_RUNTIME_UNAVAILABLE');
 };
@@ -18,6 +18,7 @@ export function restoredMediaActivationRuntime(o) {
       return readRestoredMediaActivationOrigin({ ...options, receipts, observeProtection: unavailable });
     },
     readPool: (scope) => readRestoredMediaActivationPool({ ...o.options(), ...scope }),
+    readStartup: (scope) => readRestoredMediaStartupWitness({ ...o.options(), ...scope }),
     phase: unavailable,
     quota: (scope) => readRestoredMediaActivationQuota({ ...o.options(), ...scope }),
     registration: unavailable,

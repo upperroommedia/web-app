@@ -45,6 +45,8 @@ for (const mode of [
   'restored-resources',
   'restored-startup',
   'restored-startup-drain',
+  'restored-startup-readback',
+  'restored-startup-readback-expired',
   'phase-resource',
   'idle-startup',
   'idle-poller',
@@ -869,6 +871,52 @@ for (const mode of [
                   })
                 );
                 assert.equal(calls, 1);
+                if (mode.startsWith('restored-startup-readback')) {
+                  const { collectRestoredMediaStartup } = source('restored-media-collector.ts');
+                  const readOptions = () => ({
+                    db,
+                    auth,
+                    operationId: newId,
+                    bindingDigest: newBinding,
+                    plan: p,
+                    pool: scope.pool,
+                    expectedRootSHA256: nativeSnapshotProofFromCurrent().dataDigest,
+                    expectedControlSHA256: expectedAuthority.control.dataDigest,
+                    expectedStateSHA256: expectedAuthority.state.dataDigest,
+                    image: {
+                      pythonSHA256: 'a'.repeat(64),
+                      ffmpegSHA256: 'a'.repeat(64),
+                      ffprobeSHA256: 'b'.repeat(64),
+                    },
+                  });
+                  const snapshot = await lockRef.get();
+                  function nativeSnapshotProofFromCurrent() {
+                    return nativeSnapshotProof(snapshot);
+                  }
+                  const positive = await collectRestoredMediaStartup(readOptions());
+                  assert.equal(positive.identity, `media-restored-${witness.instanceId}`);
+                  assert.equal(positive.scope, 'historical-startup-only-no-polling-or-registration-authority');
+                  await assert.rejects(
+                    collectRestoredMediaStartup({
+                      ...readOptions(),
+                      image: { ...readOptions().image, ffprobeSHA256: 'f'.repeat(64) },
+                    })
+                  );
+                  await assert.rejects(
+                    collectRestoredMediaStartup({ ...readOptions(), pool: { ...scope.pool, revisionUid: 'foreign' } })
+                  );
+                  await auth.setCustomUserClaims(idleActor.uid, { role: 'uploader' });
+                  await assert.rejects(collectRestoredMediaStartup(readOptions()));
+                  await auth.setCustomUserClaims(idleActor.uid, { role: 'admin' });
+                  assert.equal((await collectRestoredMediaStartup(readOptions())).proofSHA256, positive.proofSHA256);
+                  idleRuntime.restoredReadback = {
+                    collect: collectRestoredMediaStartup,
+                    readOptions,
+                    auth,
+                    capacityRef,
+                  };
+                }
+
                 // GET-only source birth reader cannot adopt a different action's path.
                 await assert.rejects(
                   kernelModule.readMediaKernelBirth(db, newId, cap.context.intentSHA256, link, witness)
@@ -1037,6 +1085,38 @@ for (const mode of [
               );
               assert.equal(reads, 4);
               await new Promise((resolve) => setTimeout(resolve, 200));
+            }
+
+            if (mode.startsWith('restored-startup-readback')) {
+              const r = idleRuntime.restoredReadback,
+                op = r.readOptions();
+              op.expectedRootSHA256 = currentOwned.dataDigest;
+              if (mode === 'restored-startup-readback-expired') {
+                const attempted = Date.parse(
+                  (await lockRef.get()).get('cloudRestoredMediaActivation.start.attemptedAt')
+                );
+                const remaining = Math.max(0, attempted + 120050 - Date.now());
+                await new Promise((resolve) => setTimeout(resolve, remaining));
+                const live = idleRuntime.restored;
+                await assert.rejects(live.startup.restoredMediaKernelContext(db, () => live.auth, live.parent));
+              }
+              assert.equal((await r.collect(op)).operationId, newId);
+              await assert.rejects(
+                r.collect({
+                  ...op,
+                  auth: {
+                    app: r.auth.app,
+                    getUserByEmail: async (email) => {
+                      await r.auth.getUserByEmail(email);
+                      return new Promise(() => {});
+                    },
+                  },
+                })
+              );
+              const receipt = await r.capacityRef.get();
+              await r.capacityRef.update({ digest: '0'.repeat(64) });
+              await r.capacityRef.update({ digest: receipt.get('digest') });
+              await assert.rejects(r.collect(op));
             }
             args.ownedOperation = currentOwned;
           }

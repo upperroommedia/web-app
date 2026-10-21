@@ -257,6 +257,7 @@ async function kernelContext(db: Firestore, auth: () => Auth, witness: WorkerWit
       stateVersion: original.stateVersion,
       parent: witness,
       protocol: 'restored-normal-media-kernel-v1',
+      actorUid: original.actorUid,
       recoveryOperationId: original.plan.recoveryOperationId,
       capsuleSHA256: original.plan.origin.capsuleSHA256,
     },
