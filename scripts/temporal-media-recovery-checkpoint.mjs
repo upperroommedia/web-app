@@ -1,3 +1,4 @@
+import {assertStoredMediaDiagnosticDrain,assertFreshMediaDiagnosticDrain} from './temporal-media-diagnostic-drain.mjs';
 import { assertNativeSnapshot, nativeSnapshotProof, proofDigest as hash } from './temporal-release-runtime.mjs';
 const fail = () => {
   throw new Error('MEDIA_RECOVERY_CHECKPOINT_UNCONFIRMED');
@@ -165,6 +166,17 @@ export async function saveMediaRecoveryCheckpoint(o) {
         )
           fail();
       }
+      let drainRef,drainRecord,createDrain=false;
+      if(next.drained){
+        const p=next.drained;
+        if(Object.keys(p).sort().join(',')!=='bindingDigest,buildId,image,kind,observation,operationId,proofSHA256'||p.kind!=='drained'||p.operationId!==o.operationId||p.bindingDigest!==o.bindingDigest||p.buildId!==next.plan.buildId||p.image!==next.plan.image||p.proofSHA256!==hash(p.observation))fail();
+        assertStoredMediaDiagnosticDrain(p.observation,next.plan,next.start?.pool);
+        drainRef=o.firestore.doc(`_control/temporalMediaRecoveryDrain-${o.operationId}`);
+        const existing=await tx.get(drainRef);
+        drainRecord={schemaVersion:1,operationId:o.operationId,releaseId:o.config.releaseId,bindingDigest:o.bindingDigest,planSHA256:hash(next.plan),proof:p};
+        if(before?.drained){if(!existing.exists||hash(existing.data())!==hash(drainRecord))fail();}
+        else{if(existing.exists||next.stage!=='drained')fail();assertFreshMediaDiagnosticDrain(p.observation,next.plan,next.start.pool);createDrain=true;}
+      }
       const receipt = next.stage === 'completed' ? await tx.get(o.immutableReceipt) : undefined;
       const neverStarted =
         next.neverStarted &&
@@ -197,6 +209,7 @@ export async function saveMediaRecoveryCheckpoint(o) {
         operatorPrincipal: o.operatorPrincipal,
       };
       if (receipt?.exists && hash(receipt.data()) !== hash(record)) fail();
+      if(createDrain){assertFreshMediaDiagnosticDrain(next.drained.observation,next.plan,next.start.pool);tx.create(drainRef,drainRecord);}
       tx.update(o.lockRef, { cloudMediaRecovery: next });
       if (receipt && !receipt.exists) tx.create(o.immutableReceipt, record);
     },

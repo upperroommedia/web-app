@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { randomUUID } from 'node:crypto';
 import { mediaRecoveryFixture } from '../tests/fixtures/media-recovery.mjs';
+import { readRestoredMediaRecoveryOrigin } from '../temporal-media-restored-origin.mjs';
 import { runMediaRecoveryCycle } from '../temporal-media-recovery-cycle.mjs';
 import {
   saveMediaRecoveryCheckpoint,
@@ -26,6 +27,7 @@ for (const mode of [
   'never-started-checkpoint-ack-loss',
   'never-started-restore-ack-loss',
   'recovery-ack-loss',
+  'drain-ack-loss',
   'start-checkpoint-ack-loss',
 ])
   test(`native recovery checkpoint / ${mode}`, async () => {
@@ -40,7 +42,8 @@ for (const mode of [
       expectedAuthority,
       once = true,
       denyQuota = false,
-      recoveryCalls = 0;
+      recoveryCalls = 0,
+      drainCalls = 0;
     const config = { releaseId: f.options.releaseId },
       base = {
         firestore: db,
@@ -61,6 +64,7 @@ for (const mode of [
           releaseId: config.releaseId,
           bindingDigest: f.options.bindingDigest,
           action: 'diagnose-cloud-run-media-recovery',
+          operatorPrincipal: base.operatorPrincipal,
         })
       );
       await bounded(
@@ -86,6 +90,11 @@ for (const mode of [
         const result = await bounded(prepareMediaRecoveryJournal({ ...options(), plan }));
         ownedOperation = result.ownedOperation;
         return result.prepared;
+      };
+      const drain = f.options.runtime.drain;
+      f.options.runtime.drain = async (args) => {
+        drainCalls++;
+        return drain(args);
       };
       const execute = f.options.runtime.execute;
       f.options.runtime.execute = async (args) => {
@@ -120,6 +129,10 @@ for (const mode of [
           if (mode === 'start-checkpoint-ack-loss') throw new Error('CONTROLLED_CHECKPOINT_ACK_LOST');
           await bounded((mode === 'control-drift' ? controlRef : stateRef).update({ controlledDrift: true }));
         }
+        if (once && mode === 'drain-ack-loss' && identityState.drained) {
+          once = false;
+          throw new Error('CONTROLLED_CHECKPOINT_ACK_LOST');
+        }
         if (once && mode === 'recovery-ack-loss' && identityState.recovery) {
           once = false;
           throw new Error('CONTROLLED_CHECKPOINT_ACK_LOST');
@@ -150,13 +163,21 @@ for (const mode of [
           f.calls.map((v) => v.key),
           ['diagnostic', 'restore']
         );
-      } else if (mode === 'recovery-ack-loss') {
+      } else if (mode === 'recovery-ack-loss' || mode === 'drain-ack-loss') {
         await assert.rejects(bounded(runMediaRecoveryCycle(f.options)));
         const saved = (await bounded(lockRef.get())).get('cloudMediaRecovery');
-        assert.equal(saved.stage, 'recovered');
+        assert.equal(saved.stage, mode === 'drain-ack-loss' ? 'drained' : 'recovered');
+        if (mode === 'drain-ack-loss')
+          assert.equal(
+            (await bounded(db.doc(`_control/temporalMediaRecoveryDrain-${f.options.operationId}`).get())).get(
+              'proof.proofSHA256'
+            ),
+            saved.drained.proofSHA256
+          );
         assert.equal(recoveryCalls, 1);
         await bounded(runMediaRecoveryCycle({ ...f.options, saved }));
         assert.equal(recoveryCalls, 1);
+        if (mode === 'drain-ack-loss') assert.equal(drainCalls, 1);
         assert.deepEqual(
           f.calls.map((v) => v.key),
           ['diagnostic', 'start', 'stop', 'restore']
@@ -189,11 +210,71 @@ for (const mode of [
           }
         }
       }
+      if (mode === 'normal') {
+        const originOptions = {
+          ...f.options,
+          ...options(),
+          releaseId: config.releaseId,
+          role: 'media',
+          saved: undefined,
+        };
+        const origin = await bounded(readRestoredMediaRecoveryOrigin(originOptions), 35000);
+        assert.equal(origin.kind, 'restored-media-normal-origin-v1');
+        assert.notEqual(origin.pool.revision, f.saved.plan.origin.revision);
+        assert.equal(origin.pool.desiredManualInstanceCount, 0);
+        const api = f.options.api;
+        let sampled = false,
+          drifted = false;
+        const driftAPI = async (...args) => {
+          const result = await api(...args);
+          if (args[0] === `https://run.googleapis.com/v2/${f.saved.plan.name}`) sampled = true;
+          else if (sampled && !drifted) {
+            drifted = true;
+            f.f.pool.etag = 'CONTROLLED-late-origin-drift';
+          }
+          return result;
+        };
+        await assert.rejects(
+          bounded(readRestoredMediaRecoveryOrigin({ ...originOptions, api: driftAPI }), 35000),
+          /RESTORED_MEDIA_ORIGIN_UNCONFIRMED/
+        );
+        f.f.pool.etag = f.saved.restore.pool.etag;
+        let txCount = 0,
+          normalReads = 0;
+        const delayedDB = new Proxy(db, {
+          get(t, k) {
+            if (k === 'runTransaction')
+              return async (...args) => {
+                const value = await t.runTransaction(...args);
+                if (++txCount === 2) await new Promise((r) => setTimeout(r, 4850));
+                return value;
+              };
+            const v = Reflect.get(t, k);
+            return typeof v === 'function' ? v.bind(t) : v;
+          },
+        });
+        const delayedAPI = async (...args) => {
+          const value = await api(...args);
+          if (args[0] === `https://run.googleapis.com/v2/${f.saved.plan.name}`) normalReads++;
+          if (normalReads >= 2 && args[0].includes('/revisions/')) await new Promise((r) => setTimeout(r, 350));
+          return value;
+        };
+        await assert.rejects(
+          bounded(readRestoredMediaRecoveryOrigin({ ...originOptions, firestore: delayedDB, api: delayedAPI }), 35000),
+          /RESTORED_MEDIA_ORIGIN_UNCONFIRMED/
+        );
+        await bounded(db.doc(`_control/temporalMediaRecoveryDrain-${f.options.operationId}`).delete());
+        await assert.rejects(
+          bounded(readRestoredMediaRecoveryOrigin(originOptions), 35000),
+          /RESTORED_MEDIA_ORIGIN_UNCONFIRMED/
+        );
+      }
     } finally {
       const failures = [];
       for (const cleanup of [
         ...[
           db.doc(`_control/temporalMediaRecoveryJournal-${f.options.operationId}`),
+          db.doc(`_control/temporalMediaRecoveryDrain-${f.options.operationId}`),
           immutableReceipt,
           lockRef,
           controlRef,

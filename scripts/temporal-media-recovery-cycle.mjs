@@ -1,3 +1,4 @@
+import {assertStoredMediaDiagnosticDrain} from './temporal-media-diagnostic-drain.mjs';
 import { isDeepStrictEqual as equal } from 'node:util';
 import { proofDigest as hash } from './temporal-release-runtime.mjs';
 import { readMediaRecoveryAncestorAccess, readMediaRecoveryNormalOrigin } from './temporal-bootstrap-pool.mjs';
@@ -27,7 +28,7 @@ const contract = Object.freeze({
   workflowType: 'MediaRecoveryProbe',
   protocol: 'owned-media-recovery-v1',
 });
-function diagnosticTemplate(normal, operationId) {
+export function diagnosticTemplate(normal, operationId) {
   const t = structuredClone(normal),
     env = t.containers?.[0]?.env;
   if (!Array.isArray(env)) fail();
@@ -51,7 +52,7 @@ function diagnosticTemplate(normal, operationId) {
 function proof(value, plan, kind) {
   if (
     !value ||
-    Object.keys(value).sort().join(',') !== 'bindingDigest,buildId,image,kind,operationId,proofSHA256' ||
+    Object.keys(value).sort().join(',') !== (kind==='drained'?'bindingDigest,buildId,image,kind,observation,operationId,proofSHA256':'bindingDigest,buildId,image,kind,operationId,proofSHA256') ||
     value.operationId !== plan.operationId ||
     value.bindingDigest !== plan.bindingDigest ||
     value.buildId !== plan.buildId ||
@@ -60,6 +61,7 @@ function proof(value, plan, kind) {
     !sha(value.proofSHA256)
   )
     fail();
+  if(kind==='drained'&&value.proofSHA256!==hash(value.observation))fail();
   return value;
 }
 /** One source-fixed cycle, never a normal bootstrap mode or promotion receipt.
@@ -393,6 +395,7 @@ export async function runMediaRecoveryCycle(o) {
     await put({ ...state, stage: 'drained', drained });
   }
   proof(state.drained, plan, 'drained');
+  assertStoredMediaDiagnosticDrain(state.drained.observation,plan,started);
   const zero = await transition('stop', started, plan.diagnosticTemplate, 0);
   if (!state.stopped) {
     const stopped = proof(await runtime.confirmStopped({ plan, pool: zero, drained: state.drained }), plan, 'stopped');

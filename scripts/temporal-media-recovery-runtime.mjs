@@ -1,10 +1,10 @@
-import {startCloudRunMediaRecovery,collectCloudRunMediaRecovery} from './temporal-release-cloud-run.mjs';
+import {startCloudRunMediaRecovery,collectCloudRunMediaRecovery,drainCloudRunMediaRecovery} from './temporal-release-cloud-run.mjs';
 import { prepareMediaRecoveryJournal } from './temporal-media-recovery-checkpoint.mjs';
-/** Canonical boundary, deliberately unavailable until the real image protocol,
- * fixed diagnostic queues, native original-run recovery and authoritative drain
- * are implemented. Local/controlled adapters cannot be selected by a CLI flag.
- * Deny BEFORE cycle checkpoint or native mutation, including preparation at zero.
- */
+/** Canonical preflight stays unavailable. Source preparation, episode and drain
+ * adapters are connected below; phase protection, stopped/no-start confirmations,
+ * explicit restored-origin normal activation and actual platform proof remain.
+ * Local/controlled adapters cannot be selected by a CLI flag. Deny BEFORE any
+ * cycle checkpoint or native mutation, including preparation at zero. */
 const unavailable = async () => {
   throw new Error('CLOUD_RUN_MEDIA_DIAGNOSTIC_RUNTIME_UNAVAILABLE');
 };
@@ -29,7 +29,7 @@ export function mediaRecoveryPreparation(o) {
 }
 
 /** Source execution joins the original START and historical same-image episode.
- * Canonical preflight remains denied pending native drain/restored-origin consumers. */
+ * Canonical preflight remains denied pending the remaining operational guards. */
 export function mediaRecoveryExecution(o){
  return async scope=>{
    const result=await startCloudRunMediaRecovery({...o.options(),...scope,onOwnedOperation:o.setOwnedOperation});
@@ -37,3 +37,6 @@ export function mediaRecoveryExecution(o){
    return collectCloudRunMediaRecovery({...o.options(),...scope,start:result.start});
  };
 }
+
+/** Separate immutable-checkpoint drain result; canonical preflight stays denied. */
+export const mediaRecoveryDrainage=o=>scope=>drainCloudRunMediaRecovery({...o.options(),...scope});

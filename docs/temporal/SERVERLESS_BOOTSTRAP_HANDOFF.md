@@ -857,3 +857,50 @@ Cloud Run instance recovery certificate. Canonical preflight and the media and
 orchestration gates remain denied until their separate consumers and required
 native evidence are connected. Controlled local image/capacity metadata is not
 immutable-image, 64 GiB allocation, effective-credential or Cloud Run acceptance.
+
+
+The diagnostic drain now has its own fixed native observer and immutable
+checkpoint contract. It enumerates every registered version of the private
+deployment, rejects current/ramping routing or compute associations, and checks
+all native partitions of both private queue types. It requires empty poller
+inventories and zero reported backlog for each version. It also scans the whole
+namespace for open/pending private work, retains protected old executions, and
+rejects uncertain dispatcher leases, critical sections, mutation locks and active
+or unknown provider sessions. Known committed/aborted session history is retained.
+Historical own execution heads are recognized only for the exact original run,
+acquire Activity, attempt2 and replacement witness. The source never edits them.
+
+The installed v1.32 server's DEFAULT queue describe aggregates loaded versions
+within one partition ([matching entrypoint](https://github.com/temporalio/temporal/blob/v1.32.0/service/matching/matching_engine.go#L1501),
+[all-version poller aggregation](https://github.com/temporalio/temporal/blob/v1.32.0/service/matching/task_queue_partition_manager.go#L1084)).
+The observer therefore enumerates and repeats the complete partition inventory;
+it does not infer every version's pollers from the default routing version or
+inspect only the root partition. Missing or ambiguous fields fail closed. A
+bounded GET-only wait retries only the native pollers-present condition. Elapsed
+time is never a substitute for an actual empty observation.
+
+Two complete scans, namespace compute absence and final original paused authority
+must agree within the original sample deadline. The resulting safe observation
+and parent drained checkpoint are created atomically with an immutable private
+drain journal. Lost acknowledgements retain that exact proof on resume; the
+observer is not rerun to manufacture a new timestamp. Cleanup itself does not
+expire or require another quota read.
+
+After the immutable completed cycle is read back, the canonical controller now
+requires a separate `restored-media-normal-origin-v1` consumer. It rederives the
+original twelve ancestors without altering them, joins the successful recovery,
+private drain and completed stop, verifies all four acknowledged native transition
+operations and generation increments, and reads the old/diagnostic/restored
+revision identities and templates. It finally rereads the exact normal-zero
+pool and restored revision, preserving their sample time through the final
+native authority await. Desired0 is configuration evidence only.
+
+The returned origin is a new lineage type referencing the immutable cycle and
+drain. Failed or never-started restoration cannot satisfy it. It cannot replace
+an old zero-pool receipt or silently enter the ordinary activation/promotion
+helpers. A future fixed source action must explicitly accept the extra lineage.
+Canonical preflight remains denied: phase protection, stopped/no-start native
+confirmations, new-origin normal activation, media evidence consumption and
+actual immutable-image/Cloud Run/platform proof are still required. None of
+these source tests establish operational staging readiness or platform-instance
+replacement.

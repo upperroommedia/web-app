@@ -93,7 +93,22 @@ export async function mediaRecoveryFixture() {
     assertSupported: async () => {},
     prepare: async ({ plan }) => p(plan, 'prepared'),
     execute: async ({ plan }) => p(plan, 'recovery'),
-    drain: async ({ plan }) => p(plan, 'drained'),
+    drain: async ({ plan, pool }) => {
+      const observation = {
+        schemaVersion: 1,
+        operationId: plan.operationId,
+        planSHA256: hash(plan),
+        poolSHA256: hash(pool),
+        namespace: 'urm-app-staging.qwejt',
+        observedAt: new Date().toISOString(),
+        closureSHA256: 'a'.repeat(64),
+        protectionSHA256: 'b'.repeat(64),
+        computeInventorySHA256: 'c'.repeat(64),
+        versionCount: 1,
+        partitionCount: 2,
+      };
+      return { ...p(plan, 'drained'), proofSHA256: hash(observation), observation };
+    },
     confirmStopped: async ({ plan }) => p(plan, 'stopped'),
     confirmNeverStarted: async ({ plan }) => p(plan, 'never-started'),
   };

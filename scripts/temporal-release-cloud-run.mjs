@@ -1,3 +1,4 @@
+import {waitForMediaDiagnosticDrain,assertFreshMediaDiagnosticDrain} from './temporal-media-diagnostic-drain.mjs';
 import {assertMediaRecoveryAuthority} from './temporal-media-recovery-checkpoint.mjs';
 import {proofDigest as recoveryHash} from './temporal-release-runtime.mjs';
 import {startMediaRecoveryWorkflow,observeMediaRecoveryStartedPool} from './temporal-media-recovery-start.mjs';
@@ -397,4 +398,18 @@ export const collectCloudRunMediaRecovery=o=>withNativeCloudRunClient(o,async(cl
   return {kind:'recovery',operationId:o.operationId,bindingDigest:o.bindingDigest,buildId:o.plan.buildId,image:o.plan.image,
    proofSHA256:recoveryHash({evidence:first.evidenceSHA256,image:image.imageProof,replay})};
  }catch{throw new Error('MEDIA_RECOVERY_COLLECTION_UNCONFIRMED');}
+});
+
+/** Read-only namespace/partition drain. Native poller caches may outlive close;
+ * only fresh empty native observations permit the immutable drain checkpoint. */
+export const drainCloudRunMediaRecovery=o=>withNativeCloudRunClient(o,async client=>{
+ try{
+  await observeMediaRecoveryStartedPool(o,o.plan,o.pool);
+  const observation=await waitForMediaDiagnosticDrain({...o,client});
+  const pool=await observeMediaRecoveryStartedPool(o,o.plan,o.pool);
+  await assertMediaRecoveryAuthority(o);
+  if(Date.now()>=pool.deadline||performance.now()-pool.sampledMonotonic>=5000)throw Error();
+  assertFreshMediaDiagnosticDrain(observation,o.plan,o.pool);
+  return {kind:'drained',operationId:o.operationId,bindingDigest:o.bindingDigest,buildId:o.plan.buildId,image:o.plan.image,proofSHA256:recoveryHash(observation),observation};
+ }catch{throw new Error('MEDIA_DIAGNOSTIC_DRAIN_UNCONFIRMED');}
 });
