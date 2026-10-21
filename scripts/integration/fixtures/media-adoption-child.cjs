@@ -132,6 +132,16 @@ process.once('message', async (message) => {
           }),
         });
         await host.settle(request.ref, { kind: 'source', artifact }, async () => undefined);
+        // CONTROLLED remote parent kernel/death, never actual host process proof.
+        await require('../../../apps/process-audio/src/temporal/hetzner-acquisition-store.ts').closeYouTubeAcquisitionNativeProcess(
+          {
+            firestore: db,
+            ref: request.ref,
+            owner: (await db.doc(`temporalYouTubeAcquisitions/${request.operationId}`).get()).get('owner'),
+            startedAt: (await db.doc(`temporalYouTubeAcquisitions/${request.operationId}`).get()).get('startedAt'),
+            fact: { processId: process.pid, exitCode: 0, exitSignal: null, outcome: 'completed', closedAt: Date.now() },
+          }
+        );
         if (process.env.URM_MEDIA_REMOTE_CASE === 'remote-revoked')
           await getAuth(app).setCustomUserClaims(request.ref.jobId, { role: 'guest' });
         if (process.env.URM_MEDIA_REMOTE_CASE === 'remote-owner-changed')

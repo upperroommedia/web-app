@@ -132,3 +132,70 @@ test('cancellation during durable authorization cannot later send execution IPC'
   ).resolves.toBe('cancelled');
   await expect(access(join(directory, 'late-start'))).rejects.toMatchObject({ code: 'ENOENT' });
 });
+
+test('original live handle publishes parent closure only after CLOSE and positive group absence', async () => {
+  const helperPath = await helper(`process.once('message',()=>process.exit(0));`);
+  let originalPid: number | undefined;
+  const onNativeClose = jest.fn(async (fact) => {
+    expect(fact.processId).toBe(originalPid);
+    expect(fact).toMatchObject({ exitCode: 0, exitSignal: null, outcome: 'completed' });
+    expect(Number.isSafeInteger(fact.closedAt)).toBe(true);
+    expect(() => process.kill(-fact.processId, 0)).toThrow(expect.objectContaining({ code: 'ESRCH' }));
+    expect(Object.isFrozen(fact)).toBe(true);
+  });
+  await expect(
+    runYouTubeAcquisitionProcess({
+      helperPath,
+      directory,
+      ref,
+      signal: new AbortController().signal,
+      authorize: async (pid) => {
+        originalPid = pid;
+        return true;
+      },
+      onNativeClose,
+    })
+  ).resolves.toBe('completed');
+  expect(onNativeClose).toHaveBeenCalledTimes(1);
+});
+test('unknown parent CLOSE acknowledgement rejects settled process instead of allowing reservation release', async () => {
+  const helperPath = await helper(`process.once('message',()=>process.exit(0));`);
+  const onNativeClose = jest.fn(async () => {
+    throw Error('CONTROLLED_CLOSE_ACK_UNKNOWN');
+  });
+  await expect(
+    runYouTubeAcquisitionProcess({
+      helperPath,
+      directory,
+      ref,
+      signal: new AbortController().signal,
+      authorize: async () => true,
+      onNativeClose,
+    })
+  ).rejects.toThrow('CONTROLLED_CLOSE_ACK_UNKNOWN');
+  expect(onNativeClose).toHaveBeenCalledTimes(1);
+});
+
+test('abort while parent closure ACK is pending cannot signal the already-closed numeric process group', async () => {
+  const helperPath = await helper(`process.once('message',()=>process.exit(0));`);
+  const controller = new AbortController();
+  await expect(
+    runYouTubeAcquisitionProcess({
+      helperPath,
+      directory,
+      ref,
+      signal: controller.signal,
+      authorize: async () => true,
+      onNativeClose: async () => {
+        const kill = jest.spyOn(process, 'kill');
+        try {
+          controller.abort();
+          await pause(30);
+          expect(kill).not.toHaveBeenCalled();
+        } finally {
+          kill.mockRestore();
+        }
+      },
+    })
+  ).resolves.toBe('completed');
+});

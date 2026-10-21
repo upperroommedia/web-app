@@ -1,3 +1,5 @@
+import { isDeepStrictEqual } from 'node:util';
+import type { YouTubeNativeClose } from './hetzner-acquisition-process';
 import { writeMediaUploadIntent } from '@upperroom/orchestration/media-artifacts';
 import { createHash } from 'node:crypto';
 import { FieldValue, type Firestore, type Transaction } from 'firebase-admin/firestore';
@@ -29,6 +31,7 @@ interface Operation {
   createdAt: number;
   startedAt?: number;
   drainedAt?: number;
+  nativeClose?: NativeCloseReceipt;
 }
 const fail = (): never => {
   throw new Error('YOUTUBE_ACQUISITION_OWNERSHIP');
@@ -77,6 +80,35 @@ function host(value: AcquisitionHostProcess): AcquisitionHostProcess {
     buildId: value.buildId,
   };
 }
+interface NativeCloseReceipt extends YouTubeNativeClose {
+  schemaVersion: 1;
+  operationId: string;
+  owner: AcquisitionHostProcess;
+  startedAt: number;
+  groupAbsent: true;
+}
+function nativeClose(value: NativeCloseReceipt, current: Operation): NativeCloseReceipt {
+  if (
+    !value ||
+    Object.keys(value).sort().join(',') !==
+      'closedAt,exitCode,exitSignal,groupAbsent,operationId,outcome,owner,processId,schemaVersion,startedAt' ||
+    value.schemaVersion !== 1 ||
+    value.operationId !== current.operationId ||
+    value.groupAbsent !== true ||
+    fingerprint(host(value.owner)) !== fingerprint(host(current.owner!)) ||
+    value.processId !== current.owner!.processId ||
+    value.startedAt !== current.startedAt ||
+    !Number.isSafeInteger(value.closedAt) ||
+    value.closedAt < value.startedAt ||
+    (value.exitCode !== null && (!Number.isInteger(value.exitCode) || value.exitCode < 0 || value.exitCode > 255)) ||
+    (value.exitSignal !== null && !/^SIG[A-Z0-9]+$/.test(value.exitSignal)) ||
+    !['completed', 'cancelled', 'failed'].includes(value.outcome) ||
+    (value.outcome === 'completed' && (value.exitCode !== 0 || value.exitSignal !== null))
+  )
+    return fail();
+  return value;
+}
+
 function operation(raw: unknown, ref: MediaJobRef): Operation {
   const value = raw as Operation | undefined;
   if (
@@ -135,6 +167,7 @@ function operation(raw: unknown, ref: MediaJobRef): Operation {
       } else if (Object.keys(value.result).join(',') !== 'kind') return fail();
     }
   }
+  if (value.nativeClose !== undefined) nativeClose(value.nativeClose, value);
   return value;
 }
 
@@ -146,7 +179,8 @@ export function validateYouTubeAcquisitionSourceReceipt(
   source: unknown
 ): AcquisitionHostProcess {
   const value = operation(raw, ref);
-  if (value.status !== 'source' || value.result?.kind !== 'source') return fail();
+  if (value.status !== 'source' || value.result?.kind !== 'source' || value.nativeClose?.outcome !== 'completed')
+    return fail();
   const actual = validateAcquiredYouTubeSource(ref, value.result.artifact),
     expected = validateAcquiredYouTubeSource(ref, source);
   if (Object.keys(actual).some((key) => actual[key as keyof typeof actual] !== expected[key as keyof typeof expected]))
@@ -223,7 +257,7 @@ export function createYouTubeAcquisitionHostStore(options: {
         await options.assertEligible(tx, ref);
       });
     },
-    async claim(ref: MediaJobRef, verifiedCallerEmail: string): Promise<{ launch: boolean }> {
+    async claim(ref: MediaJobRef, verifiedCallerEmail: string, startedAt = Date.now()): Promise<{ launch: boolean }> {
       ref = Object.freeze({ ...ref });
       const doc = target(ref);
       return options.firestore.runTransaction(async (tx) => {
@@ -233,7 +267,8 @@ export function createYouTubeAcquisitionHostStore(options: {
         await options.assertEligible(tx, ref);
         if (current.preparedBy.serviceAccount !== verifiedCallerEmail) return fail();
         if (current.status !== 'prepared') return { launch: false };
-        tx.update(doc, { status: 'running', owner, startedAt: Date.now() });
+        if (!Number.isSafeInteger(startedAt) || startedAt < current.createdAt || startedAt > Date.now()) return fail();
+        tx.update(doc, { status: 'running', owner, startedAt });
         return { launch: true };
       });
     },
@@ -430,4 +465,107 @@ export function createYouTubeAcquisitionHostStore(options: {
  * Readback may inspect a settled owner; only claim() can authorize the inert child. */
 export function readYouTubeAcquisitionOperation(raw: unknown, ref: MediaJobRef) {
   return operation(raw, ref);
+}
+
+/** Parent-only cleanup writer. The canonical driver calls this from the original
+ * live ChildProcess CLOSE/group-absence callback, never from HTTP or saved PIDs.
+ * Immutable close and parent link commit together. After any unknown commit ACK
+ * only exact GET reconciliation is permitted; no mutation retry or retiming.
+ */
+export async function closeYouTubeAcquisitionNativeProcess(o: {
+  firestore: Firestore;
+  ref: MediaJobRef;
+  owner: Readonly<AcquisitionHostProcess>;
+  startedAt: number;
+  fact: Readonly<YouTubeNativeClose>;
+}): Promise<void> {
+  assertStagingAcquisitionDatabase(o.firestore);
+  const ref = Object.freeze({ ...o.ref }),
+    owner = host(o.owner);
+  const originalStartedAt = o.startedAt;
+  const parent = o.firestore.collection(YOUTUBE_ACQUISITIONS).doc(youtubeAcquisitionId(ref));
+  const close = parent.collection('nativeClose').doc('original');
+  const fact = Object.freeze({ ...o.fact });
+  let expected: NativeCloseReceipt | undefined;
+  const wall = Date.now(),
+    mono = performance.now();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const fresh = () => {
+    if (Date.now() < wall || Date.now() - wall >= 5000 || performance.now() - mono >= 5000) return fail();
+  };
+  const same = (value: unknown) => isDeepStrictEqual(value, expected);
+  const work = async () => {
+    try {
+      await o.firestore.runTransaction(
+        async (tx) => {
+          const [snapshot, existing] = await Promise.all([tx.get(parent), tx.get(close)]);
+          fresh();
+          const current = operation(snapshot.data(), ref);
+          if (fingerprint(host(current.owner!)) !== fingerprint(owner) || current.startedAt !== originalStartedAt)
+            return fail();
+          const candidate = nativeClose(
+            {
+              ...fact,
+              schemaVersion: 1,
+              operationId: current.operationId,
+              owner,
+              startedAt: originalStartedAt,
+              groupAbsent: true,
+            },
+            current
+          );
+          if (expected && fingerprint(expected) !== fingerprint(candidate)) return fail();
+          expected = candidate;
+          if (existing.exists || current.nativeClose) {
+            if (
+              !existing.exists ||
+              !same(existing.data()) ||
+              !same(current.nativeClose) ||
+              !existing.createTime?.isEqual(existing.updateTime!)
+            )
+              return fail();
+            return;
+          }
+          tx.create(close, candidate);
+          tx.update(parent, { nativeClose: candidate });
+        },
+        { maxAttempts: 1 }
+      );
+      fresh();
+    } catch {
+      fresh();
+      if (!expected) return fail();
+      // GET-only, including permission/failure ambiguity; no saved owner becomes
+      // signalling or retry authority. No current actor/quota/expiry renewal.
+      const [snapshot, saved] = await Promise.all([parent.get(), close.get()]);
+      fresh();
+      const current = operation(snapshot.data(), ref);
+      if (
+        !same(current.nativeClose) ||
+        !saved.exists ||
+        !same(saved.data()) ||
+        !saved.createTime?.isEqual(saved.updateTime!)
+      )
+        return fail();
+    }
+  };
+  try {
+    await Promise.race([
+      work(),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('YOUTUBE_NATIVE_CLOSE_UNCONFIRMED')), 5000);
+      }),
+    ]);
+    fresh();
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/** Independently join the immutable parent-written CLOSE child to its atomic
+ * operation link; embedded helper settlement alone is never a drain proof. */
+export function validateYouTubeAcquisitionNativeClose(raw: unknown, ref: MediaJobRef, saved: unknown): void {
+  const current = operation(raw, ref);
+  if (!current.nativeClose || !isDeepStrictEqual(current.nativeClose, saved)) return fail();
+  nativeClose(current.nativeClose, current);
 }

@@ -4,6 +4,14 @@ import { isAbsolute } from 'node:path';
 import type { MediaJobRef } from './types';
 import { youtubeAcquisitionId } from './hetzner-acquisition';
 
+export interface YouTubeNativeClose {
+  processId: number;
+  exitCode: number | null;
+  exitSignal: NodeJS.Signals | null;
+  outcome: 'completed' | 'cancelled' | 'failed';
+  closedAt: number;
+}
+
 const failure = () => new Error('YOUTUBE_ACQUISITION_PROCESS');
 function groupAlive(pid: number): boolean {
   try {
@@ -55,6 +63,9 @@ export async function runYouTubeAcquisitionProcess(options: {
    * honor the supplied cancellation budget and never accept an HTTP boolean.
    */
   authorize: (processId: number, signal: AbortSignal) => Promise<boolean>;
+  /** Called only from the original live handle after CLOSE and positive group
+   * absence. A rejected/unknown durable ACK must retain the physical reservation. */
+  onNativeClose?: (fact: Readonly<YouTubeNativeClose>) => Promise<void>;
 }): Promise<'completed' | 'cancelled' | 'failed'> {
   const ref = Object.freeze({ ...options.ref });
   youtubeAcquisitionId(ref);
@@ -71,19 +82,25 @@ export async function runYouTubeAcquisitionProcess(options: {
     serialization: 'json',
   });
   let exitCode: number | null = null;
+  let exitSignal: NodeJS.Signals | null = null;
+  let closedAt: number | undefined;
   let spawnFailed = false;
   let stopped: 'cancelled' | 'failed' | undefined;
   let drain: Promise<void> | undefined;
+  let nativeSettled = false;
   const closed = new Promise<void>((resolve) => {
     child.once('error', () => {
       spawnFailed = true;
     });
-    child.once('close', (code) => {
+    child.once('close', (code, signal) => {
       exitCode = code;
+      exitSignal = signal;
+      closedAt = Date.now();
       resolve();
     });
   });
   const stop = (reason: 'cancelled' | 'failed') => {
+    if (nativeSettled) return;
     stopped ??= reason;
     // Retain the actual drain promise; do not claim cancellation from a signal
     // send alone. Attach a handler immediately to avoid an unhandled rejection.
@@ -131,8 +148,17 @@ export async function runYouTubeAcquisitionProcess(options: {
     // Even exit0 is invalid if descendants retained the group after helper exit.
     const leaked = child.pid !== undefined && groupAlive(child.pid);
     if (leaked) await drainGroup(child, closed);
-    if (stopped) return stopped;
-    return spawnFailed || leaked || exitCode !== 0 ? 'failed' : 'completed';
+    const outcome = stopped ?? (spawnFailed || leaked || exitCode !== 0 ? 'failed' : 'completed');
+    // Native signalling authority ends with this live handle's confirmed drain,
+    // before any durable write/unknown ACK. Never signal a saved numeric PGID.
+    nativeSettled = true;
+    clearTimeout(deadline);
+    options.signal.removeEventListener('abort', abort);
+    if (options.onNativeClose) {
+      if (!child.pid || closedAt === undefined || groupAlive(child.pid)) throw failure();
+      await options.onNativeClose(Object.freeze({ processId: child.pid, exitCode, exitSignal, outcome, closedAt }));
+    }
+    return outcome;
   } finally {
     clearTimeout(deadline);
     options.signal.removeEventListener('abort', abort);

@@ -8,6 +8,7 @@ import { OAuth2Client } from 'google-auth-library';
 import { createHetznerAcquisitionRouter } from '../../../apps/process-audio/src/temporal/hetzner-acquisition-http';
 import {
   createYouTubeAcquisitionHostStore,
+  closeYouTubeAcquisitionNativeProcess,
   prepareYouTubeAcquisition,
   YOUTUBE_ACQUISITIONS,
 } from '../../../apps/process-audio/src/temporal/hetzner-acquisition-store';
@@ -213,7 +214,7 @@ test.each(['cancel_requested', 'cancelled', 'succeeded', 'superseded'])(
   }
 );
 
-async function settleSyntheticSource() {
+async function settleSyntheticSource(close = true) {
   const host = createYouTubeAcquisitionHostStore({
     firestore: db,
     projectId: ref.projectId,
@@ -240,7 +241,26 @@ async function settleSyntheticSource() {
     }),
   });
   await host.settle(ref, { kind: 'source', artifact }, async () => undefined);
+  if (close) await closeSyntheticParent();
   return artifact;
+}
+async function closeSyntheticParent(outcome: 'completed' | 'failed' = 'completed') {
+  // CONTROLLED parent death evidence; native persistence/HTTP consumers are real.
+  const original = await db.doc(`${YOUTUBE_ACQUISITIONS}/${youtubeAcquisitionId(ref)}`).get();
+  const owner = original.get('owner');
+  await closeYouTubeAcquisitionNativeProcess({
+    firestore: db,
+    ref,
+    owner,
+    startedAt: original.get('startedAt'),
+    fact: {
+      processId: owner.processId,
+      exitCode: outcome === 'completed' ? 0 : 1,
+      exitSignal: null,
+      outcome,
+      closedAt: Date.now(),
+    },
+  });
 }
 test('actual native settled-source metadata is returned only while canonical authority remains ready', async () => {
   const artifact = await settleSyntheticSource();
@@ -307,4 +327,81 @@ test('canonical inert-child claim denies late actual actor read without committi
     late.mockRestore();
     inspect.mockRestore();
   }
+});
+
+test('helper source settlement alone remains running until original parent CLOSE is atomically confirmed', async () => {
+  const artifact = await settleSyntheticSource(false);
+  try {
+    expect(await call()).toEqual({ status: 200, body: { status: 'running', operationId: youtubeAcquisitionId(ref) } });
+    await closeSyntheticParent();
+    expect((await call()).body.status).toBe('ready');
+    const parent = db.doc(`${YOUTUBE_ACQUISITIONS}/${youtubeAcquisitionId(ref)}`);
+    const saved = parent.collection('nativeClose').doc('original');
+    const prior = await saved.get();
+    await saved.update({ closedAt: prior.get('closedAt') + 1 });
+    await saved.update({ closedAt: prior.get('closedAt') });
+    expect((await call()).status).toBe(503);
+  } finally {
+    await getStorage(app).bucket().file(artifact.path).delete({ ignoreNotFound: true });
+  }
+});
+test('nonzero helper termination never converts an existing uploaded source into adoption authority', async () => {
+  const artifact = await settleSyntheticSource(false);
+  try {
+    await closeSyntheticParent('failed');
+    expect((await call()).status).toBe(503);
+  } finally {
+    await getStorage(app).bucket().file(artifact.path).delete({ ignoreNotFound: true });
+  }
+});
+test('committed parent CLOSE ACK loss reconciles GET-only without rewriting original death facts', async () => {
+  const artifact = await settleSyntheticSource(false);
+  const run = db.runTransaction.bind(db);
+  let writes = 0;
+  const spy = jest.spyOn(db, 'runTransaction').mockImplementation((async (
+    ...args: Parameters<typeof db.runTransaction>
+  ) => {
+    writes++;
+    await run(...args);
+    throw Error('CONTROLLED_CLOSE_ACK_LOSS');
+  }) as typeof db.runTransaction);
+  try {
+    await closeSyntheticParent();
+    expect(writes).toBe(1);
+    spy.mockRestore();
+    expect((await call()).body.status).toBe('ready');
+  } finally {
+    spy.mockRestore();
+    await getStorage(app).bucket().file(artifact.path).delete({ ignoreNotFound: true });
+  }
+});
+
+test('parent close refuses a changed original claim timestamp without writing any death record', async () => {
+  const host = createYouTubeAcquisitionHostStore({
+    firestore: db,
+    projectId: ref.projectId,
+    owner: {
+      bootId: randomUUID(),
+      pidNamespace: 'pid:[1234]',
+      processId: 7,
+      startTicks: '100',
+      buildId: 'a'.repeat(40),
+    },
+    assertEligible: async () => undefined,
+  });
+  await host.claim(ref, email);
+  const parent = db.doc(`${YOUTUBE_ACQUISITIONS}/${youtubeAcquisitionId(ref)}`);
+  const original = await parent.get();
+  await parent.update({ startedAt: original.get('startedAt') + 1 });
+  await expect(
+    closeYouTubeAcquisitionNativeProcess({
+      firestore: db,
+      ref,
+      owner: original.get('owner'),
+      startedAt: original.get('startedAt'),
+      fact: { processId: 7, exitCode: 0, exitSignal: null, outcome: 'completed', closedAt: Date.now() + 1 },
+    })
+  ).rejects.toThrow('YOUTUBE_ACQUISITION_OWNERSHIP');
+  expect((await parent.collection('nativeClose').doc('original').get()).exists).toBe(false);
+  expect((await parent.get()).get('nativeClose')).toBeUndefined();
 });

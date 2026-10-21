@@ -9,6 +9,8 @@ import { readEligibleYouTubeAcquisition } from './hetzner-acquisition-policy';
 import {
   assertStagingAcquisitionDatabase,
   readYouTubeAcquisitionOperation,
+  validateYouTubeAcquisitionSourceReceipt,
+  validateYouTubeAcquisitionNativeClose,
   YOUTUBE_ACQUISITIONS,
 } from './hetzner-acquisition-store';
 import type { MediaJobRef } from './types';
@@ -90,6 +92,12 @@ export function createHetznerAcquisitionRouter(o: { firestore: Firestore; auth: 
             ref,
           });
           fresh();
+          if (record.nativeClose) {
+            const saved = await tx.get(target.collection('nativeClose').doc('original'));
+            fresh();
+            if (!saved.exists || !saved.createTime?.isEqual(saved.updateTime!)) throw unavailable();
+            validateYouTubeAcquisitionNativeClose(record, ref, saved.data());
+          }
           // A canonical stop/source is not a remote process-drain proof.
           if (eligibility.kind !== 'ready') throw unavailable();
           return record;
@@ -98,6 +106,10 @@ export function createHetznerAcquisitionRouter(o: { firestore: Firestore; auth: 
       fresh();
       if (current.status === 'source') {
         if (current.result?.kind !== 'source') throw unavailable();
+        // Helper settlement precedes helper exit; it is not parent CLOSE proof.
+        // Never expose an artifact until the original parent confirmed its drain.
+        if (!current.nativeClose) return { status: 'running', operationId };
+        validateYouTubeAcquisitionSourceReceipt(current, ref, current.result.artifact);
         const artifact = validateAcquiredYouTubeSource(ref, current.result.artifact);
         const [metadata] = await o.bucket.file(artifact.path).getMetadata();
         fresh();
@@ -118,7 +130,14 @@ export function createHetznerAcquisitionRouter(o: { firestore: Firestore; auth: 
       }
       await inspect();
       fresh();
-      return { status: current.status === 'prepared' ? 'missing' : current.status, operationId };
+      const status =
+        current.status === 'prepared'
+          ? 'missing'
+          : current.status === 'running' || !current.nativeClose
+          ? 'running'
+          : current.status;
+      if (current.nativeClose && current.nativeClose.outcome !== 'completed') throw unavailable();
+      return { status, operationId };
     };
     try {
       const result = await Promise.race([

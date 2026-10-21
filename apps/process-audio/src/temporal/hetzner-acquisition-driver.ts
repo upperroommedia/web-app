@@ -4,6 +4,7 @@ import type { Firestore } from 'firebase-admin/firestore';
 import type { MediaJobRef } from './types';
 import { youtubeAcquisitionId } from './hetzner-acquisition';
 import { runYouTubeAcquisitionProcess } from './hetzner-acquisition-process';
+import { closeYouTubeAcquisitionNativeProcess, type AcquisitionHostProcess } from './hetzner-acquisition-store';
 import { createNativeYouTubeAuthorization } from './hetzner-acquisition-authorization';
 
 interface SharedHostReservation {
@@ -46,7 +47,18 @@ export async function executeCanonicalYouTubeAcquisition(o: {
     await reservation.releaseUnused(); // No child was created; no fabricated drain fact.
     throw error;
   }
-  const authorize = createNativeYouTubeAuthorization({ ...o, ref, buildId });
+  let originalStartedAt: number | undefined;
+  let originalOwner: Readonly<AcquisitionHostProcess> | undefined;
+  const authorize = createNativeYouTubeAuthorization({
+    ...o,
+    ref,
+    buildId,
+    onInspected: (owner, startedAt) => {
+      if (originalOwner) throw new Error('YOUTUBE_SECOND_NATIVE_OWNER');
+      originalOwner = owner;
+      originalStartedAt = startedAt;
+    },
+  });
   // The returned result is possible only after the ORIGINAL child CLOSE and
   // positive owned group absence. Rejected/unknown drain never releases resources.
   await runYouTubeAcquisitionProcess({
@@ -54,6 +66,16 @@ export async function executeCanonicalYouTubeAcquisition(o: {
     directory: reservation.directory,
     ref,
     signal: reservation.signal,
+    onNativeClose: async (fact) => {
+      if (!originalOwner || originalStartedAt === undefined) throw new Error('YOUTUBE_NATIVE_OWNER_UNCONFIRMED');
+      await closeYouTubeAcquisitionNativeProcess({
+        firestore: o.firestore,
+        ref,
+        owner: originalOwner,
+        startedAt: originalStartedAt,
+        fact,
+      });
+    },
     authorize: async (pid, signal) => {
       o.startSignal.throwIfAborted();
       const allowed = await authorize(pid, AbortSignal.any([signal, o.startSignal]));

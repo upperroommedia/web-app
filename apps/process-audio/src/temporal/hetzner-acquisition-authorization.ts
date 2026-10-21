@@ -16,14 +16,18 @@ export function createNativeYouTubeAuthorization(options: {
   ref: MediaJobRef;
   buildId: string;
   verifiedCallerEmail: string;
+  /** Private parent observer; inspection alone grants no execution authority. */
+  onInspected?: (owner: Readonly<AcquisitionHostProcess>, startedAt: number) => void;
 }): (processId: number, signal: AbortSignal) => Promise<boolean> {
   const ref = Object.freeze({ ...options.ref });
   return async (processId, signal) => {
     signal.throwIfAborted();
     const owner = await inspectNativeYouTubeProcess(processId, options.buildId);
+    const startedAt = Date.now();
+    options.onInspected?.(Object.freeze({ ...owner }), startedAt);
     signal.throwIfAborted();
     const store = createCanonicalYouTubeHostStore({ firestore: options.firestore, auth: options.auth, owner, signal });
-    const result = await store.claim(ref, options.verifiedCallerEmail);
+    const result = await store.claim(ref, options.verifiedCallerEmail, startedAt);
     signal.throwIfAborted();
     return result.launch;
   };

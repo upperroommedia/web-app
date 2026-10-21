@@ -5,7 +5,11 @@ import type { Firestore, Transaction } from 'firebase-admin/firestore';
 import { ApplicationFailure } from '@temporalio/common';
 import { MEDIA_ARTIFACTS, mediaArtifactId, prepareMediaReference } from '@upperroom/orchestration/media-artifacts';
 import { validateAcquiredYouTubeSource, youtubeAcquisitionId, type AcquiredYouTubeSource } from './hetzner-acquisition';
-import { YOUTUBE_ACQUISITIONS, validateYouTubeAcquisitionSourceReceipt } from './hetzner-acquisition-store';
+import {
+  YOUTUBE_ACQUISITIONS,
+  validateYouTubeAcquisitionSourceReceipt,
+  validateYouTubeAcquisitionNativeClose,
+} from './hetzner-acquisition-store';
 import { downloadMediaStream } from './native';
 import type { MediaJobRef } from './types';
 const fail = (): never => {
@@ -65,12 +69,15 @@ export async function consumeAcquiredYouTubeSource(o: {
       const requestRef = o.db.doc(`temporalMediaRequests/${ref.jobId}`),
         hostRef = o.db.doc(`${YOUTUBE_ACQUISITIONS}/${operationId}`),
         assetRef = o.db.doc(`${MEDIA_ARTIFACTS}/${mediaArtifactId(ref.projectId, source.path)}`);
-      const [request, host, upload, asset] = await Promise.all([
+      const [request, host, upload, asset, close] = await Promise.all([
         tx.get(requestRef),
         tx.get(hostRef),
         tx.get(hostRef.collection('uploads').doc(attempt!)),
         tx.get(assetRef),
+        tx.get(hostRef.collection('nativeClose').doc('original')),
       ]);
+      if (!close.exists || !close.createTime?.isEqual(close.updateTime!)) fail();
+      validateYouTubeAcquisitionNativeClose(host.data(), ref, close.data());
       const owner = validateYouTubeAcquisitionSourceReceipt(host.data(), ref, source);
       await o.assertCurrent(tx, ref);
       o.signal.throwIfAborted();
