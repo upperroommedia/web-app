@@ -1,3 +1,5 @@
+import { pipeline, finished } from 'node:stream/promises';
+import type { Readable } from 'node:stream';
 import type { CancelToken } from './CancelToken';
 import os from 'os';
 import path from 'path';
@@ -336,57 +338,91 @@ function rewriteEmulatorUrl(url: string): string {
   return url;
 }
 
-export async function downloadFile(fileUrl: string, outputLocationPath: string): Promise<void> {
-  const writer = createWriteStream(outputLocationPath);
-  const rewrittenUrl = rewriteEmulatorUrl(fileUrl);
+/** Request and both streams belong to this promise until pipeline CLOSE. */
+export async function downloadFile(fileUrl: string, outputLocationPath: string, signal?: AbortSignal): Promise<void> {
+  signal?.throwIfAborted();
+  const response = await axios({ method: 'get', url: rewriteEmulatorUrl(fileUrl), responseType: 'stream', signal });
+  await writeOwnedMediaStream(() => response.data, outputLocationPath, signal);
+}
 
-  if (rewrittenUrl !== fileUrl) {
-    logger.debug('Rewrote emulator URL', { original: fileUrl, rewritten: rewrittenUrl });
+/** Own setup failures too: if creating the destination throws, the original
+ * input must still be destroyed and settled before its branch can reject. */
+export async function writeOwnedMediaStream(
+  source: () => Readable,
+  destination: string,
+  signal?: AbortSignal
+): Promise<void> {
+  const input = source();
+  const inputClosed = finished(input, { cleanup: true }).catch(() => undefined);
+  let output: ReturnType<typeof createWriteStream> | undefined;
+  let outputClosed: Promise<unknown> | undefined;
+  try {
+    signal?.throwIfAborted();
+    output = createWriteStream(destination);
+    outputClosed = finished(output, { cleanup: true }).catch(() => undefined);
+    await pipeline(input, output, { signal });
+  } catch (error) {
+    input.destroy();
+    output?.destroy();
+    await Promise.all([inputClosed, outputClosed]);
+    throw error;
   }
+}
 
-  return axios({
-    method: 'get',
-    url: rewrittenUrl,
-    responseType: 'stream',
-  }).then((response) => {
-    //ensure that the user can call `then()` only when the file has
-    //been downloaded entirely.
-
-    return new Promise((resolve, reject) => {
-      response.data.pipe(writer);
-      let error: unknown = null;
-      writer.on('error', (err: unknown) => {
-        error = err;
-        writer.close();
-        reject(err);
-      });
-      writer.on('close', () => {
-        if (!error) {
-          resolve();
-        }
-        //no need to call the reject here, as it will have been called in the
-        //'error' stream;
-      });
-    });
-  });
+/** A rejected parallel branch cannot release files, sermon locks or a future
+ * physical host reservation while siblings still own streams/native children.
+ * Request cancellation immediately, then retain every ORIGINAL branch promise.
+ */
+export async function settleMediaBranches<T extends readonly unknown[]>(
+  branches: { [K in keyof T]: () => Promise<T[K]> },
+  cancelToken: CancelToken
+): Promise<T> {
+  let failed = false;
+  let originalFailure: unknown;
+  const results = await Promise.allSettled(
+    branches.map((branch) =>
+      Promise.resolve()
+        .then(branch)
+        .catch((error) => {
+          if (!failed) {
+            failed = true;
+            originalFailure = error;
+            cancelToken.cancel();
+          }
+          throw error;
+        })
+    )
+  );
+  if (failed) throw originalFailure;
+  return results.map((result) => {
+    if (result.status !== 'fulfilled') throw result.reason;
+    return result.value;
+  }) as unknown as T;
 }
 
 export const downloadFiles = async (
   bucket: Bucket,
   filePaths: FilePaths,
-  tempFiles: Set<string>
+  tempFiles: Set<string>,
+  cancelToken?: CancelToken
 ): Promise<FilePaths> => {
   const tempFilePaths: FilePaths = { INTRO: undefined, OUTRO: undefined };
-  const promises: Promise<unknown>[] = [];
+  const promises: (() => Promise<unknown>)[] = [];
   // get key and value of filePaths
   for (const [key, filePath] of Object.entries(filePaths) as [keyof FilePaths, string | undefined][]) {
     if (filePath) {
-      tempFilePaths[key] = createTempFile(path.basename(filePath).split('?')[0], tempFiles);
-      promises.push(downloadFile(filePath, tempFilePaths[key] as string));
-      logger.info(`Downloading ${filePath} to ${tempFilePaths[key]}`);
+      promises.push(async () => {
+        tempFilePaths[key] = createTempFile(path.basename(filePath).split('?')[0], tempFiles);
+        await downloadFile(filePath, tempFilePaths[key] as string, cancelToken?.signal);
+      });
     }
   }
-  await Promise.all(promises);
+  if (cancelToken) await settleMediaBranches(promises, cancelToken);
+  else {
+    const results = await Promise.allSettled(promises.map((run) => Promise.resolve().then(run)));
+    const failure = results.find((result) => result.status === 'rejected');
+    if (failure?.status === 'rejected') throw failure.reason;
+  }
   return tempFilePaths;
 };
 

@@ -9,6 +9,8 @@ import {
   logMemoryUsage,
   secondsToTimeFormat,
   downloadFiles,
+  settleMediaBranches,
+  writeOwnedMediaStream,
   getDurationSeconds,
   createTempFile,
   unlinkSafeTempFile,
@@ -526,10 +528,18 @@ export const processAudio = async (
         // download processed audio for merging
         const processedFilePath = createTempFile(`processed-${fileName}`, tempFiles);
         log.debug('Downloading processed audio and intro/outro files');
-        const [tempFilePaths] = await Promise.all([
-          downloadFiles(bucket, audioFilesToMerge, tempFiles),
-          bucket.file(processedStoragePath).download({ destination: processedFilePath }),
-        ]);
+        const [tempFilePaths] = await settleMediaBranches(
+          [
+            () => downloadFiles(bucket, audioFilesToMerge, tempFiles, cancelToken),
+            () =>
+              writeOwnedMediaStream(
+                () => bucket.file(processedStoragePath).createReadStream(),
+                processedFilePath,
+                cancelToken.signal
+              ),
+          ] as const,
+          cancelToken
+        );
 
         //create merge array in order INTRO, CONTENT, OUTRO
         const filePathsArray: string[] = [];
@@ -539,10 +549,11 @@ export const processAudio = async (
 
         // use reduce to sum up all the durations of the files from filepaths
         const durationSeconds = (
-          await Promise.all(
-            [tempFilePaths.INTRO, tempFilePaths.OUTRO].map(async (path) =>
-              path ? await getDurationSeconds(path, cancelToken) : 0
-            )
+          await settleMediaBranches(
+            [tempFilePaths.INTRO, tempFilePaths.OUTRO].map(
+              (path) => async () => path ? await getDurationSeconds(path, cancelToken) : 0
+            ),
+            cancelToken
           )
         ).reduce((accumulator, currentValue) => accumulator + currentValue, duration);
 

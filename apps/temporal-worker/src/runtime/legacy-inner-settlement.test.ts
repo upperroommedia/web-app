@@ -2,6 +2,10 @@ import { fork, type ChildProcess } from 'node:child_process';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createWriteStream } from 'node:fs';
+import { PassThrough } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
+import { downloadFiles, createTempFile } from '../../../process-audio/src/utils';
 import { once } from 'node:events';
 import { CancelToken } from '../../../process-audio/src/CancelToken';
 import trimAndTranscode from '../../../process-audio/src/trimAndTranscode';
@@ -17,6 +21,8 @@ jest.mock('../../../process-audio/src/WinstonLogger', () => {
   return { __esModule: true, default: logger, createLoggerWithContext: () => logger };
 });
 jest.mock('../../../process-audio/src/utils', () => ({
+  settleMediaBranches: jest.requireActual('../../../process-audio/src/utils').settleMediaBranches,
+  writeOwnedMediaStream: jest.requireActual('../../../process-audio/src/utils').writeOwnedMediaStream,
   logMemoryUsage: jest.fn(),
   secondsToTimeFormat: jest.fn(),
   downloadFiles: jest.fn(),
@@ -89,6 +95,75 @@ test('actual legacy processAudio retains its own sermon lock and temp cleanup un
     if (child && !closed) child.kill('SIGKILL');
     await close;
     await token.waitForProcesses();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('actual FULLpipeline retains lock and files when Storage construction throws while sibling original stream closes later', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'owned-parallel-stream-'));
+  const token = new CancelToken(),
+    input = new PassThrough();
+  const output = createWriteStream(join(root, 'owned-audio'));
+  let closed = false;
+  const original = pipeline(input, output).finally(() => {
+    closed = true;
+  });
+  void original.catch(() => undefined);
+  input.write(Buffer.alloc(1024));
+  token.signal.addEventListener('abort', () => setTimeout(() => input.end(), 100), { once: true });
+  const cleanup: boolean[] = [];
+  const state = new Map<string, unknown>();
+  const database = {
+    ref: (key: string) => ({
+      transaction: async (fn: (current: any) => unknown) => {
+        const next = fn(state.get(key));
+        if (next === null) cleanup.push(closed);
+        if (next !== undefined) state.set(key, next);
+        return { committed: next !== undefined, snapshot: { val: () => state.get(key) } };
+      },
+      remove: async () => {
+        cleanup.push(closed);
+      },
+    }),
+  };
+  jest.mocked(trimAndTranscode).mockResolvedValue({} as never);
+  jest.mocked(downloadFiles).mockImplementation(async () => {
+    await original;
+    return {};
+  });
+  jest.mocked(createTempFile).mockReturnValue(join(root, 'processed-audio'));
+  try {
+    await expect(
+      processAudio(
+        'CONTROLLED_NO_VENDOR',
+        token,
+        {
+          file: () => ({
+            createReadStream: () => {
+              throw Error('CONTROLLED_STORAGE_CONSTRUCTOR_FAILURE');
+            },
+          }),
+        } as never,
+        database as never,
+        {} as never,
+        { id: 'owned-stream-sermon', type: 'StorageFilePath', source: 'processed-sermons/owned' },
+        {
+          path: 'sermons/owned-stream-sermon',
+          get: async () => ({ exists: true, data: () => ({ title: 'Synthetic', status: {} }) }),
+          update: async () => undefined,
+        } as never,
+        {} as never,
+        0,
+        1
+      )
+    ).rejects.toThrow('CONTROLLED_STORAGE_CONSTRUCTOR_FAILURE');
+    expect(cleanup.length).toBeGreaterThan(0);
+    expect(cleanup.every(Boolean)).toBe(true);
+    expect(closed).toBe(true);
+  } finally {
+    token.cancel();
+    input.end();
+    await original;
     await rm(root, { recursive: true, force: true });
   }
 });
