@@ -414,3 +414,50 @@ current-routing denial after a positive zero-open baseline. This demonstrates th
 local SDK routing/metadata guard only. No media processing, disk allocation,
 available filesystem capacity, effective runtime access, Cloud Run process
 recovery, promotion, WCI handoff or staging readiness follows from these tests.
+
+
+## Owned media startup filesystem observation
+
+The staging Cloud Run media entrypoint now checks for the current canonical media
+bootstrap/retained-activation operation before creating any worker poller. Its
+existing immutable attempted scaling checkpoint is the original startup intent:
+operation/release/binding, source CI/image evidence, pool UID/revision, runner,
+exact request and unchanged 20/20/64/16 GiB budgets. The operation saves this
+checkpoint before the single scaling PATCH. No new Workflow or Activity queue,
+signal, caller-supplied path or periodic probe is introduced.
+
+Only that owned media intent under the original paused control/state authorizes a
+private startup receipt. The process joins its previously authenticated Cloud Run
+pool/revision/runner/image witness, verifies `/tmp` resolves directly to a separate
+scratch filesystem, checks actual available bytes against the 80 GiB workspace
+and headroom requirement, and uses the existing application reservation guard.
+A one MiB random private file is written, read and fsynced, then removed; the
+reservation is released and reacquired. Native filesystem operations and cleanup
+are awaited, with deadline/drain checks between operations. A deadline is not a
+claim that an outstanding syscall has stopped. No sparse or full 80/100 GiB
+allocation, media processing or interruption recovery is claimed.
+
+Receipt creation uses one transaction attempt, rechecking original control/state
+versions and the immutable operation intent. A known rejection remains fenced;
+unknown acknowledgement permits exact readback only, with no second create.
+Another process or observation cannot overwrite the original receipt. Browser
+clients, including admins, cannot read or write this collection.
+
+The canonical frozen-runtime media registration adapter now requires this receipt.
+It waits boundedly by GET for the exact original operation's startup receipt while
+checking that intent and authority remain unchanged; prior registration can persist
+while desired count is zero and cannot establish that a new process has started.
+It joins the receipt to fresh native pool UID, serving revision UID/image/runner,
+then obtains actual native registration. Original registration timestamps are
+preserved and must remain within five seconds after all awaits. The filesystem
+sample retains its own timestamp and a 120-second maximum age; it is not an
+available-capacity lease or a live process-count observation.
+
+A normal later cold start without a matching guarded media operation creates no
+such diagnostic receipt. This mechanism does not authorize business work or
+replace the per-Activity reservation guard. Local filesystem tests use real one
+MiB I/O with controlled mount/capacity metadata; Firestore tests use the real
+canonical checkpoint and create/readback protocol with controlled Cloud metadata.
+Actual Cloud Run allocation/mount acceptance and same-host execution, processing,
+interruption recovery and image-byte verification remain required. The media
+promotion denial remains fixed with no bypass flag.

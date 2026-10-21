@@ -188,6 +188,9 @@ service cloud.firestore {
     }
 
     // Native operator execution evidence is private, including from browser admins.
+    match /temporalMediaStartupCapacity/{document=**} {
+      allow read, write: if false;
+    }
     match /temporalWorkerReadiness/{document=**} {
       allow read, write: if false;
     }

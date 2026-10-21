@@ -261,7 +261,15 @@ export async function verifyCloudRunBootstrapProtection(options) {
   return withNativeCloudRunClient(options, client => observeBootstrapProtection({...options, client}));
 }
 export async function verifyCloudRunBootstrapRegistration(options) {
-  return withNativeCloudRunClient(options, client => observeBootstrapRegistration({...options, client}));
+  return withNativeCloudRunClient(options, async (client,application) => {
+    if(options.role!=='media')return observeBootstrapRegistration({...options,client});
+    const b=options.platform.roleBindings.find(b=>b.role==='media');
+    const capacity=await application.collectMediaStartupCapacity({firestore:options.firestore,operationId:options.operationId,
+      binding:{projectId:b.projectId,region:b.region,namespace:b.namespace,role:b.role,buildId:b.buildId,poolName:b.poolName,deploymentName:b.deploymentName,runnerServiceAccount:b.runnerServiceAccount,image:b.image},
+      readResource:application.readServerlessResource,verifyPool:application.verifyServerlessPool});
+    const registration=await observeBootstrapRegistration({...options,client});
+    return joinMediaStartupRegistration(registration,capacity);
+  });
 }
 
 /** Source/CI/image guards are established by the canonical release controller. */
@@ -296,4 +304,11 @@ export const runCloudRunMediaPromotion=async()=>denyUnprovedMediaPromotion();
 /** Fixed promotion purposes use one transport attempt, including SDK interceptors. */
 export function nativePromotionConnectionOptions(purpose){
  return independentPromotionRoles.some(role=>purpose===`${role}-promotion`)?{interceptors:[],channelArgs:{'grpc.enable_retries':0}}:{};
+}
+
+export function joinMediaStartupRegistration(registration,capacity){
+ const at=Date.parse(registration?.observedAt??'');
+ const capacityAt=Date.parse(capacity?.capacityObservedAt??'');
+ if(!Number.isFinite(at)||Math.abs(Date.now()-at)>5000||!Number.isFinite(capacityAt)||capacityAt>Date.now()+5000||Date.now()-capacityAt>120000)throw new Error('MEDIA_STARTUP_REGISTRATION_EXPIRED');
+ return {...registration,mediaStartupCapacity:capacity};
 }

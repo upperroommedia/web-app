@@ -187,3 +187,14 @@ for(const role of ['controls','search','email','images','media'])test(`${role} c
  assert.deepEqual(nativePromotionConnectionOptions(`${role}-promotion`),{interceptors:[],channelArgs:{'grpc.enable_retries':0}});
  assert.deepEqual(nativePromotionConnectionOptions('workers-ready'),{});
 });
+
+test('slow media collector cannot renew older native registration evidence',async()=>{
+ const {joinMediaStartupRegistration}=await import('./temporal-release-cloud-run.mjs');
+ assert.throws(()=>joinMediaStartupRegistration({observedAt:new Date(Date.now()-6000).toISOString()},{}),/MEDIA_STARTUP_REGISTRATION_EXPIRED/);
+ const observedAt=new Date().toISOString();assert.equal(joinMediaStartupRegistration({observedAt},{capacityObservedAt:observedAt}).observedAt,observedAt);
+});
+
+for(const age of [-6000,121000])test(`media startup sample own time is preserved and age ${age} denied`,async()=>{
+ const {joinMediaStartupRegistration}=await import('./temporal-release-cloud-run.mjs');
+ assert.throws(()=>joinMediaStartupRegistration({observedAt:new Date().toISOString()},{capacityObservedAt:new Date(Date.now()-age).toISOString()}),/MEDIA_STARTUP_REGISTRATION_EXPIRED/);
+});

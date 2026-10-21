@@ -60,6 +60,7 @@ describe('durable projection and immutable source rules', () => {
     const collections = [
       'temporalYouTubeAcquisitions',
       'temporalWorkerReadiness',
+      'temporalMediaStartupCapacity',
       'durableActivityExecutions',
       'durableJobCancellationIntents',
       'durableJobCriticalSections',

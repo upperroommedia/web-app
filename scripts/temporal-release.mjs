@@ -1231,7 +1231,7 @@ await runWithCleanup(
               authorizeMutation:()=>({controls:assertControlsPromotionAuthority,search:assertSearchPromotionAuthority,email:assertEmailPromotionAuthority,images:assertImagesPromotionAuthority,media:assertMediaPromotionAuthority}[operation.role])({firestore,lockRef,controlRef,stateRef,ownedOperation,expectedAuthority,config,operationId,bindingDigest}),
               evidenceDigest:preparationArguments.digest,receipts,api,saved:hasSaved?currentOperation.get(operation.field):undefined,
               observeProtection:()=>verifyCloudRunBootstrapProtection({binding,config,platform,firestore,role:operation.role,operationId,bindingDigest,expectedAuthority,releaseId:config.releaseId}),
-              observeRegistration:()=>verifyCloudRunBootstrapRegistration({binding,config,platform,firestore,role:operation.role}),
+              observeRegistration:()=>verifyCloudRunBootstrapRegistration({binding,config,platform,firestore,role:operation.role,operationId}),
               save:async identityState=>{
                 cloudIdentityPending=true;
                 ownedOperation=await operation.checkpoint({firestore,lockRef,controlRef,stateRef,immutableReceipt,creationReceipt,ownedOperation,

@@ -95,7 +95,7 @@ async function verifyAccess(o, zeroPlan) {
       settingsSHA256: proofDigest(settings),
       runnerReceiptSHA256: proofDigest(r.runner),
       scalerReceiptSHA256: proofDigest(r.scaler),
-      poolReceiptSHA256: proofDigest(r.pool),
+    poolReceiptSHA256: proofDigest(r.pool),
     };
     if (
       !isDeepStrictEqual(p, expected) ||
@@ -297,6 +297,7 @@ async function runReviewedPoolOperation(o, mode, expectedRole) {
     role,
     buildId: b.buildId,
     name: body.name,
+    ...(role==='media'?{mediaStartup:{image:b.image,runner:b.runnerServiceAccount,budgets:{sourceBytes:20*1024**3,outputBytes:20*1024**3,workspaceBytes:64*1024**3,headroomBytes:16*1024**3}}}:{}),
     poolReceiptSHA256: proofDigest(r.pool),
     settingsSHA256: proofDigest(settings),
     receiptsSHA256: proofDigest(base),
@@ -371,6 +372,7 @@ async function runReviewedPoolOperation(o, mode, expectedRole) {
     mode: 'retain',
     buildId: b.buildId,
     name: body.name,
+    ...(role==='media'?{mediaStartup:{image:b.image,runner:b.runnerServiceAccount,budgets:{sourceBytes:20*1024**3,outputBytes:20*1024**3,workspaceBytes:64*1024**3,headroomBytes:16*1024**3}}}:{}),
     poolReceiptSHA256: proofDigest(r.pool),
     settingsSHA256: proofDigest(settings),
     receiptsSHA256: proofDigest({ ...base, bootstrapCycle: r.bootstrapCycle }),
@@ -418,7 +420,8 @@ async function runReviewedPoolOperation(o, mode, expectedRole) {
           mode,
           buildId: b.buildId,
           name: body.name,
-          poolReceiptSHA256: proofDigest(r.pool),
+          ...(role==='media'?{mediaStartup:{image:b.image,runner:b.runnerServiceAccount,budgets:{sourceBytes:20*1024**3,outputBytes:20*1024**3,workspaceBytes:64*1024**3,headroomBytes:16*1024**3}}}:{}),
+    poolReceiptSHA256: proofDigest(r.pool),
           settingsSHA256: proofDigest(settings),
           receiptsSHA256: proofDigest(r),
           origin,

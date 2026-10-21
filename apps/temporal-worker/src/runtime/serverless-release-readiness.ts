@@ -1,3 +1,4 @@
+export {collectMediaStartupCapacity} from './media-startup-capacity';
 import { createHash, randomBytes } from 'node:crypto';
 import { writeFile, realpath, stat, open } from 'node:fs/promises';
 import { constants } from 'node:fs';
