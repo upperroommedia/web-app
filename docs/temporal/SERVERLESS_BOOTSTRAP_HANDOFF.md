@@ -660,3 +660,44 @@ local dedicated-emulator fixtures, with small synthetic byte budgets and a
 test-only Workflow. This closes the controlled-authorization gap in this local
 case; it does not establish paused diagnostic admission, application bootstrap,
 immutable image execution, Cloud Run credentials or process recovery acceptance.
+
+## Separate canonical media recovery cycle core (runtime unavailable)
+
+`diagnose-cloud-run-media-recovery` now selects a separate cycle and checkpoint
+kind under the existing immutable source/CI/image and paused-authority controller.
+Its twelve distinct owned ancestor receipts are rederived by fixed read-only
+helpers. Normal bootstrap modes, original-revision matching and promotion
+consumers remain unchanged. The cycle records separate conditional requests and
+native LRO facts for normal-zero → diagnostic-zero → diagnostic-one →
+diagnostic-zero → restored normal-zero. The literal diagnostic deployment and
+Workflow/Activity queue contract is separate from normal media routing.
+
+The immutable plan retains the old receipts and origin, exact templates, image,
+runner and source identity. Each native pool observation joins its exact revision
+GET, revision UID and expected template. A template transition requires a new
+revision name and UID; scaling preserves both. Post-credential fences recheck
+original authority, access, work/compute evidence, pool identity and original
+allocation quota freshness before the single PATCH. Unknown acknowledgements stay
+GET-only and cannot authorize a later transition or another mutation.
+
+Cleanup requires a separate authoritative runtime drain before zero and stopped
+proof before restoration. If allocation never had a saved attempt, or received a
+definitive rejection, an explicit `neverStarted` fact can authorize restoration
+of the unchanged diagnostic-zero revision without allocating it. This path has
+no fabricated start, stop or drain facts. Unknown start/checkpoint acknowledgements
+remain fenced. Saved no-start outcomes resume directly to restoration, including
+lost restore acknowledgements. Cleanup does not expire or require a new quota
+read. Failed/not-started cycles cannot become successful recovery evidence.
+
+**The canonical runtime adapter is unconditionally unavailable before any cycle
+checkpoint or native mutation.** The real expiring diagnostic producer, private
+job and actor authorization, actual image queue/config path, original live-child
+signal/death/replacement journal, native recovery/drain collector and next-normal
+origin consumer still require implementation. The fixed denial must remain until
+that whole protocol exists; no CLI flag or controlled receipt can enable it.
+Source tests use controlled Cloud and runtime adapters; dedicated Firestore tests
+establish checkpoint authority, immutable progress and acknowledgement recovery.
+They prove no Cloud Run API acceptance, actual diagnostic execution or readiness.
+The restored revision is new lineage and cannot masquerade as the old zero-pool
+receipt or a retained normal activation. Media promotion and orchestration
+availability remain denied.

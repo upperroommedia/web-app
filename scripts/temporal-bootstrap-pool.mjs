@@ -223,7 +223,7 @@ async function verifyAccess(o, zeroPlan) {
  * A later handoff activation needs its own reviewed operation; this cycle does
  * not promote routing, attach WCI, retire workers or prove live instance count.
  */
-async function runReviewedPoolOperation(o, mode, expectedRole) {
+function deriveReviewedPoolOperation(o, mode, expectedRole) {
   const {
     platform,
     role,
@@ -426,6 +426,12 @@ async function runReviewedPoolOperation(o, mode, expectedRole) {
           receiptsSHA256: proofDigest(r),
           origin,
         };
+  return { b, zero, body, zeroPlan, origin, plan, confirmed };
+}
+
+async function runReviewedPoolOperation(o, mode, expectedRole) {
+  const {platform,role,settings,operationId,releaseId,evidenceDigest,receipts:r,api,save,observeProtection,observeRegistration,saved}=o;
+  const {b,zero,body,zeroPlan,origin,plan,confirmed}=deriveReviewedPoolOperation(o,mode,expectedRole);
   const url = `https://run.googleapis.com/v2/${body.name}`;
   let state = saved;
   const persist = async (next) => {
@@ -781,3 +787,20 @@ export const verifyEmailPromotionResources=o=>execute(o,'inspect-promotion','ema
 export const verifyImagesPromotionResources=o=>execute(o,'inspect-promotion','images');
 
 export const verifyMediaPromotionResources=o=>execute(o,'inspect-promotion','media');
+
+/** Fixed media-only ancestor reader for a separate recovery cycle. Normal bootstrap
+ * modes and original-revision checks above remain unchanged. No checkpoint/write. */
+export async function readMediaRecoveryAncestorAccess(o) {
+  if(o.role!=='media'||o.saved!==undefined||!o.receipts||new Set(Object.values(o.receipts).map(r=>r?.operationId)).size!==12||Object.values(o.receipts).some(r=>!uuid.test(r?.operationId??'')||r.operationId===o.operationId))fail();
+  const args={...o,save:()=>fail(),observeRegistration:()=>fail()};
+  const {b,zeroPlan,origin}=deriveReviewedPoolOperation(args,'retain','media');
+  const access=await verifyAccess(args,zeroPlan);
+  return {binding:b,zeroPlan,origin,access,receiptsSHA256:proofDigest(o.receipts)};
+}
+export async function readMediaRecoveryNormalOrigin(o) {
+  const result=await readMediaRecoveryAncestorAccess(o);
+  const resource=await o.api(`https://run.googleapis.com/v2/${result.zeroPlan.body.name}`);
+  const pool={...verifyPreparedPoolMetadata(result.zeroPlan,resource),etag:resource.etag};
+  if(!pool.etag||!isDeepStrictEqual(pool,result.origin))fail();
+  return {...result,pool};
+}

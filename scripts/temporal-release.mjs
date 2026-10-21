@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+import {runMediaRecoveryCycle} from './temporal-media-recovery-cycle.mjs';
+import {saveMediaRecoveryCheckpoint,assertMediaRecoveryAuthority} from './temporal-media-recovery-checkpoint.mjs';
+import {canonicalMediaRecoveryRuntime} from './temporal-media-recovery-runtime.mjs';
 import {independentPromotionPredecessor} from './temporal-promotion-roles.mjs';
 import {runCloudRunControlsPromotion,runCloudRunSearchPromotion,runCloudRunEmailPromotion,runCloudRunImagesPromotion,runCloudRunMediaPromotion} from './temporal-release-cloud-run.mjs';
 import {saveControlsPromotionCheckpoint,assertControlsPromotionAuthority,saveSearchPromotionCheckpoint,assertSearchPromotionAuthority,saveEmailPromotionCheckpoint,assertEmailPromotionAuthority,saveImagesPromotionCheckpoint,assertImagesPromotionAuthority,saveMediaPromotionCheckpoint,assertMediaPromotionAuthority} from './temporal-preparation-checkpoint.mjs';
@@ -125,7 +128,7 @@ if (
     'prepare-cloud-run-identity',
     'prepare-cloud-run-pool',
     'promote-cloud-run-email','promote-cloud-run-images','promote-cloud-run-media','promote-cloud-run-search','promote-cloud-run-controls','bootstrap-stop-cloud-run-controls',
-    'bootstrap-stop-cloud-run-media','activate-cloud-run-media-pool','stop-cloud-run-media-activation',
+    'diagnose-cloud-run-media-recovery','bootstrap-stop-cloud-run-media','activate-cloud-run-media-pool','stop-cloud-run-media-activation',
     'bootstrap-stop-cloud-run-images','activate-cloud-run-images-pool','stop-cloud-run-images-activation',
     'bootstrap-stop-cloud-run-email','activate-cloud-run-email-pool','stop-cloud-run-email-activation',
     'bootstrap-stop-cloud-run-search','activate-cloud-run-search-pool','stop-cloud-run-search-activation',
@@ -189,14 +192,14 @@ const operatorIdentity = {
   resourceBinding,
 };
 const poolOperationRoles=Object.freeze({'promote-cloud-run-email':'email','promote-cloud-run-images':'images','promote-cloud-run-media':'media','promote-cloud-run-search':'search','promote-cloud-run-controls':'controls',
- 'bootstrap-stop-cloud-run-media':'media','activate-cloud-run-media-pool':'media','stop-cloud-run-media-activation':'media',
+ 'diagnose-cloud-run-media-recovery':'media','bootstrap-stop-cloud-run-media':'media','activate-cloud-run-media-pool':'media','stop-cloud-run-media-activation':'media',
  'bootstrap-stop-cloud-run-images':'images','activate-cloud-run-images-pool':'images','stop-cloud-run-images-activation':'images',
  'bootstrap-stop-cloud-run-email':'email','activate-cloud-run-email-pool':'email','stop-cloud-run-email-activation':'email',
  'bootstrap-stop-cloud-run-search':'search','activate-cloud-run-search-pool':'search','stop-cloud-run-search-activation':'search',
  'bootstrap-stop-cloud-run-controls':'controls','activate-cloud-run-controls-pool':'controls','stop-cloud-run-controls-activation':'controls',
  'bootstrap-stop-cloud-run-orchestration':'orchestration','activate-cloud-run-orchestration-pool':'orchestration','stop-cloud-run-orchestration-activation':'orchestration',
 });
-const preparationArguments = ['bootstrap-stop-cloud-run-media','activate-cloud-run-media-pool','stop-cloud-run-media-activation','bootstrap-stop-cloud-run-images','activate-cloud-run-images-pool','stop-cloud-run-images-activation','bootstrap-stop-cloud-run-email','activate-cloud-run-email-pool','stop-cloud-run-email-activation','bootstrap-stop-cloud-run-search','activate-cloud-run-search-pool','stop-cloud-run-search-activation','activate-cloud-run-orchestration-pool','stop-cloud-run-orchestration-activation','bootstrap-stop-cloud-run-orchestration','activate-cloud-run-controls-pool','stop-cloud-run-controls-activation','promote-cloud-run-email','promote-cloud-run-images','promote-cloud-run-media','promote-cloud-run-search','promote-cloud-run-controls','bootstrap-stop-cloud-run-controls', 'prepare-cloud-run-dispatch-diagnostic', 'activate-cloud-run-dispatch-service', 'prepare-cloud-run-identity', 'prepare-cloud-run-dispatch-service', 'prepare-cloud-run-dispatch-access', 'prepare-stop-cloud-run-dispatch-scheduler', 'prepare-stop-cloud-run-dispatch-eventarc', 'stop-cloud-run-dispatch-wake', 'prepare-cloud-run-pool', 'prepare-cloud-run-secret-access', 'prepare-cloud-run-scaler-access', 'prepare-cloud-run-firestore-access', 'prepare-cloud-run-runtime-role', 'prepare-cloud-run-runtime-access', 'prepare-cloud-run-eventarc-audit'].includes(action) ? {
+const preparationArguments = ['diagnose-cloud-run-media-recovery','bootstrap-stop-cloud-run-media','activate-cloud-run-media-pool','stop-cloud-run-media-activation','bootstrap-stop-cloud-run-images','activate-cloud-run-images-pool','stop-cloud-run-images-activation','bootstrap-stop-cloud-run-email','activate-cloud-run-email-pool','stop-cloud-run-email-activation','bootstrap-stop-cloud-run-search','activate-cloud-run-search-pool','stop-cloud-run-search-activation','activate-cloud-run-orchestration-pool','stop-cloud-run-orchestration-activation','bootstrap-stop-cloud-run-orchestration','activate-cloud-run-controls-pool','stop-cloud-run-controls-activation','promote-cloud-run-email','promote-cloud-run-images','promote-cloud-run-media','promote-cloud-run-search','promote-cloud-run-controls','bootstrap-stop-cloud-run-controls', 'prepare-cloud-run-dispatch-diagnostic', 'activate-cloud-run-dispatch-service', 'prepare-cloud-run-identity', 'prepare-cloud-run-dispatch-service', 'prepare-cloud-run-dispatch-access', 'prepare-stop-cloud-run-dispatch-scheduler', 'prepare-stop-cloud-run-dispatch-eventarc', 'stop-cloud-run-dispatch-wake', 'prepare-cloud-run-pool', 'prepare-cloud-run-secret-access', 'prepare-cloud-run-scaler-access', 'prepare-cloud-run-firestore-access', 'prepare-cloud-run-runtime-role', 'prepare-cloud-run-runtime-access', 'prepare-cloud-run-eventarc-audit'].includes(action) ? {
   role: args[args.indexOf('--identity-role') + 1],
   kind: args[args.indexOf('--identity-kind') + 1],
   proof: args[args.indexOf('--preparation-proof') + 1],
@@ -207,7 +210,7 @@ if (preparationArguments) {
   if (!required.every(flag => args.includes(flag)) ||
     !/^[a-f0-9]{64}$/.test(preparationArguments.digest ?? ''))
     throw new Error('Explicit immutable identity preparation inputs required');
-  if (['bootstrap-stop-cloud-run-media','activate-cloud-run-media-pool','stop-cloud-run-media-activation','bootstrap-stop-cloud-run-images','activate-cloud-run-images-pool','stop-cloud-run-images-activation','bootstrap-stop-cloud-run-email','activate-cloud-run-email-pool','stop-cloud-run-email-activation','bootstrap-stop-cloud-run-search','activate-cloud-run-search-pool','stop-cloud-run-search-activation','activate-cloud-run-orchestration-pool','stop-cloud-run-orchestration-activation','bootstrap-stop-cloud-run-orchestration','activate-cloud-run-controls-pool','stop-cloud-run-controls-activation','promote-cloud-run-email','promote-cloud-run-images','promote-cloud-run-media','promote-cloud-run-search','promote-cloud-run-controls','bootstrap-stop-cloud-run-controls', 'prepare-cloud-run-dispatch-diagnostic', 'activate-cloud-run-dispatch-service', 'prepare-cloud-run-dispatch-service', 'prepare-cloud-run-dispatch-access', 'prepare-stop-cloud-run-dispatch-scheduler', 'prepare-stop-cloud-run-dispatch-eventarc', 'stop-cloud-run-dispatch-wake', 'prepare-cloud-run-pool', 'prepare-cloud-run-secret-access', 'prepare-cloud-run-scaler-access', 'prepare-cloud-run-firestore-access', 'prepare-cloud-run-runtime-role', 'prepare-cloud-run-runtime-access', 'prepare-cloud-run-eventarc-audit'].includes(action)) {
+  if (['diagnose-cloud-run-media-recovery','bootstrap-stop-cloud-run-media','activate-cloud-run-media-pool','stop-cloud-run-media-activation','bootstrap-stop-cloud-run-images','activate-cloud-run-images-pool','stop-cloud-run-images-activation','bootstrap-stop-cloud-run-email','activate-cloud-run-email-pool','stop-cloud-run-email-activation','bootstrap-stop-cloud-run-search','activate-cloud-run-search-pool','stop-cloud-run-search-activation','activate-cloud-run-orchestration-pool','stop-cloud-run-orchestration-activation','bootstrap-stop-cloud-run-orchestration','activate-cloud-run-controls-pool','stop-cloud-run-controls-activation','promote-cloud-run-email','promote-cloud-run-images','promote-cloud-run-media','promote-cloud-run-search','promote-cloud-run-controls','bootstrap-stop-cloud-run-controls', 'prepare-cloud-run-dispatch-diagnostic', 'activate-cloud-run-dispatch-service', 'prepare-cloud-run-dispatch-service', 'prepare-cloud-run-dispatch-access', 'prepare-stop-cloud-run-dispatch-scheduler', 'prepare-stop-cloud-run-dispatch-eventarc', 'stop-cloud-run-dispatch-wake', 'prepare-cloud-run-pool', 'prepare-cloud-run-secret-access', 'prepare-cloud-run-scaler-access', 'prepare-cloud-run-firestore-access', 'prepare-cloud-run-runtime-role', 'prepare-cloud-run-runtime-access', 'prepare-cloud-run-eventarc-audit'].includes(action)) {
     delete preparationArguments.kind;
     preparationArguments.settings = args[args.indexOf('--pool-settings') + 1];
     preparationArguments.settingsDigest = args[args.indexOf('--pool-settings-sha256') + 1];
@@ -1183,6 +1186,7 @@ await runWithCleanup(
             const settings=await readPreparationReceipt(preparationArguments.settings,preparationArguments.settingsDigest);
             const ids=await readPreparationReceipt(preparationArguments.receipts,preparationArguments.receiptsDigest);
             const operation={
+              'diagnose-cloud-run-media-recovery':{role:'media',mode:'recovery',field:'cloudMediaRecovery',prefix:'temporalCloudMediaRecovery',run:runMediaRecoveryCycle,checkpoint:saveMediaRecoveryCheckpoint},
               'promote-cloud-run-media':{role:'media',mode:'promote',field:'cloudMediaPromotion',prefix:'temporalCloudMediaPromotion',run:runCloudRunMediaPromotion,checkpoint:saveMediaPromotionCheckpoint},
               'promote-cloud-run-images':{role:'images',mode:'promote',field:'cloudImagesPromotion',prefix:'temporalCloudImagesPromotion',run:runCloudRunImagesPromotion,checkpoint:saveImagesPromotionCheckpoint},
               'promote-cloud-run-email':{role:'email',mode:'promote',field:'cloudEmailPromotion',prefix:'temporalCloudEmailPromotion',run:runCloudRunEmailPromotion,checkpoint:saveEmailPromotionCheckpoint},
@@ -1228,9 +1232,10 @@ await runWithCleanup(
             const immutableReceipt=firestore.doc(`_control/${operation.prefix}-${operationId}`);
             const creationReceipt=operation.creationPrefix?firestore.doc(`_control/${operation.creationPrefix}-${operationId}`):undefined;
             const result=await operation.run({binding,config,firestore,bindingDigest,expectedAuthority,platform,role:operation.role,settings,operationId,releaseId:config.releaseId,
-              authorizeMutation:()=>({controls:assertControlsPromotionAuthority,search:assertSearchPromotionAuthority,email:assertEmailPromotionAuthority,images:assertImagesPromotionAuthority,media:assertMediaPromotionAuthority}[operation.role])({firestore,lockRef,controlRef,stateRef,ownedOperation,expectedAuthority,config,operationId,bindingDigest}),
+              ...(operation.mode==='recovery'?{runtime:canonicalMediaRecoveryRuntime}:{}),
+              authorizeMutation:()=> (operation.mode==='recovery'?assertMediaRecoveryAuthority:({controls:assertControlsPromotionAuthority,search:assertSearchPromotionAuthority,email:assertEmailPromotionAuthority,images:assertImagesPromotionAuthority,media:assertMediaPromotionAuthority}[operation.role]))({firestore,lockRef,controlRef,stateRef,ownedOperation,expectedAuthority,config,operationId,bindingDigest}),
               evidenceDigest:preparationArguments.digest,receipts,api,saved:hasSaved?currentOperation.get(operation.field):undefined,
-              observeProtection:()=>verifyCloudRunBootstrapProtection({binding,config,platform,firestore,role:operation.role,operationId,bindingDigest,expectedAuthority,releaseId:config.releaseId}),
+              observeProtection:scope=>operation.mode==='recovery'?canonicalMediaRecoveryRuntime.observeProtection({binding,config,platform,firestore,operationId,bindingDigest,expectedAuthority,scope}):verifyCloudRunBootstrapProtection({binding,config,platform,firestore,role:operation.role,operationId,bindingDigest,expectedAuthority,releaseId:config.releaseId}),
               observeRegistration:()=>verifyCloudRunBootstrapRegistration({binding,config,platform,firestore,role:operation.role,operationId}),
               save:async identityState=>{
                 cloudIdentityPending=true;
@@ -1238,7 +1243,7 @@ await runWithCleanup(
                   expectedAuthority,config,operationId,bindingDigest,operatorPrincipal,identityState});
               }});
             const receipt=await immutableReceipt.get();
-            if(!receipt.exists||receipt.get('bindingDigest')!==bindingDigest||(operation.mode==='promote'?
+            if(!receipt.exists||receipt.get('bindingDigest')!==bindingDigest||(operation.mode==='recovery'?result.stage!=='completed'||result.disposition!=='restored-normal-zero'||proofDigest(receipt.get('identityState'))!==proofDigest(result):operation.mode==='promote'?
               result.stage!=='completed'||receipt.get('identityState.plan.buildId')!==platform.workerBuildId||proofDigest(receipt.get('identityState'))!==proofDigest(result):
               receipt.get(operation.mode==='retain'?'identityState.activationState.pool.uid':'identityState.stop.pool.uid')!==(operation.mode==='retain'?result.activationState.pool.uid:result.stop.pool.uid)||result.disposition!==(operation.mode==='retain'?'retained':'stopped')))
               throw new Error('BOOTSTRAP_CYCLE_RECEIPT_UNCONFIRMED');

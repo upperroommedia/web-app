@@ -90,6 +90,7 @@ export function applicationStages(root = ROOT) {
       'Validate release and recovery through the real Firestore SDK',
       [
         node('--test', 'scripts/temporal-image-replay.test.mjs'),
+        node('--test', 'scripts/temporal-media-recovery-cycle.test.mjs'),
         pnpm(
           '--dir',
           'functions',
@@ -102,7 +103,7 @@ export function applicationStages(root = ROOT) {
           'auth,firestore,database,storage',
           '--config',
           '../firebase.test.json',
-          'node ../scripts/tests/temporal-release-runtime.firestore.test.mjs && node ../scripts/tests/temporal-preparation-checkpoint.firestore.test.mjs && node ../scripts/integration/temporal-compute-isolation.native.mjs && node ../scripts/integration/temporal-controls-bootstrap.native.mjs && node ../scripts/integration/temporal-controls-promotion.native.mjs && node ../scripts/integration/temporal-media-startup.native.mjs && node ../scripts/integration/temporal-media-kernel.native.mjs && node ../scripts/integration/temporal-media-processing.native.mjs && node ../scripts/integration/temporal-media-allocation.native.mjs && node --test ../scripts/integration/fixtures/owned-media-process.test.mjs && node ../scripts/integration/temporal-media-adoption.native.mjs && node ../scripts/integration/temporal-image-replay.native.mjs'
+          'node ../scripts/tests/temporal-release-runtime.firestore.test.mjs && node ../scripts/tests/temporal-preparation-checkpoint.firestore.test.mjs && node ../scripts/integration/temporal-compute-isolation.native.mjs && node ../scripts/integration/temporal-controls-bootstrap.native.mjs && node ../scripts/integration/temporal-controls-promotion.native.mjs && node ../scripts/integration/temporal-media-startup.native.mjs && node ../scripts/integration/temporal-media-kernel.native.mjs && node ../scripts/integration/temporal-media-recovery-checkpoint.native.mjs && node ../scripts/integration/temporal-media-processing.native.mjs && node ../scripts/integration/temporal-media-allocation.native.mjs && node --test ../scripts/integration/fixtures/owned-media-process.test.mjs && node ../scripts/integration/temporal-media-adoption.native.mjs && node ../scripts/integration/temporal-image-replay.native.mjs'
         ),
         pnpm(
           '--dir',
