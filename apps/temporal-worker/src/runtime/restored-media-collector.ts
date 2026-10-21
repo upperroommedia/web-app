@@ -1,5 +1,6 @@
 /** Historical startup reader only. No fresh canary, child birth, expiry renewal,
  * queue permission, Activity execution or release readiness is granted here. */
+import { readRetainedMediaPromotionAuthority, type MediaPromotionAuthorityOptions } from './media-promotion-history';
 import type { Firestore } from 'firebase-admin/firestore';
 import type { Auth } from 'firebase-admin/auth';
 import {
@@ -49,7 +50,10 @@ export async function collectRestoredMediaStartup(o: Options) {
 export async function collectRestoredMediaPhaseStartup(o: Options) {
   return collectStartup(o, 'phase');
 }
-async function collectStartup(o: Options, scope: 'retained' | 'phase') {
+export async function collectMediaPromotionStartup(o: Options & MediaPromotionAuthorityOptions) {
+  return collectStartup(o, 'retained', o);
+}
+async function collectStartup(o: Options, scope: 'retained' | 'phase', promotion?: MediaPromotionAuthorityOptions) {
   const began = Date.now(),
     mono = performance.now();
   let active = true;
@@ -119,7 +123,20 @@ async function collectStartup(o: Options, scope: 'retained' | 'phase') {
               proof(all[2].data()) !== o.expectedStateSHA256
             )
               fail();
+            const retained = promotion ? await readRetainedMediaPromotionAuthority(promotion, tx, fresh) : null;
+            if (
+              retained &&
+              (proof(retained.activationPlan) !== proof(o.plan) ||
+                proof(retained.kernel) !== proof(all[5].data()) ||
+                proof(retained.startup) !== proof(all[6].data()))
+            )
+              fail();
             return {
+              activationParent: retained ? retained.originalParent : all[0].data()!,
+              startupAuthority: retained
+                ? [retained.originalAuthority.control.stamp, retained.originalAuthority.state.stamp]
+                : [stamp(all[1]), stamp(all[2])],
+              retainedSHA256: retained?.stampsSHA256 ?? null,
               root: all[0].data()!,
               control: all[1].data()!,
               state: all[2].data()!,
@@ -134,12 +151,14 @@ async function collectStartup(o: Options, scope: 'retained' | 'phase') {
         )
       );
     const first = await snapshots(),
-      { root, control, state, capsule, completion, kernel: k, startup: s } = first;
-    const lifecycle = root.cloudRestoredMediaActivation;
+      { activationParent: activation, control, state, capsule, completion, kernel: k, startup: s } = first;
+    const lifecycle = activation.cloudRestoredMediaActivation;
     const owned = lifecycle?.start
       ? scope === 'retained'
-        ? restoredMediaStartupIntent(root)
-        : restoredMediaHistoricalStartupIntent(root)
+        ? promotion
+          ? restoredMediaHistoricalStartupIntent(activation)
+          : restoredMediaStartupIntent(activation)
+        : restoredMediaHistoricalStartupIntent(activation)
       : null;
     const p = owned?.plan ?? o.plan;
     if (scope === 'retained' && !owned) fail();
@@ -147,10 +166,10 @@ async function collectStartup(o: Options, scope: 'retained' | 'phase') {
       scope === 'phase' &&
       (!lifecycle ||
         hash(lifecycle.plan) !== hash(p) ||
-        root.action !== 'activate-restored-cloud-run-media' ||
-        root.operationId !== o.operationId ||
-        root.bindingDigest !== o.bindingDigest ||
-        root.releaseId !== p.releaseId)
+        activation.action !== 'activate-restored-cloud-run-media' ||
+        activation.operationId !== o.operationId ||
+        activation.bindingDigest !== o.bindingDigest ||
+        activation.releaseId !== p.releaseId)
     )
       fail();
     if (
@@ -159,7 +178,7 @@ async function collectStartup(o: Options, scope: 'retained' | 'phase') {
       (scope === 'phase' &&
         !owned &&
         (lifecycle.stage !== 'planned' || k || s || lifecycle.stop || lifecycle.cleanup)) ||
-      root.operatorPrincipal?.adcAndGcloudAccountMatch !== true ||
+      activation.operatorPrincipal?.adcAndGcloudAccountMatch !== true ||
       control.releaseId !== p.releaseId ||
       state.releaseId !== p.releaseId ||
       control.admission !== 'paused' ||
@@ -188,11 +207,11 @@ async function collectStartup(o: Options, scope: 'retained' | 'phase') {
     for (const i of [3, 4, ...(s ? [6] : [])]) if (hash(stamps[i].createTime) !== hash(stamps[i].updateTime)) fail();
     if (hash(stamps[3].createTime) !== hash(stamps[4].createTime)) fail();
     const finishPhase = async (stage: string, identity: string | null = null) => {
-      const actor = await read(() => o.auth.getUserByEmail(root.operatorPrincipal.email));
+      const actor = await read(() => o.auth.getUserByEmail(activation.operatorPrincipal.email));
       if (
         actor.disabled ||
         actor.customClaims?.role !== 'admin' ||
-        actor.email !== root.operatorPrincipal.email ||
+        actor.email !== activation.operatorPrincipal.email ||
         (k && actor.uid !== k.context.actorUid)
       )
         fail();
@@ -240,8 +259,10 @@ async function collectStartup(o: Options, scope: 'retained' | 'phase') {
       k.context.recoveryOperationId !== p.recoveryOperationId ||
       k.context.capsuleSHA256 !== capsuleSHA256 ||
       k.context.intentSHA256 !== owned!.intentSHA256 ||
-      k.context.controlVersion !== hash({ createTime: stamps[1].createTime, updateTime: stamps[1].updateTime }) ||
-      k.context.stateVersion !== hash({ createTime: stamps[2].createTime, updateTime: stamps[2].updateTime })
+      k.context.controlVersion !==
+        hash({ createTime: first.startupAuthority[0].createTime, updateTime: first.startupAuthority[0].updateTime }) ||
+      k.context.stateVersion !==
+        hash({ createTime: first.startupAuthority[1].createTime, updateTime: first.startupAuthority[1].updateTime })
     )
       fail();
     if (scope === 'phase') {
@@ -376,11 +397,20 @@ async function collectStartup(o: Options, scope: 'retained' | 'phase') {
       fail();
     if (scope === 'phase')
       return finishPhase(k.stage, k.stage === 'running' ? `media-restored-${s.worker.instanceId}` : null);
-    const actor = await read(() => o.auth.getUserByEmail(root.operatorPrincipal.email));
+    if (promotion) {
+      const currentActor = await read(() => o.auth.getUserByEmail(first.root.operatorPrincipal.email));
+      if (
+        currentActor.disabled ||
+        currentActor.customClaims?.role !== 'admin' ||
+        currentActor.email !== first.root.operatorPrincipal.email
+      )
+        fail();
+    }
+    const actor = await read(() => o.auth.getUserByEmail(activation.operatorPrincipal.email));
     if (
       actor.disabled ||
       actor.customClaims?.role !== 'admin' ||
-      actor.email !== root.operatorPrincipal.email ||
+      actor.email !== activation.operatorPrincipal.email ||
       actor.uid !== k.context.actorUid
     )
       fail();

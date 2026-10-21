@@ -1,3 +1,4 @@
+import { seedControlledPromotionRetention } from './fixtures/media-promotion-history-input.mjs';
 /** Actual LOCAL SDK + dedicated Auth/Firestore/Storage/RTDB + production source
  * admission and media factory. Cloud/revision witnesses and pool cycle are CONTROLLED.
  * Fixture bootstrap/controlled image and Cloud metadata; no actual index.js, final image, Cloud Run or readiness acceptance. */
@@ -80,7 +81,8 @@ test(
       supervisedSettled = false;
     const users = [],
       owned = [],
-      ownedActivationOperations = new Set();
+      ownedActivationOperations = new Set(),
+      promotionInputRefs = [];
     let ownsControls = false;
     let admissionCalls = 0,
       acquireCalls = 0,
@@ -1045,6 +1047,89 @@ test(
               await assert.rejects(
                 collectCompletedMediaRecoveryExecution({ ...historical, activationBindingDigest: plan.bindingDigest })
               );
+              stage = 'promotion-parent-historical/native-retained-input';
+              const retainedInput = await seedControlledPromotionRetention({
+                db,
+                activationId,
+                activationBinding,
+                recovery: completed,
+                ancestors: f.options.receipts,
+                operatorIdentity,
+                operatorPrincipal: original.operatorPrincipal,
+                controlRef,
+                stateRef,
+                ownedRefs: promotionInputRefs,
+              });
+              const promotionId = randomUUID(),
+                promotionBinding = 'e'.repeat(64);
+              ownedActivationOperations.add(promotionId);
+              await lockRef.set({
+                action: 'promote-cloud-run-media',
+                operationId: promotionId,
+                releaseId: plan.releaseId,
+                bindingDigest: promotionBinding,
+                operatorPrincipal: original.operatorPrincipal,
+                operatorIdentity,
+              });
+              const promotion = {
+                ...historical,
+                promotionOperationId: promotionId,
+                promotionBindingDigest: promotionBinding,
+                expectedRootSHA256: nativeSnapshotProof(await lockRef.get()).dataDigest,
+              };
+              const {
+                collectMediaPromotionRecoveryExecution,
+                confirmMediaPromotionRecoveryProvenance,
+              } = require(fileURLToPath(
+                new URL('../../apps/temporal-worker/src/runtime/media-recovery-collector.ts', import.meta.url)
+              ));
+              const promoted = await bounded(collectMediaPromotionRecoveryExecution(promotion), 25000);
+              assert.equal(promoted.runId, h.runId);
+              assert.equal(promoted.workflowId, h.workflowId);
+              const originalControl = (await controlRef.get()).data();
+              await controlRef.update({ promotionReadbackEpoch: 'CONTROLLED_CURRENT_AUTHORITY_CHANGE' });
+              assert.equal(
+                (
+                  await collectMediaPromotionRecoveryExecution({
+                    ...promotion,
+                    expectedControlSHA256: nativeSnapshotProof(await controlRef.get()).dataDigest,
+                  })
+                ).runId,
+                promoted.runId
+              );
+              await controlRef.set(originalControl);
+              const currentPromotion = await collectMediaPromotionRecoveryExecution(promotion);
+              assert.notEqual(currentPromotion.provenanceSHA256, promoted.provenanceSHA256);
+              assert.equal(
+                (await confirmMediaPromotionRecoveryProvenance(promotion)).provenanceSHA256,
+                currentPromotion.provenanceSHA256
+              );
+              for (const changed of [
+                { promotionOperationId: activationId },
+                { promotionBindingDigest: activationBinding },
+                { activationOperationId: promotionId },
+                { recoveryOperationId: activationId },
+              ])
+                await assert.rejects(collectMediaPromotionRecoveryExecution({ ...promotion, ...changed }));
+              const { collectMediaPromotionStartup } = require(fileURLToPath(
+                new URL('../../apps/temporal-worker/src/runtime/restored-media-collector.ts', import.meta.url)
+              ));
+              await assert.rejects(
+                collectMediaPromotionStartup({
+                  ...promotion,
+                  auth,
+                  operationId: activationId,
+                  bindingDigest: activationBinding,
+                  plan: retainedInput.plan,
+                  pool: retainedInput.pool,
+                  image: collectorOptions.image.tools,
+                })
+              ); // CONTROLLED retained input is not real startup evidence.
+              const originalRetained = (await retainedInput.cap.get()).data();
+              await retainedInput.cap.update({ registrationSHA256: '0'.repeat(64) });
+              await assert.rejects(collectMediaPromotionRecoveryExecution(promotion));
+              await retainedInput.cap.set(originalRetained);
+              await assert.rejects(collectMediaPromotionRecoveryExecution(promotion));
               const capRef = db.doc(`_control/temporalMediaRecoveryCapsule-${op}`),
                 capData = (await capRef.get()).data();
               await capRef.update({ completionSHA256: '0'.repeat(64) });
@@ -1239,6 +1324,7 @@ test(
               await bounded(ref.delete());
             }
           });
+      for (const ref of promotionInputRefs) await cleanup(() => ref.delete());
       if (auth) for (const uid of users) await cleanup(() => auth.deleteUser(uid));
       if (db) await cleanup(() => db.terminate());
       if (app) await cleanup(() => deleteApp(app));

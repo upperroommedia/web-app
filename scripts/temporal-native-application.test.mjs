@@ -15,6 +15,12 @@ test('repeated guarded runtime application loads release their own disabled comp
     owned = process[key];
     const second = loadNativeReleaseApplication(root);
     assert.equal(typeof first.collectRestoredMediaStartup, 'function');
+    for (const method of [
+      'collectMediaPromotionStartup',
+      'collectMediaPromotionRecoveryExecution',
+      'confirmMediaPromotionRecoveryProvenance',
+    ])
+      assert.equal(typeof first[method], 'function');
     assert.equal(typeof first.Client, 'function');
     assert.equal(typeof second.collectServerlessRoleReadiness, 'function');
     assert.equal(process[key], undefined);

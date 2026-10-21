@@ -1,3 +1,4 @@
+import { readMediaPromotionRetainedResources } from '../temporal-media-promotion-evidence.mjs';
 import {
   readRestoredMediaPromotionInput,
   confirmRestoredMediaActivationCapsule,
@@ -50,6 +51,7 @@ for (const mode of [
   'activation-access',
   'restored-activation',
   'restored-resources',
+  'restored-promotion-resources',
   'restored-phase-resources',
   'restored-startup',
   'restored-startup-capsule',
@@ -617,7 +619,13 @@ for (const mode of [
       if (
         mode === 'normal' ||
         mode === 'capsule' ||
-        ['activation-access', 'restored-activation', 'restored-resources', 'restored-phase-resources'].includes(mode) ||
+        [
+          'activation-access',
+          'restored-activation',
+          'restored-resources',
+          'restored-promotion-resources',
+          'restored-phase-resources',
+        ].includes(mode) ||
         mode.startsWith('restored-startup') ||
         mode === 'phase-resource' ||
         ['idle-startup', 'idle-poller'].includes(mode)
@@ -662,9 +670,13 @@ for (const mode of [
           assert.equal((await confirmCompletedMediaRecoveryCapsule(options())).capsuleSHA256, proof.capsuleSHA256);
         }
         if (
-          ['activation-access', 'restored-activation', 'restored-resources', 'restored-phase-resources'].includes(
-            mode
-          ) ||
+          [
+            'activation-access',
+            'restored-activation',
+            'restored-resources',
+            'restored-promotion-resources',
+            'restored-phase-resources',
+          ].includes(mode) ||
           mode.startsWith('restored-startup')
         ) {
           const newId = randomUUID(),
@@ -691,7 +703,12 @@ for (const mode of [
           assert.equal(proof.pool.uid, result.restore.pool.uid);
           assert.equal(proof.pool.etag, result.restore.pool.etag);
           if (
-            ['restored-activation', 'restored-resources', 'restored-phase-resources'].includes(mode) ||
+            [
+              'restored-activation',
+              'restored-resources',
+              'restored-promotion-resources',
+              'restored-phase-resources',
+            ].includes(mode) ||
             mode.startsWith('restored-startup')
           ) {
             const controlled = restoredActivationFixture();
@@ -1098,7 +1115,14 @@ for (const mode of [
               }
             }
 
-            if (['restored-resources', 'restored-phase-resources', 'restored-startup-phase-failure'].includes(mode)) {
+            if (
+              [
+                'restored-resources',
+                'restored-promotion-resources',
+                'restored-phase-resources',
+                'restored-startup-phase-failure',
+              ].includes(mode)
+            ) {
               idleRuntime.restoredResourcePatches = 0;
               controlled.options.api = (...v) => {
                 if (v[1] === 'PATCH') idleRuntime.restoredResourcePatches++;
@@ -1275,7 +1299,14 @@ for (const mode of [
             }
             let completionAckLost = false;
             controlled.options.save = async (identityState) => {
-              if (['restored-resources', 'restored-phase-resources', 'restored-startup-phase-failure'].includes(mode))
+              if (
+                [
+                  'restored-resources',
+                  'restored-promotion-resources',
+                  'restored-phase-resources',
+                  'restored-startup-phase-failure',
+                ].includes(mode)
+              )
                 await fixtureSave(identityState);
               currentOwned = await saveRestoredMediaActivationCheckpoint({
                 ...args,
@@ -1310,7 +1341,12 @@ for (const mode of [
             const retained = (await lockRef.get()).get('cloudRestoredMediaActivation');
             assert.equal(retained.disposition, 'retained');
             assert.equal(
-              ['restored-resources', 'restored-phase-resources', 'restored-startup-phase-failure'].includes(mode)
+              [
+                'restored-resources',
+                'restored-promotion-resources',
+                'restored-phase-resources',
+                'restored-startup-phase-failure',
+              ].includes(mode)
                 ? idleRuntime.restoredResourcePatches
                 : controlled.patches,
               1
@@ -1320,7 +1356,12 @@ for (const mode of [
             controlled.options.saved = retained;
             await activateRestoredCloudRunMedia(controlled.options);
             assert.equal(
-              ['restored-resources', 'restored-phase-resources', 'restored-startup-phase-failure'].includes(mode)
+              [
+                'restored-resources',
+                'restored-promotion-resources',
+                'restored-phase-resources',
+                'restored-startup-phase-failure',
+              ].includes(mode)
                 ? idleRuntime.restoredResourcePatches
                 : controlled.patches,
               1
@@ -1472,6 +1513,65 @@ for (const mode of [
               assert.equal(accepted.activationOperationId, newId);
               assert.equal(accepted.activationBindingDigest, newBinding);
               assert.equal(accepted.scope, 'sealed-input-only-no-promotion-or-readiness-authority');
+              const { fileURLToPath } = await import('node:url');
+              const { collectMediaPromotionStartup } = require(fileURLToPath(
+                new URL('../../apps/temporal-worker/src/runtime/restored-media-collector.ts', import.meta.url)
+              ));
+              const startupInput = {
+                db,
+                auth: idleRuntime.restored.auth,
+                operationId: newId,
+                bindingDigest: newBinding,
+                plan: retained.plan,
+                pool: retained.start.pool,
+                promotionOperationId: promotionId,
+                promotionBindingDigest: input.bindingDigest,
+                activationOperationId: newId,
+                recoveryOperationId: base.operationId,
+                releaseId: config.releaseId,
+                buildId: retained.plan.buildId,
+                imageDigest: retained.plan.image,
+                expectedRootSHA256: input.ownedOperation.dataDigest,
+                expectedControlSHA256: expectedAuthority.control.dataDigest,
+                expectedStateSHA256: expectedAuthority.state.dataDigest,
+                image: { pythonSHA256: 'a'.repeat(64), ffmpegSHA256: 'a'.repeat(64), ffprobeSHA256: 'b'.repeat(64) },
+              };
+              const promotedStartup = await collectMediaPromotionStartup(startupInput);
+              assert.equal(promotedStartup.operationId, newId);
+              assert.equal(promotedStartup.worker.instanceId, cap.get('startup.worker.instanceId'));
+              const originalControl = (await controlRef.get()).data();
+              await controlRef.update({ promotionReadbackEpoch: 'CONTROLLED_CURRENT_AUTHORITY_CHANGE' });
+              const changedControl = nativeSnapshotProof(await controlRef.get());
+              assert.notEqual(
+                hash(changedControl.updateTime),
+                hash(cap.get('originalAuthority.control.stamp.updateTime'))
+              );
+              assert.equal(
+                (
+                  await collectMediaPromotionStartup({
+                    ...startupInput,
+                    expectedControlSHA256: changedControl.dataDigest,
+                  })
+                ).identity,
+                promotedStartup.identity
+              );
+              await controlRef.set(originalControl);
+              input.expectedAuthority = {
+                ...input.expectedAuthority,
+                control: nativeSnapshotProof(await controlRef.get()),
+              };
+
+              for (const change of [
+                { promotionOperationId: newId },
+                { promotionBindingDigest: newBinding },
+                { activationOperationId: promotionId },
+                { pool: { ...retained.start.pool, revisionUid: 'foreign' } },
+              ])
+                await assert.rejects(collectMediaPromotionStartup({ ...startupInput, ...change }));
+              await idleRuntime.restored.auth.updateUser(idleActor.uid, { disabled: true });
+              await assert.rejects(collectMediaPromotionStartup(startupInput));
+              await idleRuntime.restored.auth.updateUser(idleActor.uid, { disabled: false });
+
               await assert.rejects(readRestoredMediaPromotionInput({ ...input, bindingDigest: newBinding }));
               await assert.rejects(
                 readRestoredMediaPromotionInput({
@@ -1479,6 +1579,13 @@ for (const mode of [
                   receipts: { ...input.receipts, restoredActivation: { ...receipt.data(), bindingDigest: 'wrong' } },
                 })
               );
+              const kernelRef = db.doc(`_control/temporalRestoredMediaKernel-${newId}`),
+                originalKernel = (await kernelRef.get()).data();
+              await kernelRef.update({ stage: 'closed' });
+              await assert.rejects(collectMediaPromotionStartup(startupInput));
+              await kernelRef.set(originalKernel);
+              await assert.rejects(collectMediaPromotionStartup(startupInput)); // Native restore cannot restore sealed stamps.
+
               const nativeCap = cap.data();
               await activationCapsule.update({ registrationSHA256: '0'.repeat(64) });
               await assert.rejects(readRestoredMediaPromotionInput(input));
@@ -1615,6 +1722,70 @@ for (const mode of [
               await r.capacityRef.update({ digest: '0'.repeat(64) });
               await r.capacityRef.update({ digest: receipt.get('digest') });
               await assert.rejects(r.collect(op));
+            }
+            if (mode === 'restored-promotion-resources') {
+              const promotionId = randomUUID(),
+                imagesId = randomUUID(),
+                images = db.doc(`_control/temporalCloudImagesPromotion-${imagesId}`);
+              await images.create({ operationId: imagesId, CONTROLLED_INPUT_ONLY: true });
+              idlePrivate.push(images);
+              await lockRef.set({
+                action: 'promote-cloud-run-media',
+                operationId: promotionId,
+                releaseId: config.releaseId,
+                bindingDigest: 'f'.repeat(64),
+                operatorPrincipal: { ...base.operatorPrincipal, adcAndGcloudAccountMatch: true },
+                operatorIdentity: controlledCapsuleOperatorIdentity,
+              });
+              const input = {
+                ...idleRuntime.restoredResources(),
+                operationId: promotionId,
+                bindingDigest: 'f'.repeat(64),
+                ownedOperation: nativeSnapshotProof(await lockRef.get()),
+                receipts: {
+                  ...controlled.options.receipts,
+                  restoredActivation: (await ownReceipt.get()).data(),
+                  imagesPromotion: (await images.get()).data(),
+                },
+              };
+              const positive = await readMediaPromotionRetainedResources(input);
+              assert.equal(positive.activationOperationId, newId);
+              assert.equal(positive.recoveryOperationId, base.operationId);
+              assert.equal(hash(positive.pool), hash(retained.start.pool));
+              const api = input.api;
+              for (const kind of ['pool', 'revision', 'lro'])
+                await assert.rejects(
+                  readMediaPromotionRetainedResources({
+                    ...input,
+                    api: async (...v) => {
+                      const actual = await api(...v);
+                      return kind === 'pool' && v[0] === `https://run.googleapis.com/v2/${retained.start.pool.name}`
+                        ? { ...actual, etag: 'foreign' }
+                        : kind === 'revision' && v[0].endsWith(retained.start.pool.revision)
+                        ? { ...actual, uid: 'foreign' }
+                        : kind === 'lro' && v[0].includes('/operations/')
+                        ? { ...actual, done: false }
+                        : actual;
+                    },
+                  })
+                );
+              const nativeTx = db.runTransaction.bind(db);
+              let reads = 0;
+              const delayed = new Proxy(db, {
+                get(target, key) {
+                  if (key === 'runTransaction')
+                    return async (...v) => {
+                      const result = await nativeTx(...v);
+                      if (++reads === 2) await new Promise((resolve) => setTimeout(resolve, 5100));
+                      return result;
+                    };
+                  const v = Reflect.get(target, key, target);
+                  return typeof v === 'function' ? v.bind(target) : v;
+                },
+              });
+              await assert.rejects(readMediaPromotionRetainedResources({ ...input, firestore: delayed }));
+              await new Promise((resolve) => setTimeout(resolve, 200));
+              return;
             }
             args.ownedOperation = currentOwned;
           }

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import { mediaPromotionReceiptPrefixes, readRestoredMediaPromotionInput, confirmRestoredMediaActivationCapsule } from './temporal-restored-media-capsule.mjs';
+import { readCloudRunMediaPromotionEvidence } from './temporal-release-cloud-run.mjs';
+import { mediaPromotionReceiptPrefixes, confirmRestoredMediaActivationCapsule } from './temporal-restored-media-capsule.mjs';
 import {activateRestoredCloudRunMedia} from './temporal-media-restored-activation.mjs';
 import {saveRestoredMediaActivationCheckpoint} from './temporal-media-restored-checkpoint.mjs';
 import {restoredMediaActivationRuntime} from './temporal-media-restored-runtime.mjs';
@@ -1234,7 +1235,7 @@ await runWithCleanup(
               receipts[key]=snapshot.data();
             }
             const currentOperation=await lockRef.get();assertNativeSnapshot(ownedOperation,currentOperation);
-            if(operation.mode==='promote'&&operation.role==='media')await readRestoredMediaPromotionInput({firestore,lockRef,controlRef,stateRef,ownedOperation,expectedAuthority,operationId,bindingDigest,releaseId:config.releaseId,role:'media',platform,evidenceDigest:preparationArguments.digest,receipts});
+            if(operation.mode==='promote'&&operation.role==='media')await readCloudRunMediaPromotionEvidence({firebaseAuth:resources.auth,binding,config,platform,api,firestore,lockRef,controlRef,stateRef,ownedOperation,expectedAuthority,operationId,bindingDigest,releaseId:config.releaseId,role:'media',settings,evidenceDigest:preparationArguments.digest,receipts});
 
             const hasSaved=Object.hasOwn(currentOperation.data(),operation.field);
             if(hasSaved)cloudIdentityPending=true;

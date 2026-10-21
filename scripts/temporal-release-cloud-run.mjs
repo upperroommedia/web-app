@@ -1,3 +1,5 @@
+import { readMediaPromotionRetainedResources } from './temporal-media-promotion-evidence.mjs';
+import { verifyMediaPromotionPredecessor } from './temporal-promotion-predecessor.mjs';
 import { observeRestoredMediaPhasePool } from './temporal-restored-media-phase-pool.mjs';
 import { observeRestoredMediaPhaseProtection } from './temporal-restored-media-protection.mjs';
 import {readRestoredMediaRecoveryPlan} from './temporal-restored-media-registration.mjs';
@@ -788,3 +790,37 @@ export const readRestoredMediaUnused = (o) => {
     throw new Error('RESTORED_MEDIA_UNUSED_UNCONFIRMED');
   return readRestoredMediaPhaseProtection({ ...o, key: 'stop', transition: o.state.stop ?? null });
 };
+
+/** Fixed promotion-parent retained evidence. This GET-only observer joins the
+ * original recovery, distinct activation, and current promotion explicitly.
+ * Cloud Run instance/platform proof is separate; this cannot authorize a CAS. */
+export const readCloudRunMediaPromotionEvidence = o => withNativeCloudRunClient(o, async(client,application)=>{
+ try {
+  const resources=await readMediaPromotionRetainedResources(o),p=resources.recoveryPlan,a=resources.plan;
+  const image=await createMediaRecoveryImageReplayObserver({image:p.image,buildId:p.buildId,operationId:p.operationId,bindingDigest:p.bindingDigest,evidenceDigest:p.evidenceDigest,historyToJSON:application.historyToJSON});
+  const args={db:o.firestore,client,recoveryOperationId:p.operationId,activationOperationId:a.operationId,activationBindingDigest:a.bindingDigest,promotionOperationId:o.operationId,promotionBindingDigest:o.bindingDigest,releaseId:o.releaseId,expectedRootSHA256:o.ownedOperation.dataDigest,expectedControlSHA256:o.expectedAuthority.control.dataDigest,expectedStateSHA256:o.expectedAuthority.state.dataDigest,buildId:p.buildId,imageDigest:p.image,image:{bundleSHA256:image.bundleSHA256,tools:image.tools}};
+  const first=await application.collectMediaPromotionRecoveryExecution(args);
+  const replay=await image.replayHistory(first.history,first.workflowId,first.runId);
+  assertMediaRecoveryImageReplayReceipt(replay,{image:p.image,buildId:p.buildId,operationId:p.operationId,bindingDigest:p.bindingDigest,evidenceDigest:p.evidenceDigest,bundleSHA256:image.bundleSHA256,workflowId:first.workflowId,runId:first.runId,historySHA256:recoveryHash(first.history)});
+  const second=await application.collectMediaPromotionRecoveryExecution(args);
+  if(first.evidenceSHA256!==second.evidenceSHA256||first.provenanceSHA256!==second.provenanceSHA256)throw Error();
+  const at=Date.now(),mono=performance.now(),fresh=()=>{if(Date.now()<at||Date.now()-at>=5000||performance.now()-mono>=5000)throw Error();};
+  const read=async fn=>{let timer;try{fresh();const v=await Promise.race([Promise.resolve().then(()=>{fresh();return fn();}),new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('MEDIA_PROMOTION_RETAINED_EVIDENCE_UNCONFIRMED')),Math.max(1,5000-(Date.now()-at)));})]);fresh();return v;}finally{clearTimeout(timer);}};
+  const rpc=fn=>read(()=>client.connection.withDeadline(at+5000,fn));
+  const startupArgs={...args,auth:o.firebaseAuth,operationId:a.operationId,bindingDigest:a.bindingDigest,plan:a,pool:resources.pool,image:image.tools};
+  const startup=await read(()=>application.collectMediaPromotionStartup(startupArgs));
+  const ready=await read(()=>o.firestore.doc(`_control/temporalMediaRecoveryOriginalReady-${p.operationId}`).get()),kernel=await read(()=>o.firestore.doc(`_control/temporalMediaRecoveryReplacementKernel-${p.operationId}`).get());
+  const scan=async()=>({normal:await scanRestoredMediaInventory({client,plan:a,startup,rpc}),diagnostic:await scanPrivateMediaInventory({client,db:o.firestore,plan:p,operationId:p.operationId,read,rpc,auth:{ready:ready.data(),worker:kernel.get('worker')}}),compute:await read(()=>observeNamespaceComputeIsolation(client,'urm-app-staging.qwejt')),predecessors:await read(()=>verifyMediaPromotionPredecessor({...o,client}))});
+  const before=await scan(),after=await scan();
+  if(recoveryHash(before)!==recoveryHash(after)||!after.normal.ownedPollers.some(row=>row.type===2&&row.key==='urm-media'))throw Error();
+  await read(()=>readCloudRunOperatorKey(o.platform.operatorApiKeyFile,o.platform.operatorApiKeySHA256));
+  await read(async()=>{const {loadVerifiedRuntimeApplication}=await import('./temporal-release-runtime.mjs');await loadVerifiedRuntimeApplication(o.binding,o.config,o.firestore,()=>null);});
+  const current=await read(()=>readMediaPromotionRetainedResources(o));
+  if(resources.nativeFactsSHA256!==current.nativeFactsSHA256||resources.accessSHA256!==current.accessSHA256||recoveryHash(resources.pool)!==recoveryHash(current.pool)||resources.capsuleSHA256!==current.capsuleSHA256)throw Error();
+  const lastStartup=await read(()=>application.collectMediaPromotionStartup({...startupArgs,pool:current.pool}));
+  if(startup.proofSHA256!==lastStartup.proofSHA256||startup.identity!==lastStartup.identity)throw Error();
+  const last=await read(()=>application.confirmMediaPromotionRecoveryProvenance(args));
+  if(last.provenanceSHA256!==first.provenanceSHA256)throw Error();fresh();
+  return {kind:'media-promotion-retained-evidence-v1',operationId:o.operationId,activationOperationId:a.operationId,recoveryOperationId:p.operationId,buildId:p.buildId,image:p.image,pool:current.pool,proofSHA256:recoveryHash({resources:current.nativeFactsSHA256,access:current.accessSHA256,episode:first.evidenceSHA256,provenance:first.provenanceSHA256,replay,image:image.imageProof,startup:startup.proofSHA256,inventory:after}),observedAt:new Date(at).toISOString(),scope:'readonly-retained-evidence-no-instance-proof-or-promotion-authority'};
+ }catch{throw new Error('MEDIA_PROMOTION_RETAINED_EVIDENCE_UNCONFIRMED');}
+},'media-promotion');

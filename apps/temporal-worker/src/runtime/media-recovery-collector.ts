@@ -12,6 +12,8 @@ import { mediaRecoveryPinnedVersion } from './media-recovery-pin';
 import {
   releaseProvenanceDigest,
   readCompletedMediaRecoverySnapshot,
+  readMediaPromotionRecoverySnapshot,
+  type MediaPromotionRecoveryOptions,
   type CompletedMediaRecoveryOptions,
 } from './media-recovery-history';
 import { validateHistoricalMediaRecoveryCapacity } from './media-startup-capacity';
@@ -589,6 +591,16 @@ export async function waitForMediaRecoveryEpisode(o: Omit<Options, 'image'> & { 
 
 /** Fixed new-parent historical read. Never waits for, starts or renews work. */
 export async function collectCompletedMediaRecoveryExecution(o: CompletedMediaRecoveryOptions) {
+  return collectHistorical(o, (fresh) => readCompletedMediaRecoverySnapshot(o, fresh));
+}
+/** Fixed promotion parent; current and both historical operations stay distinct. */
+export async function collectMediaPromotionRecoveryExecution(o: MediaPromotionRecoveryOptions) {
+  return collectHistorical(o, (fresh) => readMediaPromotionRecoverySnapshot(o, fresh));
+}
+async function collectHistorical(
+  o: CompletedMediaRecoveryOptions,
+  snapshot: (fresh: () => void) => ReturnType<typeof readCompletedMediaRecoverySnapshot>
+) {
   const began = Date.now(),
     mono = performance.now(),
     deadline = began + 20000;
@@ -598,7 +610,7 @@ export async function collectCompletedMediaRecoveryExecution(o: CompletedMediaRe
   };
   try {
     const task = async () => {
-      const read = () => readCompletedMediaRecoverySnapshot(o, fresh);
+      const read = () => snapshot(fresh);
       const first = await read();
       fresh();
       const result = await collectWithEpisodeReader(
@@ -625,6 +637,14 @@ export async function collectCompletedMediaRecoveryExecution(o: CompletedMediaRe
 
 /** Final fixed GET-only provenance fence after native/image external reads. */
 export async function confirmCompletedMediaRecoveryProvenance(o: CompletedMediaRecoveryOptions) {
+  return confirmHistorical((fresh) => readCompletedMediaRecoverySnapshot(o, fresh));
+}
+export async function confirmMediaPromotionRecoveryProvenance(o: MediaPromotionRecoveryOptions) {
+  return confirmHistorical((fresh) => readMediaPromotionRecoverySnapshot(o, fresh));
+}
+async function confirmHistorical(
+  snapshot: (fresh: () => void) => ReturnType<typeof readCompletedMediaRecoverySnapshot>
+) {
   const at = Date.now(),
     mono = performance.now();
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -633,7 +653,7 @@ export async function confirmCompletedMediaRecoveryProvenance(o: CompletedMediaR
   };
   try {
     const result = await Promise.race([
-      readCompletedMediaRecoverySnapshot(o, fresh),
+      snapshot(fresh),
       new Promise<never>((_, reject) => {
         timer = setTimeout(() => reject(new Error('MEDIA_RECOVERY_COLLECTION_UNCONFIRMED')), 5000);
       }),

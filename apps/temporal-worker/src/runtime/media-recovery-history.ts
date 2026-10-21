@@ -1,5 +1,6 @@
 /** Fixed historical authorization reader. Current authority and immutable
  * original provenance are independent; no Firestore or parent overlays. */
+import { readRetainedMediaPromotionAuthority, type MediaPromotionAuthorityOptions } from './media-promotion-history';
 import { createHash } from 'node:crypto';
 import type { Firestore } from 'firebase-admin/firestore';
 import type { Client } from '@temporalio/client';
@@ -75,7 +76,18 @@ export type CompletedMediaRecoveryOptions = {
   imageDigest: string;
   image: { bundleSHA256: string; tools: { pythonSHA256: string; ffmpegSHA256: string; ffprobeSHA256: string } };
 };
+export type MediaPromotionRecoveryOptions = CompletedMediaRecoveryOptions & MediaPromotionAuthorityOptions;
 export async function readCompletedMediaRecoverySnapshot(o: CompletedMediaRecoveryOptions, fresh: () => void) {
+  return readSnapshot(o, fresh);
+}
+export async function readMediaPromotionRecoverySnapshot(o: MediaPromotionRecoveryOptions, fresh: () => void) {
+  return readSnapshot(o, fresh, o);
+}
+async function readSnapshot(
+  o: CompletedMediaRecoveryOptions,
+  fresh: () => void,
+  promotion?: MediaPromotionRecoveryOptions
+) {
   fresh();
   const id = o.recoveryOperationId;
   if (
@@ -108,13 +120,17 @@ export async function readCompletedMediaRecoverySnapshot(o: CompletedMediaRecove
         original = v.originalParent,
         completed = receipt.get('identityState'),
         p = completed?.plan;
+      const retained = promotion ? await readRetainedMediaPromotionAuthority(promotion, tx, fresh) : null;
       if (
         releaseProvenanceDigest(c) !== o.expectedRootSHA256 ||
         releaseProvenanceDigest(control.data()) !== o.expectedControlSHA256 ||
         releaseProvenanceDigest(state.data()) !== o.expectedStateSHA256 ||
-        c.action !== 'activate-restored-cloud-run-media' ||
-        c.operationId !== o.activationOperationId ||
-        c.bindingDigest !== o.activationBindingDigest ||
+        (retained
+          ? retained.activationPlan.bindingDigest !== o.activationBindingDigest ||
+            retained.activationPlan.recoveryOperationId !== id
+          : c.action !== 'activate-restored-cloud-run-media' ||
+            c.operationId !== o.activationOperationId ||
+            c.bindingDigest !== o.activationBindingDigest) ||
         c.releaseId !== o.releaseId ||
         c.operatorPrincipal?.adcAndGcloudAccountMatch !== true ||
         control.get('releaseId') !== o.releaseId ||
@@ -142,6 +158,7 @@ export async function readCompletedMediaRecoverySnapshot(o: CompletedMediaRecove
       );
       const { capsuleSHA256, ...preimage } = v;
       if (
+        (retained && retained.activationPlan.origin.capsuleSHA256 !== v.capsuleSHA256) ||
         v.schemaVersion !== 1 ||
         v.kind !== 'completed-media-recovery-provenance-only-v1' ||
         releaseProvenanceDigest(preimage) !== capsuleSHA256 ||
@@ -281,7 +298,14 @@ export async function readCompletedMediaRecoverySnapshot(o: CompletedMediaRecove
         updated: nativeTime(s.updateTime),
       }));
       fresh();
-      return { facts, originals, start, pool: completed.start.pool, plan: p, stampsSHA256: hash(stamps) };
+      return {
+        facts,
+        originals,
+        start,
+        pool: completed.start.pool,
+        plan: p,
+        stampsSHA256: retained ? hash({ episode: stamps, retained: retained.stampsSHA256 }) : hash(stamps),
+      };
     },
     { readOnly: true }
   );
