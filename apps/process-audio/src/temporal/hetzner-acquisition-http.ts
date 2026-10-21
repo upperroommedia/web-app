@@ -1,3 +1,4 @@
+import { executeCanonicalYouTubeAcquisition } from './hetzner-acquisition-driver';
 import { Router } from 'express';
 import type { Auth } from 'firebase-admin/auth';
 import type { Firestore, DocumentSnapshot } from 'firebase-admin/firestore';
@@ -35,6 +36,9 @@ export function createHetznerAcquisitionRouter(o: { firestore: Firestore; auth: 
     }
     const wall = Date.now(),
       mono = performance.now();
+    const birth = new AbortController();
+    const disconnected = () => birth.abort();
+    response.once('close', disconnected);
     let timer: ReturnType<typeof setTimeout> | undefined;
     const fresh = () => {
       if (Date.now() - wall > 5000 || Date.now() < wall || performance.now() - mono > 5000) throw unavailable();
@@ -61,8 +65,15 @@ export function createHetznerAcquisitionRouter(o: { firestore: Firestore; auth: 
           youtubeAcquisitionId(request.body.ref) !== operationId
         )
           throw unavailable();
-        // No side effect, saved attempt, reservation or process is created here.
-        // The Activity transport treats a rejected POST as uncertain and reconciles GET only.
+        // This reaches the canonical fixed resource gate, which remains denied.
+        // No HTTP body can supply an authorization flag or helper executable.
+        await executeCanonicalYouTubeAcquisition({
+          firestore: o.firestore,
+          auth: o.auth,
+          ref,
+          verifiedCallerEmail: initial.preparedBy.serviceAccount,
+          startSignal: birth.signal,
+        });
         return undefined;
       }
       if (request.body !== undefined && Object.keys(request.body).length) throw unavailable();
@@ -113,7 +124,10 @@ export function createHetznerAcquisitionRouter(o: { firestore: Firestore; auth: 
       const result = await Promise.race([
         work(),
         new Promise<never>((_, reject) => {
-          timer = setTimeout(() => reject(unavailable()), 5000);
+          timer = setTimeout(() => {
+            birth.abort();
+            reject(unavailable());
+          }, 5000);
         }),
       ]);
       fresh();
@@ -123,6 +137,8 @@ export function createHetznerAcquisitionRouter(o: { firestore: Firestore; auth: 
       if (!response.headersSent) response.status(503).json({ error: 'Acquisition readback is unavailable.' });
     } finally {
       if (timer) clearTimeout(timer);
+      response.removeListener('close', disconnected);
+      birth.abort();
     }
   });
   return router;

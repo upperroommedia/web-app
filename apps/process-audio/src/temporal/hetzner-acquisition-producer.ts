@@ -166,3 +166,24 @@ export async function startNativeYouTubeProducer(options: {
     diagnostic: () => (truncated ? undefined : diagnostic.toString('utf8')),
   };
 }
+
+/** Final helper-side native session check. No saved PID or external death boolean.
+ * A true return means unexpected descendants were found and drained: callers
+ * must reject success even though resource cleanup can continue. */
+export async function drainNativeYouTubeSession(directory: string): Promise<boolean> {
+  if (process.platform !== 'linux' || !isAbsolute(directory)) throw failure();
+  const text = await readFile('/proc/self/stat', 'utf8');
+  const fields = text
+    .slice(text.lastIndexOf(') ') + 2)
+    .trim()
+    .split(/\s+/);
+  if (Number(fields[2]) !== process.pid || Number(fields[3]) !== process.pid || !/^[1-9][0-9]*$/.test(fields[19]))
+    throw failure();
+  const result = await execute('/usr/bin/python3', ['-c', drainScript, String(process.pid), fields[19]], {
+    timeout: 12000,
+    maxBuffer: 1024,
+    cwd: directory,
+  });
+  if (result.stdout.trim() !== 'empty' && result.stdout.trim() !== 'children') throw failure();
+  return result.stdout.trim() === 'children';
+}

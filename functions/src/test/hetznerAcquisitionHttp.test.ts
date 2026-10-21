@@ -1,3 +1,5 @@
+import { createNativeYouTubeAuthorization } from '../../../apps/process-audio/src/temporal/hetzner-acquisition-authorization';
+import * as nativeIdentity from '../../../apps/process-audio/src/temporal/hetzner-acquisition-identity';
 import { Readable } from 'node:stream';
 import { uploadYouTubeObject } from '../../../apps/process-audio/src/temporal/hetzner-acquisition-upload';
 import express from 'express';
@@ -22,6 +24,7 @@ import type { MediaJobRef } from '../../../apps/process-audio/src/temporal/types
 let app: App, db: Firestore, auth: Auth, ref: MediaJobRef, uid: string;
 let paths: string[];
 let server: Server, origin: string;
+const originalRelease = process.env.SENTRY_RELEASE;
 const email = `tw-m-${'a'.repeat(20)}@urm-app-staging.iam.gserviceaccount.com`;
 const call = async (method = 'GET', body?: unknown, token = 'CONTROLLED_OIDC') => {
   const response = await fetch(`${origin}/${youtubeAcquisitionId(ref)}`, {
@@ -33,6 +36,7 @@ const call = async (method = 'GET', body?: unknown, token = 'CONTROLLED_OIDC') =
   return { status: response.status, body: await response.json() };
 };
 beforeAll(async () => {
+  process.env.SENTRY_RELEASE = `process-audio-hetzner@staging-${'b'.repeat(40)}`;
   for (const host of [process.env.FIRESTORE_EMULATOR_HOST, process.env.FIREBASE_AUTH_EMULATOR_HOST]) {
     if (!/^(127\.0\.0\.1|localhost):\d+$/.test(host ?? '') || host?.endsWith(':9'))
       throw new Error('Dedicated emulator harness required');
@@ -152,6 +156,8 @@ afterEach(async () => {
 afterAll(async () => {
   await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
   jest.restoreAllMocks();
+  if (originalRelease === undefined) delete process.env.SENTRY_RELEASE;
+  else process.env.SENTRY_RELEASE = originalRelease;
   await db.terminate();
   await deleteApp(app);
 });
@@ -263,5 +269,42 @@ test('second native actor read detects revocation after initial inspection', asy
     expect((await call()).status).toBe(503);
   } finally {
     spy.mockRestore();
+  }
+});
+
+test('canonical inert-child claim denies late actual actor read without committing running ownership', async () => {
+  const owner = {
+    bootId: randomUUID(),
+    pidNamespace: 'pid:[1234]',
+    processId: 7,
+    startTicks: '100',
+    buildId: 'b'.repeat(40),
+  };
+  const inspect = jest.spyOn(nativeIdentity, 'inspectNativeYouTubeProcess').mockResolvedValue(owner);
+  const original = auth.getUser.bind(auth);
+  const late = jest.spyOn(auth, 'getUser').mockImplementation(async (actor) => {
+    await new Promise((resolve) => setTimeout(resolve, 5100));
+    return original(actor);
+  });
+  const document = db.doc(`${YOUTUBE_ACQUISITIONS}/${youtubeAcquisitionId(ref)}`),
+    before = await document.get();
+  try {
+    const authorize = createNativeYouTubeAuthorization({
+      firestore: db,
+      auth,
+      ref,
+      buildId: owner.buildId,
+      verifiedCallerEmail: email,
+    });
+    await expect(authorize(owner.processId, new AbortController().signal)).rejects.toThrow(
+      'YOUTUBE_ACQUISITION_AUTHORITY_UNAVAILABLE'
+    );
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const after = await document.get();
+    expect(after.get('status')).toBe('prepared');
+    expect(after.updateTime!.isEqual(before.updateTime!)).toBe(true);
+  } finally {
+    late.mockRestore();
+    inspect.mockRestore();
   }
 });

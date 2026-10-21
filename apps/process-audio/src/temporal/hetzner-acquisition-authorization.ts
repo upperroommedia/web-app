@@ -45,19 +45,41 @@ export function createCanonicalYouTubeHostStore(options: {
     projectId: 'urm-app-staging',
     owner,
     assertEligible: async (transaction, ref, purpose) => {
-      options.signal?.throwIfAborted();
-      const actual = await inspectNativeYouTubeProcess(owner.processId, owner.buildId);
-      if (Object.keys(owner).some((key) => owner[key as keyof typeof owner] !== actual[key as keyof typeof actual]))
-        throw new Error('YOUTUBE_NATIVE_IDENTITY_UNCONFIRMED');
-      const result = await readEligibleYouTubeAcquisition({
-        firestore: options.firestore,
-        auth: options.auth,
-        transaction,
-        ref,
+      await boundedNativeEligibility(async () => {
+        options.signal?.throwIfAborted();
+        const actual = await inspectNativeYouTubeProcess(owner.processId, owner.buildId);
+        if (Object.keys(owner).some((key) => owner[key as keyof typeof owner] !== actual[key as keyof typeof actual]))
+          throw new Error('YOUTUBE_NATIVE_IDENTITY_UNCONFIRMED');
+        const result = await readEligibleYouTubeAcquisition({
+          firestore: options.firestore,
+          auth: options.auth,
+          transaction,
+          ref,
+        });
+        options.signal?.throwIfAborted();
+        if (result.kind !== (purpose === 'source_available' ? 'source_available' : 'ready'))
+          throw new Error('YOUTUBE_ACQUISITION_INELIGIBLE');
       });
-      options.signal?.throwIfAborted();
-      if (result.kind !== (purpose === 'source_available' ? 'source_available' : 'ready'))
-        throw new Error('YOUTUBE_ACQUISITION_INELIGIBLE');
     },
   });
+}
+
+/** Read-only native/actor observation. Late settlement cannot grant bytes or a
+ * durable claim, even if the event loop delays the timeout callback. */
+async function boundedNativeEligibility(run: () => Promise<void>): Promise<void> {
+  const wall = Date.now(),
+    mono = performance.now();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deny = () => new Error('YOUTUBE_ACQUISITION_AUTHORITY_UNAVAILABLE');
+  try {
+    await Promise.race([
+      run(),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(deny()), 5000);
+      }),
+    ]);
+    if (Date.now() < wall || Date.now() - wall >= 5000 || performance.now() - mono >= 5000) throw deny();
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
