@@ -37,7 +37,7 @@ const emptyCompute = (v) => {
  * Legacy DescribeTaskQueue aggregates all loaded versions of ONE partition;
  * enumerate and repeat the complete partition set for BOTH queue types.
  * Native v1.32 matching sources linked in SERVERLESS_BOOTSTRAP_HANDOFF.md. */
-async function observe(o) {
+async function observe(o, mode = 'drained') {
   const { client, firestore: db, plan, pool } = o;
   if (
     db.projectId !== 'urm-app-staging' ||
@@ -49,7 +49,7 @@ async function observe(o) {
     plan.contract?.deploymentName !== deploymentName ||
     plan.contract.queue !== queue ||
     !/^[a-f0-9]{40}$/.test(plan.buildId) ||
-    pool.desiredManualInstanceCount !== 1
+    pool.desiredManualInstanceCount !== (mode === 'drained' ? 1 : 0)
   )
     fail();
   const end = Date.now() + 30000;
@@ -91,7 +91,7 @@ async function observe(o) {
       db.runTransaction(
         async (tx) => {
           if (!live || o.signal?.aborted || Date.now() >= end) fail();
-          const [parent, c, s, old, newborn, intent, ready] = await Promise.all(
+          const [parent, c, s, old, newborn, intent, ready, drain, ...executionFacts] = await Promise.all(
             [
               o.lockRef,
               o.controlRef,
@@ -99,6 +99,18 @@ async function observe(o) {
               ...['Kernel', 'ReplacementKernel', 'ReplacementIntent', 'OriginalReady'].map((k) =>
                 db.doc(`_control/temporalMediaRecovery${k}-${o.operationId}`)
               ),
+              db.doc(`_control/temporalMediaRecoveryDrain-${o.operationId}`),
+              ...[
+                'Start',
+                'Startup',
+                'OriginalSignal',
+                'OriginalDeath',
+                'Work',
+                'ReplacementStartup',
+                'ReplacementAdoption',
+                'ReplacementCompleted',
+                'ReplacementStop',
+              ].map((k) => db.doc(`_control/temporalMediaRecovery${k}-${o.operationId}`)),
             ].map((r) => tx.get(r))
           );
           assertNativeSnapshot(o.ownedOperation, parent);
@@ -111,11 +123,6 @@ async function observe(o) {
             parent.get('bindingDigest') !== o.bindingDigest ||
             parent.get('releaseId') !== plan.releaseId ||
             hash(cycle?.plan) !== hash(plan) ||
-            cycle.start?.stage !== 'completed' ||
-            hash(cycle.start.pool) !== hash(pool) ||
-            !['recovered', 'recovery-failed', 'drained'].includes(cycle.stage) ||
-            Boolean(cycle.recovery) === Boolean(cycle.recoveryFailed) ||
-            cycle.stop ||
             cycle.restore ||
             c.get('admission') !== 'paused' ||
             s.get('phase') !== 'provider-usage-ready' ||
@@ -124,6 +131,77 @@ async function observe(o) {
             ['media', 'publishing', 'images', 'emails', 'accounts', 'bundles', 'search'].some(
               (k) => c.get(`domains.${k}.admission`) !== 'paused'
             )
+          )
+            fail();
+          if (mode === 'never-started') {
+            const rejection = cycle.start;
+            if (
+              !['prepared', 'never-started'].includes(cycle.stage) ||
+              cycle.diagnostic?.stage !== 'completed' ||
+              hash(cycle.diagnostic.pool) !== hash(pool) ||
+              cycle.recovery ||
+              cycle.recoveryFailed ||
+              cycle.drained ||
+              cycle.stop ||
+              cycle.stopped ||
+              parent.get('mediaRecoveryWorkflowStart') !== undefined ||
+              (rejection &&
+                (rejection.stage !== 'rejected' ||
+                  !Number.isInteger(rejection.status) ||
+                  rejection.status < 400 ||
+                  rejection.status >= 500 ||
+                  [408, 429].includes(rejection.status))) ||
+              [old, newborn, intent, ready, drain, ...executionFacts].some((x) => x.exists)
+            )
+              fail();
+            return {
+              closureSHA256: hash({ kind: 'no-execution-facts', operationId: o.operationId }),
+              authoritySHA256: hash([stamp(parent), stamp(c), stamp(s)]),
+            };
+          }
+          if (cycle.start?.stage !== 'completed' || Boolean(cycle.recovery) === Boolean(cycle.recoveryFailed)) fail();
+          const startedPool = cycle.start.pool;
+          if (mode === 'stopped') {
+            if (
+              !['drained', 'stopped'].includes(cycle.stage) ||
+              cycle.stop?.stage !== 'completed' ||
+              hash(cycle.stop.pool) !== hash(pool) ||
+              !cycle.drained ||
+              !drain.exists
+            )
+              fail();
+            assertStoredMediaDiagnosticDrain(cycle.drained.observation, plan, startedPool);
+            if (
+              cycle.drained.proofSHA256 !== hash(cycle.drained.observation) ||
+              hash(drain.data()) !==
+                hash({
+                  schemaVersion: 1,
+                  operationId: o.operationId,
+                  releaseId: plan.releaseId,
+                  bindingDigest: o.bindingDigest,
+                  planSHA256: hash(plan),
+                  proof: cycle.drained,
+                })
+            )
+              fail();
+            const { desiredManualInstanceCount: oldCount, generation: oldGeneration, ...oldIdentity } = startedPool;
+            const { desiredManualInstanceCount: newCount, generation: newGeneration, ...newIdentity } = pool;
+            // A scaling stop changes generation and etag, not the native revision.
+            delete oldIdentity.etag;
+            delete newIdentity.etag;
+            if (
+              oldCount !== 1 ||
+              newCount !== 0 ||
+              hash(oldIdentity) !== hash(newIdentity) ||
+              !/^\d+$/.test(oldGeneration ?? '') ||
+              !/^\d+$/.test(newGeneration ?? '') ||
+              BigInt(newGeneration) !== BigInt(oldGeneration) + 1n
+            )
+              fail();
+          } else if (
+            !['recovered', 'recovery-failed', 'drained'].includes(cycle.stage) ||
+            hash(startedPool) !== hash(pool) ||
+            cycle.stop
           )
             fail();
           for (const kernel of [old, ...(newborn.exists ? [newborn] : [])]) {
@@ -141,8 +219,8 @@ async function observe(o) {
               cloud.projectId !== 'urm-app-staging' ||
               cloud.region !== 'us-central1' ||
               cloud.pool !== plan.name?.split('/').at(-1) ||
-              cloud.revision !== pool.revision?.split('/').at(-1) ||
-              cloud.revisionUid !== pool.revisionUid ||
+              cloud.revision !== startedPool.revision?.split('/').at(-1) ||
+              cloud.revisionUid !== startedPool.revisionUid ||
               cloud.imageDigest !== plan.image?.split('@')[1] ||
               cloud.serviceAccount !== plan.runner ||
               !cloud.instanceId ||
@@ -191,7 +269,15 @@ async function observe(o) {
   const scan = async () => {
     const auth = await authority();
     const versions = [];
-    const report = await rpc(() => service.describeWorkerDeployment({ namespace, deploymentName }));
+    let report;
+    report = await rpc(async () => {
+      try {
+        return await service.describeWorkerDeployment({ namespace, deploymentName });
+      } catch (error) {
+        if (mode !== 'never-started' || error?.code !== 5) throw error;
+        return { workerDeploymentInfo: { name: deploymentName, routingConfig: {}, versionSummaries: [] } };
+      }
+    });
     const d = report.workerDeploymentInfo,
       r = d?.routingConfig;
     if (
@@ -202,7 +288,7 @@ async function observe(o) {
     )
       fail();
     const summaries = array(d.versionSummaries);
-    if (!summaries.length || summaries.length > 100) fail();
+    if ((!summaries.length && mode !== 'never-started') || summaries.length > 100) fail();
     for (const entry of summaries) {
       const v = entry.deploymentVersion;
       if (
@@ -256,7 +342,7 @@ async function observe(o) {
         ),
       });
     }
-    if (!versions.some((v) => v.buildId === plan.buildId)) fail();
+    if (mode !== 'never-started' && !versions.some((v) => v.buildId === plan.buildId)) fail();
     const partitions = await rpc(() =>
       service.listTaskQueuePartitions({ namespace, taskQueue: { name: queue, kind: 1 } })
     );
@@ -479,5 +565,23 @@ export async function waitForMediaDiagnosticDrain(o) {
     return fail();
   } finally {
     clearTimeout(timer);
+  }
+}
+
+/** Separate stopped/never-started native confirmations. These inspect work and
+ * receipt absence/lineage; desired0 is not a live process-count assertion. The
+ * caller must independently bind exact native pool/revision before and after. */
+export async function observeMediaDiagnosticStopped(o) {
+  try {
+    return await observe(o, 'stopped');
+  } catch {
+    throw new Error('MEDIA_DIAGNOSTIC_STOP_UNCONFIRMED');
+  }
+}
+export async function observeMediaDiagnosticNeverStarted(o) {
+  try {
+    return await observe(o, 'never-started');
+  } catch {
+    throw new Error('MEDIA_DIAGNOSTIC_NEVER_STARTED_UNCONFIRMED');
   }
 }

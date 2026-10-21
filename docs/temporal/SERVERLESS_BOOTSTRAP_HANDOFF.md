@@ -904,3 +904,26 @@ confirmations, new-origin normal activation, media evidence consumption and
 actual immutable-image/Cloud Run/platform proof are still required. None of
 these source tests establish operational staging readiness or platform-instance
 replacement.
+
+The stopped and never-started confirmations now have separate fixed native
+observers in the diagnostic policy. A stopped observation requires the exact
+completed scaling successor, the immutable original drain journal, and closed
+owned original/replacement kernels before repeating the complete native
+version/partition, namespace work, provider lease/lock and compute scans.
+A never-started observation instead requires no saved Workflow START intent and
+no owned startup/kernel/work/fault/replacement facts. An attempted or unknown
+scale acknowledgement cannot satisfy it; only an absent attempt or definitive
+rejection can. A definitive native deployment NOT_FOUND is permitted only in
+this never-started policy, while private partition poller/work and namespace
+compute reads remain mandatory. Historical unrelated closed operations remain.
+
+The canonical confirmations rederive all original ancestor receipts and read
+the exact diagnostic-zero pool and revision before and after native observation.
+Both native configuration samples and the native observation retain their
+original deadlines through the final paused-authority await. These are
+configuration and work/receipt confirmations, not process-count or platform
+instance-termination proof. Cleanup does not renew execution expiry or acquire a
+new disk quota. Canonical preflight and phase-aware mutation protection remain
+unavailable; the separate restored-origin activation consumer and actual final
+image/platform acceptance are still required. No operational gate is enabled by
+these local tests.

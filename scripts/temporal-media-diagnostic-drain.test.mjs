@@ -4,6 +4,8 @@ import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import {
   observeMediaDiagnosticDrain,
+  observeMediaDiagnosticStopped,
+  observeMediaDiagnosticNeverStarted,
   waitForMediaDiagnosticDrain,
   assertStoredMediaDiagnosticDrain,
 } from './temporal-media-diagnostic-drain.mjs';
@@ -165,6 +167,7 @@ function fixture() {
     stateRef = db.doc('_control/temporalReleaseState');
   return {
     docs,
+    snapshot,
     rows,
     calls,
     state,
@@ -236,3 +239,104 @@ test('known committed and aborted sessions permit drain without changing history
   f.rows.set('temporalProviderMutationSessions', [{ state: 'committed' }, { state: 'aborted' }]);
   assert.equal((await observeMediaDiagnosticDrain(f.options)).versionCount, 2);
 });
+
+function stoppedFixture() {
+  const f = fixture(),
+    id = f.options.operationId,
+    p = f.docs.get('_control/temporalReleaseOperation'),
+    cycle = p.cloudMediaRecovery;
+  cycle.start.pool.generation = '10';
+  cycle.start.pool.etag = 'old-etag';
+  const observation = {
+    schemaVersion: 1,
+    operationId: id,
+    planSHA256: hash(f.options.plan),
+    poolSHA256: hash(cycle.start.pool),
+    namespace: 'urm-app-staging.qwejt',
+    observedAt: new Date().toISOString(),
+    closureSHA256: 'a'.repeat(64),
+    protectionSHA256: 'b'.repeat(64),
+    computeInventorySHA256: 'c'.repeat(64),
+    versionCount: 2,
+    partitionCount: 3,
+  };
+  cycle.drained = {
+    kind: 'drained',
+    operationId: id,
+    bindingDigest: f.options.bindingDigest,
+    buildId: f.options.plan.buildId,
+    image: f.options.plan.image,
+    proofSHA256: hash(observation),
+    observation,
+  };
+  cycle.stage = 'drained';
+  cycle.stop = {
+    stage: 'completed',
+    pool: { ...cycle.start.pool, desiredManualInstanceCount: 0, generation: '11', etag: 'new-etag' },
+  };
+  f.options.pool = cycle.stop.pool;
+  f.docs.set(`_control/temporalMediaRecoveryDrain-${id}`, {
+    schemaVersion: 1,
+    operationId: id,
+    releaseId: f.options.plan.releaseId,
+    bindingDigest: f.options.bindingDigest,
+    planSHA256: hash(f.options.plan),
+    proof: cycle.drained,
+  });
+  f.options.ownedOperation = nativeSnapshotProof(f.snapshot(f.options.lockRef.path));
+  return f;
+}
+function neverStartedFixture() {
+  const f = fixture(),
+    cycle = f.docs.get('_control/temporalReleaseOperation').cloudMediaRecovery;
+  for (const key of [...f.docs.keys()]) if (key.startsWith('_control/temporalMediaRecovery')) f.docs.delete(key);
+  cycle.stage = 'prepared';
+  delete cycle.start;
+  delete cycle.recovery;
+  f.options.pool = { ...f.options.pool, desiredManualInstanceCount: 0 };
+  cycle.diagnostic = { stage: 'completed', pool: f.options.pool };
+  f.options.ownedOperation = nativeSnapshotProof(f.snapshot(f.options.lockRef.path));
+  return f;
+}
+test('stopped observation requires immutable original drain and exact zero scaling successor', async () => {
+  const f = stoppedFixture();
+  assert.equal((await observeMediaDiagnosticStopped(f.options)).poolSHA256, hash(f.options.pool));
+  f.docs.delete(`_control/temporalMediaRecoveryDrain-${f.options.operationId}`);
+  await assert.rejects(observeMediaDiagnosticStopped(f.options), /STOP_UNCONFIRMED/);
+});
+for (const mode of ['running-kernel', 'wrong-generation', 'changed-revision', 'poller', 'pending-work'])
+  test(`stopped confirmation denies ${mode}`, async () => {
+    const f = stoppedFixture();
+    if (mode === 'running-kernel')
+      f.docs.get(`_control/temporalMediaRecoveryKernel-${f.options.operationId}`).stage = 'running';
+    if (mode === 'wrong-generation') f.options.pool.generation = '12';
+    if (mode === 'changed-revision') f.options.pool.revisionUid = 'foreign';
+    if (mode === 'poller') f.state.pendingPolls = 1;
+    if (mode === 'pending-work') f.state.open = true;
+    await assert.rejects(observeMediaDiagnosticStopped(f.options), /STOP_UNCONFIRMED/);
+  });
+test('never-started requires no owned execution intent/facts and definite native absence', async () => {
+  const f = neverStartedFixture();
+  f.options.client.connection.workflowService.describeWorkerDeployment = async () => {
+    throw Object.assign(new Error('not found'), { code: 5 });
+  };
+  f.options.client.connection.workflowService.listWorkerDeployments = async () => ({ workerDeployments: [] });
+  assert.equal((await observeMediaDiagnosticNeverStarted(f.options)).versionCount, 0);
+  f.docs.set(`_control/temporalMediaRecoveryStartup-${f.options.operationId}`, { stage: 'attempted' });
+  await assert.rejects(observeMediaDiagnosticNeverStarted(f.options), /NEVER_STARTED_UNCONFIRMED/);
+});
+for (const mode of ['unknown-start', 'start-intent', 'work', 'ambiguous-absence', 'private-open', 'poller'])
+  test(`never-started denies ${mode}`, async () => {
+    const f = neverStartedFixture(),
+      p = f.docs.get('_control/temporalReleaseOperation');
+    if (mode === 'unknown-start') p.cloudMediaRecovery.start = { stage: 'attempted' };
+    if (mode === 'start-intent') p.mediaRecoveryWorkflowStart = { nonce: 'unknown' };
+    if (mode === 'work') f.docs.set(`_control/temporalMediaRecoveryWork-${f.options.operationId}`, {});
+    if (mode === 'ambiguous-absence')
+      f.options.client.connection.workflowService.describeWorkerDeployment = async () => {
+        throw Object.assign(new Error('unknown'), { code: 14 });
+      };
+    if (mode === 'private-open') f.state.open = true;
+    if (mode === 'poller') f.state.pendingPolls = 1;
+    await assert.rejects(observeMediaDiagnosticNeverStarted(f.options), /NEVER_STARTED_UNCONFIRMED/);
+  });

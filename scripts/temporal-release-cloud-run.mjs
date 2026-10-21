@@ -1,4 +1,5 @@
-import {waitForMediaDiagnosticDrain,assertFreshMediaDiagnosticDrain} from './temporal-media-diagnostic-drain.mjs';
+import {observeMediaRecoveryDiagnosticZeroPool,mediaDiagnosticConfirmationProof} from './temporal-media-stop-confirmation.mjs';
+import {waitForMediaDiagnosticDrain,assertFreshMediaDiagnosticDrain,observeMediaDiagnosticStopped,observeMediaDiagnosticNeverStarted} from './temporal-media-diagnostic-drain.mjs';
 import {assertMediaRecoveryAuthority} from './temporal-media-recovery-checkpoint.mjs';
 import {proofDigest as recoveryHash} from './temporal-release-runtime.mjs';
 import {startMediaRecoveryWorkflow,observeMediaRecoveryStartedPool} from './temporal-media-recovery-start.mjs';
@@ -413,3 +414,15 @@ export const drainCloudRunMediaRecovery=o=>withNativeCloudRunClient(o,async clie
   return {kind:'drained',operationId:o.operationId,bindingDigest:o.bindingDigest,buildId:o.plan.buildId,image:o.plan.image,proofSHA256:recoveryHash(observation),observation};
  }catch{throw new Error('MEDIA_DIAGNOSTIC_DRAIN_UNCONFIRMED');}
 });
+
+const confirmMediaDiagnosticZero=(o,kind,observe)=>withNativeCloudRunClient(o,async client=>{
+ try{
+  const before=await observeMediaRecoveryDiagnosticZeroPool(o);
+  const observation=await observe({...o,client});
+  const after=await observeMediaRecoveryDiagnosticZeroPool(o);
+  await assertMediaRecoveryAuthority(o);
+  return mediaDiagnosticConfirmationProof(o,kind,observation,before,after);
+ }catch{throw new Error('MEDIA_DIAGNOSTIC_CONFIRMATION_UNCONFIRMED');}
+});
+export const confirmCloudRunMediaRecoveryStopped=o=>confirmMediaDiagnosticZero(o,'stopped',observeMediaDiagnosticStopped);
+export const confirmCloudRunMediaRecoveryNeverStarted=o=>confirmMediaDiagnosticZero(o,'never-started',observeMediaDiagnosticNeverStarted);

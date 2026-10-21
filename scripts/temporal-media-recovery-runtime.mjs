@@ -1,7 +1,7 @@
-import {startCloudRunMediaRecovery,collectCloudRunMediaRecovery,drainCloudRunMediaRecovery} from './temporal-release-cloud-run.mjs';
+import {startCloudRunMediaRecovery,collectCloudRunMediaRecovery,drainCloudRunMediaRecovery,confirmCloudRunMediaRecoveryStopped,confirmCloudRunMediaRecoveryNeverStarted} from './temporal-release-cloud-run.mjs';
 import { prepareMediaRecoveryJournal } from './temporal-media-recovery-checkpoint.mjs';
 /** Canonical preflight stays unavailable. Source preparation, episode and drain
- * adapters are connected below; phase protection, stopped/no-start confirmations,
+ * adapters are connected below; phase protection,
  * explicit restored-origin normal activation and actual platform proof remain.
  * Local/controlled adapters cannot be selected by a CLI flag. Deny BEFORE any
  * cycle checkpoint or native mutation, including preparation at zero. */
@@ -40,3 +40,6 @@ export function mediaRecoveryExecution(o){
 
 /** Separate immutable-checkpoint drain result; canonical preflight stays denied. */
 export const mediaRecoveryDrainage=o=>scope=>drainCloudRunMediaRecovery({...o.options(),...scope});
+
+export const mediaRecoveryStoppedConfirmation=o=>scope=>confirmCloudRunMediaRecoveryStopped({...o.options(),...scope});
+export const mediaRecoveryNeverStartedConfirmation=o=>scope=>confirmCloudRunMediaRecoveryNeverStarted({...o.options(),...scope});

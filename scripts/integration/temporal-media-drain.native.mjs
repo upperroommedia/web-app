@@ -5,7 +5,11 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
-import { observeMediaDiagnosticDrain } from '../temporal-media-diagnostic-drain.mjs';
+import {
+  observeMediaDiagnosticDrain,
+  observeMediaDiagnosticStopped,
+  observeMediaDiagnosticNeverStarted,
+} from '../temporal-media-diagnostic-drain.mjs';
 import { nativeSnapshotProof, proofDigest as hash } from '../temporal-release-runtime.mjs';
 import { bounded } from './fixtures/owned-media-process.mjs';
 const require = createRequire(new URL('../../package.json', import.meta.url));
@@ -118,6 +122,8 @@ test(
         pool = {
           desiredManualInstanceCount: 1,
           uid: 'CONTROLLED-pool',
+          generation: '10',
+          etag: 'controlled10',
           revision: `${plan.name}/revisions/owned-revision`,
           revisionUid: 'CONTROLLED-revision',
         };
@@ -243,6 +249,89 @@ test(
       await bounded(lock.create({ state: 'active' }));
       await assert.rejects(bounded(observeMediaDiagnosticDrain(options), 35000), /DRAIN_UNCONFIRMED/);
       await bounded(lock.delete());
+      stage = 'stopped-confirmation';
+      const drained = {
+        kind: 'drained',
+        operationId: op,
+        bindingDigest: options.bindingDigest,
+        buildId,
+        image: plan.image,
+        proofSHA256: hash(observed),
+        observation: observed,
+      };
+      const drainRef = db.doc(`_control/temporalMediaRecoveryDrain-${op}`);
+      refs.push(drainRef);
+      await bounded(
+        drainRef.create({
+          schemaVersion: 1,
+          operationId: op,
+          releaseId,
+          bindingDigest: options.bindingDigest,
+          planSHA256: hash(plan),
+          proof: drained,
+        })
+      );
+      const zero = { ...pool, desiredManualInstanceCount: 0, generation: '11', etag: 'controlled11' };
+      const stoppedCycle = {
+        ...(await bounded(lockRef.get())).get('cloudMediaRecovery'),
+        stage: 'drained',
+        drained,
+        stop: { stage: 'completed', pool: zero },
+      };
+      await bounded(lockRef.update({ cloudMediaRecovery: stoppedCycle }));
+      const stoppedOptions = {
+        ...options,
+        pool: zero,
+        ownedOperation: nativeSnapshotProof(await bounded(lockRef.get())),
+      };
+      assert.equal((await bounded(observeMediaDiagnosticStopped(stoppedOptions), 35000)).poolSHA256, hash(zero));
+      await bounded(drainRef.delete());
+      await assert.rejects(bounded(observeMediaDiagnosticStopped(stoppedOptions), 35000), /STOP_UNCONFIRMED/);
+      await bounded(
+        drainRef.create({
+          schemaVersion: 1,
+          operationId: op,
+          releaseId,
+          bindingDigest: options.bindingDigest,
+          planSHA256: hash(plan),
+          proof: drained,
+        })
+      );
+      stage = 'never-started-confirmation';
+      // A DISTINCT operation has no source execution intent or private facts.
+      // Historical closed runs/receipts belonging to the earlier op stay intact.
+      const neverId = randomUUID(),
+        neverPlan = { ...plan, operationId: neverId };
+      await bounded(
+        lockRef.update({
+          operationId: neverId,
+          cloudMediaRecovery: { stage: 'prepared', plan: neverPlan, diagnostic: { stage: 'completed', pool: zero } },
+        })
+      );
+      const neverOptions = {
+        ...options,
+        operationId: neverId,
+        plan: neverPlan,
+        pool: zero,
+        ownedOperation: nativeSnapshotProof(await bounded(lockRef.get())),
+      };
+      assert.equal((await bounded(observeMediaDiagnosticNeverStarted(neverOptions), 35000)).poolSHA256, hash(zero));
+      const attempted = db.doc(`_control/temporalMediaRecoveryStartup-${neverId}`);
+      refs.push(attempted);
+      await bounded(attempted.create({ stage: 'attempted' }));
+      await assert.rejects(
+        bounded(observeMediaDiagnosticNeverStarted(neverOptions), 35000),
+        /NEVER_STARTED_UNCONFIRMED/
+      );
+      await bounded(attempted.delete());
+      // Restore the original owned fixture parent before its final drift probe.
+      await bounded(lockRef.update({ operationId: op, cloudMediaRecovery: { ...stoppedCycle, stage: 'recovered' } }));
+      const restored = await bounded(lockRef.get());
+      const originalCycle = restored.get('cloudMediaRecovery');
+      delete originalCycle.drained;
+      delete originalCycle.stop;
+      await bounded(lockRef.update({ cloudMediaRecovery: originalCycle }));
+      options.ownedOperation = nativeSnapshotProof(await bounded(lockRef.get()));
       // Exact original authority must survive the final awaited transaction.
       const nativeTx = db.runTransaction.bind(db);
       let reads = 0;
