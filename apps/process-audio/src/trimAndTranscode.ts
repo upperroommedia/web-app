@@ -375,6 +375,7 @@ const trimAndTranscode = async (
     proc = spawn(ffmpegPath, args, {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
+    cancelToken.trackProcess(proc);
 
     // Pipe output
     if (!proc.stdout) {

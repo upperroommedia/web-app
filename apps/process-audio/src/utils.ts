@@ -1,3 +1,4 @@
+import type { CancelToken } from './CancelToken';
 import os from 'os';
 import path from 'path';
 import { exec, spawn } from 'node:child_process';
@@ -140,11 +141,7 @@ export function normalizeYouTubeUrl(input: string): string | null {
  * Log process memory and optionally "our" /tmp usage (sum of tempFiles sizes).
  * Avoids scanning all of os.tmpdir(); when tempFiles is passed, satisfies GCP "calculate memory including /tmp".
  */
-export const logMemoryUsage = async (
-  message: string,
-  ctx?: LogContext,
-  tempFiles?: Set<string>
-): Promise<void> => {
+export const logMemoryUsage = async (message: string, ctx?: LogContext, tempFiles?: Set<string>): Promise<void> => {
   const log = createLoggerWithContext(ctx);
   const memoryUsage = process.memoryUsage();
   let tempDirMB = 0;
@@ -283,10 +280,11 @@ export const uploadSermon = async (
   });
 };
 
-export const getDurationSeconds = (filePath: string): Promise<number> => {
+export const getDurationSeconds = (filePath: string, cancelToken?: CancelToken): Promise<number> => {
   return new Promise((resolve, reject) => {
     const ffprobePath = getFFprobePath();
     const proc = spawn(ffprobePath, ['-v', 'error', '-show_entries', 'format=duration', '-of', 'json', filePath]);
+    cancelToken?.trackProcess(proc);
 
     let stdout = '';
     let stderr = '';
@@ -397,16 +395,40 @@ export async function executeWithTimeout<T>(
   cancelFunc: () => void,
   delay: number
 ): Promise<T> {
-  const timeoutPromise = new Promise<T>((_, reject) => {
-    const id = setTimeout(() => {
-      clearTimeout(id);
+  if (!Number.isSafeInteger(delay) || delay <= 0) throw new Error('Invalid media operation timeout');
+  const wall = Date.now(),
+    mono = performance.now();
+  let expired = false;
+  const failure = () => new Error(`Timeout of ${delay / 1000} seconds exceeded`);
+  const cancel = () => {
+    if (expired) return;
+    expired = true;
+    try {
       cancelFunc();
-      logger.error('Function timeout', `Timeout of ${delay / 1000} seconds exceeded`);
-      reject(new Error(`Timeout of ${delay / 1000} seconds exceeded`));
-    }, delay);
-  });
-
-  return Promise.race([asyncFunc(), timeoutPromise]);
+    } catch {
+      // Cancellation failure never releases the original operation.
+    }
+  };
+  const elapsed = () => expired || Date.now() < wall || Date.now() - wall >= delay || performance.now() - mono >= delay;
+  const timer = setTimeout(cancel, delay);
+  try {
+    // A timer requests cancellation; it is not evidence of process settlement.
+    // Never hand HTTP/task authority back while the original operation runs.
+    const result = await asyncFunc();
+    if (elapsed()) {
+      cancel();
+      throw failure();
+    }
+    return result;
+  } catch (error) {
+    if (elapsed()) {
+      cancel();
+      throw failure();
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export function validateAddIntroOutroData(data: unknown): data is ProcessAudioInputType {

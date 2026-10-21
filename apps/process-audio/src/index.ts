@@ -919,7 +919,12 @@ const legacyProcessAudioHandler = async (
               ctx,
               taskId,
               sourceBucket
-            ),
+            )
+              .catch((error) => {
+                cancelToken.cancel();
+                throw error;
+              })
+              .finally(() => cancelToken.waitForProcesses()),
           cancelToken.cancel,
           timeoutMillis
         );

@@ -66,6 +66,7 @@ const mergeFiles = async (
   const proc = spawn(ffmpegPath, args, {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
+  cancelToken.trackProcess(proc);
 
   if (!proc.stdout) {
     throw new Error('FFmpeg stdout is null');

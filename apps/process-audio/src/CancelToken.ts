@@ -7,9 +7,17 @@ export class CancelToken {
   private readonly listeners = new Set<() => void>();
 
   cancel = () => {
+    if (this.shouldCancel) return;
     this.shouldCancel = true;
     this.abortController.abort(new Error('Media operation cancelled'));
-    for (const listener of this.listeners) listener();
+    for (const listener of this.listeners) {
+      try {
+        listener();
+      } catch {
+        // A failed signal never becomes a CLOSE receipt; continue cancelling
+        // the other owned children and retain waitForProcesses() fencing.
+      }
+    }
   };
 
   /** Native cancellation remains active even when a provider produces no output. */
@@ -17,12 +25,22 @@ export class CancelToken {
     if (this.processes.has(process)) return;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const abort = () => {
-      process.kill('SIGTERM');
-      timer = setTimeout(() => process.kill('SIGKILL'), 5000);
+      try {
+        process.kill('SIGTERM');
+      } catch {
+        /* Still attempt escalation; only CLOSE settles ownership. */
+      }
+      timer = setTimeout(() => {
+        try {
+          process.kill('SIGKILL');
+        } catch {
+          /* Wait for original CLOSE; never infer death. */
+        }
+      }, 5000);
       timer.unref();
     };
     this.listeners.add(abort);
-    const closed = new Promise<void>(resolve => {
+    const closed = new Promise<void>((resolve) => {
       process.once('close', () => {
         if (timer) clearTimeout(timer);
         this.listeners.delete(abort);
@@ -38,7 +56,9 @@ export class CancelToken {
     await Promise.all([...this.processes.values()]);
   }
 
-  get signal(): AbortSignal { return this.abortController.signal; }
+  get signal(): AbortSignal {
+    return this.abortController.signal;
+  }
 
   get isCancellationRequested() {
     return this.shouldCancel;

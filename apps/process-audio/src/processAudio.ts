@@ -540,7 +540,9 @@ export const processAudio = async (
         // use reduce to sum up all the durations of the files from filepaths
         const durationSeconds = (
           await Promise.all(
-            [tempFilePaths.INTRO, tempFilePaths.OUTRO].map(async (path) => (path ? await getDurationSeconds(path) : 0))
+            [tempFilePaths.INTRO, tempFilePaths.OUTRO].map(async (path) =>
+              path ? await getDurationSeconds(path, cancelToken) : 0
+            )
           )
         ).reduce((accumulator, currentValue) => accumulator + currentValue, duration);
 
@@ -614,12 +616,16 @@ export const processAudio = async (
         log.info('Audio processing completed successfully');
         return buildResult();
       } catch (error) {
+        cancelToken.cancel();
         log.error('Audio processing failed', {
           error: error instanceof Error ? error.message : String(error),
           stack: error instanceof Error ? error.stack : undefined,
         });
         throw error;
       } finally {
+        // Keep the original sermon lock heartbeat and temporary files until all
+        // native children owned by this pipeline have actually emitted CLOSE.
+        await cancelToken.waitForProcesses();
         stopLockHeartbeat?.();
         if (lockAcquired) {
           await releaseProcessAudioLock(realtimeDB, fileName, lockRequestId, log);
