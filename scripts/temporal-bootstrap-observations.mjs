@@ -1,3 +1,4 @@
+import {assertImageReplayReceipt} from './temporal-image-replay.mjs';
 import { proofDigest, assertNativeSnapshot } from './temporal-release-runtime.mjs';
 import { observeNamespaceComputeIsolation } from './temporal-compute-isolation.mjs';
 const fail = () => {
@@ -148,9 +149,14 @@ async function observeProtection(o, transition, expectedRole) {
           if(BigInt(info.historyLength?.toString()??'0')!==BigInt(events.length))fail();
           const history={events};
           if(Buffer.byteLength(JSON.stringify(history))>20*1024*1024)fail();
-          await o.replayHistory(history,e.workflowId);
+          const imageReplay=await o.replayHistory(history,e.workflowId,e.runId);
+          if(o.imageReplayProof) assertImageReplayReceipt(imageReplay,{
+            image:platform.workerImage,buildId:platform.workerBuildId,operationId,bindingDigest,
+            evidenceDigest:o.evidenceDigest,bundleSHA256:o.bundleSHA256,
+            historySHA256:proofDigest(history),workflowId:e.workflowId,runId:e.runId,
+            imageId:o.imageReplayProof.imageId,platform:o.imageReplayProof.platform});
           if(Date.now()>=deadline)fail();
-          replay={historySHA256:proofDigest(history),head:String(events.length),bundleSHA256:o.bundleSHA256};
+          replay={historySHA256:proofDigest(history),head:String(events.length),bundleSHA256:o.bundleSHA256,...(o.imageReplayProof?{imageReplay}:{})};
         }
         workflows.push({ executionSHA256: proofDigest(e), version: deployed, queue: info.taskQueue,...(replay?{replay}:{}) });
       }

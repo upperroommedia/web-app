@@ -526,3 +526,42 @@ stops every originally owned process group even if its leader already exited,
 then removes only this unique fixture's emulator documents, references, objects
 and progress. A deadline is a failed observation, not proof that a native call
 settled. Test failure and cleanup failures remain failures of the overall suite.
+
+## Exact-image offline replay before native promotion
+
+The canonical independent-role promotion adapter now obtains replay bytes from
+the exact digest already joined to source, CI and native build evidence. It no
+longer rebuilds a Workflow bundle from the operator checkout. The fixed runner
+reads `/workspace/apps/temporal-worker/lib/workflow-bundle.js` and the baked build
+ID inside that image, then uses the image's installed production SDK to replay.
+Missing local images, digest/build mismatches and unsupported envelopes stop the
+operation; there is no pull, tag or caller-supplied bundle fallback.
+
+Replay uses only a local Unix Docker socket and a private empty Docker client
+configuration. The container has no network or host mounts, runs as `node` with
+a read-only root, dropped capabilities and no-new-privileges, and has bounded
+CPU, memory, temporary storage, process count, input, output and deadlines. The
+serving entrypoint is replaced by the source-fixed runner; no application worker
+or provider client starts. Histories enter through stdin and are not written to
+the private receipt directory. The frozen runtime's pinned SDK serializes native
+histories with `historyToJSON`; the image decodes them with `historyFromJSON`.
+Original native-history and transport-JSON hashes remain separate.
+
+Each private, create-only intent precedes one inert container creation. Its saved
+CID and exact native configuration establish ownership before one recorded start.
+Unknown creation without a CID stays inert and fenced; names cannot establish
+ownership. A failed or interrupted start is not resent. Native stopped state and
+owned-container removal must be confirmed before a successful receipt is returned.
+Interrupted removal can reconcile exact-CID absence from its original ownership
+proof and removal intent without another start or removal. Cleanup remains
+available after the work deadline. Result receipts bind the image/config ID,
+platform, build, actual bundle digest, fixed runner digest, original operation,
+source/CI evidence, exact Workflow Run ID and both history hashes.
+
+Controlled Docker contract tests and an actual LOCAL payload-bearing history
+replay test cover this source seam. The latter uses controlled image filesystem
+and Runtime ownership with the real installed SDK and native replay engine.
+Neither establishes execution in the final candidate image. Actual Docker/image
+acceptance and the Cloud Run worker's consumption of those same bundle bytes are
+still required. Media promotion remains unconditionally denied, and orchestration
+promotion remains unavailable until its separate final gates are implemented.

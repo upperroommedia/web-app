@@ -3,6 +3,7 @@ import {loadNativeReleaseApplication} from './temporal-native-application.mjs';
 import {promoteCloudRunControls,promoteCloudRunSearch,promoteCloudRunEmail,promoteCloudRunImages,promoteCloudRunMedia} from './temporal-promote-controls.mjs';
 import { observeBootstrapProtection, observeBootstrapRegistration, observeControlsPromotionBefore, observeControlsPromotionAfter,observeSearchPromotionBefore,observeSearchPromotionAfter,observeEmailPromotionBefore,observeEmailPromotionAfter,observeImagesPromotionBefore,observeImagesPromotionAfter,observeMediaPromotionBefore,observeMediaPromotionAfter } from './temporal-bootstrap-observations.mjs';
 import { createHash } from 'node:crypto';
+import { createImageReplayObserver } from './temporal-image-replay.mjs';
 import { isAbsolute } from 'node:path';
 import { realpath, open } from 'node:fs/promises';
 import { constants } from 'node:fs';
@@ -85,7 +86,7 @@ async function withNativeCloudRunClient({ binding, config, platform, firestore }
   const key = await readCloudRunOperatorKey(platform.operatorApiKeyFile, platform.operatorApiKeySHA256);
   const { loadVerifiedRuntimeApplication } = await import('./temporal-release-runtime.mjs');
   const application = await loadVerifiedRuntimeApplication(binding, config, firestore, () => {
-    return loadNativeReleaseApplication(binding.runtimeRoot,purpose);
+    return loadNativeReleaseApplication(binding.runtimeRoot);
   });
   let connection;
   try {
@@ -275,17 +276,12 @@ export async function verifyCloudRunBootstrapRegistration(options) {
 /** Source/CI/image guards are established by the canonical release controller. */
 async function runPromotion(options,role){
  return withNativeCloudRunClient(options,async(client,application)=>{
-  const bounded=async(p,ms)=>{let timer;try{return await Promise.race([p,new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('CONTROLS_PROMOTION_NATIVE_DEADLINE')),ms);})]);}finally{clearTimeout(timer);}};
-  application.Runtime.install({logger:new application.DefaultLogger('ERROR',()=>undefined)});
-  const bundle=await bounded(application.bundleWorkflowCode({workflowsPath:application.workflowsPath,logger:new application.DefaultLogger('ERROR',()=>undefined)}),30000);
-  const bundleSHA256=createHash('sha256').update(bundle.code).digest('hex'),replayed=new Set();
-  const replayHistory=async(history,id)=>{
-   const digest=createHash('sha256').update(JSON.stringify(history)).digest('hex');
-   if(replayed.has(digest))return;
-   await bounded(application.Worker.runReplayHistory({workflowBundle:{code:bundle.code}},history,id),20000);
-   replayed.add(digest);
-  };
-  const observe={...options,client,bundleSHA256,replayHistory};
+  // No source-built bundle or caller-selected file can substitute for final image bytes.
+  const imageReplay=await createImageReplayObserver({image:options.platform.workerImage,
+    buildId:options.platform.workerBuildId,operationId:options.operationId,
+    bindingDigest:options.bindingDigest,evidenceDigest:options.evidenceDigest,historyToJSON:application.historyToJSON});
+  const observe={...options,client,bundleSHA256:imageReplay.bundleSHA256,
+    replayHistory:imageReplay.replayHistory,imageReplayProof:imageReplay.imageProof};
   const operations={controls:[promoteCloudRunControls,observeControlsPromotionBefore,observeControlsPromotionAfter],search:[promoteCloudRunSearch,observeSearchPromotionBefore,observeSearchPromotionAfter],email:[promoteCloudRunEmail,observeEmailPromotionBefore,observeEmailPromotionAfter],images:[promoteCloudRunImages,observeImagesPromotionBefore,observeImagesPromotionAfter],media:[promoteCloudRunMedia,observeMediaPromotionBefore,observeMediaPromotionAfter]};
   const [run,before,after]=operations[role];
   return run({...options,client,before:()=>before(observe),after:()=>after(observe)});
