@@ -6,6 +6,7 @@ import {
   sentryRelease,
   sentryTracesSampleRate,
 } from './instrument';
+import { createHetznerAcquisitionRouter } from './temporal/hetzner-acquisition-http';
 import express, { Request } from 'express';
 import {
   authenticateNativeMediaCaller,
@@ -256,6 +257,10 @@ logger.info('Loading storage, realtimeDB and firestore');
 const bucket = firebaseAdmin.storage().bucket();
 const realtimeDB = firebaseAdmin.database();
 const db = firebaseAdmin.firestore();
+app.use(
+  '/internal/temporal/youtube/acquisitions',
+  createHetznerAcquisitionRouter({ firestore: db, auth: firebaseAdmin.auth(), bucket })
+);
 
 async function readPersistedYouTubeMediaByteCanaries(): Promise<{
   guest: YouTubeMediaByteCanaryDiagnostic;

@@ -425,3 +425,9 @@ export function createYouTubeAcquisitionHostStore(options: {
     },
   };
 }
+
+/** Parse an existing private native operation without granting a claim or upload.
+ * Readback may inspect a settled owner; only claim() can authorize the inert child. */
+export function readYouTubeAcquisitionOperation(raw: unknown, ref: MediaJobRef) {
+  return operation(raw, ref);
+}
