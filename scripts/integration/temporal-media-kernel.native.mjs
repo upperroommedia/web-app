@@ -152,3 +152,265 @@ process.on('SIGTERM',()=>process.exit(0));
       }
     });
   }
+
+// Actual original live-handle SIGKILL/close/group drain. Artifact/store/caller
+// metadata below are CONTROLLED; this is not source Activity or image acceptance.
+const { superviseOriginalMediaFault, originalMediaArtifacts } = require(fileURLToPath(
+  new URL('../../apps/temporal-worker/src/runtime/media-recovery-original-fault.ts', import.meta.url)
+));
+const { workerReadinessDigest: hash } = require(fileURLToPath(
+  new URL('../../apps/temporal-worker/src/runtime/readiness-probe.ts', import.meta.url)
+));
+const { createHash } = await import('node:crypto');
+for (const mode of [
+  'normal-fault',
+  'signal-commit-ack-loss',
+  'signal-not-committed',
+  'grant-drift',
+  'invalid-ready-time',
+  'replacement-generation',
+  'native-attempt-expired',
+  'changed-current-pin',
+  'missing-current-pin',
+  'late-signal-authority-ack',
+]) {
+  test(`actual original-handle fault / ${mode}`, { timeout: 15000 }, async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'urm-original-fault-'));
+    const entry = join(dir, 'child.cjs'),
+      op = randomUUID(),
+      runId = randomUUID();
+    const docs = new Map();
+    const name = (kind) => `_control/temporalMediaRecovery${kind}-${op}`;
+    let childPid,
+      forks = 0,
+      signalWrites = 0;
+    const ref = {
+      jobId: `media-recovery-${op}`,
+      projectId: 'urm-app-staging',
+      sermonId: `media-recovery-${op}`,
+      requestVersion: 'a'.repeat(16),
+      revision: 1,
+    };
+    const bytes = Buffer.from('CONTROLLED synthetic artifact bytes');
+    const prefix = `workflow-audio/media-recovery-${op}/`;
+    const names = [`${prefix}source.wav`, `${prefix}processed.wav`];
+    const metadata = names.map((n, i) => ({
+      name: n,
+      generation: String(i + 1),
+      size: String(bytes.length),
+      md5Hash: createHash('md5').update(bytes).digest('base64'),
+    }));
+    const bucket = {
+      name: 'urm-app-staging.firebasestorage.app',
+      getFiles: async () => [metadata.map((m) => ({ name: m.name, getMetadata: async () => [m] })), null],
+      file: (n, options) => ({
+        getMetadata: async () => [
+          {
+            ...metadata.find((m) => m.name === n),
+            ...(mode === 'replacement-generation' && !options ? { generation: '999' } : {}),
+          },
+        ],
+        download: async () => [bytes],
+      }),
+    };
+    const request = {
+      artifacts: { source: { path: names[0], generation: '1' }, processed: { path: names[1], generation: '2' } },
+    };
+    const updateTime = {
+      seconds: 1,
+      nanoseconds: 2,
+      isEqual: (other) => other?.seconds === 1 && other?.nanoseconds === 2,
+    };
+    const snapshot = (key) => ({
+      exists: docs.has(key),
+      data: () => structuredClone(docs.get(key)),
+      get: (field) => field.split('.').reduce((v, k) => v?.[k], docs.get(key)),
+    });
+    const db = {
+      doc: (key) => ({
+        key,
+        get: async () =>
+          key.startsWith('temporalMediaRequests/')
+            ? {
+                exists: true,
+                data: () => request,
+                get: (field) => field.split('.').reduce((v, k) => v?.[k], request),
+                updateTime,
+              }
+            : snapshot(key),
+      }),
+      runTransaction: async (fn) => {
+        const pending = [];
+        const result = await fn({
+          get: async (r) => snapshot(r.key),
+          create: (r, v) => pending.push([r.key, v]),
+          set: (r, v) => pending.push([r.key, v]),
+        });
+        for (const [key, value] of pending) {
+          if (key === name('OriginalSignal')) {
+            signalWrites++;
+            if (mode === 'signal-not-committed') throw new Error('CONTROLLED_UNKNOWN_ACK');
+          }
+          docs.set(key, structuredClone(value));
+          if (key === name('Kernel') && value.stage === 'born') {
+            childPid = value.birth.pid;
+            forks++;
+          }
+          if (key === name('Kernel') && value.stage === 'running') {
+            const grant = { runId, ref };
+            docs.set(name('Work'), { stage: 'admitted', worker: value.worker, grant });
+            startedAt = Date.now();
+            const ready = {
+              schemaVersion: 1,
+              kind: 'settled-original-acquire-before-completion-ack',
+              operationId: op,
+              intentSHA256: cap.context.intentSHA256,
+              birthDigest: hash({
+                context: value.context,
+                intent: value.intent,
+                birth: value.birth,
+                worker: value.worker,
+              }),
+              grantSHA256: hash(grant),
+              nativeAttempt: {
+                scheduledEventId: '7',
+                startedAt,
+                workerIdentity: `media-recovery-${witness.instanceId}`,
+                attempt: 1,
+              },
+              worker: value.worker,
+              workflowId: ref.jobId,
+              runId,
+              activityId: 'media-recovery-acquire',
+              attempt: 1,
+              ref,
+              inventory: await originalMediaArtifacts(
+                db,
+                {
+                  ...bucket,
+                  file: (n, opts) => ({
+                    getMetadata: async () => [metadata.find((m) => m.name === n)],
+                    download: async () => [bytes],
+                  }),
+                },
+                op
+              ),
+              observedAt: mode === 'invalid-ready-time' ? 'invalid' : new Date().toISOString(),
+            };
+            docs.set(name('OriginalReady'), ready);
+            if (mode === 'grant-drift') docs.get(name('Work')).grant.runId = randomUUID();
+          }
+          if (key === name('OriginalSignal') && mode === 'signal-commit-ack-loss')
+            throw new Error('CONTROLLED_UNKNOWN_ACK');
+        }
+        return result;
+      },
+    };
+    const cap = {
+      context: { operationId: op, intentSHA256: 'c'.repeat(64), parent: { ...witness, instanceId: randomUUID() } },
+      authorize: async () => {
+        if (mode === 'late-signal-authority-ack' && docs.has(name('OriginalSignal')))
+          await new Promise((r) => setTimeout(r, 4100));
+      },
+      checkFresh: () => {},
+    };
+    let startedAt;
+    const client = {
+      connection: { withDeadline: async (_, fn) => fn() },
+      workflowService: {
+        getWorkflowExecutionHistory: async () => ({
+          history: {
+            events: [
+              {
+                eventId: 7,
+                activityTaskScheduledEventAttributes: {
+                  activityId: 'media-recovery-acquire',
+                  activityType: { name: 'acquireMedia' },
+                  taskQueue: { name: 'urm-media-kernel-recovery' },
+                },
+              },
+            ],
+          },
+        }),
+      },
+      workflow: {
+        getHandle: () => ({
+          describe: async () => ({
+            raw: {
+              workflowExecutionInfo: {
+                execution: { runId },
+                status: 1,
+                versioningInfo: {
+                  behavior: 1,
+                  versioningOverride:
+                    mode === 'missing-current-pin'
+                      ? undefined
+                      : {
+                          pinned: {
+                            behavior: 1,
+                            version: {
+                              deploymentName: 'urm-worker-media-recovery-staging',
+                              buildId: mode === 'changed-current-pin' ? 'f'.repeat(40) : witness.buildId,
+                            },
+                          },
+                        },
+                  deploymentVersion: { deploymentName: 'urm-worker-media-recovery-staging', buildId: witness.buildId },
+                },
+              },
+              pendingActivities: [
+                {
+                  activityId: 'media-recovery-acquire',
+                  activityType: { name: 'acquireMedia' },
+                  state: 2,
+                  attempt: mode === 'native-attempt-expired' ? 2 : 1,
+                  lastWorkerIdentity: `media-recovery-${witness.instanceId}`,
+                  lastStartedTime: { seconds: Math.floor(startedAt / 1000), nanos: (startedAt % 1000) * 1e6 },
+                  lastDeploymentVersion: {
+                    deploymentName: 'urm-worker-media-recovery-staging',
+                    buildId: witness.buildId,
+                  },
+                },
+              ],
+            },
+          }),
+        }),
+      },
+    };
+    await writeFile(
+      entry,
+      `require(${JSON.stringify(
+        require.resolve('ts-node')
+      )}).register({skipProject:true,transpileOnly:true,compilerOptions:{module:'CommonJS',target:'ES2022',esModuleInterop:true,moduleResolution:'node'}});
+const kernel=require(${JSON.stringify(
+        fileURLToPath(new URL('../../apps/temporal-worker/src/runtime/media-kernel-supervisor.ts', import.meta.url))
+      )});
+process.on('SIGTERM',()=>process.exit(0));
+(async()=>{await kernel.awaitMediaKernelLaunch();await kernel.reportMediaKernelWitness(${JSON.stringify(
+        witness
+      )});setInterval(()=>{},1000);})().catch(()=>process.exit(1));`
+    );
+    try {
+      if (['normal-fault', 'signal-commit-ack-loss'].includes(mode)) {
+        assert.deepEqual(await superviseOriginalMediaFault(db, bucket, cap, entry, client), {
+          code: null,
+          signal: 'SIGKILL',
+        });
+        assert.equal(
+          docs.get(name('OriginalDeath')).kind,
+          'original-application-child-death-only-no-replacement-authority'
+        );
+        assert.equal(docs.get(name('OriginalDeath')).originalRunId, runId);
+        assert.equal(docs.get(name('Kernel')).close.descendantsAbsent, true);
+        assert.equal(signalWrites, 1);
+        await assert.rejects(superviseOriginalMediaFault(db, bucket, cap, entry, client));
+      } else {
+        await assert.rejects(superviseOriginalMediaFault(db, bucket, cap, entry, client));
+        assert.equal(docs.has(name('OriginalDeath')), false);
+      }
+      assert.equal(forks, 1);
+      if (childPid) assert.throws(() => process.kill(-childPid, 0), { code: 'ESRCH' });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+}

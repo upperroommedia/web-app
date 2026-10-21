@@ -124,6 +124,7 @@ test(
       const client = new Client({ connection: mutationConnection, namespace });
       let version;
       for (const mode of [
+        'original-completion-held',
         'start-late-authority',
         'normal',
         'admission-ack-loss',
@@ -322,6 +323,7 @@ test(
           [
             'normal',
             'admission-ack-loss',
+            'original-completion-held',
             'start-ack-loss',
             'start-receipt-ack-loss',
             'start-confirmed-ack-loss',
@@ -354,6 +356,23 @@ test(
           assert.deepEqual(Object.keys(registered.activities).sort(), ['acquireMedia', 'admitMediaRecoveryWork']);
           current.producer = registered.activities;
           current.media = registered.activities;
+          if (mode === 'original-completion-held') {
+            process.env.TEMPORAL_MEDIA_RECOVERY_CHILD = 'original';
+            const { holdOriginalMediaCompletion } = require(fileURLToPath(
+              new URL('../../apps/temporal-worker/src/runtime/media-recovery-original-fault.ts', import.meta.url)
+            ));
+            current.media = {
+              ...registered.activities,
+              acquireMedia: holdOriginalMediaCompletion({
+                db,
+                bucket: selected,
+                client,
+                cap: registered.cap,
+                birth: registered.birth,
+                acquire: registered.activities.acquireMedia,
+              }),
+            };
+          }
         }
         lostAck = false;
         admissionCalls = 0;
@@ -366,6 +385,7 @@ test(
               connection: environment.nativeConnection,
               namespace,
               taskQueue: queue,
+              identity: `media-recovery-${witness.instanceId}`,
               workflowsPath: fileURLToPath(
                 new URL('../../apps/temporal-worker/src/workflows/verification/media-recovery.ts', import.meta.url)
               ),
@@ -397,6 +417,8 @@ test(
                   return current.media.acquireMedia(ref);
                 },
               },
+              maxHeartbeatThrottleInterval: '1 second',
+              defaultHeartbeatThrottleInterval: '1 second',
               shutdownGraceTime: '1 second',
               shutdownForceTime: '5 seconds',
             })
@@ -590,6 +612,58 @@ test(
             assert.equal(startCalls, 1);
           }
         }
+        if (mode === 'original-completion-held') {
+          stage = 'original-completion-held/ready-wait';
+          const end = Date.now() + 15000;
+          let ready;
+          while (Date.now() < end) {
+            ready = (await bounded(db.doc(`_control/temporalMediaRecoveryOriginalReady-${op}`).get())).data();
+            if (ready) break;
+            await new Promise((r) => setTimeout(r, 50));
+          }
+          stage = 'original-completion-held/ready-joined';
+          assert.equal(ready?.runId, handle.firstExecutionRunId);
+          assert.equal(ready?.inventory.objects.length, 2);
+          assert.equal(productionCalls, 1);
+          const h = await bounded(handle.fetchHistory());
+          const acquireSchedule = h.events.find(
+            (e) => e.activityTaskScheduledEventAttributes?.activityId === 'media-recovery-acquire'
+          );
+          assert(acquireSchedule);
+          assert(
+            !h.events.some(
+              (e) =>
+                String(e.activityTaskCompletedEventAttributes?.scheduledEventId) === String(acquireSchedule.eventId)
+            )
+          );
+          assert.equal((await bounded(handle.describe())).raw.workflowExecutionInfo.status, 1);
+          // Real heartbeat expiry advances beyond attempt1; the original-fault
+          // observer must then refuse even the still-persisted ready receipt.
+          stage = 'original-completion-held/real-expiry';
+          await new Promise((r) => setTimeout(r, 17500));
+          const { originalPendingAttempt } = require(fileURLToPath(
+            new URL('../../apps/temporal-worker/src/runtime/media-recovery-original-fault.ts', import.meta.url)
+          ));
+          const originalCap = await bounded(mediaRecoveryKernelContext(db, auth, witness, op));
+          stage = 'original-completion-held/deny-expired-attempt';
+          await assert.rejects(bounded(originalPendingAttempt(client, originalCap, ready)));
+          assert.equal(
+            (await bounded(db.doc(`_control/temporalMediaRecoveryOriginalSignal-${op}`).get())).exists,
+            false
+          );
+          stage = 'original-completion-held/owned-cleanup';
+          if ((await bounded(handle.describe())).raw.workflowExecutionInfo.status === 1) {
+            try {
+              await bounded(handle.terminate('Owned LOCAL completion-hold fixture cleanup'));
+            } catch {
+              assert.notEqual((await bounded(handle.describe())).raw.workflowExecutionInfo.status, 1);
+            }
+          }
+          await assert.rejects(bounded(handle.result()));
+          delete process.env.TEMPORAL_MEDIA_RECOVERY_CHILD;
+          handle = undefined;
+          continue;
+        }
         if (
           [
             'normal',
@@ -695,6 +769,7 @@ test(
 
       throw primary;
     } finally {
+      delete process.env.TEMPORAL_MEDIA_RECOVERY_CHILD;
       const failures = [];
       const cleanup = async (fn) => {
         try {
@@ -725,6 +800,7 @@ test(
             `temporalMediaRecoveryStart-${op}`,
             `temporalMediaRecoveryKernel-${op}`,
             `temporalMediaRecoveryStartup-${op}`,
+            `temporalMediaRecoveryOriginalReady-${op}`,
           ])
             await cleanup(() => db.doc(`_control/${name}`).delete());
           const { durableEntityKey, DURABLE_COLLECTIONS } = require('@upperroom/orchestration/job-store');

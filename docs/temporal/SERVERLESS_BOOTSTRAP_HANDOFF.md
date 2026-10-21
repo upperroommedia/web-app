@@ -415,7 +415,6 @@ local SDK routing/metadata guard only. No media processing, disk allocation,
 available filesystem capacity, effective runtime access, Cloud Run process
 recovery, promotion, WCI handoff or staging readiness follows from these tests.
 
-
 ## Owned media startup filesystem observation
 
 The staging Cloud Run media entrypoint now checks for the current canonical media
@@ -461,7 +460,6 @@ canonical checkpoint and create/readback protocol with controlled Cloud metadata
 Actual Cloud Run allocation/mount acceptance and same-host execution, processing,
 interruption recovery and image-byte verification remain required. The media
 promotion denial remains fixed with no bypass flag.
-
 
 ## Synthetic native media processing and child cancellation
 
@@ -566,7 +564,6 @@ acceptance and the Cloud Run worker's consumption of those same bundle bytes are
 still required. Media promotion remains unconditionally denied, and orchestration
 promotion remains unavailable until its separate final gates are implemented.
 
-
 The Cloud Run orchestration startup now reads the fixed image bundle once through
 a bounded, stable owned descriptor, verifies the baked build ID, and supplies the
 held code directly to `Worker.create`. Fatal UTF-8 decoding preserves any BOM in
@@ -581,7 +578,6 @@ native receipt to match. Old schema, missing evidence and changed image digests
 are fenced, including GET-only reconciliation. Controlled filesystem and native
 LOCAL SDK/Firestore tests do not establish final image or Cloud Run acceptance.
 Media promotion remains fixed-denied and orchestration promotion unavailable.
-
 
 Owned media startup intent v3 and capacity receipt schema 3 now require a separate
 64GiB filesystem-accounted allocation before the synthetic audio check. The
@@ -702,7 +698,6 @@ The restored revision is new lineage and cannot masquerade as the old zero-pool
 receipt or a retained normal activation. Media promotion and orchestration
 availability remain denied.
 
-
 The canonical prepare stage now has a private native Firestore ARMING journal.
 It is explicitly scoped `arming-only-no-execution-authority`; it grants no
 Workflow, Activity, polling, signal or restart permission. A separate original
@@ -742,7 +737,6 @@ restored-normal lineage consumer remain pending. Ordinary media remains
 Activity-only, media promotion remains denied, and orchestration promotion
 remains unavailable. No Cloud Run or immutable-image execution is established by
 the local producer case.
-
 
 The canonical execution adapter now calls the fixed native SDK START writer
 through the verified source/CI/image loader. Its dedicated connection disables
@@ -795,8 +789,21 @@ normal startup.
 
 This is a source implementation, with local native registration / production
 Activity tests under controlled Cloud and birth metadata, plus real OS child
-IPC/close regressions. It is not final-image or Cloud Run execution. Forced
-signal/death/replacement, replacement-child authorization, original artifact
+IPC/close regressions. It is not final-image or Cloud Run execution. The private image launcher now owns an original fault phase: after the real
+acquisition settles, a separate wrapper snapshots both full artifact version
+inventories/current identities/checksums/bytes and withholds the completion ACK.
+A fresh native observation binds the exact original run, scheduled Activity,
+started attempt1, current explicit Workflow pin and birth-bound worker identity.
+The parent saves its signal attempt before one SIGKILL through the live child
+handle. Only actual close and positive process-group absence permit a death-only
+receipt. Pending-attempt and heartbeat/start deadlines survive final authority
+acknowledgements; stale or changed work denies the fault. Native Activity
+metadata may omit its deployment for Workflow-bound work; this is not relabeled
+as explicit Activity deployment evidence.
+
+This phase cannot start a replacement or claim recovery success. Distinct
+replacement birth intent/authorization, natural retry and original artifact
 adoption collection, authoritative drain and restored-normal-origin consumption
-remain pending. Canonical preflight, media promotion and orchestration gates
+remain pending. A death fact proves application-child termination within its
+instance, not Cloud Run instance replacement. Canonical preflight, media promotion and orchestration gates
 remain closed.

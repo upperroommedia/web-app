@@ -84,6 +84,7 @@ jest.mock('@google-cloud/storage', () => ({
     }
   },
 }));
+jest.mock('./runtime/media-recovery-original-fault', () => ({ holdOriginalMediaCompletion: (o: any) => o.acquire }));
 jest.mock('./runtime/media-recovery-registration', () => ({
   createMediaRecoveryRegistration: async () => ({
     cap: {
@@ -144,9 +145,11 @@ beforeEach(() => {
   mockRegistered = true;
   mockParent = true;
   mockBundleFailure = false;
+  process.env.TEMPORAL_MEDIA_RECOVERY_CHILD = 'original';
   process.send = (() => true) as typeof process.send;
 });
 afterEach(() => {
+  delete process.env.TEMPORAL_MEDIA_RECOVERY_CHILD;
   process.send = originalSend;
 });
 test('private actual entrypoint retains same bundle bytes and only two Activities before polling', async () => {

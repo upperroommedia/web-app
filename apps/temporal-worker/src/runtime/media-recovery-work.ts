@@ -1,3 +1,5 @@
+import { mediaRecoveryPinnedVersion } from './media-recovery-pin';
+export { mediaRecoveryPinnedVersion } from './media-recovery-pin';
 import { Context } from '@temporalio/activity';
 import { ApplicationFailure, defaultPayloadConverter } from '@temporalio/common';
 import type { Client } from '@temporalio/client';
@@ -45,21 +47,6 @@ export function mediaRecoveryPCM() {
   b.writeUInt32LE(32000, 40);
   for (let i = 0; i < 16000; i++) b.writeInt16LE(Math.round(10000 * Math.sin((i * Math.PI) / 20)), 44 + 2 * i);
   return b;
-}
-
-/** Both original and current overrides must retain the exact explicit pin. */
-export function mediaRecoveryPinnedVersion(value: any, expected: any) {
-  if (
-    !value?.pinned ||
-    value.autoUpgrade ||
-    value.pinned.behavior !== 1 ||
-    value.pinned.deployment ||
-    hash(value.pinned.version) !== hash(expected) ||
-    expected?.deploymentName !== MEDIA_RECOVERY_DEPLOYMENT ||
-    !/^[a-f0-9]{40}$/.test(expected?.buildId ?? '')
-  )
-    fail();
-  return true;
 }
 
 /** Native original-start evidence, independent of later name/current routing.

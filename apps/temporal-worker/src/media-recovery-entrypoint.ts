@@ -7,6 +7,7 @@ import { runMediaFilesystemCanary, validateMediaStartupCapacityEvidence } from '
 import { WorkerLifecycle } from './runtime/worker-lifecycle';
 import { initializeWorkerObservability, flushWorkerObservability } from './runtime/observability';
 import { workerReadinessDigest as hash } from './runtime/readiness-probe';
+import { holdOriginalMediaCompletion } from './runtime/media-recovery-original-fault';
 import { Client, Connection } from '@temporalio/client';
 import { NativeConnection, Worker, type Runtime } from '@temporalio/worker';
 import { getSharedFirebaseAppOwnership } from '@upperroom/shared/firebase/firebaseAdminOwnership';
@@ -15,6 +16,8 @@ import { VersioningBehavior } from '@temporalio/common';
  * normal media queue. Canonical release preflight remains fixed-deny separately. */
 export async function runMediaRecoveryApplication(bindShutdown?: (shutdown: () => Promise<void>) => void) {
   const config = loadMediaRecoveryRuntimeConfig();
+  if (process.env.TEMPORAL_MEDIA_RECOVERY_CHILD !== 'original')
+    throw new Error('MEDIA_RECOVERY_ORIGINAL_CHILD_REQUIRED');
   let runtime: Runtime | undefined,
     native: NativeConnection | undefined,
     connection: Connection | undefined,
@@ -182,8 +185,19 @@ export async function runMediaRecoveryApplication(bindShutdown?: (shutdown: () =
       connection: native,
       namespace: config.namespace,
       taskQueue: config.queues[0],
+      identity: `media-recovery-${witness.instanceId}`,
       workflowBundle: { code: bundle.code },
-      activities: registration.activities,
+      activities: {
+        ...registration.activities,
+        acquireMedia: holdOriginalMediaCompletion({
+          db,
+          bucket,
+          client,
+          cap: registration.cap,
+          birth: registration.birth,
+          acquire: registration.activities.acquireMedia,
+        }),
+      },
       workerDeploymentOptions: {
         useWorkerVersioning: true,
         defaultVersioningBehavior: VersioningBehavior.PINNED,

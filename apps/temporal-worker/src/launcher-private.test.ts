@@ -27,8 +27,19 @@ jest.mock('firebase-admin/firestore', () => ({ getFirestore: () => ({}) }));
 jest.mock('firebase-admin/auth', () => ({ getAuth: () => ({}) }));
 jest.mock('./runtime/worker-witness', () => ({ loadWorkerWitness: async () => ({ buildId: 'a'.repeat(40) }) }));
 jest.mock('./runtime/media-recovery-capability', () => ({ mediaRecoveryKernelContext: () => mockCap() }));
-jest.mock('./runtime/media-kernel-supervisor', () => ({
-  superviseMediaRecoveryKernel: (...args: any[]) => mockSupervise(...args),
+jest.mock('@google-cloud/storage', () => ({
+  Storage: class {
+    bucket() {
+      return {};
+    }
+  },
+}));
+jest.mock('./runtime/media-recovery-original-fault', () => ({
+  superviseOriginalMediaFault: (...args: any[]) => mockSupervise(...args),
+}));
+jest.mock('@temporalio/client', () => ({
+  Connection: { connect: async () => ({ close: async () => {} }) },
+  Client: class {},
 }));
 jest.mock('./index', () => ({ startWorkerProcess: mockNormal }));
 import { launchApplicationWorker } from './launcher';
@@ -42,7 +53,7 @@ afterEach(() => {
 test('image private branch supervises actual index.js and retains independent resource cleanup', async () => {
   await launchApplicationWorker();
   expect(mockSupervise).toHaveBeenCalledTimes(1);
-  expect(mockSupervise.mock.calls[0][2]).toMatch(/index.js$/);
+  expect(mockSupervise.mock.calls[0][3]).toMatch(/index.js$/);
   expect(mockCap).toHaveBeenCalledTimes(1);
   expect(mockNormal).not.toHaveBeenCalled();
   expect(mockClose).toHaveBeenCalledTimes(1);

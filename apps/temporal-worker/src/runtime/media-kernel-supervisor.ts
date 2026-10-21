@@ -186,7 +186,13 @@ async function superviseKernel(
   db: Firestore,
   cap: NonNullable<Awaited<ReturnType<typeof mediaKernelContext>>>,
   entrypoint: string,
-  journalPath: string
+  journalPath: string,
+  recovery?: {
+    onRunning: (
+      control: { fault: () => boolean; stop: () => void; exited: () => boolean },
+      state: any
+    ) => Promise<void>;
+  }
 ) {
   const ref = db.doc(journalPath);
   const grant = async () => {
@@ -202,7 +208,8 @@ async function superviseKernel(
   let child: ChildProcess | undefined,
     exited = false,
     draining = false,
-    forwarded = false;
+    forwarded = false,
+    faultAttempted = false;
   const stop = () => {
     draining = true;
     if (child && !exited && !forwarded) {
@@ -216,7 +223,18 @@ async function superviseKernel(
     await writeOnce(db, ref, undefined, state, cap.authorize);
     await grant();
     if (draining) fail();
-    child = fork(entrypoint, [], { detached: true, stdio: ['ignore', 'inherit', 'inherit', 'ipc'], execArgv: [] });
+    if (
+      state.intent.parentPid !== process.pid ||
+      !uuid(state.intent.launchId) ||
+      !Number.isFinite(Date.parse(state.intent.createdAt))
+    )
+      fail();
+    child = fork(entrypoint, [], {
+      detached: true,
+      stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
+      execArgv: [],
+      ...(recovery ? { env: { ...process.env, TEMPORAL_MEDIA_RECOVERY_CHILD: 'original' } } : {}),
+    });
     let pending = Promise.resolve(),
       protocolError = false;
     let launchTimer: ReturnType<typeof setTimeout> | undefined;
@@ -271,6 +289,22 @@ async function superviseKernel(
                 worker: state.worker,
               }),
             });
+            if (recovery)
+              await recovery.onRunning(
+                {
+                  exited: () => exited,
+                  stop,
+                  fault: () => {
+                    cap.checkFresh();
+                    if (draining || exited || forwarded || faultAttempted || state.stage !== 'running') fail();
+                    faultAttempted = true;
+                    const sent = child!.kill('SIGKILL');
+                    if (sent) forwarded = true;
+                    return sent;
+                  },
+                },
+                structuredClone(state)
+              );
             return;
           }
           fail();
@@ -399,4 +433,19 @@ export const superviseMediaRecoveryKernel = (
     cap,
     entrypoint,
     path(cap.context.operationId).replace('temporalMediaKernel-', 'temporalMediaRecoveryKernel-')
+  );
+
+/** Source-only original-handle controls. Normal supervision has no fault hook. */
+export const superviseMediaRecoveryOriginal = (
+  db: Firestore,
+  cap: NonNullable<Awaited<ReturnType<typeof mediaKernelContext>>>,
+  entrypoint: string,
+  onRunning: NonNullable<Parameters<typeof superviseKernel>[4]>['onRunning']
+) =>
+  superviseKernel(
+    db,
+    cap,
+    entrypoint,
+    path(cap.context.operationId).replace('temporalMediaKernel-', 'temporalMediaRecoveryKernel-'),
+    { onRunning }
   );

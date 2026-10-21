@@ -59,12 +59,15 @@ async function launchMediaRecoveryApplication() {
   const ownership = getSharedFirebaseAppOwnership();
   if (!ownership || ownership.app.options.projectId !== config.projectId || !ownership.isRegistered())
     throw new Error('MEDIA_RECOVERY_FIREBASE_OWNER_REQUIRED');
+  let parentConnection: import('@temporalio/client').Connection | undefined;
   try {
     const { getFirestore } = await import('firebase-admin/firestore'),
       { getAuth } = await import('firebase-admin/auth');
     const { loadWorkerWitness } = await import('./runtime/worker-witness');
     const { mediaRecoveryKernelContext } = await import('./runtime/media-recovery-capability');
-    const { superviseMediaRecoveryKernel } = await import('./runtime/media-kernel-supervisor');
+    const { superviseOriginalMediaFault } = await import('./runtime/media-recovery-original-fault');
+    const { Storage } = await import('@google-cloud/storage');
+    if (process.env.TEMPORAL_MEDIA_RECOVERY_CHILD !== undefined) throw new Error('MEDIA_RECOVERY_PARENT_REQUIRED');
     const parent = await loadWorkerWitness(config.buildId, true);
     const cap = await mediaRecoveryKernelContext(
       getFirestore(ownership.app),
@@ -72,13 +75,31 @@ async function launchMediaRecoveryApplication() {
       parent,
       config.operationId
     );
-    const result = await superviseMediaRecoveryKernel(
+    const { Client, Connection } = await import('@temporalio/client');
+    parentConnection = await Connection.connect({
+      address: config.address,
+      tls: config.tls,
+      apiKey: config.apiKey,
+      interceptors: [],
+      channelArgs: { 'grpc.enable_retries': 0 },
+    });
+    const parentClient = new Client({ connection: parentConnection, namespace: config.namespace });
+    const result = await superviseOriginalMediaFault(
       getFirestore(ownership.app),
+      new Storage({ projectId: config.projectId, retryOptions: { autoRetry: false } }).bucket(
+        'urm-app-staging.firebasestorage.app'
+      ),
       cap,
-      require('node:path').resolve(__dirname, 'index.js')
+      require('node:path').resolve(__dirname, 'index.js'),
+      parentClient
     );
     if (result.code !== 0) process.exitCode = 1;
   } finally {
+    try {
+      await parentConnection?.close();
+    } catch {
+      process.exitCode = 1;
+    }
     if (ownership.isRegistered()) {
       const results = await Promise.allSettled([
         Promise.resolve().then(() => ownership.terminateFirestore()),
