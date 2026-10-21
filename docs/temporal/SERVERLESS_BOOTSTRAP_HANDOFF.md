@@ -492,3 +492,37 @@ it does not prove application Activity execution, large-input capacity, an origi
 Cloud Run worker's replacement, durable media-job adoption or pinned-image bytes.
 The unconditional media-promotion denial remains until those separate gates are
 implemented and proven.
+
+## Local durable media artifact adoption after process replacement
+
+The existing serial recovery suite also runs a separate, emulator-only OS process
+fixture. A test-only Workflow schedules the application's actual `acquireMedia`
+Activity on an isolated unversioned queue. The first child downloads a synthetic
+one-second PCM input from the dedicated Storage emulator, runs the installed local
+ffmpeg/ffprobe through the application path, and commits source and processed
+artifacts to the dedicated Firestore emulator. The fixture withholds the Activity
+completion acknowledgement only after that source work returns. It kills that
+exact detached child and confirms the original process group is absent before
+starting a distinct OS child.
+
+The replacement executes attempt two of the same scheduled Activity in the exact
+original Workflow Run ID. The retained processed-artifact branch must return
+without updating the request or allocating another artifact. Both artifacts'
+complete version inventories, current generations, sizes and checksums are
+compared; downloading an old pinned generation alone cannot establish that no
+overwrite occurred. Separate cases replace the processed generation or supersede
+the media owner before recovery: the former must fail without adopting the
+changed object, and the latter must return superseded without processing again.
+
+The fixture uses controlled authorization, small process-local test budgets,
+installed local tools and a test-only Workflow. It does not run the application's
+worker bootstrap, production Workflow, Cloud Run platform, pinned image or live
+provider recovery. It creates no release receipt or promotion authority. The
+media-promotion denial remains unconditional; image-bound Cloud Run process
+replacement and the remaining native platform gates are still required.
+
+All requests and cleanup steps have fixture deadlines. Cleanup independently
+stops every originally owned process group even if its leader already exited,
+then removes only this unique fixture's emulator documents, references, objects
+and progress. A deadline is a failed observation, not proof that a native call
+settled. Test failure and cleanup failures remain failures of the overall suite.
