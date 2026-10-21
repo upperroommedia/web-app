@@ -174,9 +174,9 @@ test('lost remove ACK may succeed only after exact native CID absence', async ()
   }
 });
 
-for (const mode of ['inspect', 'replay', 'wrong-build', 'bad-history'])
+for (const mode of ['inspect', 'replay', 'bom', 'wrong-build', 'bad-history'])
   test(`fixed runner consumes actual supplied image bytes and image SDK / ${mode}`, async () => {
-    const code = Buffer.from('fixed-image-workflow-bytes'),
+    const code = Buffer.from((mode === 'bom' ? '\ufeff' : '') + 'fixed-image-workflow-bytes'),
       build = 'b'.repeat(40),
       historyJSON = '{"events":[]}';
     const request = {
@@ -246,8 +246,8 @@ for (const mode of ['inspect', 'replay', 'wrong-build', 'bad-history'])
     } else {
       assert.deepEqual(exits, [0]);
       assert.equal(JSON.parse(output[0]).bundleSHA256, sha(code));
-      assert.equal(replays.length, mode === 'replay' ? 1 : 0);
-      if (mode === 'replay') assert.equal(replays[0].options.workflowBundle.code, code.toString());
+      assert.equal(replays.length, ['replay', 'bom'].includes(mode) ? 1 : 0);
+      if (['replay', 'bom'].includes(mode)) assert.equal(replays[0].options.workflowBundle.code, code.toString());
     }
   });
 

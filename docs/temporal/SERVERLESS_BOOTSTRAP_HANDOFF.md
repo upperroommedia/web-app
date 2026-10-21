@@ -565,3 +565,19 @@ Neither establishes execution in the final candidate image. Actual Docker/image
 acceptance and the Cloud Run worker's consumption of those same bundle bytes are
 still required. Media promotion remains unconditionally denied, and orchestration
 promotion remains unavailable until its separate final gates are implemented.
+
+
+The Cloud Run orchestration startup now reads the fixed image bundle once through
+a bounded, stable owned descriptor, verifies the baked build ID, and supplies the
+held code directly to `Worker.create`. Fatal UTF-8 decoding preserves any BOM in
+both startup and offline replay, so the consumed code round-trips to the hashed
+bytes. Traditional workers retain their existing bundle path; independent roles
+remain Activity-only.
+
+Private readiness receipt schema 2 includes that startup evidence only for
+orchestration. The canonical final collector independently inspects the exact
+image, pins its bundle digest in the immutable start intent, and requires the
+native receipt to match. Old schema, missing evidence and changed image digests
+are fenced, including GET-only reconciliation. Controlled filesystem and native
+LOCAL SDK/Firestore tests do not establish final image or Cloud Run acceptance.
+Media promotion remains fixed-denied and orchestration promotion unavailable.

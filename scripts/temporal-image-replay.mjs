@@ -22,7 +22,7 @@ export const imageReplayRunner = String.raw`
  const path='/workspace/apps/temporal-worker/lib/workflow-bundle.js';
  const fd=fs.openSync(path,fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW);
  let bytes;try{const s=fs.fstatSync(fd);if(!s.isFile()||s.size<1||s.size>64*1024*1024)throw Error();bytes=fs.readFileSync(fd);if(bytes.length!==s.size)throw Error();}finally{fs.closeSync(fd);}
- const code=new TextDecoder('utf-8',{fatal:true}).decode(bytes);
+ const code=new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}).decode(bytes);
  const buildFile=fs.openSync('/etc/temporal-worker-build-id',fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW);
  let buildId;try{const s=fs.fstatSync(buildFile);if(!s.isFile()||s.size>128)throw Error();buildId=fs.readFileSync(buildFile,'utf8').trim();}finally{fs.closeSync(buildFile);}
  if(!/^[a-f0-9]{40}$/.test(buildId))throw Error();
@@ -89,7 +89,8 @@ async function privateRead(path, cid = false) {
   try {
     file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
     const s = await file.stat();
-    if (!s.isFile() || s.uid !== process.getuid() || s.mode & (cid ? 0o022 : 0o077) || s.size > (cid ? 65 : 128 * 1024)) fail();
+    if (!s.isFile() || s.uid !== process.getuid() || s.mode & (cid ? 0o022 : 0o077) || s.size > (cid ? 65 : 128 * 1024))
+      fail();
     if (cid) {
       await file.chmod(0o600);
       await file.sync();

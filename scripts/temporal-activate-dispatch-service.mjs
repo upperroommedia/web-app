@@ -16,8 +16,8 @@ function operation(value) {
 }
 function intentValid(intent, bindings) {
   if (!intent || typeof intent !== 'object' || Array.isArray(intent) ||
-    Object.keys(intent).sort().join(',') !== 'bindings,createdAt,nonce,schemaVersion,workflowId' ||
-    intent.schemaVersion !== 1 || typeof intent.workflowId !== 'string' || !intent.workflowId ||
+    Object.keys(intent).sort().join(',') !== 'bindings,createdAt,imageWorkflowBundleSHA256,nonce,schemaVersion,workflowId' ||
+    intent.schemaVersion !== 1 || !hash.test(intent.imageWorkflowBundleSHA256 ?? '') || typeof intent.workflowId !== 'string' || !intent.workflowId ||
     typeof intent.nonce !== 'string' || !intent.nonce || !Number.isFinite(Date.parse(intent.createdAt)) ||
     !isDeepStrictEqual(intent.bindings, bindings)) fail();
 }
@@ -92,7 +92,7 @@ export async function activateCloudRunDispatchService(options) {
   const proofValid = (proof, fresh = true) => {
     intentValid(state.workerIntent, bindings);
     if (proof?.schemaVersion !== 1 || proof.scope !== 'observed-role-execution-and-declared-pool-identity' ||
-      proof.workflowId !== state.workerIntent.workflowId || !uuid.test(proof.runId ?? '') || !hash.test(proof.historyDigest ?? '') ||
+      proof.imageWorkflowBundleSHA256 !== state.workerIntent.imageWorkflowBundleSHA256 || proof.workflowId !== state.workerIntent.workflowId || !uuid.test(proof.runId ?? '') || !hash.test(proof.historyDigest ?? '') ||
       !Number.isFinite(Date.parse(proof.verifiedAt)) || Date.parse(proof.verifiedAt) > Date.now() + 5000 ||
       Date.parse(proof.verifiedAt) < Date.parse(state.workerIntent.createdAt) - 5000 ||
       Date.parse(state.workerIntent.createdAt) > Date.now() + 5000 ||

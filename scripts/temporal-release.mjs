@@ -389,14 +389,14 @@ await runWithCleanup(
             const prior = held.data()?.cloudWorkerIntent;
             if (hasPrior) cloudWorkerProbePending = true;
             if (hasPrior && (!prior || typeof prior !== 'object' || Array.isArray(prior) ||
-              Object.keys(prior).sort().join(',') !== 'artifactDirectory,bindings,createdAt,nonce,schemaVersion,workflowId'))
+              Object.keys(prior).sort().join(',') !== 'artifactDirectory,bindings,createdAt,imageWorkflowBundleSHA256,nonce,schemaVersion,workflowId'))
               throw new Error('CLOUD_RUN_SAVED_PROBE_INTENT_INVALID');
             const directory = prior?.artifactDirectory ?? await realpath(await mkdtemp(join(tmpdir(), 'urm-temporal-cloud-ready-')));
             const savedIntent = prior && (({ artifactDirectory, ...intent }) => intent)(prior);
             const scalerPolicies = await verifyCloudRunScalerPolicies(configuredPlatform, api);
             const dispatchKeyIdentity = await verifyDispatchTemporalKeyIdentity({ version: configuredPlatform.dispatch.apiKeyVersion, api });
             const dispatchConfiguration = await verifyCloudRunDispatchConfiguration(configuredPlatform, api);
-            await collectCloudRunReleaseWorkers({ binding, config, platform: configuredPlatform, firestore,
+            await collectCloudRunReleaseWorkers({ operationId, bindingDigest, binding, config, platform: configuredPlatform, firestore,
               artifactDirectory: directory, savedIntent,
               recordIntent: async (intent) => {
                 // From this point a lost transaction acknowledgement is uncertain.
@@ -1369,7 +1369,7 @@ await runWithCleanup(
               probe: async ({ savedIntent, recordIntent, artifactDirectory }) => {
                 await verifyCloudRunScalerPolicies(platform, api);
                 const keyIdentity = await verifyDispatchTemporalKeyIdentity({ version: platform.dispatch.apiKeyVersion, api });
-                const proof = await collectCloudRunReleaseWorkers({ binding, config, platform, firestore,
+                const proof = await collectCloudRunReleaseWorkers({ operationId, bindingDigest, binding, config, platform, firestore,
                   artifactDirectory, savedIntent, recordIntent });
                 // Native collector first validates directory ownership and matching saved intent.
                 await writeFile(join(artifactDirectory, `dispatch-key-identity-${randomUUID()}.json`), JSON.stringify(keyIdentity), { flag: 'wx', mode: 0o600 });

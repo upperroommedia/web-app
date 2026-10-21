@@ -3,6 +3,7 @@ import { verifyCloudRunRtdbReadiness } from './cloud-run-rtdb-readiness';
 import { Context } from '@temporalio/activity';
 import type { Firestore } from 'firebase-admin/firestore';
 import type { WorkerWitness } from './worker-witness';
+import type { ConsumedWorkflowBundleEvidence } from './consumed-workflow-bundle';
 
 /** Stable across Firestore map ordering; shared with the native collector. */
 export function workerReadinessDigest(value: unknown): string {
@@ -54,6 +55,7 @@ export function createWorkerReadinessActivities(options: {
   buildId: string;
   queue: string;
   witness: WorkerWitness;
+  workflowBundle?: ConsumedWorkflowBundleEvidence;
 }) {
   return {
     async recordWorkerReadiness(request: WorkerReadinessRequest): Promise<WorkerReadinessReceipt> {
@@ -87,6 +89,19 @@ export function createWorkerReadinessActivities(options: {
         !options.witness.instanceId
       )
         throw new Error('WORKER_READINESS_EXECUTION_MISMATCH');
+      const workflowBundle = request.role === 'orchestration' ? options.workflowBundle : null;
+      if (
+        request.role === 'orchestration' &&
+        (!workflowBundle ||
+          Object.keys(workflowBundle).sort().join(',') !== 'buildId,bundleBytes,bundleSHA256,schemaVersion' ||
+          workflowBundle.schemaVersion !== 1 ||
+          workflowBundle.buildId !== request.buildId ||
+          !/^[a-f0-9]{64}$/.test(workflowBundle.bundleSHA256) ||
+          !Number.isSafeInteger(workflowBundle.bundleBytes) ||
+          workflowBundle.bundleBytes < 1 ||
+          workflowBundle.bundleBytes > 64 * 1024 * 1024)
+      )
+        throw new Error('WORKER_READINESS_BUNDLE_UNCONFIRMED');
       const firebaseRtdb = request.role === 'orchestration' ? await verifyCloudRunRtdbReadiness(options.witness) : null;
       const email =
         request.role === 'email'
@@ -97,7 +112,8 @@ export function createWorkerReadinessActivities(options: {
       const evidence = {
         email,
         firebaseRtdb,
-        schemaVersion: 1,
+        workflowBundle,
+        schemaVersion: 2,
         projectId: request.projectId,
         buildId: request.buildId,
         nonce: request.nonce,

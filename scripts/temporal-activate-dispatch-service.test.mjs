@@ -109,12 +109,12 @@ async function activationFixture() {
     save:async value=>{saved=structuredClone(value);},
     probe:async ({savedIntent,recordIntent})=>{
       probes++;
-      const intent=savedIntent??{schemaVersion:1,workflowId:'fixture-readiness',nonce:'fixture-nonce',createdAt:new Date().toISOString(),
+      const intent=savedIntent??{schemaVersion:1,workflowId:'fixture-readiness',nonce:'fixture-nonce',imageWorkflowBundleSHA256:'e'.repeat(64),createdAt:new Date().toISOString(),
         bindings:p.roleBindings.map(({projectId,region,namespace,role,buildId,poolName,deploymentName,runnerServiceAccount,image})=>({projectId,region,namespace,role,buildId,poolName,deploymentName,runnerServiceAccount,image}))};
       if(!savedIntent){await recordIntent(intent);starts++;}
       assert.deepEqual(saved.workerIntent,intent);
       return {schemaVersion:1,scope:'observed-role-execution-and-declared-pool-identity',workflowId:intent.workflowId,
-        runId:'55555555-2222-4333-8444-555555555555',verifiedAt:new Date().toISOString(),historyDigest:'f'.repeat(64),roles:p.roleBindings.map(b=>({role:b.role}))};
+        imageWorkflowBundleSHA256:intent.imageWorkflowBundleSHA256,runId:'55555555-2222-4333-8444-555555555555',verifiedAt:new Date().toISOString(),historyDigest:'f'.repeat(64),roles:p.roleBindings.map(b=>({role:b.role}))};
     },
     api:async (url,method='GET',body)=>{
       calls.push([url,method,body]);
@@ -199,13 +199,15 @@ for(const bad of ['missing-intent','null-intent','foreign-bindings','stale-inten
   await assert.rejects(activateCloudRunDispatchService(f.options));assert.equal(f.patches,0);
 });
 
-for (const bad of ['missing-intent', 'missing-proof', 'wrong-original-run', 'wrong-workflow']) test(`post-attempt resume denies ${bad} without completion`, async()=>{
+for (const bad of ['missing-intent', 'missing-proof', 'wrong-original-run', 'wrong-workflow','missing-image-intent','wrong-image-proof']) test(`post-attempt resume denies ${bad} without completion`, async()=>{
  const f=await activationFixture(),api=f.options.api;
  f.options.api=async(...a)=>{const value=await api(...a);if(a[1]==='PATCH')throw new Error('lost');return value;};
  await assert.rejects(activateCloudRunDispatchService(f.options));
  const saved=structuredClone(f.saved);
  if(bad==='missing-intent')delete saved.workerIntent;
  if(bad==='missing-proof')delete saved.proof;
+ if(bad==='missing-image-intent')delete saved.workerIntent.imageWorkflowBundleSHA256;
+ if(bad==='wrong-image-proof')saved.proof.imageWorkflowBundleSHA256='0'.repeat(64);
  if(bad==='wrong-original-run')saved.proof.runId='bad';
  if(bad==='wrong-workflow')saved.proof.workflowId='foreign';
  await assert.rejects(activateCloudRunDispatchService({...f.options,saved}));assert.equal(f.patches,1);

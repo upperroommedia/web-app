@@ -64,6 +64,7 @@ test('fresh native role executions persist private witnesses and return only rec
     for (const role of ['orchestration', 'controls', 'images', 'email']) {
       const queue = `urm-${role}`;
       const activities = createWorkerReadinessActivities({
+        workflowBundle: { schemaVersion: 1, buildId, bundleSHA256: 'f'.repeat(64), bundleBytes: 100 },
         firestore: db,
         projectId: 'urm-app-staging',
         buildId,

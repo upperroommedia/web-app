@@ -1,4 +1,5 @@
 import { recordMediaStartupCapacity } from './runtime/media-startup-capacity';
+import { loadConsumedWorkflowBundle } from './runtime/consumed-workflow-bundle';
 import { queuePollsWorkflows } from './runtime/queue-polling';
 import { createWorkerReadinessActivities } from './runtime/readiness-probe';
 import { createServer, type Server } from 'node:http';
@@ -108,6 +109,11 @@ export async function runWorkerProcess(bindShutdown?: (shutdown: () => Promise<v
     initializeWorkerObservability(config.projectId, config.buildId, config.queues, (installed) => {
       runtime = installed;
     });
+    const consumedBundle =
+      config.hosting === 'cloud-run' && config.queues.includes('urm-orchestration')
+        ? await loadConsumedWorkflowBundle(config.workflowBundle, config.buildId)
+        : undefined;
+    if (lifecycle.draining) return;
     native = await NativeConnection.connect({ address: config.address, tls: config.tls, apiKey: config.apiKey });
     if (lifecycle.draining) return;
     connection = await Connection.connect({ address: config.address, tls: config.tls, apiKey: config.apiKey });
@@ -135,9 +141,19 @@ export async function runWorkerProcess(bindShutdown?: (shutdown: () => Promise<v
     if (lifecycle.draining) return;
     const { createRuntimeActivities } = await import('./runtime/activities');
     const { db, queues } = createRuntimeActivities(config.projectId, config.queues, client, witness);
-    if(config.projectId==='urm-app-staging'&&config.hosting==='cloud-run'&&config.queues.length===1&&config.queues[0]==='urm-media'){
-      await recordMediaStartupCapacity({firestore:db,buildId:config.buildId,witness,isDraining:()=>lifecycle.draining});
-      if(lifecycle.draining)return;
+    if (
+      config.projectId === 'urm-app-staging' &&
+      config.hosting === 'cloud-run' &&
+      config.queues.length === 1 &&
+      config.queues[0] === 'urm-media'
+    ) {
+      await recordMediaStartupCapacity({
+        firestore: db,
+        buildId: config.buildId,
+        witness,
+        isDraining: () => lifecycle.draining,
+      });
+      if (lifecycle.draining) return;
     }
     providerSandbox = await verifyProviderSandboxReadiness(db, config.projectId, config.queues, true);
     if (lifecycle.draining) return;
@@ -147,7 +163,11 @@ export async function runWorkerProcess(bindShutdown?: (shutdown: () => Promise<v
         connection: native,
         namespace: config.namespace,
         taskQueue: queue,
-        workflowBundle: queuePollsWorkflows(config.hosting, queue) ? { codePath: config.workflowBundle } : undefined,
+        workflowBundle: queuePollsWorkflows(config.hosting, queue)
+          ? consumedBundle
+            ? { code: consumedBundle.code }
+            : { codePath: config.workflowBundle }
+          : undefined,
         activities: {
           ...queues[queue as keyof typeof queues],
           ...(config.hosting === 'cloud-run'
@@ -157,6 +177,7 @@ export async function runWorkerProcess(bindShutdown?: (shutdown: () => Promise<v
                 buildId: config.buildId,
                 queue,
                 witness,
+                workflowBundle: consumedBundle?.evidence,
               })
             : {}),
         },

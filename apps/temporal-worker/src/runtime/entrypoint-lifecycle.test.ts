@@ -1,3 +1,11 @@
+const mockConsumedBundle = {
+  code: 'held immutable image bytes',
+  evidence: { schemaVersion: 1, buildId: 'unit', bundleSHA256: 'b'.repeat(64), bundleBytes: 26 },
+};
+const mockLoadConsumedBundle = jest.fn(async () => mockConsumedBundle);
+jest.mock('./consumed-workflow-bundle', () => ({
+  loadConsumedWorkflowBundle: (...args: unknown[]) => Reflect.apply(mockLoadConsumedBundle, undefined, args),
+}));
 let mockRequestHandler:
   | ((
       request: { url: string },
@@ -122,6 +130,7 @@ jest.mock('@upperroom/shared/firebase/firebaseAdminOwnership', () => ({
       : undefined,
 }));
 jest.mock('@upperroom/shared/firebase/firebaseAdmin', () => ({}));
+jest.mock('./media-startup-capacity', () => ({ recordMediaStartupCapacity: jest.fn(async () => undefined) }));
 jest.mock('./worker-witness', () => ({ loadWorkerWitness: async () => ({ instanceId: 'test' }) }));
 jest.mock('./provider-sandbox-readiness', () => ({
   verifyProviderSandboxReadiness: jest.fn().mockResolvedValue(undefined),
@@ -335,3 +344,16 @@ for (const queue of ['urm-search', 'urm-email', 'urm-images', 'urm-media'])
       mockWorkers[0].stop();
       await run;
     });
+
+test('Cloud Run orchestration passes the exact held bundle string to Worker.create', async () => {
+  mockWorkerQueue = 'urm-orchestration';
+  mockHosting = 'cloud-run';
+  const { Worker } = await import('@temporalio/worker');
+  const running = track(startWorkerProcess());
+  await tick();
+  expect(mockLoadConsumedBundle).toHaveBeenCalledWith('/fixture/workflows.js', 'unit');
+  expect(jest.mocked(Worker.create).mock.calls[0][0].workflowBundle).toEqual({ code: mockConsumedBundle.code });
+  mockSignals.get('SIGTERM')?.();
+  mockWorkers[0].stop();
+  await running;
+});

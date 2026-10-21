@@ -1,4 +1,4 @@
-export {collectMediaStartupCapacity} from './media-startup-capacity';
+export { collectMediaStartupCapacity } from './media-startup-capacity';
 import { createHash, randomBytes } from 'node:crypto';
 import { writeFile, realpath, stat, open } from 'node:fs/promises';
 import { constants } from 'node:fs';
@@ -33,6 +33,7 @@ export interface ServerlessReadinessStartIntent {
   nonce: string;
   bindings: ServerlessRoleBinding[];
   createdAt: string;
+  imageWorkflowBundleSHA256: string;
 }
 async function readPrivateReceipt(directory: string, name: string, optional = false): Promise<unknown> {
   let handle;
@@ -223,11 +224,24 @@ export async function readServerlessResource(name: string): Promise<unknown> {
  * start intent survives unknown acknowledgement; do not rerun into a new directory
  * instead of reconciling that exact saved workflow. No raw API errors/credentials
  * or arbitrary environment values are persisted. Other release gates remain required. */
+export async function assertServerlessReadinessArtifactDirectory(directory: string): Promise<void> {
+  const info = await stat(directory);
+  if (
+    !isAbsolute(directory) ||
+    (await realpath(directory)) !== directory ||
+    !info.isDirectory() ||
+    (info.mode & 0o777) !== 0o700 ||
+    info.uid !== process.getuid?.()
+  )
+    fail();
+}
+
 export async function collectServerlessReadinessObservations(options: {
   client: Client;
   firestore: Firestore;
   bindings: ServerlessRoleBinding[];
   artifactDirectory: string;
+  imageWorkflowBundleSHA256: string;
   readResource?: typeof readServerlessResource;
   onStartIntent?: (intent: ServerlessReadinessStartIntent) => Promise<void>;
   savedIntent?: ServerlessReadinessStartIntent;
@@ -247,15 +261,8 @@ export async function collectServerlessReadinessObservations(options: {
   )
     fail();
   bindings.forEach(validateServerlessRoleBinding);
-  const directory = await stat(options.artifactDirectory);
-  if (
-    !isAbsolute(options.artifactDirectory) ||
-    (await realpath(options.artifactDirectory)) !== options.artifactDirectory ||
-    !directory.isDirectory() ||
-    (directory.mode & 0o777) !== 0o700 ||
-    directory.uid !== process.getuid?.()
-  )
-    fail();
+  await assertServerlessReadinessArtifactDirectory(options.artifactDirectory);
+  if (!/^[a-f0-9]{64}$/.test(options.imageWorkflowBundleSHA256)) fail();
   const reconciling = Object.prototype.hasOwnProperty.call(options, 'savedIntent');
   if (
     reconciling &&
@@ -270,11 +277,14 @@ export async function collectServerlessReadinessObservations(options: {
       nonce: generatedNonce,
       bindings,
       createdAt: new Date().toISOString(),
+      imageWorkflowBundleSHA256: options.imageWorkflowBundleSHA256,
     }
   );
   if (
-    Object.keys(intent).sort().join(',') !== 'bindings,createdAt,nonce,schemaVersion,workflowId' ||
+    Object.keys(intent).sort().join(',') !==
+      'bindings,createdAt,imageWorkflowBundleSHA256,nonce,schemaVersion,workflowId' ||
     intent.schemaVersion !== 1 ||
+    intent.imageWorkflowBundleSHA256 !== options.imageWorkflowBundleSHA256 ||
     !/^[a-f0-9]{32}$/.test(intent.nonce) ||
     intent.workflowId !== `serverless-readiness-${intent.nonce}` ||
     !Number.isFinite(Date.parse(intent.createdAt)) ||
@@ -419,8 +429,8 @@ export async function collectServerlessReadinessObservations(options: {
       const { digest, ...evidence } = object(stored.data());
       if (
         Object.keys(evidence).sort().join(',') !==
-          'activityId,attempt,buildId,email,firebaseRtdb,nonce,observedAt,projectId,role,runId,schemaVersion,taskQueue,worker,workflowId' ||
-        evidence.schemaVersion !== 1 ||
+          'activityId,attempt,buildId,email,firebaseRtdb,nonce,observedAt,projectId,role,runId,schemaVersion,taskQueue,worker,workflowBundle,workflowId' ||
+        evidence.schemaVersion !== 2 ||
         digest !== receipt.digest ||
         workerReadinessDigest(evidence) !== digest ||
         evidence.projectId !== binding.projectId ||
@@ -437,6 +447,19 @@ export async function collectServerlessReadinessObservations(options: {
         Date.now() - startedAt > 600000
       )
         fail();
+      if (binding.role === 'orchestration') {
+        const bundle = object(evidence.workflowBundle);
+        if (
+          Object.keys(bundle).sort().join(',') !== 'buildId,bundleBytes,bundleSHA256,schemaVersion' ||
+          bundle.schemaVersion !== 1 ||
+          bundle.buildId !== binding.buildId ||
+          bundle.bundleSHA256 !== options.imageWorkflowBundleSHA256 ||
+          !Number.isSafeInteger(bundle.bundleBytes) ||
+          bundle.bundleBytes < 1 ||
+          bundle.bundleBytes > 64 * 1024 * 1024
+        )
+          fail();
+      } else if (evidence.workflowBundle !== null) fail();
       if (binding.role === 'orchestration') {
         const access = object(evidence.firebaseRtdb);
         if (
@@ -511,6 +534,7 @@ export async function collectServerlessReadinessObservations(options: {
         fail();
       roles.push({
         role: binding.role,
+        workflowBundle: evidence.workflowBundle,
         firebaseRtdb: evidence.firebaseRtdb,
         email: evidence.email,
         ...platform,
@@ -525,6 +549,7 @@ export async function collectServerlessReadinessObservations(options: {
       scope: 'observed-role-execution-and-declared-pool-identity',
       workflowId,
       runId,
+      imageWorkflowBundleSHA256: options.imageWorkflowBundleSHA256,
       verifiedAt: new Date().toISOString(),
       roles,
       historyDigest: createHash('sha256').update(JSON.stringify(history)).digest('hex'),
@@ -572,6 +597,7 @@ export async function reconcileServerlessRoleReadiness(
     firestore: options.firestore,
     bindings: options.bindings,
     artifactDirectory: options.artifactDirectory,
+    imageWorkflowBundleSHA256: options.imageWorkflowBundleSHA256,
     savedIntent: options.savedIntent,
     readResource: readServerlessResource,
   });

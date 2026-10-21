@@ -2,10 +2,10 @@ import {independentPromotionRoles,denyUnprovedMediaPromotion} from './temporal-p
 import {loadNativeReleaseApplication} from './temporal-native-application.mjs';
 import {promoteCloudRunControls,promoteCloudRunSearch,promoteCloudRunEmail,promoteCloudRunImages,promoteCloudRunMedia} from './temporal-promote-controls.mjs';
 import { observeBootstrapProtection, observeBootstrapRegistration, observeControlsPromotionBefore, observeControlsPromotionAfter,observeSearchPromotionBefore,observeSearchPromotionAfter,observeEmailPromotionBefore,observeEmailPromotionAfter,observeImagesPromotionBefore,observeImagesPromotionAfter,observeMediaPromotionBefore,observeMediaPromotionAfter } from './temporal-bootstrap-observations.mjs';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { createImageReplayObserver } from './temporal-image-replay.mjs';
-import { isAbsolute } from 'node:path';
-import { realpath, open } from 'node:fs/promises';
+import { isAbsolute, join } from 'node:path';
+import { realpath, open, writeFile } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { firebaseResourceEnvironment, validateConfig } from './temporal-platform.mjs';
 import { serverlessComputeArguments } from './temporal-serverless-platform.mjs';
@@ -98,15 +98,68 @@ async function withNativeCloudRunClient({ binding, config, platform, firestore }
   } finally { await connection?.close(); }
 }
 
-export async function collectCloudRunReleaseWorkers({ binding, config, platform, firestore, artifactDirectory, recordIntent, savedIntent }) {
+export async function collectCloudRunReleaseWorkers({
+  binding,
+  config,
+  platform,
+  firestore,
+  artifactDirectory,
+  recordIntent,
+  savedIntent,
+  operationId,
+  bindingDigest,
+}) {
   return withNativeCloudRunClient({ binding, config, platform, firestore }, async (client, application) => {
-    const options = { client, firestore, artifactDirectory,
-      bindings: platform.roleBindings.map(({ projectId, region, namespace, role, buildId, poolName,
-        deploymentName, runnerServiceAccount, image }) => ({ projectId, region, namespace, role, buildId,
-        poolName, deploymentName, runnerServiceAccount, image })) };
-    return savedIntent
+    await application.assertServerlessReadinessArtifactDirectory(artifactDirectory);
+    if (savedIntent && !/^[a-f0-9]{64}$/.test(savedIntent.imageWorkflowBundleSHA256 ?? ''))
+      throw new Error('CLOUD_RUN_SAVED_BUNDLE_INTENT_INVALID');
+    // This digest binds the canonical release configuration, not a new CI attestation.
+    const evidenceDigest = createHash('sha256')
+      .update(
+        JSON.stringify({
+          bindingDigest,
+          releaseId: config.releaseId,
+          image: platform.workerImage,
+          scope: 'workers-ready-image-configuration',
+        })
+      )
+      .digest('hex');
+    const image = await createImageReplayObserver({
+      image: platform.workerImage,
+      buildId: platform.workerBuildId,
+      operationId,
+      bindingDigest,
+      evidenceDigest,
+      historyToJSON: application.historyToJSON,
+    });
+    const options = {
+      client,
+      firestore,
+      artifactDirectory,
+      imageWorkflowBundleSHA256: image.bundleSHA256,
+      bindings: platform.roleBindings.map(
+        ({ projectId, region, namespace, role, buildId, poolName, deploymentName, runnerServiceAccount, image }) => ({
+          projectId,
+          region,
+          namespace,
+          role,
+          buildId,
+          poolName,
+          deploymentName,
+          runnerServiceAccount,
+          image,
+        })
+      ),
+    };
+    const proof = await (savedIntent
       ? application.reconcileServerlessRoleReadiness({ ...options, savedIntent })
-      : application.collectServerlessRoleReadiness({ ...options, onStartIntent: recordIntent });
+      : application.collectServerlessRoleReadiness({ ...options, onStartIntent: recordIntent }));
+    await writeFile(
+      join(artifactDirectory, `worker-image-bundle-${randomUUID()}.json`),
+      JSON.stringify(image.imageProof),
+      { flag: 'wx', mode: 0o600 }
+    );
+    return proof;
   });
 }
 export async function verifyCloudRunComputeIsolation(options) {

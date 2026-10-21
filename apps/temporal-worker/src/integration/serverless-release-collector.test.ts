@@ -132,6 +132,7 @@ test('collector joins actual version routing, native activity history and privat
           defaultVersioningBehavior: 'PINNED',
         },
         activities: createWorkerReadinessActivities({
+          workflowBundle: { schemaVersion: 1, buildId, bundleSHA256: 'f'.repeat(64), bundleBytes: 100 },
           firestore: db,
           projectId: binding.projectId,
           buildId,
@@ -180,6 +181,7 @@ test('collector joins actual version routing, native activity history and privat
         firestore: db,
         bindings,
         artifactDirectory: directory,
+        imageWorkflowBundleSHA256: 'f'.repeat(64),
         onStartIntent: async () => {
           throw new Error('Native entry must reject local transport before intent');
         },
@@ -191,6 +193,7 @@ test('collector joins actual version routing, native activity history and privat
       firestore: db,
       bindings,
       artifactDirectory: directory,
+      imageWorkflowBundleSHA256: 'f'.repeat(64),
       readResource: async (name) => resources.get(name),
       onStartIntent: async (intent) => {
         // Real SDK read proves persistence runs before the execution exists.
@@ -218,6 +221,7 @@ test('collector joins actual version routing, native activity history and privat
         firestore: db,
         bindings,
         artifactDirectory: directory,
+        imageWorkflowBundleSHA256: 'f'.repeat(64),
         readResource: async (name) => resources.get(name),
       })
     ).rejects.toMatchObject({ code: 'EEXIST' });
@@ -231,6 +235,7 @@ test('collector joins actual version routing, native activity history and privat
             firestore: db,
             bindings,
             artifactDirectory: directory,
+            imageWorkflowBundleSHA256: 'f'.repeat(64),
             savedIntent,
             onStartIntent: () => {
               throw new Error('Must not call a start callback');
@@ -245,6 +250,7 @@ test('collector joins actual version routing, native activity history and privat
             firestore: db,
             bindings,
             artifactDirectory: directory,
+            imageWorkflowBundleSHA256: 'f'.repeat(64),
             savedIntent,
             readResource: async (name: string) => resources.get(name),
           },
@@ -258,6 +264,7 @@ test('collector joins actual version routing, native activity history and privat
           firestore: db,
           bindings,
           artifactDirectory: directory,
+          imageWorkflowBundleSHA256: 'f'.repeat(64),
         },
       ])
     ).rejects.toThrow('SERVERLESS_NATIVE_READINESS_UNCONFIRMED');
@@ -267,6 +274,42 @@ test('collector joins actual version routing, native activity history and privat
     const originalAck = await readFile(join(directory, 'readiness-start-ack.json'), 'utf8');
     const originalProof = await readFile(join(directory, 'readiness-proof.json'), 'utf8');
     const savedIntent = JSON.parse(originalIntent);
+    // The private native receipt and original expected-image intent must agree.
+    const orchestration = proof.roles.find((role) => role.role === 'orchestration')!;
+    const receiptRef = db.collection(WORKER_READINESS_COLLECTION).doc(orchestration.receipt.id);
+    const receipt = (await receiptRef.get()).data()!;
+    for (const patch of [
+      { schemaVersion: 1 },
+      { workflowBundle: null },
+      { workflowBundle: { ...receipt.workflowBundle, bundleSHA256: '0'.repeat(64) } },
+    ]) {
+      await receiptRef.set({ ...receipt, ...patch });
+      await expect(
+        collectServerlessReadinessObservations({
+          client,
+          firestore: db,
+          bindings,
+          artifactDirectory: directory,
+          imageWorkflowBundleSHA256: 'f'.repeat(64),
+          savedIntent,
+          readResource: async (name) => resources.get(name),
+        })
+      ).rejects.toThrow('SERVERLESS_READINESS_PENDING_RECONCILE_SAVED_INTENT');
+      expect(starts).not.toHaveBeenCalled();
+    }
+    await receiptRef.set(receipt);
+    await expect(
+      collectServerlessReadinessObservations({
+        client,
+        firestore: db,
+        bindings,
+        artifactDirectory: directory,
+        imageWorkflowBundleSHA256: '0'.repeat(64),
+        savedIntent,
+        readResource: async (name) => resources.get(name),
+      })
+    ).rejects.toThrow('SERVERLESS_NATIVE_READINESS_UNCONFIRMED');
+    expect(starts).not.toHaveBeenCalled();
     // Additional release artifacts must follow successful collector validation.
     // A corrupt persisted directory must never gain even a policy-only receipt.
     for (const invalid of ['symlink', 'nonprivate', 'mismatched-intent']) {
@@ -290,6 +333,7 @@ test('collector joins actual version routing, native activity history and privat
             firestore: db,
             bindings,
             artifactDirectory: invalidDirectory,
+            imageWorkflowBundleSHA256: 'f'.repeat(64),
             savedIntent,
             readResource: async (name) => resources.get(name),
           }).then(async () => {
@@ -310,6 +354,7 @@ test('collector joins actual version routing, native activity history and privat
       firestore: db,
       bindings,
       artifactDirectory: directory,
+      imageWorkflowBundleSHA256: 'f'.repeat(64),
       savedIntent,
       readResource: async (name) => resources.get(name),
       onStartIntent: async () => {
@@ -328,6 +373,7 @@ test('collector joins actual version routing, native activity history and privat
       firestore: db,
       bindings,
       artifactDirectory: directory,
+      imageWorkflowBundleSHA256: 'f'.repeat(64),
       savedIntent,
       readResource: async (name) => resources.get(name),
     });
@@ -348,6 +394,7 @@ test('collector joins actual version routing, native activity history and privat
           firestore: db,
           bindings,
           artifactDirectory: missingDirectory,
+          imageWorkflowBundleSHA256: 'f'.repeat(64),
           savedIntent: neverStarted,
           readResource: async (name) => resources.get(name),
         })
@@ -367,6 +414,7 @@ test('collector joins actual version routing, native activity history and privat
         firestore: db,
         bindings,
         artifactDirectory: directory,
+        imageWorkflowBundleSHA256: 'f'.repeat(64),
         savedIntent: { ...savedIntent, nonce: '0'.repeat(32) },
         readResource: async (name) => resources.get(name),
       })
