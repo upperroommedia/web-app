@@ -1,3 +1,4 @@
+import { prepareRestoredMediaActivationCapsule } from './temporal-restored-media-capsule.mjs';
 import { proofDigest as hash, assertNativeSnapshot, nativeSnapshotProof } from './temporal-release-runtime.mjs';
 import { assertRestoredMediaActivationAuthority } from './temporal-media-restored-origin.mjs';
 import { assertRestoredActivationState } from './temporal-media-restored-activation.mjs';
@@ -115,8 +116,14 @@ export async function saveRestoredMediaActivationCheckpoint(o) {
         identityState: next,
       };
       if (receipt.exists && (next.stage !== 'completed' || hash(receipt.data()) !== hash(record))) fail();
+      const retained = next.stage === 'completed' && next.disposition === 'retained';
+      const sealed = retained ? await prepareRestoredMediaActivationCapsule(o, tx, root, c, s, record) : null;
+      if (retained && receipt.exists && sealed.create) fail();
+
+      sealed?.checkFresh();
       tx.update(o.lockRef, { cloudRestoredMediaActivation: next });
       if (next.stage === 'completed' && !receipt.exists) tx.create(o.immutableReceipt, record);
+      if (sealed?.create) tx.create(sealed.ref, sealed.record);
     },
     { maxAttempts: 1 }
   );

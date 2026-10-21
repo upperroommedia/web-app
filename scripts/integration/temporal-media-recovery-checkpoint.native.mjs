@@ -1,3 +1,7 @@
+import {
+  readRestoredMediaPromotionInput,
+  confirmRestoredMediaActivationCapsule,
+} from '../temporal-restored-media-capsule.mjs';
 import { observeRestoredMediaPhaseProtection } from '../temporal-restored-media-protection.mjs';
 import { restoredMediaProtectionFixture } from '../tests/fixtures/restored-media-protection.mjs';
 import { observeRestoredMediaPhasePool } from '../temporal-restored-media-phase-pool.mjs';
@@ -48,6 +52,8 @@ for (const mode of [
   'restored-resources',
   'restored-phase-resources',
   'restored-startup',
+  'restored-startup-capsule',
+  'restored-startup-capsule-missing',
   'restored-startup-phase',
   'restored-startup-phase-failure',
   'restored-startup-drain',
@@ -1070,7 +1076,7 @@ for (const mode of [
             const ownReceipt = db.doc(`_control/temporalCloudRestoredMediaActivation-${newId}`);
             idlePrivate.push(ownReceipt);
 
-            if (['restored-resources', 'restored-phase-resources', 'restored-startup-phase-failure'].includes(mode)) {
+            {
               const prefixes = {
                 runner: 'temporalCloudIdentityPreparation',
                 scaler: 'temporalCloudIdentityPreparation',
@@ -1090,6 +1096,9 @@ for (const mode of [
                 await ref.create(f.options.receipts[key]);
                 idlePrivate.push(ref);
               }
+            }
+
+            if (['restored-resources', 'restored-phase-resources', 'restored-startup-phase-failure'].includes(mode)) {
               idleRuntime.restoredResourcePatches = 0;
               controlled.options.api = (...v) => {
                 if (v[1] === 'PATCH') idleRuntime.restoredResourcePatches++;
@@ -1181,6 +1190,89 @@ for (const mode of [
               controlled.options.runtime.quota = (scope) =>
                 readRestoredMediaActivationQuota({ ...resources(), ...scope });
             }
+
+            const activationCapsule = db.doc(`_control/temporalRestoredMediaActivationCapsule-${newId}`);
+            idlePrivate.push(activationCapsule);
+            if (!mode.startsWith('restored-startup')) {
+              // CONTROLLED provenance only: these records do not pass the full
+              // startup/episode/image collectors and never authorize promotion.
+              const register = controlled.options.runtime.registration;
+              controlled.options.runtime.registration = async (scope) => {
+                const op = (await lockRef.get()).data(),
+                  p = scope.plan,
+                  x = op.cloudRestoredMediaActivation.start;
+                const c = await controlRef.get(),
+                  s = await stateRef.get();
+                const version = (v) =>
+                  hash({
+                    createTime: { seconds: v.createTime.seconds, nanoseconds: v.createTime.nanoseconds },
+                    updateTime: { seconds: v.updateTime.seconds, nanoseconds: v.updateTime.nanoseconds },
+                  });
+                const intentSHA256 = hash({
+                  kind: 'restored-normal-media-startup-v1',
+                  operationId: newId,
+                  recoveryOperationId: p.recoveryOperationId,
+                  releaseId: p.releaseId,
+                  bindingDigest: p.bindingDigest,
+                  plan: p,
+                  start: {
+                    before: x.before,
+                    request: x.request,
+                    attemptedAt: x.attemptedAt,
+                    phaseSHA256: x.phaseSHA256,
+                    computeSHA256: x.computeSHA256,
+                    quota: x.quota,
+                  },
+                });
+                const worker = {
+                  buildId: p.buildId,
+                  instanceId: randomUUID(),
+                  cloudRun: { CONTROLLED_PROVENANCE_ONLY: true },
+                };
+                const k = {
+                  schemaVersion: 1,
+                  stage: 'running',
+                  context: {
+                    operationId: newId,
+                    protocol: 'restored-normal-media-kernel-v1',
+                    recoveryOperationId: p.recoveryOperationId,
+                    capsuleSHA256: p.origin.capsuleSHA256,
+                    intentSHA256,
+                    controlVersion: version(c),
+                    stateVersion: version(s),
+                    actorUid: 'CONTROLLED_NOT_NATIVE_ACTOR',
+                  },
+                  intent: {
+                    createdAt: new Date().toISOString(),
+                    launchId: randomUUID(),
+                    parentPid: process.pid + 100000,
+                  },
+                  birth: { nonce: randomUUID(), pid: process.pid, spawnedAt: new Date().toISOString() },
+                  worker,
+                };
+                const body = {
+                  schemaVersion: 1,
+                  kind: 'restored-normal-media-startup-capacity-v1',
+                  operationId: newId,
+                  recoveryOperationId: p.recoveryOperationId,
+                  intentSHA256,
+                  capsuleSHA256: p.origin.capsuleSHA256,
+                  kernel: {
+                    operationId: newId,
+                    birthDigest: hash({ context: k.context, intent: k.intent, birth: k.birth, worker }),
+                  },
+                  worker,
+                  capacity: { CONTROLLED_PROVENANCE_ONLY: true },
+                  observedAt: new Date().toISOString(),
+                };
+                const kr = db.doc(`_control/temporalRestoredMediaKernel-${newId}`),
+                  sr = db.doc(`temporalRestoredMediaStartupCapacity/${newId}`);
+                idlePrivate.push(kr, sr);
+                await kr.create(k);
+                await sr.create({ ...body, digest: hash(body) });
+                return register(scope);
+              };
+            }
             let completionAckLost = false;
             controlled.options.save = async (identityState) => {
               if (['restored-resources', 'restored-phase-resources', 'restored-startup-phase-failure'].includes(mode))
@@ -1206,6 +1298,7 @@ for (const mode of [
               );
               const stopped = (await lockRef.get()).get('cloudRestoredMediaActivation');
               assert.equal(stopped.disposition, 'stopped');
+              assert.equal((await activationCapsule.get()).exists, false);
               assert.equal(idleRuntime.restoredUnusedPassed, true);
               assert.equal(idleRuntime.restoredResourcePatches, 2);
               controlled.options.saved = stopped;
@@ -1313,6 +1406,97 @@ for (const mode of [
               await assert.rejects(
                 collect({ ...current, auth: { app: auth.app, getUserByEmail: () => new Promise(() => {}) } })
               );
+            }
+
+            if (mode.startsWith('restored-startup-capsule')) {
+              const cap = await activationCapsule.get(),
+                receipt = await ownReceipt.get();
+              assert.equal(cap.get('kind'), 'retained-restored-media-provenance-only-v1');
+              assert.equal(hash(cap.createTime), hash(receipt.createTime));
+              assert.equal(hash(cap.createTime), hash(cap.updateTime));
+              assert.equal(cap.get('activationReceiptSHA256'), hash(receipt.data()));
+              assert.equal(cap.get('facts').length, 15);
+              const sealed = await confirmRestoredMediaActivationCapsule({
+                ...args,
+                config,
+                ownedOperation: currentOwned,
+              });
+              assert.equal(sealed.capsuleSHA256, cap.get('capsuleSHA256'));
+              if (mode === 'restored-startup-capsule-missing') {
+                const before = hash((await lockRef.get()).data());
+                await activationCapsule.delete();
+                await assert.rejects(
+                  saveRestoredMediaActivationCheckpoint({
+                    ...args,
+                    config,
+                    operatorPrincipal: receipt.get('operatorPrincipal'),
+                    ownedOperation: currentOwned,
+                    immutableReceipt: ownReceipt,
+                    identityState: retained,
+                  })
+                );
+                assert.equal((await activationCapsule.get()).exists, false);
+                assert.equal(hash((await lockRef.get()).data()), before);
+                await assert.rejects(
+                  confirmRestoredMediaActivationCapsule({ ...args, config, ownedOperation: currentOwned })
+                );
+                return;
+              }
+              const promotionId = randomUUID(),
+                imagesId = randomUUID();
+              const images = db.doc(`_control/temporalCloudImagesPromotion-${imagesId}`);
+              await images.create({ operationId: imagesId, CONTROLLED_INPUT_ONLY: true });
+              idlePrivate.push(images);
+              await lockRef.set({
+                action: 'promote-cloud-run-media',
+                operationId: promotionId,
+                releaseId: config.releaseId,
+                bindingDigest: 'f'.repeat(64),
+                operatorPrincipal: { ...base.operatorPrincipal, adcAndGcloudAccountMatch: true },
+                operatorIdentity: controlledCapsuleOperatorIdentity,
+              });
+              const input = {
+                ...args,
+                operationId: promotionId,
+                bindingDigest: 'f'.repeat(64),
+                ownedOperation: nativeSnapshotProof(await lockRef.get()),
+                platform: { workerBuildId: retained.plan.buildId, workerImage: retained.plan.image },
+                evidenceDigest: retained.plan.evidenceDigest,
+                receipts: {
+                  ...controlled.options.receipts,
+                  restoredActivation: receipt.data(),
+                  imagesPromotion: (await images.get()).data(),
+                },
+              };
+              const accepted = await readRestoredMediaPromotionInput(input);
+              assert.equal(accepted.activationOperationId, newId);
+              assert.equal(accepted.activationBindingDigest, newBinding);
+              assert.equal(accepted.scope, 'sealed-input-only-no-promotion-or-readiness-authority');
+              await assert.rejects(readRestoredMediaPromotionInput({ ...input, bindingDigest: newBinding }));
+              await assert.rejects(
+                readRestoredMediaPromotionInput({
+                  ...input,
+                  receipts: { ...input.receipts, restoredActivation: { ...receipt.data(), bindingDigest: 'wrong' } },
+                })
+              );
+              const nativeCap = cap.data();
+              await activationCapsule.update({ registrationSHA256: '0'.repeat(64) });
+              await assert.rejects(readRestoredMediaPromotionInput(input));
+              await activationCapsule.set(nativeCap);
+              await assert.rejects(readRestoredMediaPromotionInput(input)); // Native rewrite stamp is not original provenance.
+              await activationCapsule.delete();
+              await assert.rejects(readRestoredMediaPromotionInput(input));
+              await assert.rejects(
+                saveRestoredMediaActivationCheckpoint({
+                  ...args,
+                  config,
+                  operatorPrincipal: receipt.get('operatorPrincipal'),
+                  ownedOperation: currentOwned,
+                  immutableReceipt: ownReceipt,
+                  identityState: retained,
+                })
+              );
+              return;
             }
 
             if (mode === 'restored-startup') {

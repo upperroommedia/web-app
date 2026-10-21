@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { mediaPromotionReceiptPrefixes, readRestoredMediaPromotionInput, confirmRestoredMediaActivationCapsule } from './temporal-restored-media-capsule.mjs';
 import {activateRestoredCloudRunMedia} from './temporal-media-restored-activation.mjs';
 import {saveRestoredMediaActivationCheckpoint} from './temporal-media-restored-checkpoint.mjs';
 import {restoredMediaActivationRuntime} from './temporal-media-restored-runtime.mjs';
@@ -1217,7 +1218,7 @@ await runWithCleanup(
               'activate-cloud-run-orchestration-pool':{role:'orchestration',mode:'retain',field:'cloudOrchestrationActivation',prefix:'temporalCloudOrchestrationActivation',creationPrefix:'temporalCloudOrchestrationActivationStart',run:activateCloudRunOrchestrationPool,checkpoint:saveOrchestrationActivationCheckpoint},
               'stop-cloud-run-orchestration-activation':{role:'orchestration',mode:'abort',field:'cloudOrchestrationActivationStop',prefix:'temporalCloudOrchestrationActivationStop',run:stopCloudRunOrchestrationActivation,checkpoint:saveOrchestrationActivationStopCheckpoint},
             }[action];
-            const prefixes={...(operation.mode==='restored'?{recovery:'temporalCloudMediaRecovery'}:{}),...(operation.mode==='promote'&&operation.role!=='controls'?{[`${independentPromotionPredecessor[operation.role]}Promotion`]:`temporalCloud${independentPromotionPredecessor[operation.role][0].toUpperCase()+independentPromotionPredecessor[operation.role].slice(1)}Promotion`}:{}),runner:'temporalCloudIdentityPreparation',scaler:'temporalCloudIdentityPreparation',pool:'temporalCloudPoolPreparation',
+            const prefixes=operation.mode==='promote'&&operation.role==='media'?mediaPromotionReceiptPrefixes:{...(operation.mode==='restored'?{recovery:'temporalCloudMediaRecovery'}:{}),...(operation.mode==='promote'&&operation.role!=='controls'?{[`${independentPromotionPredecessor[operation.role]}Promotion`]:`temporalCloud${independentPromotionPredecessor[operation.role][0].toUpperCase()+independentPromotionPredecessor[operation.role].slice(1)}Promotion`}:{}),runner:'temporalCloudIdentityPreparation',scaler:'temporalCloudIdentityPreparation',pool:'temporalCloudPoolPreparation',
               runnerScaler:'temporalCloudScalerAccessPreparation',scalerTrust:'temporalCloudScalerAccessPreparation',poolAccess:'temporalCloudScalerAccessPreparation',
               firestore:'temporalCloudFirestoreAccessPreparation',projectRole:'temporalCloudRuntimeRolePreparation',projectAccess:'temporalCloudRuntimeAccessPreparation',
               ...(['search','email'].includes(operation.role)?{}:{storageRole:'temporalCloudRuntimeRolePreparation',storageAccess:'temporalCloudRuntimeAccessPreparation'}),
@@ -1233,6 +1234,8 @@ await runWithCleanup(
               receipts[key]=snapshot.data();
             }
             const currentOperation=await lockRef.get();assertNativeSnapshot(ownedOperation,currentOperation);
+            if(operation.mode==='promote'&&operation.role==='media')await readRestoredMediaPromotionInput({firestore,lockRef,controlRef,stateRef,ownedOperation,expectedAuthority,operationId,bindingDigest,releaseId:config.releaseId,role:'media',platform,evidenceDigest:preparationArguments.digest,receipts});
+
             const hasSaved=Object.hasOwn(currentOperation.data(),operation.field);
             if(hasSaved)cloudIdentityPending=true;
             const immutableReceipt=firestore.doc(`_control/${operation.prefix}-${operationId}`);
@@ -1255,6 +1258,7 @@ await runWithCleanup(
               receipt.get(operation.mode==='retain'?'identityState.activationState.pool.uid':'identityState.stop.pool.uid')!==(operation.mode==='retain'?result.activationState.pool.uid:result.stop.pool.uid)||result.disposition!==(operation.mode==='retain'?'retained':'stopped')))
               throw new Error('BOOTSTRAP_CYCLE_RECEIPT_UNCONFIRMED');
             if(operation.mode==='recovery')await readRestoredMediaRecoveryOrigin({binding,config,platform,firestore,lockRef,controlRef,stateRef,ownedOperation,expectedAuthority,operationId,bindingDigest,releaseId:config.releaseId,role:'media',settings,evidenceDigest:preparationArguments.digest,receipts,api});
+            if(operation.mode==='restored')await confirmRestoredMediaActivationCapsule({firestore,lockRef,controlRef,stateRef,ownedOperation,expectedAuthority,config,operationId,bindingDigest});
             if(operation.mode==='recovery')await confirmCompletedMediaRecoveryCapsule({firestore,lockRef,controlRef,stateRef,ownedOperation,expectedAuthority,config,operationId,bindingDigest});
             cloudIdentityPending=false;
             console.log(`Owned role-bound ${operation.mode==='promote'?`${operation.role} routing`:'configuration'} operation recorded at ${immutableReceipt.path}; no readiness advance.`);
