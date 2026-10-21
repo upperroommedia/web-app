@@ -1,4 +1,4 @@
-import { createRuntimeYouTubeAcquisition } from './hetzner-media';
+import { createRuntimeYouTubeAcquisition, createRuntimeYouTubeArchiveWaitRecorder } from './hetzner-media';
 import { createReviewedCreateActivities } from './reviewed-create';
 import { beginClaimedPublishingStep } from './activity-step-start';
 import { readAuthoritativeCriticalRepairStepIds } from '../../../../functions/src/temporal/publishing/criticalRepairStepAuthority';
@@ -445,6 +445,12 @@ export function createRuntimeActivities(
     assertCurrent: assertMediaActorInTransaction,
   });
   const media = createMediaActivities({
+    recordYouTubeArchiveWait: createRuntimeYouTubeArchiveWaitRecorder({
+      projectId,
+      firestore: db,
+      witness,
+      assertCurrent: assertMediaActorInTransaction,
+    }),
     acquireYouTubeSource,
     assertAuthorizedInTransaction: assertMediaActorInTransaction,
     assertAuthorized: assertCurrent,

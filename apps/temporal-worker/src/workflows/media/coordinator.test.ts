@@ -3,7 +3,7 @@ import { Worker, type WorkerOptions } from '@temporalio/worker';
 import { Context } from '@temporalio/activity';
 import type { WorkflowHandle } from '@temporalio/client';
 import { AwaitSermonAudio, MediaArtifactCleanup, SermonAudioCoordinator } from './index';
-import type { MediaActivities, MediaJobRef } from '../../../../process-audio/src/temporal/types';
+import type { MediaActivities, MediaJobRef, MediaArchiveWait } from '../../../../process-audio/src/temporal/types';
 
 const ref = (revision: number): MediaJobRef => ({
   jobId: `job-${revision}`,
@@ -170,14 +170,26 @@ describe('durable media coordinator', () => {
     });
   }, 120_000);
 
-  test('post-live archive retry uses a durable timer instead of worker sleep', async () => {
+  test('archive wait metadata is retained across the native durable timer and deterministic replay', async () => {
     let attempts = 0;
+    let projected: MediaArchiveWait | undefined;
+    const acquired: Array<{ resume?: MediaArchiveWait; activityId: string; runId?: string }> = [];
     const worker = await createWorker({
       connection: environment.nativeConnection,
       taskQueue: queue,
       workflowsPath: workflowPath,
       activities: activities({
-        acquireMedia: async () => ({ kind: ++attempts === 1 ? 'waiting_archive' : 'ready' }),
+        acquireMedia: async (_ref, resume) => {
+          const info = Context.current().info;
+          acquired.push({ resume, activityId: info.activityId, runId: info.workflowExecution?.runId });
+          return { kind: ++attempts === 1 ? 'waiting_archive' : 'ready' };
+        },
+        projectMediaWaiting: async (_ref, reason, attempt, wait) => {
+          expect(reason).toBe('archive');
+          expect(attempt).toBe(1);
+          expect(Context.current().info.activityType).toBe('projectMediaWaiting');
+          projected = wait;
+        },
       }),
     });
     await runWorker(worker, async () => {
@@ -190,8 +202,16 @@ describe('durable media coordinator', () => {
       await environment.sleep('31 minutes');
       await waitFor(handle, (state) => state.phase === 'idle');
       expect(attempts).toBe(2);
+      expect(projected).toEqual({ attempt: 1, scheduledAt: expect.any(Number), dueAt: expect.any(Number) });
+      expect(projected!.dueAt - projected!.scheduledAt).toBe(30 * 60_000);
+      expect(acquired[0].resume).toBeUndefined();
+      expect(acquired[1].resume).toEqual(projected);
+      expect(acquired[1].activityId).not.toBe(acquired[0].activityId);
+      expect(acquired[1].runId).toBe(acquired[0].runId);
       const history = await handle.fetchHistory();
       expect(history.events?.some((event) => event.timerStartedEventAttributes)).toBe(true);
+      expect(history.events?.some((event) => event.timerFiredEventAttributes)).toBe(true);
+      await Worker.runReplayHistory({ workflowsPath: workflowPath }, history);
       await handle.cancel();
       await expect(handle.result()).rejects.toThrow();
     });

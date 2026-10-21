@@ -19,7 +19,14 @@ import type { YouTubeAcquisitionError } from '../processYouTubeUrl';
 import { createContext } from '../context';
 import { getFFmpegPath, getFFprobePath, validateAddIntroOutroData } from '../utils';
 import { downloadMediaStream, runMediaCommand, uploadMediaStream } from './native';
-import type { MediaActivities, MediaJobProjection, MediaJobRef, MediaOutcome, MediaStage } from './types';
+import type {
+  MediaActivities,
+  MediaJobProjection,
+  MediaJobRef,
+  MediaOutcome,
+  MediaStage,
+  MediaArchiveWait,
+} from './types';
 import { checkMediaWorkspace, mediaResources, reserveMediaWorkspace } from './resources';
 import { createMediaAuthenticationProbe } from './authentication';
 import {
@@ -41,7 +48,12 @@ type PrivateRequest = {
 export interface MediaActivityDependencies {
   projectId: string;
   assertAuthorized: (ref: MediaJobRef) => Promise<void>;
-  acquireYouTubeSource?: (ref: MediaJobRef, signal: AbortSignal) => Promise<RemoteYouTubeResult>;
+  acquireYouTubeSource?: (
+    ref: MediaJobRef,
+    signal: AbortSignal,
+    archiveResume?: MediaArchiveWait
+  ) => Promise<RemoteYouTubeResult>;
+  recordYouTubeArchiveWait?: (ref: MediaJobRef, wait: MediaArchiveWait) => Promise<void>;
   assertAuthorizedInTransaction?: (tx: Transaction, ref: MediaJobRef) => Promise<unknown>;
   firestore: Firestore;
   database: Database;
@@ -360,7 +372,7 @@ export function createMediaActivities(dependencies: MediaActivityDependencies): 
       await project(ref, 'preparing', 0);
       return { kind: 'ready' };
     },
-    acquireMedia: async (ref) => {
+    acquireMedia: async (ref, archiveResume) => {
       const eligible = await eligibility(ref);
       if (eligible.kind !== 'ready') return eligible;
       let request = await load(ref);
@@ -382,7 +394,7 @@ export function createMediaActivities(dependencies: MediaActivityDependencies): 
                 'Remote media adoption authorization is unavailable.',
                 'PERMISSION_CHANGED'
               );
-            const remote = await dependencies.acquireYouTubeSource(ref, signal);
+            const remote = await dependencies.acquireYouTubeSource(ref, signal, archiveResume);
             signal.throwIfAborted();
             if (remote.kind === 'retryable')
               throw ApplicationFailure.create({
@@ -675,8 +687,15 @@ export function createMediaActivities(dependencies: MediaActivityDependencies): 
       if ((await eligibility(ref)).kind !== 'ready') return { ready: false, generation: null };
       return authenticationProbe(ref);
     },
-    projectMediaWaiting: async (ref, reason, attempt) => {
+    projectMediaWaiting: async (ref, reason, attempt, archiveWait) => {
       if ((await eligibility(ref)).kind !== 'ready') return;
+      if (archiveWait !== undefined) {
+        if (reason !== 'archive' || archiveWait.attempt !== attempt)
+          throw new Error('YOUTUBE_ARCHIVE_WAIT_UNCONFIRMED');
+        if (dependencies.acquireYouTubeSource && !dependencies.recordYouTubeArchiveWait)
+          throw new Error('YOUTUBE_ARCHIVE_WAIT_UNCONFIRMED');
+        await dependencies.recordYouTubeArchiveWait?.(ref, archiveWait);
+      }
       await dependencies.projectJob(ref, { state: 'waiting', reason, progress: 0 });
       await db.runTransaction(async (transaction) => {
         const [sermon, state] = await Promise.all([transaction.get(sermonDoc(ref)), transaction.get(stateDoc(ref))]);

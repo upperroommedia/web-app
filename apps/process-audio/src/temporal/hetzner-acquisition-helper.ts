@@ -119,13 +119,15 @@ async function execute(message: unknown, cancellation: CancelToken): Promise<voi
         cancellation.signal.throwIfAborted();
         const evidence = (error as import('../processYouTubeUrl').YouTubeAcquisitionError)?.youtubeAcquisitionEvidence;
         const { getYouTubeFailureDisposition } = await import('@upperroom/contracts/processAudioQueue');
-        if (!evidence || getYouTubeFailureDisposition(evidence).action !== 'task_retry') throw error;
+        if (!evidence) throw error;
+        const disposition = getYouTubeFailureDisposition(evidence);
+        if (!['task_retry', 'post_live_retry'].includes(disposition.action)) throw error;
         // Only known provider failure before ANY upload is eligible here. The
-        // store independently fences uncertain uploads. Auth/archive resume is
-        // deliberately separate until the same-host recovery protocol exists.
+        // store independently fences uncertain uploads. Auth recovery remains
+        // separate until a successful same-host canary protocol exists.
         await store.settle(
           ref,
-          { kind: 'retryable' },
+          { kind: disposition.action === 'post_live_retry' ? 'waiting_archive' : 'retryable' },
           async () => {
             await cancellation.waitForProcesses();
             if (await drainNativeYouTubeSession(input.directory)) throw denied();

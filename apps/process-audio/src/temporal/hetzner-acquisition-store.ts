@@ -1,3 +1,4 @@
+import { mediaWallTime } from './system-time';
 import { getYouTubeFailureDisposition, type YouTubeAcquisitionEvidence } from '@upperroom/contracts/processAudioQueue';
 import { isDeepStrictEqual } from 'node:util';
 import {
@@ -232,7 +233,7 @@ export async function prepareYouTubeAcquisition(options: {
       ref,
       preparedBy: caller,
       status: 'prepared',
-      createdAt: Date.now(),
+      createdAt: mediaWallTime(),
     });
   });
 }
@@ -284,7 +285,11 @@ export function createYouTubeAcquisitionHostStore(options: {
         await options.assertEligible(tx, ref);
       });
     },
-    async claim(ref: MediaJobRef, verifiedCallerEmail: string, startedAt = Date.now()): Promise<{ launch: boolean }> {
+    async claim(
+      ref: MediaJobRef,
+      verifiedCallerEmail: string,
+      startedAt = mediaWallTime()
+    ): Promise<{ launch: boolean }> {
       ref = Object.freeze({ ...ref });
       const doc = target(ref);
       return options.firestore.runTransaction(
@@ -296,7 +301,7 @@ export function createYouTubeAcquisitionHostStore(options: {
           await options.assertEligible(tx, ref);
           if (current.preparedBy.serviceAccount !== verifiedCallerEmail) return fail();
           if (current.unclaimedClose !== undefined || current.status !== 'prepared') return { launch: false };
-          if (!Number.isSafeInteger(startedAt) || startedAt < current.createdAt || startedAt > Date.now())
+          if (!Number.isSafeInteger(startedAt) || startedAt < current.createdAt || startedAt > mediaWallTime())
             return fail();
           if (current.preparedEpisode !== undefined)
             await claimYouTubeEpisode(tx, snapshot, ref, options.episodeId, owner, startedAt);
@@ -410,9 +415,9 @@ export function createYouTubeAcquisitionHostStore(options: {
               sermonId: ref.sermonId,
               jobId: ref.jobId,
               path,
-              createdAt: Date.now(),
+              createdAt: mediaWallTime(),
             });
-            tx.create(uploadDoc(snapshot), { state: 'streaming', path, owner, createdAt: Date.now() });
+            tx.create(uploadDoc(snapshot), { state: 'streaming', path, owner, createdAt: mediaWallTime() });
             tx.update(snapshot.ref, { activeUpload: attemptId });
             return { launch: true };
           });
@@ -435,7 +440,7 @@ export function createYouTubeAcquisitionHostStore(options: {
           await options.firestore.runTransaction(async (tx) => {
             const value = await current(tx);
             if (value.state !== 'streaming') return fail();
-            tx.update(uploadDoc(value.snapshot), { state: 'failed', failedAt: Date.now() });
+            tx.update(uploadDoc(value.snapshot), { state: 'failed', failedAt: mediaWallTime() });
             tx.update(value.snapshot.ref, { activeUpload: FieldValue.delete() });
           });
         },
@@ -491,10 +496,11 @@ export function createYouTubeAcquisitionHostStore(options: {
       // Only the source ladder's typed provider evidence can classify a safe
       // retry. Storage/transport/cancellation and missing evidence remain fenced.
       if (
-        safe.kind === 'retryable' &&
+        (safe.kind === 'retryable' || (safe.kind === 'waiting_archive' && options.episodeId !== undefined)) &&
         (!evidence ||
           evidence.requiresAuthenticationRecovery !== false ||
-          getYouTubeFailureDisposition(evidence).action !== 'task_retry' ||
+          getYouTubeFailureDisposition(evidence).action !==
+            (safe.kind === 'waiting_archive' ? 'post_live_retry' : 'task_retry') ||
           !Array.isArray(evidence.attemptedModes) ||
           evidence.attemptedModes.length < 1 ||
           evidence.attemptedModes.length > 3 ||
@@ -514,7 +520,7 @@ export function createYouTubeAcquisitionHostStore(options: {
         // settle after cancellation/deletion so resource drain remains visible.
         if (safe.kind === 'source') await options.assertEligible(tx, ref);
         if (safe.kind === 'source_available') await options.assertEligible(tx, ref, 'source_available');
-        if (safe.kind === 'retryable') {
+        if (safe.kind === 'retryable' || (safe.kind === 'waiting_archive' && options.episodeId !== undefined)) {
           if (!options.episodeId) return fail();
           const uploads = await tx.get(snapshot.ref.collection('uploads').limit(1));
           if (!uploads.empty || snapshot.get('activeUpload') !== undefined) return fail();
@@ -523,13 +529,13 @@ export function createYouTubeAcquisitionHostStore(options: {
             {
               schemaVersion: 1,
               episodeId: options.episodeId,
-              kind: 'retryable',
-              action: 'task_retry',
+              kind: safe.kind,
+              action: safe.kind === 'waiting_archive' ? 'post_live_retry' : 'task_retry',
               attemptedModes: [...evidence!.attemptedModes],
             }
           );
         }
-        tx.update(snapshot.ref, { status: safe.kind, result: safe, drainedAt: Date.now() });
+        tx.update(snapshot.ref, { status: safe.kind, result: safe, drainedAt: mediaWallTime() });
       });
     },
   };
@@ -563,11 +569,11 @@ export async function closeYouTubeAcquisitionNativeProcess(o: {
   let close = parent.collection('nativeClose').doc('original');
   const fact = Object.freeze({ ...o.fact });
   let expected: NativeCloseReceipt | undefined;
-  const wall = Date.now(),
+  const wall = mediaWallTime(),
     mono = performance.now();
   let timer: ReturnType<typeof setTimeout> | undefined;
   const fresh = () => {
-    if (Date.now() < wall || Date.now() - wall >= 5000 || performance.now() - mono >= 5000) return fail();
+    if (mediaWallTime() < wall || mediaWallTime() - wall >= 5000 || performance.now() - mono >= 5000) return fail();
   };
   const same = (value: unknown) => isDeepStrictEqual(value, expected);
   const work = async () => {

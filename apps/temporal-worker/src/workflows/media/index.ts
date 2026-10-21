@@ -10,10 +10,17 @@ import {
   isCancellation,
   makeContinueAsNewFunc,
   proxyActivities,
+  patched,
   setHandler,
   workflowInfo,
 } from '@temporalio/workflow';
-import type { MediaActivities, MediaJobRef, MediaOutcome } from '../../../../process-audio/src/temporal/types';
+import {
+  MEDIA_ARCHIVE_RETRY_DELAYS,
+  type MediaArchiveWait,
+  type MediaActivities,
+  type MediaJobRef,
+  type MediaOutcome,
+} from '../../../../process-audio/src/temporal/types';
 
 export const mediaRequest = defineSignal<[MediaJobRef]>('media.request');
 export const mediaCancel = defineSignal<[string]>('media.cancel');
@@ -28,6 +35,7 @@ type Resume = {
   archiveAttempts: number;
   recoveryGeneration: string | null;
   archiveDueAt?: number;
+  archiveScheduledAt?: number;
 };
 export interface MediaCoordinatorInput {
   initial: MediaJobRef;
@@ -35,10 +43,11 @@ export interface MediaCoordinatorInput {
   controlTaskQueue?: string;
   resume?: Resume;
 }
-const ARCHIVE_DELAYS = [30 * 60_000, 60 * 60_000, 2 * 60 * 60_000, 4 * 60 * 60_000, 6 * 60 * 60_000];
+const ARCHIVE_DELAYS = MEDIA_ARCHIVE_RETRY_DELAYS;
 
 /** Per-sermon serialization, durable waits and latest-request coalescing. No source data enters history. */
 export async function SermonAudioCoordinator(input: MediaCoordinatorInput): Promise<void> {
+  const archiveProtocol = patched('media-archive-resume-v1');
   const operations = proxyActivities<
     Pick<MediaActivities, 'acquireMedia' | 'mergeMedia' | 'recoverMediaAuthentication'>
   >({
@@ -101,12 +110,14 @@ export async function SermonAudioCoordinator(input: MediaCoordinatorInput): Prom
     let archiveAttempts = input.resume && processedCount === 0 ? input.resume.archiveAttempts : 0;
     let waitCycles = 0;
     let archiveDueAt = input.resume && processedCount === 0 ? input.resume.archiveDueAt : undefined;
+    let archiveScheduledAt = input.resume && processedCount === 0 ? input.resume.archiveScheduledAt : undefined;
     let continuation: Resume | undefined;
     const resume = () => ({
       authAttempts,
       archiveAttempts,
       recoveryGeneration,
       ...(archiveDueAt ? { archiveDueAt } : {}),
+      ...(archiveScheduledAt !== undefined ? { archiveScheduledAt } : {}),
     });
     activeScope = new CancellationScope();
     try {
@@ -152,9 +163,16 @@ export async function SermonAudioCoordinator(input: MediaCoordinatorInput): Prom
               return;
             }
           }
+          const archiveResume: MediaArchiveWait | undefined =
+            archiveProtocol && archiveDueAt !== undefined && archiveScheduledAt !== undefined
+              ? { attempt: archiveAttempts, scheduledAt: archiveScheduledAt, dueAt: archiveDueAt }
+              : undefined;
           archiveDueAt = undefined;
+          archiveScheduledAt = undefined;
           phase = 'acquiring';
-          outcome = await operations.acquireMedia(ref);
+          outcome = archiveResume
+            ? await operations.acquireMedia(ref, archiveResume)
+            : await operations.acquireMedia(ref);
           if (outcome.kind === 'ready') break;
           if (outcome.kind === 'completed') return;
           if (outcome.kind === 'superseded' || outcome.kind === 'deleted' || outcome.kind === 'cancelled') {
@@ -172,8 +190,19 @@ export async function SermonAudioCoordinator(input: MediaCoordinatorInput): Prom
               return;
             }
             phase = 'waiting_archive';
-            await projections.projectMediaWaiting(ref, 'archive', archiveAttempts);
-            archiveDueAt = Date.now() + ARCHIVE_DELAYS[Math.min(archiveAttempts - 1, ARCHIVE_DELAYS.length - 1)];
+            if (archiveProtocol) {
+              archiveScheduledAt = Date.now();
+              archiveDueAt =
+                archiveScheduledAt + ARCHIVE_DELAYS[Math.min(archiveAttempts - 1, ARCHIVE_DELAYS.length - 1)];
+              await projections.projectMediaWaiting(ref, 'archive', archiveAttempts, {
+                attempt: archiveAttempts,
+                scheduledAt: archiveScheduledAt,
+                dueAt: archiveDueAt,
+              });
+            } else {
+              await projections.projectMediaWaiting(ref, 'archive', archiveAttempts);
+              archiveDueAt = Date.now() + ARCHIVE_DELAYS[Math.min(archiveAttempts - 1, ARCHIVE_DELAYS.length - 1)];
+            }
             continue;
           }
           phase = 'waiting_auth';
