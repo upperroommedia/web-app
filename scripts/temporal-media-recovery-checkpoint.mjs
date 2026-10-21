@@ -1,5 +1,6 @@
 import {assertStoredMediaDiagnosticDrain,assertFreshMediaDiagnosticDrain} from './temporal-media-diagnostic-drain.mjs';
 import { assertNativeSnapshot, nativeSnapshotProof, proofDigest as hash } from './temporal-release-runtime.mjs';
+import {prepareCompletedMediaRecoveryCapsule} from './temporal-media-recovery-capsule.mjs';
 const fail = () => {
   throw new Error('MEDIA_RECOVERY_CHECKPOINT_UNCONFIRMED');
 };
@@ -209,6 +210,9 @@ export async function saveMediaRecoveryCheckpoint(o) {
         operatorPrincipal: o.operatorPrincipal,
       };
       if (receipt?.exists && hash(receipt.data()) !== hash(record)) fail();
+      const capsule=next.stage==='completed'&&next.recovery&&!next.recoveryFailed&&!next.neverStarted
+        ?await prepareCompletedMediaRecoveryCapsule(o,tx,parent,next,record,drainRecord):undefined;
+      if(capsule?.create)tx.create(capsule.ref,capsule.record);
       if(createDrain){assertFreshMediaDiagnosticDrain(next.drained.observation,next.plan,next.start.pool);tx.create(drainRef,drainRecord);}
       tx.update(o.lockRef, { cloudMediaRecovery: next });
       if (receipt && !receipt.exists) tx.create(o.immutableReceipt, record);

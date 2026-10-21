@@ -1,4 +1,9 @@
 import { observeMediaRecoveryProtection } from '../temporal-media-recovery-protection.mjs';
+import {
+  controlledRecoveryCapsuleFacts,
+  controlledCapsuleOperatorIdentity,
+} from '../tests/fixtures/media-recovery-capsule.mjs';
+import { confirmCompletedMediaRecoveryCapsule } from '../temporal-media-recovery-capsule.mjs';
 /** Actual Firestore checkpoint/authority; CONTROLLED Cloud/runtime protocol. */
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -24,6 +29,7 @@ if (process.env.FIRESTORE_EMULATOR_HOST !== `127.0.0.1:${harness.emulators.fires
   throw new Error('Dedicated emulator required');
 for (const mode of [
   'normal',
+  'capsule',
   'phase-resource',
   'idle-startup',
   'idle-poller',
@@ -78,6 +84,7 @@ for (const mode of [
           bindingDigest: f.options.bindingDigest,
           action: 'diagnose-cloud-run-media-recovery',
           operatorPrincipal: base.operatorPrincipal,
+          operatorIdentity: controlledCapsuleOperatorIdentity,
         })
       );
       await bounded(
@@ -116,8 +123,28 @@ for (const mode of [
       };
       const fixtureSave = f.options.save;
       f.options.save = async (identityState) => {
+        if (
+          identityState.stage === 'completed' &&
+          identityState.recovery &&
+          !identityState.recoveryFailed &&
+          !identityState.neverStarted &&
+          !(await db.doc(`_control/temporalMediaRecoveryCapsule-${base.operationId}`).get()).exists
+        ) {
+          const controlled = controlledRecoveryCapsuleFacts(identityState);
+          for (const [kind, data] of Object.entries(controlled.facts)) {
+            const ref = db.doc(`_control/temporalMediaRecovery${kind}-${base.operationId}`);
+            await ref.set(data);
+            if (!idlePrivate.some((r) => r.path === ref.path)) idlePrivate.push(ref);
+          }
+          await lockRef.update({ mediaRecoveryWorkflowStart: controlled.intent });
+          ownedOperation = nativeSnapshotProof(await lockRef.get());
+        }
         ownedOperation = await bounded(saveMediaRecoveryCheckpoint({ ...options(), identityState }));
         await fixtureSave(identityState);
+        if (mode === 'capsule' && once && identityState.stage === 'completed') {
+          once = false;
+          throw Error('CONTROLLED_COMPLETION_ACK_LOST');
+        }
         if (
           mode.startsWith('never-started') &&
           identityState.diagnostic?.stage === 'completed' &&
@@ -558,10 +585,51 @@ for (const mode of [
         if (denyQuota && args[0].includes('cloudquotas')) throw new Error('CONTROLLED_QUOTA_UNAVAILABLE');
         return api(...args);
       };
-      if (mode === 'normal' || mode === 'phase-resource' || ['idle-startup', 'idle-poller'].includes(mode)) {
+      if (
+        mode === 'normal' ||
+        mode === 'capsule' ||
+        mode === 'phase-resource' ||
+        ['idle-startup', 'idle-poller'].includes(mode)
+      ) {
         cycleTask = runMediaRecoveryCycle(f.options);
+        if (mode === 'capsule') {
+          await assert.rejects(bounded(cycleTask), /CONTROLLED_COMPLETION_ACK_LOST/);
+          const saved = (await lockRef.get()).get('cloudMediaRecovery');
+          assert.equal(saved.stage, 'completed');
+          assert.equal((await immutableReceipt.get()).get('identityState.stage'), 'completed');
+          assert.equal(
+            (await db.doc(`_control/temporalMediaRecoveryCapsule-${base.operationId}`).get()).get('kind'),
+            'completed-media-recovery-provenance-only-v1'
+          );
+          cycleTask = runMediaRecoveryCycle({ ...f.options, saved });
+        }
         const result = await bounded(cycleTask, mode === 'idle-poller' ? 90000 : 15000);
         assert.equal((await bounded(immutableReceipt.get())).get('identityState.stage'), 'completed');
+        if (mode === 'capsule') {
+          const proof = await confirmCompletedMediaRecoveryCapsule(options());
+          assert.equal(proof.scope, 'historical-provenance-only-no-activation-authority');
+          const ref = db.doc(`_control/temporalMediaRecoveryCapsule-${base.operationId}`),
+            snapshot = await ref.get();
+          const original = snapshot.data();
+          await ref.delete();
+          await assert.rejects(confirmCompletedMediaRecoveryCapsule(options()), /CAPSULE_UNCONFIRMED/);
+          await assert.rejects(
+            saveMediaRecoveryCheckpoint({ ...options(), identityState: result }),
+            /CAPSULE_UNCONFIRMED/
+          );
+          assert.equal((await ref.get()).exists, false);
+          assert.equal((await immutableReceipt.get()).exists, true);
+          await ref.create(original);
+          await lockRef.update({ action: 'activate-restored-cloud-run-media' });
+          const current = nativeSnapshotProof(await lockRef.get());
+          await assert.rejects(
+            confirmCompletedMediaRecoveryCapsule({ ...options(), ownedOperation: current }),
+            /CAPSULE_UNCONFIRMED/
+          );
+          await lockRef.update({ action: 'diagnose-cloud-run-media-recovery' });
+          ownedOperation = nativeSnapshotProof(await lockRef.get());
+          assert.equal((await confirmCompletedMediaRecoveryCapsule(options())).capsuleSHA256, proof.capsuleSHA256);
+        }
         if (mode === 'phase-resource') {
           const scope = { plan: result.plan, phase: 'completed', pool: result.restore.pool };
           const readOptions = { ...f.options, ...options(), ...scope };
@@ -742,7 +810,7 @@ for (const mode of [
       if (idleRuntime.running) await bounded(idleRuntime.running, 15000);
       if (idleRuntime.env) await bounded(idleRuntime.env.teardown(), 20000);
       if (idleRuntime.Runtime) await bounded(idleRuntime.Runtime.instance().shutdown(), 10000);
-      if (['idle-startup', 'idle-poller'].includes(mode)) {
+      {
         if (idleActor) await getAuth(app).deleteUser(idleActor.uid);
         for (const ref of idlePrivate) await ref.delete();
       }
@@ -752,6 +820,7 @@ for (const mode of [
         ...[
           db.doc(`_control/temporalMediaRecoveryJournal-${f.options.operationId}`),
           db.doc(`_control/temporalMediaRecoveryDrain-${f.options.operationId}`),
+          db.doc(`_control/temporalMediaRecoveryCapsule-${f.options.operationId}`),
           immutableReceipt,
           lockRef,
           controlRef,

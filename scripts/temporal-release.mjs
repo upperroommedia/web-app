@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import {readRestoredMediaRecoveryOrigin} from './temporal-media-restored-origin.mjs';
+import {confirmCompletedMediaRecoveryCapsule} from './temporal-media-recovery-capsule.mjs';
 import {runMediaRecoveryCycle} from './temporal-media-recovery-cycle.mjs';
 import {saveMediaRecoveryCheckpoint,assertMediaRecoveryAuthority} from './temporal-media-recovery-checkpoint.mjs';
 import {canonicalMediaRecoveryRuntime,mediaRecoveryPreparation,mediaRecoveryExecution,mediaRecoveryDrainage,mediaRecoveryStoppedConfirmation,mediaRecoveryNeverStartedConfirmation,mediaRecoveryProtection} from './temporal-media-recovery-runtime.mjs';
@@ -1249,6 +1250,7 @@ await runWithCleanup(
               receipt.get(operation.mode==='retain'?'identityState.activationState.pool.uid':'identityState.stop.pool.uid')!==(operation.mode==='retain'?result.activationState.pool.uid:result.stop.pool.uid)||result.disposition!==(operation.mode==='retain'?'retained':'stopped')))
               throw new Error('BOOTSTRAP_CYCLE_RECEIPT_UNCONFIRMED');
             if(operation.mode==='recovery')await readRestoredMediaRecoveryOrigin({binding,config,platform,firestore,lockRef,controlRef,stateRef,ownedOperation,expectedAuthority,operationId,bindingDigest,releaseId:config.releaseId,role:'media',settings,evidenceDigest:preparationArguments.digest,receipts,api});
+            if(operation.mode==='recovery')await confirmCompletedMediaRecoveryCapsule({firestore,lockRef,controlRef,stateRef,ownedOperation,expectedAuthority,config,operationId,bindingDigest});
             cloudIdentityPending=false;
             console.log(`Owned role-bound ${operation.mode==='promote'?`${operation.role} routing`:'configuration'} operation recorded at ${immutableReceipt.path}; no readiness advance.`);
           } else if (action === 'prepare-cloud-run-pool') {
