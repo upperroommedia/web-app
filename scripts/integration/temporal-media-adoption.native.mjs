@@ -6,12 +6,16 @@ import { fork } from 'node:child_process';
 import { randomUUID, createHash } from 'node:crypto';
 import { bounded, groupAbsent, stopOwnedGroup } from './fixtures/owned-media-process.mjs';
 const require = createRequire(new URL('../../package.json', import.meta.url));
+require(fileURLToPath(new URL('./fixtures/current-workspace-source.cjs', import.meta.url)));
 require('ts-node').register({
+  preferTsExts: true,
   skipProject: true,
   transpileOnly: true,
   compilerOptions: { module: 'CommonJS', target: 'ES2022', esModuleInterop: true, moduleResolution: 'node' },
 });
 const { initializeApp, deleteApp } = require('firebase-admin/app');
+const { getAuth } = require('firebase-admin/auth');
+const { createDurableJobStore, durableEntityKey, DURABLE_COLLECTIONS } = require('@upperroom/orchestration/job-store');
 const { getFirestore } = require('firebase-admin/firestore');
 const { getStorage } = require('firebase-admin/storage');
 const { getDatabase } = require('firebase-admin/database');
@@ -23,6 +27,7 @@ const { createLocalTestEnvironment } = require(fileURLToPath(
 Runtime.install({ logger: new DefaultLogger('ERROR', () => undefined) });
 const harness = require('./firebase.test.json');
 const emulatorNames = [
+  ['FIREBASE_AUTH_EMULATOR_HOST', harness.emulators.auth.port],
   ['FIRESTORE_EMULATOR_HOST', harness.emulators.firestore.port],
   ['FIREBASE_DATABASE_EMULATOR_HOST', harness.emulators.database.port],
   ['FIREBASE_STORAGE_EMULATOR_HOST', harness.emulators.storage.port],
@@ -39,6 +44,8 @@ function launch(address, holdAck) {
       PATH: process.env.PATH,
       HOME: process.env.HOME,
       NODE_ENV: 'test',
+      FIREBASE_PROJECT_ID: 'urm-app-staging',
+      GCLOUD_PROJECT: 'urm-app-staging',
       ...Object.fromEntries(emulatorNames.map(([key]) => [key, process.env[key]])),
     },
   });
@@ -78,6 +85,7 @@ function launch(address, holdAck) {
         'MEDIA_STAGE_FAILED',
         'INVALID_MEDIA_REFERENCE',
         'INVALID_MEDIA_ARTIFACT',
+        'PERMISSION_CHANGED',
       ].includes(value.code)
         ? value.code
         : 'unknown';
@@ -129,7 +137,14 @@ function pcm() {
   return bytes;
 }
 
-for (const mode of ['adopt', 'replaced-generation', 'superseded'])
+for (const mode of [
+  'adopt',
+  'replaced-generation',
+  'superseded',
+  'role-revoked',
+  'actor-disabled',
+  'canonical-owner-changed',
+])
   test(`real source media acquisition/OS replacement / ${mode}`, async () => {
     const id = `adoption-${randomUUID()}`,
       children = [],
@@ -172,8 +187,33 @@ for (const mode of ['adopt', 'replaced-generation', 'superseded'])
         })
       );
       await bounded(db.doc(`temporalMediaState/${id}`).create({ owner: 'temporal', ref }));
-      await bounded(db.doc(`durableJobs/${id}`).create({ state: 'queued' }));
-      await bounded(db.doc(`sermons/${id}`).create({ status: { audioStatus: 'PENDING', subsplash: 'UPLOADED' } }));
+      await bounded(getAuth(app).createUser({ uid: id }));
+      await bounded(getAuth(app).setCustomUserClaims(id, { role: 'uploader' }));
+      await bounded(
+        db.doc(`sermons/${id}`).create({ uploaderId: id, status: { audioStatus: 'PENDING', subsplash: 'UPLOADED' } })
+      );
+      const store = createDurableJobStore({ firestore: db, projectId });
+      await bounded(
+        db.runTransaction(async (tx) => {
+          await tx.get(db.doc(`sermons/${id}`));
+          store.createInTransaction(tx, {
+            ref: { projectId, jobId: id },
+            kind: 'audio.process',
+            entity: { type: 'sermon', id },
+            actorUid: id,
+            payload,
+            requestId: id,
+            generation: 1,
+            createdAt: Date.now(),
+            dispatch: {
+              ref,
+              workflowId: id,
+              workflowType: 'MediaArtifactAdoptionProbe',
+              taskQueue: 'owned-media-adoption-workflow',
+            },
+          });
+        })
+      );
       environment = await createLocalTestEnvironment({
         server: { executable: { type: 'cached-download', version: 'v1.9.1' } },
       });
@@ -224,6 +264,12 @@ for (const mode of ['adopt', 'replaced-generation', 'superseded'])
       assert.equal(accepted.attempt, 1);
       assert.equal(accepted.runId, handle.firstExecutionRunId);
       assert.equal(accepted.workflowId, id);
+      const executions = await bounded(db.collection(DURABLE_COLLECTIONS.executions).where('jobId', '==', id).get());
+      assert.equal(executions.size, 1);
+      assert.equal(executions.docs[0].get('runId'), accepted.runId);
+      assert.equal(executions.docs[0].get('worker.instanceId'), before.instanceId);
+      assert.equal(executions.docs[0].get('activityType'), 'acquireMedia');
+      assert.equal((await bounded(db.doc(`durableJobIntents/${id}`).get())).get('actorUid'), id);
       const persisted = await bounded(request.get()),
         artifact = persisted.get('artifacts.processed');
       assert.ok(artifact?.path && artifact?.generation && artifact.duration > 0);
@@ -261,6 +307,11 @@ for (const mode of ['adopt', 'replaced-generation', 'superseded'])
         );
       if (mode === 'superseded')
         await bounded(db.doc(`temporalMediaState/${id}`).update({ ref: { ...ref, jobId: `${id}-new`, revision: 2 } }));
+      if (mode === 'role-revoked') await bounded(getAuth(app).setCustomUserClaims(id, { role: 'guest' }));
+      if (mode === 'actor-disabled') await bounded(getAuth(app).updateUser(id, { disabled: true }));
+      if (mode === 'canonical-owner-changed')
+        await bounded(db.doc(`sermons/${id}`).update({ uploaderId: `foreign-${id}` }));
+      const authorityDenied = ['role-revoked', 'actor-disabled', 'canonical-owner-changed'].includes(mode);
       const second = launch(environment.address, false);
       children.push(second);
       stage = 'second-ready';
@@ -268,13 +319,11 @@ for (const mode of ['adopt', 'replaced-generation', 'superseded'])
       assert.notEqual(after.pid, before.pid);
       assert.notEqual(after.instanceId, before.instanceId);
       stage = 'second-acquired';
-      if (mode === 'replaced-generation') {
+      if (mode === 'replaced-generation' || authorityDenied) {
         const rejected = await second.next('activity-error');
-        assert.equal(rejected.code, 'INVALID_MEDIA_ARTIFACT');
-        await assert.rejects(
-          bounded(handle.result()),
-          (error) => error.cause?.cause?.type === 'INVALID_MEDIA_ARTIFACT'
-        );
+        const expectedFailure = authorityDenied ? 'PERMISSION_CHANGED' : 'INVALID_MEDIA_ARTIFACT';
+        assert.equal(rejected.code, expectedFailure);
+        await assert.rejects(bounded(handle.result()), (error) => error.cause?.cause?.type === expectedFailure);
       } else {
         const adopted = await second.next('acquired');
         assert.equal(adopted.attempt, 2);
@@ -312,11 +361,11 @@ for (const mode of ['adopt', 'replaced-generation', 'superseded'])
       assert.equal(start.identity, after.identity);
       assert.equal(
         history.events.filter((e) => e.activityTaskCompletedEventAttributes).length,
-        mode === 'replaced-generation' ? 0 : 1
+        mode === 'replaced-generation' || authorityDenied ? 0 : 1
       );
       assert.equal(
         history.events.filter((e) => e.activityTaskFailedEventAttributes).length,
-        mode === 'replaced-generation' ? 1 : 0
+        mode === 'replaced-generation' || authorityDenied ? 1 : 0
       );
       assert.equal(
         history.events.some(
@@ -350,12 +399,37 @@ for (const mode of ['adopt', 'replaced-generation', 'superseded'])
       }
       if (app) {
         const db = getFirestore(app);
-        for (const collection of ['temporalMediaRequests', 'temporalMediaState', 'durableJobs', 'sermons']) {
+        for (const collection of [
+          'temporalMediaRequests',
+          'temporalMediaState',
+          'durableJobs',
+          'durableJobIntents',
+          'durableJobOutbox',
+          'sermons',
+        ]) {
           try {
             await bounded(db.doc(`${collection}/${id}`).delete());
           } catch (error) {
             failures.push(error);
           }
+        }
+        try {
+          await bounded(getAuth(app).deleteUser(id));
+          await bounded(
+            db
+              .doc(`durableJobEntities/${durableEntityKey(projectId, { type: 'sermon', id }, 'audio.process')}`)
+              .delete()
+          );
+          for (const collection of [
+            DURABLE_COLLECTIONS.executions,
+            DURABLE_COLLECTIONS.stepExecutions,
+            DURABLE_COLLECTIONS.drains,
+          ]) {
+            const records = await bounded(db.collection(collection).where('jobId', '==', id).get());
+            for (const record of records.docs) await bounded(record.ref.delete());
+          }
+        } catch (error) {
+          failures.push(error);
         }
         try {
           const artifacts = await bounded(db.collection('temporalMediaArtifacts').where('ownerJobId', '==', id).get());
@@ -384,6 +458,7 @@ for (const mode of ['adopt', 'replaced-generation', 'superseded'])
           failures.push(error);
         }
         try {
+          await bounded(getFirestore(app).terminate());
           await bounded(deleteApp(app));
         } catch (error) {
           failures.push(error);

@@ -639,3 +639,24 @@ a replacement child, diagnostic Workflow/Activity queues, original Activity
 adoption, Cloud Run instance replacement, or recovery acceptance. Those remain
 required. Media promotion remains unconditionally denied and orchestration
 promotion remains unavailable; no handoff, admission or retirement advances.
+
+### Production authorization in the local OS-adoption test
+
+The existing serial native adoption case now obtains `acquireMedia` from the
+actual `createRuntimeActivities` media factory. It uses the production execution
+context, durable store, actor authorization, permission projection and artifact
+validation rather than injecting a no-op authorization callback. The fixture
+creates an emulator uploader and a real durable store intent/entity/job. Native
+SDK execution metadata is recorded for the original RunId and worker witness.
+Workspace imports are fixed to current TypeScript source, with no generated-JS
+fallback; this is a test-process-only resolver, never a runtime loader.
+
+After original child death, a distinct SDK child can adopt unchanged artifacts.
+Revoking the uploader role, disabling that actor, or changing canonical sermon
+ownership must deny the second execution. The original request and both artifact
+inventories must remain unchanged on these denials. Replaced artifact generation
+and superseded media-owner cases remain separate. All resources and actors are
+local dedicated-emulator fixtures, with small synthetic byte budgets and a
+test-only Workflow. This closes the controlled-authorization gap in this local
+case; it does not establish paused diagnostic admission, application bootstrap,
+immutable image execution, Cloud Run credentials or process recovery acceptance.
