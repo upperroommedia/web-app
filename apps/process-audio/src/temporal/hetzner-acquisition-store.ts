@@ -1,5 +1,11 @@
+import { getYouTubeFailureDisposition, type YouTubeAcquisitionEvidence } from '@upperroom/contracts/processAudioQueue';
 import { isDeepStrictEqual } from 'node:util';
-import { claimYouTubeEpisode, assertOwnedYouTubeEpisode, validateEpisodeDrain } from './hetzner-acquisition-episode';
+import {
+  claimYouTubeEpisode,
+  assertOwnedYouTubeEpisode,
+  validateEpisodeDrain,
+  readAcquisitionExecution,
+} from './hetzner-acquisition-episode';
 import type { HostResourceReply } from '../host/resources';
 import type { YouTubeNativeClose } from './hetzner-acquisition-process';
 import { writeMediaUploadIntent } from '@upperroom/orchestration/media-artifacts';
@@ -129,6 +135,7 @@ function operation(raw: unknown, ref: MediaJobRef): Operation {
       'completed',
       'waiting_auth',
       'waiting_archive',
+      'retryable',
       'restricted',
       'cancelled',
       'superseded',
@@ -247,6 +254,8 @@ export function createYouTubeAcquisitionHostStore(options: {
   const owner = host(options.owner);
   const target = (ref: MediaJobRef) =>
     options.firestore.collection(YOUTUBE_ACQUISITIONS).doc(youtubeAcquisitionId(ref));
+  const load = async (tx: Transaction, ref: MediaJobRef) =>
+    readAcquisitionExecution(tx, await tx.get(target(ref)), options.episodeId);
   const owned = (current: Operation) => {
     if (
       current.preparedEpisode !== undefined &&
@@ -258,13 +267,17 @@ export function createYouTubeAcquisitionHostStore(options: {
   return {
     async read(ref: MediaJobRef): Promise<Operation | undefined> {
       ref = Object.freeze({ ...ref });
-      const snapshot = await target(ref).get();
-      return snapshot.exists ? operation(snapshot.data(), ref) : undefined;
+      return options.firestore.runTransaction(async (tx) => {
+        const root = await tx.get(target(ref));
+        if (!root.exists) return undefined;
+        const snapshot = await readAcquisitionExecution(tx, root, options.episodeId);
+        return operation(snapshot.data(), ref);
+      });
     },
     async assertCurrent(ref: MediaJobRef): Promise<void> {
       ref = Object.freeze({ ...ref });
       await options.firestore.runTransaction(async (tx) => {
-        const snapshot = await tx.get(target(ref));
+        const snapshot = await load(tx, ref);
         owned(operation(snapshot.data(), ref));
         await assertOwnedYouTubeEpisode(tx, snapshot, options.episodeId, owner, options.nativeEnrollment);
         await options.assertEligible(tx, ref);
@@ -275,7 +288,8 @@ export function createYouTubeAcquisitionHostStore(options: {
       const doc = target(ref);
       return options.firestore.runTransaction(
         async (tx) => {
-          const snapshot = await tx.get(doc);
+          const root = await tx.get(doc);
+          const snapshot = await readAcquisitionExecution(tx, root, options.episodeId);
           if (!snapshot.exists) return fail(); // An HTTP caller cannot create its own delegation.
           const current = operation(snapshot.data(), ref);
           await options.assertEligible(tx, ref);
@@ -286,7 +300,7 @@ export function createYouTubeAcquisitionHostStore(options: {
           if (current.preparedEpisode !== undefined)
             await claimYouTubeEpisode(tx, snapshot, ref, options.episodeId, owner, startedAt);
           else if (options.episodeId !== undefined) return fail();
-          tx.update(doc, { status: 'running', owner, startedAt });
+          tx.update(snapshot.ref, { status: 'running', owner, startedAt });
           return { launch: true };
         },
         options.episodeId ? { maxAttempts: 1 } : undefined
@@ -300,7 +314,7 @@ export function createYouTubeAcquisitionHostStore(options: {
       ref = Object.freeze({ ...ref });
       if (!/^[a-f0-9-]{36}$/.test(attemptId)) return fail();
       const parent = target(ref);
-      const doc = parent.collection('uploads').doc(attemptId);
+      const uploadDoc = (snapshot: { ref: typeof parent }) => snapshot.ref.collection('uploads').doc(attemptId);
       const path = `workflow-audio/${ref.sermonId}/${ref.requestVersion}/source-${attemptId}.bin`;
       type Bytes = { bytes: number; crc32c: string };
       const checkedBytes = (raw: Bytes): Bytes => {
@@ -357,13 +371,13 @@ export function createYouTubeAcquisitionHostStore(options: {
         return value;
       };
       const current = async (tx: Transaction) => {
-        const snapshot = await tx.get(parent);
+        const snapshot = await load(tx, ref);
         owned(operation(snapshot.data(), ref));
         await assertOwnedYouTubeEpisode(tx, snapshot, options.episodeId, owner, options.nativeEnrollment);
-        const upload = await tx.get(doc);
+        const upload = await tx.get(uploadDoc(snapshot));
         await options.assertEligible(tx, ref);
         if (snapshot.get('activeUpload') !== attemptId) return fail();
-        return checked(upload.data());
+        return { ...checked(upload.data()), snapshot };
       };
       return {
         path,
@@ -375,10 +389,10 @@ export function createYouTubeAcquisitionHostStore(options: {
         }),
         async begin(): Promise<{ launch: boolean; expected?: Bytes; receipt?: YouTubeStreamReceipt }> {
           return options.firestore.runTransaction(async (tx) => {
-            const snapshot = await tx.get(parent);
+            const snapshot = await load(tx, ref);
             owned(operation(snapshot.data(), ref));
             await assertOwnedYouTubeEpisode(tx, snapshot, options.episodeId, owner, options.nativeEnrollment);
-            const upload = await tx.get(doc);
+            const upload = await tx.get(uploadDoc(snapshot));
             await options.assertEligible(tx, ref);
             if (upload.exists) {
               if (snapshot.get('activeUpload') !== attemptId) return fail();
@@ -397,8 +411,8 @@ export function createYouTubeAcquisitionHostStore(options: {
               path,
               createdAt: Date.now(),
             });
-            tx.create(doc, { state: 'streaming', path, owner, createdAt: Date.now() });
-            tx.update(parent, { activeUpload: attemptId });
+            tx.create(uploadDoc(snapshot), { state: 'streaming', path, owner, createdAt: Date.now() });
+            tx.update(snapshot.ref, { activeUpload: attemptId });
             return { launch: true };
           });
         },
@@ -407,7 +421,7 @@ export function createYouTubeAcquisitionHostStore(options: {
           await options.firestore.runTransaction(async (tx) => {
             const value = await current(tx);
             if (value.state !== 'streaming' || value.expected) return fail();
-            tx.update(doc, { state: 'bytes_complete', expected });
+            tx.update(uploadDoc(value.snapshot), { state: 'bytes_complete', expected });
           });
         },
         /** Only the concrete uploader calls this after a confirmed native
@@ -420,8 +434,8 @@ export function createYouTubeAcquisitionHostStore(options: {
           await options.firestore.runTransaction(async (tx) => {
             const value = await current(tx);
             if (value.state !== 'streaming') return fail();
-            tx.update(doc, { state: 'failed', failedAt: Date.now() });
-            tx.update(parent, { activeUpload: FieldValue.delete() });
+            tx.update(uploadDoc(value.snapshot), { state: 'failed', failedAt: Date.now() });
+            tx.update(value.snapshot.ref, { activeUpload: FieldValue.delete() });
           });
         },
         async retain(raw: YouTubeStreamReceipt): Promise<void> {
@@ -439,7 +453,7 @@ export function createYouTubeAcquisitionHostStore(options: {
             if (!value.expected || value.expected.bytes !== receipt.bytes || value.expected.crc32c !== receipt.crc32c)
               return fail();
             if (value.state === 'retained' && value.receipt!.generation !== receipt.generation) return fail();
-            tx.update(doc, { state: 'retained', receipt });
+            tx.update(uploadDoc(value.snapshot), { state: 'retained', receipt });
           });
         },
       };
@@ -449,7 +463,12 @@ export function createYouTubeAcquisitionHostStore(options: {
      * caller's boolean "drained" or unverified termination assertion instead.
      * No artifact or canonical document is deleted or adopted here.
      */
-    async settle(ref: MediaJobRef, result: RemoteYouTubeResult, drain: () => Promise<void>): Promise<void> {
+    async settle(
+      ref: MediaJobRef,
+      result: RemoteYouTubeResult,
+      drain: () => Promise<void>,
+      evidence?: YouTubeAcquisitionEvidence
+    ): Promise<void> {
       ref = Object.freeze({ ...ref });
       const safe: RemoteYouTubeResult =
         result.kind === 'source'
@@ -460,6 +479,7 @@ export function createYouTubeAcquisitionHostStore(options: {
               'completed',
               'source_available',
               'waiting_archive',
+              'retryable',
               'restricted',
               'cancelled',
               'superseded',
@@ -467,11 +487,25 @@ export function createYouTubeAcquisitionHostStore(options: {
             ].includes(result.kind)
           ? { kind: result.kind }
           : fail();
+      // Only the source ladder's typed provider evidence can classify a safe
+      // retry. Storage/transport/cancellation and missing evidence remain fenced.
+      if (
+        safe.kind === 'retryable' &&
+        (!evidence ||
+          evidence.requiresAuthenticationRecovery !== false ||
+          getYouTubeFailureDisposition(evidence).action !== 'task_retry' ||
+          !Array.isArray(evidence.attemptedModes) ||
+          evidence.attemptedModes.length < 1 ||
+          evidence.attemptedModes.length > 3 ||
+          !evidence.attemptedModes.every((mode) =>
+            ['public_provider', 'cookie_provider', 'browser_fallback'].includes(mode)
+          ))
+      )
+        return fail();
       await drain();
       ref = Object.freeze({ ...ref });
-      const doc = target(ref);
       await options.firestore.runTransaction(async (tx) => {
-        const snapshot = await tx.get(doc);
+        const snapshot = await load(tx, ref);
         const current = operation(snapshot.data(), ref);
         owned(current);
         await assertOwnedYouTubeEpisode(tx, snapshot, options.episodeId, owner, options.nativeEnrollment);
@@ -479,7 +513,22 @@ export function createYouTubeAcquisitionHostStore(options: {
         // settle after cancellation/deletion so resource drain remains visible.
         if (safe.kind === 'source') await options.assertEligible(tx, ref);
         if (safe.kind === 'source_available') await options.assertEligible(tx, ref, 'source_available');
-        tx.update(doc, { status: safe.kind, result: safe, drainedAt: Date.now() });
+        if (safe.kind === 'retryable') {
+          if (!options.episodeId) return fail();
+          const uploads = await tx.get(snapshot.ref.collection('uploads').limit(1));
+          if (!uploads.empty || snapshot.get('activeUpload') !== undefined) return fail();
+          tx.create(
+            target(ref).collection('episodes').doc(options.episodeId).collection('facts').doc('providerOutcome'),
+            {
+              schemaVersion: 1,
+              episodeId: options.episodeId,
+              kind: 'retryable',
+              action: 'task_retry',
+              attemptedModes: [...evidence!.attemptedModes],
+            }
+          );
+        }
+        tx.update(snapshot.ref, { status: safe.kind, result: safe, drainedAt: Date.now() });
       });
     },
   };
@@ -509,7 +558,8 @@ export async function closeYouTubeAcquisitionNativeProcess(o: {
     owner = host(o.owner);
   const originalStartedAt = o.startedAt;
   const parent = o.firestore.collection(YOUTUBE_ACQUISITIONS).doc(youtubeAcquisitionId(ref));
-  const close = parent.collection('nativeClose').doc('original');
+  let executionRef = parent;
+  let close = parent.collection('nativeClose').doc('original');
   const fact = Object.freeze({ ...o.fact });
   let expected: NativeCloseReceipt | undefined;
   const wall = Date.now(),
@@ -523,8 +573,11 @@ export async function closeYouTubeAcquisitionNativeProcess(o: {
     try {
       await o.firestore.runTransaction(
         async (tx) => {
-          const [snapshot, existing, sealed] = await Promise.all([
-            tx.get(parent),
+          const delegation = await tx.get(parent);
+          const snapshot = await readAcquisitionExecution(tx, delegation, o.episode?.id);
+          executionRef = snapshot.ref;
+          close = executionRef.collection('nativeClose').doc('original');
+          const [existing, sealed] = await Promise.all([
             tx.get(close),
             ...(o.episode
               ? [tx.get(parent.collection('episodes').doc(o.episode.id).collection('facts').doc('sealed'))]
@@ -574,7 +627,7 @@ export async function closeYouTubeAcquisitionNativeProcess(o: {
               episodeId: o.episode.id,
               proof: { ...o.episode.proof },
             });
-          tx.update(parent, { nativeClose: candidate });
+          tx.update(executionRef, { nativeClose: candidate });
         },
         { maxAttempts: 1 }
       );
@@ -585,7 +638,7 @@ export async function closeYouTubeAcquisitionNativeProcess(o: {
       // GET-only, including permission/failure ambiguity; no saved owner becomes
       // signalling or retry authority. No current actor/quota/expiry renewal.
       const [snapshot, saved, sealed] = await Promise.all([
-        parent.get(),
+        executionRef.get(),
         close.get(),
         ...(o.episode ? [parent.collection('episodes').doc(o.episode.id).collection('facts').doc('sealed').get()] : []),
       ]);

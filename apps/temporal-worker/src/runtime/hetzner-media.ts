@@ -42,7 +42,15 @@ export function createRuntimeYouTubeAcquisition(o: {
       Context.current().info.activityType !== 'acquireMedia'
     )
       return fail();
+    const info = Context.current().info;
+    if (!info.workflowExecution) return fail();
     await prepareNativeYouTubeEpisode({
+      invocation: {
+        workflowId: info.workflowExecution.workflowId,
+        runId: info.workflowExecution.runId,
+        activityId: info.activityId,
+        attempt: info.attempt,
+      },
       firestore: o.firestore,
       ref,
       caller: { buildId: w.buildId, serviceAccount: cloud.serviceAccount, instanceId: cloud.instanceId },

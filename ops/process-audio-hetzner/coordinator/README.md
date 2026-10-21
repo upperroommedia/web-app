@@ -125,3 +125,21 @@ native helper acceptance. The application's physical gate must remain denied
 until those checks and the client/full-pipeline integration pass.
 
 The portable source tests exercise create-only journals and controlled native response boundaries. One temporary Unix-socket permission regression requires root to create a root-owned directory and then drops its client to UID/GID 65534; it skips on nonroot development machines. Existing CI runs that owned fixture with sudo. It never constructs or starts the host daemon and is not Docker/cgroup/capacity acceptance.
+
+Acquisition successor source protocol keeps the original delegation/episode and
+its owner, upload, result and `nativeClose/original` records intact. A strictly
+later SDK attempt of the **same** native Workflow/run/Activity may prepare a new
+UUID episode only after a source-classified provider `task_retry`, original
+completed closure, released host scope and an empty predecessor upload journal.
+The successor has its own runtime document, ownership, uploads and closure; an
+atomic head/link update selects it. Immutable predecessor data **and native
+creation/update stamps** are rechecked by later consumers. Lost intent ACKs
+cannot backfill launch authorization, and HTTP never chooses an episode/retry.
+The native client reports the safe retry to the original Activity retry policy.
+
+This is a conservative known-provider-retry source path, not activation evidence.
+Any prior upload, unknown/generic failure, unclaimed child, authentication wait
+or archive wait remains fenced. Same-host authentication canary/generation and
+bounded archive-resume integration are still required; a local Cloud Run canary
+cannot substitute for retained-host authentication recovery. All physical and
+operational activation gates above remain denied.

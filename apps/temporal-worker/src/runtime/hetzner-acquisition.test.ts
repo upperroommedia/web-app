@@ -251,3 +251,13 @@ test('an existing-source signal cannot smuggle an unmeasured artifact or claim j
     type: 'YOUTUBE_ACQUISITION_PROTOCOL',
   });
 });
+
+test('known provider retry is returned to the original native Activity retry policy without another HTTP start', async () => {
+  const { request, client } = setup([state('retryable')]);
+  await expect(client.acquire(ref, new AbortController().signal)).rejects.toMatchObject({
+    type: 'YOUTUBE_ACQUISITION_RETRYABLE',
+    nonRetryable: false,
+    message: 'YouTube acquisition is awaiting a verified source result.',
+  });
+  expect(request.mock.calls.map((call) => call[0])).toEqual(['GET']);
+});

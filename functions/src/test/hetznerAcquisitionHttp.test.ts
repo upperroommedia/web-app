@@ -405,3 +405,148 @@ test('parent close refuses a changed original claim timestamp without writing an
   expect((await parent.collection('nativeClose').doc('original').get()).exists).toBe(false);
   expect((await parent.get()).get('nativeClose')).toBeUndefined();
 });
+
+test('actual HTTP and SAME-object source consumer select successor execution rather than original retry history', async () => {
+  const {
+    prepareNativeYouTubeEpisode,
+    readPreparedYouTubeEpisode,
+    recordYouTubeEpisodeResource,
+    recordReleasedYouTubeEpisode,
+  } = await import('../../../apps/process-audio/src/temporal/hetzner-acquisition-episode');
+  const { consumeAcquiredYouTubeSource } = await import(
+    '../../../apps/process-audio/src/temporal/acquired-youtube-source'
+  );
+  const { mkdtemp, rm } = await import('node:fs/promises');
+  const { join } = await import('node:path');
+  const { tmpdir } = await import('node:os');
+  const root = db.doc(`${YOUTUBE_ACQUISITIONS}/${youtubeAcquisitionId(ref)}`);
+  // Replace only this test's never-launched fixture, not a production delegation.
+  await root.delete();
+  const assertCurrent = async (transaction: import('firebase-admin/firestore').Transaction) => {
+    if ((await readEligibleYouTubeAcquisition({ firestore: db, auth, transaction, ref })).kind !== 'ready')
+      throw Error('CONTROLLED_DENIED');
+  };
+  const begin = async (attempt: number) => {
+    await prepareNativeYouTubeEpisode({
+      firestore: db,
+      ref,
+      caller: { buildId: 'a'.repeat(40), serviceAccount: email, instanceId: 'CONTROLLED_CLOUD_INSTANCE' },
+      invocation: {
+        workflowId: 'CONTROLLED_WORKFLOW',
+        runId: 'CONTROLLED_RUN',
+        activityId: 'CONTROLLED_ACTIVITY',
+        attempt,
+      },
+      assertCurrent,
+    });
+    const episode = await readPreparedYouTubeEpisode({ firestore: db, ref, verifiedCallerEmail: email });
+    const proof = (state: 'reserved' | 'enrolled') => ({
+      v: 1 as const,
+      id: episode.id,
+      peerBound: true as const,
+      state,
+      directory: `/workspace/yt-acquisition-scratch/${episode.id}`,
+      receiptHash: 'c'.repeat(64),
+    });
+    for (const phase of ['reserved', 'enrolled'] as const)
+      await recordYouTubeEpisodeResource({ firestore: db, episode, proof: proof(phase), phase, assertCurrent });
+    const owner = {
+      bootId: randomUUID(),
+      buildId: 'a'.repeat(40),
+      pidNamespace: 'pid:[1234]',
+      processId: 7 + attempt,
+      startTicks: String(100 * attempt),
+    };
+    const store = createYouTubeAcquisitionHostStore({
+      firestore: db,
+      projectId: ref.projectId,
+      owner,
+      episodeId: episode.id,
+      nativeEnrollment: proof('enrolled'),
+      assertEligible: assertCurrent,
+    });
+    const startedAt = Date.now();
+    expect(await store.claim(ref, email, startedAt)).toEqual({ launch: true });
+    return { episode, owner, store, startedAt };
+  };
+  const finish = async (execution: Awaited<ReturnType<typeof begin>>) => {
+    const proof = {
+      v: 1 as const,
+      id: execution.episode.id,
+      peerBound: true as const,
+      state: 'drained' as const,
+      groupAbsent: true as const,
+      receiptHash: 'd'.repeat(64),
+    };
+    await closeYouTubeAcquisitionNativeProcess({
+      firestore: db,
+      ref,
+      owner: execution.owner,
+      startedAt: execution.startedAt,
+      fact: {
+        processId: execution.owner.processId,
+        exitCode: 0,
+        exitSignal: null,
+        outcome: 'completed',
+        closedAt: Date.now(),
+      },
+      episode: { id: execution.episode.id, proof },
+    });
+    await recordReleasedYouTubeEpisode({
+      firestore: db,
+      episode: execution.episode,
+      proof: { ...proof, state: 'closed' },
+    });
+  };
+  const first = await begin(1);
+  await first.store.settle(ref, { kind: 'retryable' }, async () => undefined, {
+    attemptedModes: ['public_provider'],
+    requiresAuthenticationRecovery: false,
+  });
+  await finish(first);
+  expect(await call()).toEqual({ status: 200, body: { status: 'retryable', operationId: youtubeAcquisitionId(ref) } });
+  const originalClose = await root.collection('nativeClose').doc('original').get();
+  const next = await begin(2);
+  const artifact = await uploadYouTubeObject({
+    journal: next.store.upload(ref, randomUUID()),
+    signal: new AbortController().signal,
+    start: async () => ({
+      output: Readable.from([Buffer.alloc(128, 42)]),
+      completion: Promise.resolve('succeeded'),
+      drain: async () => undefined,
+    }),
+  });
+  const directory = await mkdtemp(join(tmpdir(), 'owned-successor-adoption-'));
+  try {
+    await next.store.settle(ref, { kind: 'source', artifact }, async () => undefined);
+    await finish(next);
+    expect(await call()).toEqual({
+      status: 200,
+      body: { status: 'ready', operationId: youtubeAcquisitionId(ref), artifact },
+    });
+    const adopt = await consumeAcquiredYouTubeSource({
+      db,
+      bucket: getStorage(app).bucket(),
+      ref,
+      source: artifact,
+      destination: join(directory, 'source.bin'),
+      signal: new AbortController().signal,
+      assertCurrent,
+    });
+    await adopt(1); // CONTROLLED measured duration; actual Storage bytes/CRC/generation and native adoption transaction.
+    expect((await db.doc(paths[0]).get()).get('artifacts.source')).toEqual({
+      path: artifact.path,
+      generation: artifact.generation,
+      duration: 1,
+    });
+    expect((await root.get()).get('owner')).toEqual(first.owner);
+    expect(
+      (await root.collection('nativeClose').doc('original').get()).updateTime?.isEqual(originalClose.updateTime!)
+    ).toBe(true);
+  } finally {
+    await getStorage(app).bucket().file(artifact.path).delete({ ignoreNotFound: true });
+    await rm(directory, { recursive: true, force: true });
+    const { MEDIA_ARTIFACTS, mediaArtifactId } = await import('@upperroom/orchestration/media-artifacts');
+    await db.recursiveDelete(db.doc(`${MEDIA_ARTIFACTS}/${mediaArtifactId(ref.projectId, artifact.path)}`));
+  }
+});

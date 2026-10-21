@@ -384,6 +384,11 @@ export function createMediaActivities(dependencies: MediaActivityDependencies): 
               );
             const remote = await dependencies.acquireYouTubeSource(ref, signal);
             signal.throwIfAborted();
+            if (remote.kind === 'retryable')
+              throw ApplicationFailure.create({
+                message: 'YouTube acquisition requires a verified native retry.',
+                type: 'YOUTUBE_ACQUISITION_RETRYABLE',
+              });
             if (remote.kind !== 'source' && remote.kind !== 'source_available') return remote;
             request = await load(ref);
             if (request.artifacts?.processed) {

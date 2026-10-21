@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import type { Firestore, Transaction, DocumentSnapshot } from 'firebase-admin/firestore';
 import type { HostResourceReply } from '../host/resources';
@@ -21,11 +21,154 @@ export interface AcquisitionEpisode {
   schemaVersion: 1;
   id: string;
   operationId: string;
-  ordinal: 1;
-  predecessor: null;
+  ordinal: number;
+  predecessor: null | { id: string; closeHash: string; releaseHash: string; providerHash: string };
+  invocation: AcquisitionInvocation;
   ref: MediaJobRef;
   preparedBy: AcquisitionPreparer;
   createdAt: number;
+}
+export interface AcquisitionInvocation {
+  workflowId: string;
+  runId: string;
+  activityId: string;
+  attempt: number;
+}
+function invocation(value: AcquisitionInvocation): AcquisitionInvocation {
+  if (
+    !value ||
+    Object.keys(value).sort().join(',') !== 'activityId,attempt,runId,workflowId' ||
+    ![value.workflowId, value.runId, value.activityId].every(
+      (v) => typeof v === 'string' && v.length > 0 && v.length <= 256
+    ) ||
+    !Number.isSafeInteger(value.attempt) ||
+    value.attempt < 1
+  )
+    return fail();
+  return { ...value };
+}
+const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+function nativeHash(snapshot: DocumentSnapshot) {
+  immutable(snapshot);
+  return digest({
+    data: snapshot.data(),
+    createTime: { seconds: snapshot.createTime!.seconds, nanoseconds: snapshot.createTime!.nanoseconds },
+    updateTime: { seconds: snapshot.updateTime!.seconds, nanoseconds: snapshot.updateTime!.nanoseconds },
+  });
+}
+function providerOutcome(snapshot: DocumentSnapshot, id: string): void {
+  immutable(snapshot);
+  const value = snapshot.data();
+  if (
+    !value ||
+    Object.keys(value).sort().join(',') !== 'action,attemptedModes,episodeId,kind,schemaVersion' ||
+    value.schemaVersion !== 1 ||
+    value.episodeId !== id ||
+    value.kind !== 'retryable' ||
+    value.action !== 'task_retry' ||
+    !Array.isArray(value.attemptedModes) ||
+    value.attemptedModes.length < 1 ||
+    value.attemptedModes.length > 3 ||
+    !value.attemptedModes.every(
+      (mode: unknown) =>
+        typeof mode === 'string' && ['public_provider', 'cookie_provider', 'browser_fallback'].includes(mode)
+    )
+  )
+    return fail();
+}
+
+/** Actual snapshots only. Original episode execution stays on the original
+ * delegation; each successor owns its distinct native runtime document. */
+export function acquisitionDelegationRef(execution: DocumentSnapshot) {
+  return execution.ref.parent.id === 'runtime' ? execution.ref.parent.parent!.parent.parent! : execution.ref;
+}
+export async function readAcquisitionExecution(
+  tx: Transaction,
+  root: DocumentSnapshot,
+  id?: string
+): Promise<DocumentSnapshot> {
+  const selected = id ?? root.get('headEpisode') ?? root.get('preparedEpisode');
+  if (selected === undefined || selected === root.get('preparedEpisode')) return root;
+  if (!uuid(selected) || root.get('headEpisode') !== selected) return fail();
+  const execution = await tx.get(root.ref.collection('episodes').doc(selected).collection('runtime').doc('current'));
+  if (
+    !execution.exists ||
+    execution.get('preparedEpisode') !== selected ||
+    execution.get('operationId') !== root.id ||
+    !isDeepStrictEqual(execution.get('ref'), root.get('ref'))
+  )
+    return fail();
+  return execution;
+}
+async function episodeOriginal(
+  tx: Transaction,
+  execution: DocumentSnapshot,
+  original: DocumentSnapshot,
+  parsed: AcquisitionEpisode
+) {
+  immutable(original);
+  const rootRef = acquisitionDelegationRef(execution);
+  if (parsed.ordinal === 1) {
+    const root = rootRef.path === execution.ref.path ? execution : await tx.get(rootRef);
+    if (root.get('preparedEpisode') !== parsed.id || !original.createTime?.isEqual(root.createTime!)) return fail();
+  } else {
+    if (
+      !parsed.predecessor ||
+      execution.ref.path !== original.ref.collection('runtime').doc('current').path ||
+      !original.createTime?.isEqual(execution.createTime!)
+    )
+      return fail();
+    const link = await tx.get(
+      rootRef.collection('episodes').doc(parsed.predecessor.id).collection('facts').doc('successor')
+    );
+    immutable(link);
+    if (
+      !link.createTime?.isEqual(original.createTime!) ||
+      !isDeepStrictEqual(link.data(), { schemaVersion: 1, episode: parsed })
+    )
+      return fail();
+    const previousIntent = await tx.get(rootRef.collection('episodes').doc(parsed.predecessor.id));
+    const previous = intent(previousIntent.data(), parsed.ref);
+    if (
+      previous.ordinal + 1 !== parsed.ordinal ||
+      previous.invocation.workflowId !== parsed.invocation.workflowId ||
+      previous.invocation.runId !== parsed.invocation.runId ||
+      previous.invocation.activityId !== parsed.invocation.activityId ||
+      parsed.invocation.attempt <= previous.invocation.attempt
+    )
+      return fail();
+    const predecessorExecution =
+      previous.ordinal === 1
+        ? await tx.get(rootRef)
+        : await tx.get(previousIntent.ref.collection('runtime').doc('current'));
+    await episodeOriginal(tx, predecessorExecution, previousIntent, previous);
+    const [close, released, uploads, provider] = await Promise.all([
+      tx.get(predecessorExecution.ref.collection('nativeClose').doc('original')),
+      tx.get(previousIntent.ref.collection('facts').doc('released')),
+      tx.get(predecessorExecution.ref.collection('uploads').limit(1)),
+      tx.get(previousIntent.ref.collection('facts').doc('providerOutcome')),
+    ]);
+    immutable(close);
+    immutable(released);
+    providerOutcome(provider, previous.id);
+    validateEpisodeDrain(released.get('proof'), previous.id, 'closed');
+    if (
+      nativeHash(provider) !== parsed.predecessor.providerHash ||
+      provider.get('kind') !== 'retryable' ||
+      provider.get('action') !== 'task_retry' ||
+      provider.get('episodeId') !== previous.id ||
+      nativeHash(close) !== parsed.predecessor.closeHash ||
+      nativeHash(released) !== parsed.predecessor.releaseHash ||
+      close.get('outcome') !== 'completed' ||
+      released.get('proof.descendantsStopped') === true ||
+      !isDeepStrictEqual(close.data(), predecessorExecution.get('nativeClose')) ||
+      predecessorExecution.get('status') !== 'retryable' ||
+      predecessorExecution.get('result.kind') !== 'retryable' ||
+      predecessorExecution.get('activeUpload') !== undefined ||
+      !uploads.empty
+    )
+      return fail();
+  }
 }
 function immutable(snapshot: DocumentSnapshot): void {
   if (!snapshot.exists || !snapshot.createTime?.isEqual(snapshot.updateTime!)) fail();
@@ -35,18 +178,28 @@ function intent(raw: unknown, ref: MediaJobRef): AcquisitionEpisode {
   if (
     !value ||
     Object.keys(value).sort().join(',') !==
-      'createdAt,id,operationId,ordinal,predecessor,preparedBy,ref,schemaVersion' ||
+      'createdAt,id,invocation,operationId,ordinal,predecessor,preparedBy,ref,schemaVersion' ||
     value.schemaVersion !== 1 ||
     !uuid(value.id) ||
     value.operationId !== youtubeAcquisitionId(ref) ||
     youtubeAcquisitionId(value.ref) !== value.operationId ||
-    value.ordinal !== 1 ||
-    value.predecessor !== null ||
+    !Number.isSafeInteger(value.ordinal) ||
+    value.ordinal < 1 ||
+    value.ordinal > 64 ||
+    (value.ordinal === 1
+      ? value.predecessor !== null
+      : !value.predecessor ||
+        Object.keys(value.predecessor).sort().join(',') !== 'closeHash,id,providerHash,releaseHash' ||
+        !uuid(value.predecessor.id) ||
+        !/^[a-f0-9]{64}$/.test(value.predecessor.closeHash) ||
+        !/^[a-f0-9]{64}$/.test(value.predecessor.releaseHash) ||
+        !/^[a-f0-9]{64}$/.test(value.predecessor.providerHash)) ||
     !Number.isSafeInteger(value.createdAt) ||
     value.createdAt < 0
   )
     return fail();
   validateAcquisitionPreparer(value.preparedBy);
+  invocation(value.invocation);
   return value;
 }
 /** Native Activity producer only. HTTP never chooses an episode or authorizes
@@ -55,6 +208,7 @@ export async function prepareNativeYouTubeEpisode(o: {
   firestore: Firestore;
   ref: MediaJobRef;
   caller: AcquisitionPreparer;
+  invocation: AcquisitionInvocation;
   assertCurrent: (tx: Transaction, ref: MediaJobRef) => Promise<void>;
 }): Promise<void> {
   assertStagingAcquisitionDatabase(o.firestore);
@@ -66,12 +220,14 @@ export async function prepareNativeYouTubeEpisode(o: {
     id: randomUUID(),
     ordinal: 1,
     predecessor: null,
+    invocation: invocation(o.invocation),
     operationId: parent.id,
     ref,
     preparedBy: caller,
     createdAt: Date.now(),
   };
   const doc = parent.collection('episodes').doc(episode.id);
+  let executionRef = parent;
   let created = false;
   // An unknown first intent ACK never becomes a new birth. Only the source
   // producer after a KNOWN commit may create the separate permission receipt.
@@ -79,8 +235,9 @@ export async function prepareNativeYouTubeEpisode(o: {
     async (tx) => {
       const existing = await tx.get(parent);
       if (existing.exists) {
-        const current = readYouTubeAcquisitionOperation(existing.data(), ref);
-        const saved = existing.get('preparedEpisode');
+        const execution = await readAcquisitionExecution(tx, existing);
+        const current = readYouTubeAcquisitionOperation(execution.data(), ref);
+        const saved = execution.get('preparedEpisode');
         if (
           !uuid(saved) ||
           current.preparedBy.buildId !== caller.buildId ||
@@ -89,13 +246,63 @@ export async function prepareNativeYouTubeEpisode(o: {
           return fail();
         const original = await tx.get(parent.collection('episodes').doc(saved));
         const allowed = await tx.get(original.ref.collection('facts').doc('authorized'));
-        immutable(original);
         immutable(allowed);
-        if (!original.createTime?.isEqual(existing.createTime!)) return fail();
         const parsed = intent(original.data(), ref);
+        await episodeOriginal(tx, execution, original, parsed);
         if (parsed.id !== saved || !isDeepStrictEqual(allowed.data(), { schemaVersion: 1, episode: parsed }))
           return fail();
         await o.assertCurrent(tx, ref);
+        if (isDeepStrictEqual(parsed.invocation, episode.invocation)) return;
+        // An ordinary retry cannot reinterpret unknown ownership, upload ACKs,
+        // or an auth/archive wait as permission for a new producer.
+        if (
+          current.status !== 'retryable' ||
+          current.result?.kind !== 'retryable' ||
+          current.nativeClose?.outcome !== 'completed' ||
+          parsed.ordinal >= 64 ||
+          parsed.invocation.workflowId !== episode.invocation.workflowId ||
+          parsed.invocation.runId !== episode.invocation.runId ||
+          parsed.invocation.activityId !== episode.invocation.activityId ||
+          episode.invocation.attempt <= parsed.invocation.attempt
+        )
+          return fail();
+        await assertReleasedYouTubeEpisode(tx, execution);
+        const provider = await tx.get(original.ref.collection('facts').doc('providerOutcome'));
+        providerOutcome(provider, parsed.id);
+        if (
+          provider.get('schemaVersion') !== 1 ||
+          provider.get('episodeId') !== parsed.id ||
+          provider.get('kind') !== 'retryable' ||
+          provider.get('action') !== 'task_retry'
+        )
+          return fail();
+        const uploads = await tx.get(execution.ref.collection('uploads').limit(1));
+        if (!uploads.empty || execution.get('activeUpload') !== undefined) return fail();
+        const closed = await tx.get(execution.ref.collection('nativeClose').doc('original'));
+        const released = await tx.get(original.ref.collection('facts').doc('released'));
+        immutable(closed);
+        immutable(released);
+        episode.ordinal = parsed.ordinal + 1;
+        episode.predecessor = {
+          id: parsed.id,
+          closeHash: nativeHash(closed),
+          releaseHash: nativeHash(released),
+          providerHash: nativeHash(provider),
+        };
+        executionRef = doc.collection('runtime').doc('current');
+        tx.create(original.ref.collection('facts').doc('successor'), { schemaVersion: 1, episode });
+        tx.create(doc, episode);
+        tx.create(executionRef, {
+          schemaVersion: 1,
+          operationId: parent.id,
+          ref,
+          preparedBy: caller,
+          status: 'prepared',
+          createdAt: episode.createdAt,
+          preparedEpisode: episode.id,
+        });
+        tx.update(parent, { headEpisode: episode.id });
+        created = true;
         return;
       }
       await o.assertCurrent(tx, ref);
@@ -116,7 +323,7 @@ export async function prepareNativeYouTubeEpisode(o: {
   if (!created) return;
   await o.firestore.runTransaction(
     async (tx) => {
-      const [current, original] = await Promise.all([tx.get(parent), tx.get(doc)]);
+      const [current, original] = await Promise.all([tx.get(executionRef), tx.get(doc)]);
       immutable(original);
       if (
         !isDeepStrictEqual(original.data(), episode) ||
@@ -141,7 +348,8 @@ export async function readPreparedYouTubeEpisode(o: {
   return o.firestore.runTransaction(
     async (tx) => {
       const parent = o.firestore.collection(YOUTUBE_ACQUISITIONS).doc(youtubeAcquisitionId(o.ref));
-      const snapshot = await tx.get(parent),
+      const root = await tx.get(parent);
+      const snapshot = await readAcquisitionExecution(tx, root),
         current = readYouTubeAcquisitionOperation(snapshot.data(), o.ref);
       const id = snapshot.get('preparedEpisode');
       if (!uuid(id) || current.status !== 'prepared' || current.preparedBy.serviceAccount !== o.verifiedCallerEmail)
@@ -150,8 +358,8 @@ export async function readPreparedYouTubeEpisode(o: {
       const allowed = await tx.get(original.ref.collection('facts').doc('authorized'));
       immutable(original);
       immutable(allowed);
-      if (!original.createTime?.isEqual(snapshot.createTime!)) return fail();
       const value = intent(original.data(), o.ref);
+      await episodeOriginal(tx, snapshot, original, value);
       if (
         value.id !== id ||
         !isDeepStrictEqual(value.preparedBy, current.preparedBy) ||
@@ -192,14 +400,15 @@ export async function recordYouTubeEpisodeResource(o: {
   const proof = Object.freeze({ ...o.proof });
   await o.firestore.runTransaction(
     async (tx) => {
-      const [root, saved, authorized] = await Promise.all([
+      const [delegation, saved, authorized] = await Promise.all([
         tx.get(parent),
         tx.get(doc),
         tx.get(doc.collection('facts').doc('authorized')),
       ]);
       immutable(saved);
       immutable(authorized);
-      if (!saved.createTime?.isEqual(root.createTime!)) return fail();
+      const root = await readAcquisitionExecution(tx, delegation, episode.id);
+      await episodeOriginal(tx, root, saved, episode);
       if (
         root.get('preparedEpisode') !== episode.id ||
         root.get('status') !== 'prepared' ||
@@ -227,7 +436,7 @@ export async function claimYouTubeEpisode(
   startedAt: number
 ): Promise<void> {
   if (!uuid(id) || parent.get('preparedEpisode') !== id) return fail();
-  const doc = parent.ref.collection('episodes').doc(id);
+  const doc = acquisitionDelegationRef(parent).collection('episodes').doc(id);
   const [original, authorized, reserved, enrolled, birth] = await Promise.all([
     tx.get(doc),
     tx.get(doc.collection('facts').doc('authorized')),
@@ -236,8 +445,8 @@ export async function claimYouTubeEpisode(
     tx.get(doc.collection('facts').doc('birth')),
   ]);
   for (const saved of [original, authorized, reserved, enrolled]) immutable(saved);
-  if (!original.createTime?.isEqual(parent.createTime!)) return fail();
   const episode = intent(original.data(), ref);
+  await episodeOriginal(tx, parent, original, episode);
   if (
     episode.id !== id ||
     !isDeepStrictEqual(episode.preparedBy, parent.get('preparedBy')) ||
@@ -269,7 +478,10 @@ export async function assertOwnedYouTubeEpisode(
     return;
   }
   if (!uuid(id) || bound !== id) return fail();
-  const doc = parent.ref.collection('episodes').doc(id),
+  const rootRef = acquisitionDelegationRef(parent);
+  const root = rootRef.path === parent.ref.path ? parent : await tx.get(rootRef);
+  if ((root.get('headEpisode') ?? root.get('preparedEpisode')) !== id) return fail();
+  const doc = rootRef.collection('episodes').doc(id),
     facts = doc.collection('facts');
   const [original, authorized, reserved, enrolled, born] = await Promise.all([
     tx.get(doc),
@@ -279,8 +491,8 @@ export async function assertOwnedYouTubeEpisode(
     tx.get(facts.doc('birth')),
   ]);
   for (const saved of [original, authorized, reserved, enrolled, born]) immutable(saved);
-  if (!original.createTime?.isEqual(parent.createTime!)) return fail();
   const value = intent(original.data(), parent.get('ref'));
+  await episodeOriginal(tx, parent, original, value);
   resource(reserved.get('proof'), id, 'reserved');
   resource(enrolled.get('proof'), id, 'enrolled');
   if (
@@ -319,10 +531,13 @@ export async function assertPersistedYouTubeEpisodeClose(o: {
   validateEpisodeDrain(o.proof, o.episode.id, 'drained');
   await o.firestore.runTransaction(
     async (tx) => {
-      const parent = await tx.get(o.firestore.collection(YOUTUBE_ACQUISITIONS).doc(o.episode.operationId));
+      const root = await tx.get(o.firestore.collection(YOUTUBE_ACQUISITIONS).doc(o.episode.operationId));
+      const parent = await readAcquisitionExecution(tx, root, o.episode.id);
       await assertOwnedYouTubeEpisode(tx, parent, o.episode.id, parent.get('owner'));
       const [sealed, closed] = await Promise.all([
-        tx.get(parent.ref.collection('episodes').doc(o.episode.id).collection('facts').doc('sealed')),
+        tx.get(
+          acquisitionDelegationRef(parent).collection('episodes').doc(o.episode.id).collection('facts').doc('sealed')
+        ),
         tx.get(parent.ref.collection('nativeClose').doc('original')),
       ]);
       immutable(sealed);
@@ -349,9 +564,10 @@ export async function recordReleasedYouTubeEpisode(o: {
   try {
     await o.firestore.runTransaction(
       async (tx) => {
-        const root = await tx.get(parent);
+        const delegation = await tx.get(parent);
+        const root = await readAcquisitionExecution(tx, delegation, o.episode.id);
         await assertOwnedYouTubeEpisode(tx, root, o.episode.id, root.get('owner'));
-        const closed = await tx.get(parent.collection('nativeClose').doc('original'));
+        const closed = await tx.get(root.ref.collection('nativeClose').doc('original'));
         const sealed = await tx.get(doc.parent.doc('sealed'));
         immutable(closed);
         immutable(sealed);
@@ -380,7 +596,7 @@ export async function assertReleasedYouTubeEpisode(tx: Transaction, parent: Docu
   if (id === undefined) return; // Historical single-owner path is not relabelled.
   if (!uuid(id)) return fail();
   await assertOwnedYouTubeEpisode(tx, parent, id, parent.get('owner'));
-  const facts = parent.ref.collection('episodes').doc(id).collection('facts');
+  const facts = acquisitionDelegationRef(parent).collection('episodes').doc(id).collection('facts');
   const [sealed, released, closed] = await Promise.all([
     tx.get(facts.doc('sealed')),
     tx.get(facts.doc('released')),

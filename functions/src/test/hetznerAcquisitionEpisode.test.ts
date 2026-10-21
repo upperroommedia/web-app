@@ -7,6 +7,7 @@ import {
   readPreparedYouTubeEpisode,
   recordYouTubeEpisodeResource,
   assertReleasedYouTubeEpisode,
+  readAcquisitionExecution,
 } from '../../../apps/process-audio/src/temporal/hetzner-acquisition-episode';
 import { reserveYouTubeEpisodeResources } from '../../../apps/process-audio/src/temporal/hetzner-acquisition-resources';
 import {
@@ -32,7 +33,20 @@ const gateRef = () => db.doc(`_testEpisodeAuthority/${ref.jobId}`);
 const current = async (tx: Transaction) => {
   if (!(await tx.get(gateRef())).get('allowed')) throw Error('CONTROLLED_REVOKED');
 };
-const prepare = () => prepareNativeYouTubeEpisode({ firestore: db, ref, caller, assertCurrent: current });
+const nativeInvocation = {
+  workflowId: 'CONTROLLED_WORKFLOW',
+  runId: 'CONTROLLED_RUN',
+  activityId: 'CONTROLLED_ACTIVITY',
+  attempt: 1,
+};
+const prepare = (attempt = 1) =>
+  prepareNativeYouTubeEpisode({
+    firestore: db,
+    ref,
+    caller,
+    invocation: { ...nativeInvocation, attempt },
+    assertCurrent: current,
+  });
 const read = () => readPreparedYouTubeEpisode({ firestore: db, ref, verifiedCallerEmail: caller.serviceAccount });
 beforeAll(() => {
   if (!/^(localhost|127\.0\.0\.1):\d+$/.test(process.env.FIRESTORE_EMULATOR_HOST ?? ''))
@@ -76,6 +90,7 @@ test('native preparation atomically creates exactly one first intent; repeats re
   await prepareNativeYouTubeEpisode({
     firestore: db,
     ref,
+    invocation: nativeInvocation,
     caller: { ...caller, instanceId: 'CONTROLLED_CURRENT_RETRY_ACTIVITY' },
     assertCurrent: current,
   });
@@ -194,8 +209,8 @@ test('unknown native enrollment ACK cannot persist an enrollment permit or autho
   });
   await expect(store.claim(ref, caller.serviceAccount)).rejects.toThrow('YOUTUBE_EPISODE_UNCONFIRMED');
 });
-async function running() {
-  await prepare();
+async function running(attempt = 1, processOwner = owner) {
+  await prepare(attempt);
   const episode = await read();
   const reservation = await reserveYouTubeEpisodeResources({
     firestore: db,
@@ -203,11 +218,11 @@ async function running() {
     startSignal: new AbortController().signal,
     assertCurrent: current,
   });
-  await reservation.enroll(owner.processId, new AbortController().signal);
+  await reservation.enroll(processOwner.processId, new AbortController().signal);
   const store = createYouTubeAcquisitionHostStore({
     firestore: db,
     projectId: ref.projectId,
-    owner,
+    owner: processOwner,
     episodeId: episode.id,
     nativeEnrollment: {
       v: 1,
@@ -349,3 +364,146 @@ test('seal retains capacity until immutable original DB CLOSE; both adoption gat
     'YOUTUBE_EPISODE_UNCONFIRMED'
   );
 });
+
+const providerEvidence = { attemptedModes: ['public_provider' as const], requiresAuthenticationRecovery: false };
+async function knownRetry() {
+  const original = await running();
+  await original.store.settle(ref, { kind: 'retryable' }, async () => undefined, providerEvidence);
+  const sealed = await original.reservation.sealAfterNativeClose();
+  await closeYouTubeAcquisitionNativeProcess({
+    firestore: db,
+    ref,
+    owner,
+    startedAt: original.startedAt,
+    fact: { processId: owner.processId, exitCode: 0, exitSignal: null, outcome: 'completed', closedAt: Date.now() },
+    episode: { id: original.episode.id, proof: sealed },
+  });
+  await original.reservation.releaseAfterNativeDrain();
+  return original;
+}
+test('successor uses a distinct native owner/upload/close while preserving original history and adopts exact current source chain', async () => {
+  const first = await knownRetry();
+  const original = await root().get(),
+    oldClose = await root().collection('nativeClose').doc('original').get();
+  const nextOwner = { ...owner, processId: 8, startTicks: '200' };
+  const next = await running(2, nextOwner);
+  expect(next.episode.ordinal).toBe(2);
+  expect(next.episode.predecessor?.id).toBe(first.episode.id);
+  expect(next.episode.invocation.attempt).toBe(2);
+  const attempt = randomUUID(),
+    upload = next.store.upload(ref, attempt);
+  expect(await upload.begin()).toEqual({ launch: true });
+  await upload.recordBytes({ bytes: 1, crc32c: 'AAAAAA==' });
+  const artifact = { path: upload.path, generation: '1', bytes: 1, crc32c: 'AAAAAA==' };
+  await upload.retain(artifact);
+  await next.store.settle(ref, { kind: 'source', artifact }, async () => undefined);
+  const sealed = await next.reservation.sealAfterNativeClose();
+  await closeYouTubeAcquisitionNativeProcess({
+    firestore: db,
+    ref,
+    owner: nextOwner,
+    startedAt: next.startedAt,
+    fact: { processId: nextOwner.processId, exitCode: 0, exitSignal: null, outcome: 'completed', closedAt: Date.now() },
+    episode: { id: next.episode.id, proof: sealed },
+  });
+  await next.reservation.releaseAfterNativeDrain();
+  await db.runTransaction(async (tx) => {
+    const selected = await readAcquisitionExecution(tx, await tx.get(root()));
+    expect(selected.ref.path).toBe(
+      root().collection('episodes').doc(next.episode.id).collection('runtime').doc('current').path
+    );
+    await assertReleasedYouTubeEpisode(tx, selected);
+    expect(selected.get('owner')).toEqual(nextOwner);
+    expect(selected.get('activeUpload')).toBe(attempt);
+    expect((await tx.get(selected.ref.collection('uploads').doc(attempt))).get('receipt')).toEqual(artifact);
+  });
+  const retained = await root().get();
+  expect(retained.get('preparedEpisode')).toBe(first.episode.id);
+  for (const key of ['owner', 'startedAt', 'result', 'nativeClose', 'status'])
+    expect(retained.get(key)).toEqual(original.get(key));
+  expect((await root().collection('nativeClose').doc('original').get()).updateTime?.isEqual(oldClose.updateTime!)).toBe(
+    true
+  );
+  expect((await root().collection('uploads').get()).empty).toBe(true);
+});
+test('known retry successor requires strictly later SAME native Activity attempt and current actor; same attempt is GET-only', async () => {
+  await knownRetry();
+  await prepare();
+  expect((await root().collection('episodes').get()).size).toBe(1);
+  for (const changed of [
+    { ...nativeInvocation, runId: 'OTHER_RUN', attempt: 2 },
+    { ...nativeInvocation, activityId: 'OTHER_ACTIVITY', attempt: 2 },
+  ]) {
+    await expect(
+      prepareNativeYouTubeEpisode({ firestore: db, ref, caller, invocation: changed, assertCurrent: current })
+    ).rejects.toThrow();
+  }
+  await gateRef().update({ allowed: false });
+  await expect(prepare(2)).rejects.toThrow('CONTROLLED_REVOKED');
+  expect((await root().collection('episodes').get()).size).toBe(1);
+});
+test('retry classification never clears unknown upload fences or substitutes auth/archive/generic failure', async () => {
+  const active = await running();
+  await expect(active.store.settle(ref, { kind: 'retryable' }, async () => undefined)).rejects.toThrow();
+  await expect(
+    active.store.settle(ref, { kind: 'retryable' }, async () => undefined, {
+      ...providerEvidence,
+      requiresAuthenticationRecovery: true,
+    })
+  ).rejects.toThrow();
+  await active.store.upload(ref, randomUUID()).begin();
+  await expect(
+    active.store.settle(ref, { kind: 'retryable' }, async () => undefined, providerEvidence)
+  ).rejects.toThrow();
+  await expect(prepare(2)).rejects.toThrow();
+  expect((await root().collection('episodes').get()).size).toBe(1);
+  expect((await root().get()).get('activeUpload')).toBeDefined();
+});
+test('committed successor intent ACK loss has no launch authorization/backfill or later successor', async () => {
+  await knownRetry();
+  const actual = db.runTransaction.bind(db);
+  jest.spyOn(db, 'runTransaction').mockImplementationOnce(async (run, options) => {
+    await actual(run, options);
+    throw Error('CONTROLLED_SUCCESSOR_COMMIT_ACK_LOSS');
+  });
+  await expect(prepare(2)).rejects.toThrow('CONTROLLED_SUCCESSOR_COMMIT_ACK_LOSS');
+  jest.restoreAllMocks();
+  const head = (await root().get()).get('headEpisode');
+  expect((await root().collection('episodes').doc(head).collection('facts').doc('authorized').get()).exists).toBe(
+    false
+  );
+  await expect(read()).rejects.toThrow();
+  await expect(prepare(2)).rejects.toThrow();
+  await expect(prepare(3)).rejects.toThrow();
+  expect((await root().collection('episodes').get()).size).toBe(2);
+});
+test('current successor rereads immutable predecessor close/release stamps; rewritten history denies', async () => {
+  await knownRetry();
+  await prepare(2);
+  const before = await read();
+  const close = root().collection('nativeClose').doc('original'),
+    original = (await close.get()).data()!;
+  await close.update({ closedAt: original.closedAt + 1 });
+  await close.set(original);
+  await expect(read()).rejects.toThrow();
+  expect(before.ordinal).toBe(2);
+});
+
+test.each(['rewrite', 'recreate'])(
+  'successor rejects original provider classification %s after its own creation',
+  async (mode) => {
+    const first = await knownRetry();
+    await prepare(2);
+    expect((await read()).ordinal).toBe(2);
+    const outcome = root().collection('episodes').doc(first.episode.id).collection('facts').doc('providerOutcome');
+    const original = (await outcome.get()).data()!;
+    if (mode === 'rewrite') {
+      await outcome.update({ attemptedModes: ['cookie_provider'] });
+      await outcome.set(original);
+    } else {
+      await outcome.delete();
+      await outcome.create(original);
+    }
+    await expect(read()).rejects.toThrow('YOUTUBE_EPISODE_UNCONFIRMED');
+  }
+);

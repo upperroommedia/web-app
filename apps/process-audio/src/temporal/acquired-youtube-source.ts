@@ -1,4 +1,4 @@
-import { assertReleasedYouTubeEpisode } from './hetzner-acquisition-episode';
+import { assertReleasedYouTubeEpisode, readAcquisitionExecution } from './hetzner-acquisition-episode';
 import { isDeepStrictEqual as same } from 'node:util';
 import { stat } from 'node:fs/promises';
 import type { Bucket } from '@google-cloud/storage';
@@ -70,12 +70,13 @@ export async function consumeAcquiredYouTubeSource(o: {
       const requestRef = o.db.doc(`temporalMediaRequests/${ref.jobId}`),
         hostRef = o.db.doc(`${YOUTUBE_ACQUISITIONS}/${operationId}`),
         assetRef = o.db.doc(`${MEDIA_ARTIFACTS}/${mediaArtifactId(ref.projectId, source.path)}`);
-      const [request, host, upload, asset, close] = await Promise.all([
+      const delegation = await tx.get(hostRef);
+      const host = await readAcquisitionExecution(tx, delegation);
+      const [request, upload, asset, close] = await Promise.all([
         tx.get(requestRef),
-        tx.get(hostRef),
-        tx.get(hostRef.collection('uploads').doc(attempt!)),
+        tx.get(host.ref.collection('uploads').doc(attempt!)),
         tx.get(assetRef),
-        tx.get(hostRef.collection('nativeClose').doc('original')),
+        tx.get(host.ref.collection('nativeClose').doc('original')),
       ]);
       if (!close.exists || !close.createTime?.isEqual(close.updateTime!)) fail();
       validateYouTubeAcquisitionNativeClose(host.data(), ref, close.data());

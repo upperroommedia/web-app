@@ -13,6 +13,7 @@ export interface AcquiredYouTubeSource {
 export type RemoteYouTubeResult =
   | { kind: 'source'; artifact: AcquiredYouTubeSource }
   | { kind: 'source_available' }
+  | { kind: 'retryable' }
   | Exclude<MediaOutcome, { kind: 'ready' }>;
 export interface AcquisitionRequest {
   operationId: string;
@@ -111,6 +112,7 @@ function observation(
   }
   if (data.artifact !== undefined) return failure('YOUTUBE_ACQUISITION_PROTOCOL');
   if (data.status === 'missing' || data.status === 'running') return { status: data.status };
+  if (data.status === 'retryable') return failure('YOUTUBE_ACQUISITION_RETRYABLE');
   if (data.status === 'waiting_auth') return { kind: 'waiting_auth', recoveryGeneration: null };
   if (
     data.status === 'waiting_archive' ||

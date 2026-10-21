@@ -100,20 +100,39 @@ async function execute(message: unknown, cancellation: CancelToken): Promise<voi
     }, 500);
     watchdog.unref();
     try {
-      const artifact = await acquireYouTubeToStream(
-        '/usr/local/bin/yt-dlp',
-        eligible.payload.youtubeUrl,
-        join(input.directory, 'source'),
-        cancellation,
-        () => undefined,
-        firebaseAdmin.database(),
-        undefined,
-        createNativeYouTubeAcquisitionSink({ ref, store })
-      );
-      cancellation.signal.throwIfAborted();
-      await store.settle(ref, { kind: 'source', artifact }, async () => {
-        if (await drainNativeYouTubeSession(input.directory)) throw denied();
-      });
+      try {
+        const artifact = await acquireYouTubeToStream(
+          '/usr/local/bin/yt-dlp',
+          eligible.payload.youtubeUrl,
+          join(input.directory, 'source'),
+          cancellation,
+          () => undefined,
+          firebaseAdmin.database(),
+          undefined,
+          createNativeYouTubeAcquisitionSink({ ref, store })
+        );
+        cancellation.signal.throwIfAborted();
+        await store.settle(ref, { kind: 'source', artifact }, async () => {
+          if (await drainNativeYouTubeSession(input.directory)) throw denied();
+        });
+      } catch (error) {
+        cancellation.signal.throwIfAborted();
+        const evidence = (error as import('../processYouTubeUrl').YouTubeAcquisitionError)?.youtubeAcquisitionEvidence;
+        const { getYouTubeFailureDisposition } = await import('@upperroom/contracts/processAudioQueue');
+        if (!evidence || getYouTubeFailureDisposition(evidence).action !== 'task_retry') throw error;
+        // Only known provider failure before ANY upload is eligible here. The
+        // store independently fences uncertain uploads. Auth/archive resume is
+        // deliberately separate until the same-host recovery protocol exists.
+        await store.settle(
+          ref,
+          { kind: 'retryable' },
+          async () => {
+            await cancellation.waitForProcesses();
+            if (await drainNativeYouTubeSession(input.directory)) throw denied();
+          },
+          evidence
+        );
+      }
     } finally {
       clearInterval(watchdog);
       cancellation.cancel();

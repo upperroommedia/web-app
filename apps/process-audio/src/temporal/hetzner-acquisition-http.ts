@@ -1,4 +1,4 @@
-import { assertReleasedYouTubeEpisode } from './hetzner-acquisition-episode';
+import { assertReleasedYouTubeEpisode, readAcquisitionExecution } from './hetzner-acquisition-episode';
 import { executeCanonicalYouTubeAcquisition } from './hetzner-acquisition-driver';
 import { Router } from 'express';
 import type { Auth } from 'firebase-admin/auth';
@@ -81,12 +81,16 @@ export function createHetznerAcquisitionRouter(o: { firestore: Firestore; auth: 
         return undefined;
       }
       if (request.body !== undefined && Object.keys(request.body).length) throw unavailable();
+      let originalExecution: DocumentSnapshot | undefined;
       const inspect = async () =>
         o.firestore.runTransaction(async (tx) => {
           const current = await tx.get(target);
           fresh();
           if (!sameStamp(original, current)) throw unavailable();
-          const record = readYouTubeAcquisitionOperation(current.data(), ref);
+          const execution = await readAcquisitionExecution(tx, current);
+          if (originalExecution && !sameStamp(originalExecution, execution)) throw unavailable();
+          originalExecution ??= execution;
+          const record = readYouTubeAcquisitionOperation(execution.data(), ref);
           const eligibility = await readEligibleYouTubeAcquisition({
             firestore: o.firestore,
             auth: o.auth,
@@ -95,11 +99,11 @@ export function createHetznerAcquisitionRouter(o: { firestore: Firestore; auth: 
           });
           fresh();
           if (record.nativeClose) {
-            const saved = await tx.get(target.collection('nativeClose').doc('original'));
+            const saved = await tx.get(execution.ref.collection('nativeClose').doc('original'));
             fresh();
             if (!saved.exists || !saved.createTime?.isEqual(saved.updateTime!)) throw unavailable();
             validateYouTubeAcquisitionNativeClose(record, ref, saved.data());
-            await assertReleasedYouTubeEpisode(tx, current);
+            await assertReleasedYouTubeEpisode(tx, execution);
           }
           // A canonical stop/source is not a remote process-drain proof.
           if (eligibility.kind !== 'ready') throw unavailable();
