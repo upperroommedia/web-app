@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import {runMediaRecoveryCycle} from './temporal-media-recovery-cycle.mjs';
 import {saveMediaRecoveryCheckpoint,assertMediaRecoveryAuthority} from './temporal-media-recovery-checkpoint.mjs';
-import {canonicalMediaRecoveryRuntime} from './temporal-media-recovery-runtime.mjs';
+import {canonicalMediaRecoveryRuntime,mediaRecoveryPreparation} from './temporal-media-recovery-runtime.mjs';
 import {independentPromotionPredecessor} from './temporal-promotion-roles.mjs';
 import {runCloudRunControlsPromotion,runCloudRunSearchPromotion,runCloudRunEmailPromotion,runCloudRunImagesPromotion,runCloudRunMediaPromotion} from './temporal-release-cloud-run.mjs';
 import {saveControlsPromotionCheckpoint,assertControlsPromotionAuthority,saveSearchPromotionCheckpoint,assertSearchPromotionAuthority,saveEmailPromotionCheckpoint,assertEmailPromotionAuthority,saveImagesPromotionCheckpoint,assertImagesPromotionAuthority,saveMediaPromotionCheckpoint,assertMediaPromotionAuthority} from './temporal-preparation-checkpoint.mjs';
@@ -1232,7 +1232,7 @@ await runWithCleanup(
             const immutableReceipt=firestore.doc(`_control/${operation.prefix}-${operationId}`);
             const creationReceipt=operation.creationPrefix?firestore.doc(`_control/${operation.creationPrefix}-${operationId}`):undefined;
             const result=await operation.run({binding,config,firestore,bindingDigest,expectedAuthority,platform,role:operation.role,settings,operationId,releaseId:config.releaseId,
-              ...(operation.mode==='recovery'?{runtime:canonicalMediaRecoveryRuntime}:{}),
+              ...(operation.mode==='recovery'?{runtime:Object.freeze({...canonicalMediaRecoveryRuntime,prepare:mediaRecoveryPreparation({options:()=>({firestore,lockRef,controlRef,stateRef,ownedOperation,expectedAuthority,config,operationId,bindingDigest}),setOwnedOperation:value=>{ownedOperation=value;}})})}:{}),
               authorizeMutation:()=> (operation.mode==='recovery'?assertMediaRecoveryAuthority:({controls:assertControlsPromotionAuthority,search:assertSearchPromotionAuthority,email:assertEmailPromotionAuthority,images:assertImagesPromotionAuthority,media:assertMediaPromotionAuthority}[operation.role]))({firestore,lockRef,controlRef,stateRef,ownedOperation,expectedAuthority,config,operationId,bindingDigest}),
               evidenceDigest:preparationArguments.digest,receipts,api,saved:hasSaved?currentOperation.get(operation.field):undefined,
               observeProtection:scope=>operation.mode==='recovery'?canonicalMediaRecoveryRuntime.observeProtection({binding,config,platform,firestore,operationId,bindingDigest,expectedAuthority,scope}):verifyCloudRunBootstrapProtection({binding,config,platform,firestore,role:operation.role,operationId,bindingDigest,expectedAuthority,releaseId:config.releaseId}),

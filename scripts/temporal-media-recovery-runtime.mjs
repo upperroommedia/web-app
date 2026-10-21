@@ -1,3 +1,4 @@
+import { prepareMediaRecoveryJournal } from './temporal-media-recovery-checkpoint.mjs';
 /** Canonical boundary, deliberately unavailable until the real image protocol,
  * fixed diagnostic queues, native original-run recovery and authoritative drain
  * are implemented. Local/controlled adapters cannot be selected by a CLI flag.
@@ -15,3 +16,13 @@ export const canonicalMediaRecoveryRuntime = Object.freeze({
   confirmStopped: unavailable,
   confirmNeverStarted: unavailable,
 });
+
+/** The actual canonical prepare stage uses the native private journal. Preflight
+ * remains fixed-deny, so this cannot yet arm a live diagnostic through the CLI. */
+export function mediaRecoveryPreparation(o) {
+  return async ({ plan }) => {
+    const result = await prepareMediaRecoveryJournal({ ...o.options(), plan });
+    o.setOwnedOperation(result.ownedOperation);
+    return result.prepared;
+  };
+}

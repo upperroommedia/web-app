@@ -701,3 +701,16 @@ They prove no Cloud Run API acceptance, actual diagnostic execution or readiness
 The restored revision is new lineage and cannot masquerade as the old zero-pool
 receipt or a retained normal activation. Media promotion and orchestration
 availability remain denied.
+
+
+The canonical prepare stage now has a private native Firestore ARMING journal.
+It is explicitly scoped `arming-only-no-execution-authority`; it grants no
+Workflow, Activity, polling, signal or restart permission. A separate original
+attempt precedes its sole create transaction. The journal binds the exact plan,
+image, runner, fixed diagnostic contract, paused native authority and original
+attempt timestamp. Missing/changed journals and altered attempt timestamps deny
+prepared and later checkpoints. Unknown attempt/create acknowledgements never
+resend; only exact completed native state can reconcile. Cleanup retains the
+original journal and expiry, without renewing work permission. The runtime
+preflight remains unconditionally unavailable, so the CLI cannot reach this
+arming stage until the complete private execution protocol is implemented.

@@ -122,6 +122,49 @@ export async function saveMediaRecoveryCheckpoint(o) {
             fail();
         }
       }
+      // Prepared is an immutable native arming journal, never an operator-supplied
+      // digest. Retain this join through cleanup without renewing its expiry.
+      if (next.prepared) {
+        const journal = await tx.get(o.firestore.doc(`_control/temporalMediaRecoveryJournal-${o.operationId}`));
+        const record = journal.data(),
+          attempt = parent.get('mediaRecoveryJournalAttempt'),
+          p = next.prepared;
+        if (
+          !journal.exists ||
+          record?.schemaVersion !== 1 ||
+          record.scope !== 'arming-only-no-execution-authority' ||
+          record.operationId !== o.operationId ||
+          record.releaseId !== o.config.releaseId ||
+          record.bindingDigest !== o.bindingDigest ||
+          record.planSHA256 !== hash(next.plan) ||
+          record.buildId !== next.plan.buildId ||
+          record.image !== next.plan.image ||
+          record.runner !== next.plan.runner ||
+          record.pool !== next.plan.name ||
+          hash(record.contract) !== hash(next.plan.contract) ||
+          record.createdAt !== next.plan.createdAt ||
+          record.expiresAt !== next.plan.expiresAt ||
+          hash(record.authority) !== hash(o.expectedAuthority) ||
+          !attempt ||
+          Object.keys(attempt).sort().join(',') !== 'attemptedAt,planSHA256,recordSHA256,schemaVersion,stage' ||
+          attempt.schemaVersion !== 1 ||
+          attempt.stage !== 'completed' ||
+          attempt.planSHA256 !== hash(next.plan) ||
+          attempt.recordSHA256 !== hash(record) ||
+          record.attemptedAt !== attempt.attemptedAt ||
+          !Number.isFinite(Date.parse(attempt.attemptedAt)) ||
+          Date.parse(attempt.attemptedAt) < Date.parse(next.plan.createdAt) ||
+          Date.parse(attempt.attemptedAt) >= next.plan.expiresAt ||
+          Object.keys(p).sort().join(',') !== 'bindingDigest,buildId,image,kind,operationId,proofSHA256' ||
+          p.operationId !== o.operationId ||
+          p.bindingDigest !== o.bindingDigest ||
+          p.buildId !== next.plan.buildId ||
+          p.image !== next.plan.image ||
+          p.kind !== 'prepared' ||
+          p.proofSHA256 !== hash(record)
+        )
+          fail();
+      }
       const receipt = next.stage === 'completed' ? await tx.get(o.immutableReceipt) : undefined;
       const neverStarted =
         next.neverStarted &&
@@ -160,4 +203,175 @@ export async function saveMediaRecoveryCheckpoint(o) {
     { maxAttempts: 1 }
   );
   return nativeSnapshotProof(await o.lockRef.get());
+}
+
+/** Private ARMING journal only. This grants no Workflow/Activity or restart
+ * authority: the production runtime remains unavailable until its full protocol
+ * is implemented. The only create is preceded by a durable attempt. */
+export async function prepareMediaRecoveryJournal(o) {
+  const plan = o.plan;
+  const fresh = () => {
+    if (
+      !plan ||
+      plan.schemaVersion !== 1 ||
+      plan.role !== 'media' ||
+      plan.operationId !== o.operationId ||
+      plan.releaseId !== o.config.releaseId ||
+      plan.bindingDigest !== o.bindingDigest ||
+      !/^[a-f0-9]{40}$/.test(plan.buildId ?? '') ||
+      plan.name !==
+        `projects/urm-app-staging/locations/us-central1/workerPools/urm-worker-media-${plan.buildId.slice(0, 20)}` ||
+      plan.runner !== `tw-m-${plan.buildId.slice(0, 20)}@urm-app-staging.iam.gserviceaccount.com` ||
+      !/^us-central1-docker\.pkg\.dev\/urm-app-staging\/urm-temporal\/worker@sha256:[a-f0-9]{64}$/.test(
+        plan.image ?? ''
+      ) ||
+      hash(plan.contract) !==
+        hash({
+          deploymentName: 'urm-worker-media-recovery-staging',
+          queue: 'urm-media-kernel-recovery',
+          workflowType: 'MediaRecoveryProbe',
+          protocol: 'owned-media-recovery-v1',
+        }) ||
+      !Number.isFinite(Date.parse(plan.createdAt)) ||
+      plan.expiresAt !== Date.parse(plan.createdAt) + 300000 ||
+      Date.parse(plan.createdAt) > Date.now() + 5000 ||
+      Date.now() >= plan.expiresAt
+    )
+      fail();
+  };
+  fresh();
+  if (
+    o.firestore.projectId !== 'urm-app-staging' ||
+    o.firestore.databaseId !== '(default)' ||
+    !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(o.operationId ?? '') ||
+    o.lockRef.path !== '_control/temporalReleaseOperation' ||
+    o.controlRef.path !== '_control/temporalRelease' ||
+    o.stateRef.path !== '_control/temporalReleaseState'
+  )
+    fail();
+  const ref = o.firestore.doc(`_control/temporalMediaRecoveryJournal-${o.operationId}`);
+  const record = {
+    schemaVersion: 1,
+    scope: 'arming-only-no-execution-authority',
+    operationId: o.operationId,
+    releaseId: o.config.releaseId,
+    bindingDigest: o.bindingDigest,
+    planSHA256: hash(plan),
+    buildId: plan.buildId,
+    image: plan.image,
+    runner: plan.runner,
+    pool: plan.name,
+    contract: plan.contract,
+    createdAt: plan.createdAt,
+    expiresAt: plan.expiresAt,
+    authority: o.expectedAuthority,
+  };
+  const matches = (parent) => {
+    const state = parent.get('cloudMediaRecovery');
+    if (
+      state?.stage !== 'planned' ||
+      hash(state.plan) !== hash(plan) ||
+      state.prepared ||
+      state.diagnostic ||
+      state.start
+    )
+      fail();
+  };
+  let ownedOperation = o.ownedOperation;
+  let attempt;
+  await o.firestore.runTransaction(
+    async (tx) => {
+      const parent = await authority({ ...o, ownedOperation }, tx);
+      matches(parent);
+      fresh();
+      attempt = parent.get('mediaRecoveryJournalAttempt');
+    },
+    { readOnly: true }
+  );
+  record.attemptedAt = attempt?.attemptedAt ?? new Date().toISOString();
+  const recordSHA256 = hash(record);
+  if (!attempt) {
+    attempt = {
+      schemaVersion: 1,
+      stage: 'attempted',
+      recordSHA256,
+      planSHA256: hash(plan),
+      attemptedAt: record.attemptedAt,
+    };
+    // Unknown checkpoint ACK cannot proceed to a create. A later invocation sees
+    // the attempt and is GET-only; it cannot turn absence into retry authority.
+    try {
+      await o.firestore.runTransaction(
+        async (tx) => {
+          const parent = await authority({ ...o, ownedOperation }, tx);
+          matches(parent);
+          fresh();
+          const current = await tx.get(ref);
+          if (parent.get('mediaRecoveryJournalAttempt') !== undefined || current.exists) fail();
+          tx.update(o.lockRef, { mediaRecoveryJournalAttempt: attempt });
+        },
+        { maxAttempts: 1 }
+      );
+    } catch {
+      await o.lockRef.get();
+      throw new Error('MEDIA_RECOVERY_JOURNAL_ATTEMPT_ACK_UNKNOWN');
+    }
+    ownedOperation = nativeSnapshotProof(await o.lockRef.get());
+    try {
+      await o.firestore.runTransaction(
+        async (tx) => {
+          const parent = await authority({ ...o, ownedOperation }, tx);
+          matches(parent);
+          fresh();
+          const current = await tx.get(ref);
+          if (hash(parent.get('mediaRecoveryJournalAttempt')) !== hash(attempt) || current.exists) fail();
+          tx.create(ref, record);
+          tx.update(o.lockRef, { mediaRecoveryJournalAttempt: { ...attempt, stage: 'completed' } });
+        },
+        { maxAttempts: 1 }
+      );
+    } catch {
+      // Do not resend after any error, including definite rejection. Exact GET
+      // reconciliation is allowed only on a later invocation over native state.
+      await Promise.all([ref.get(), o.lockRef.get()]);
+      throw new Error('MEDIA_RECOVERY_JOURNAL_CREATE_UNCONFIRMED');
+    }
+    ownedOperation = nativeSnapshotProof(await o.lockRef.get());
+  }
+  let parent;
+  await o.firestore.runTransaction(
+    async (tx) => {
+      parent = await authority({ ...o, ownedOperation }, tx);
+      matches(parent);
+      const actual = parent.get('mediaRecoveryJournalAttempt'),
+        current = await tx.get(ref);
+      if (
+        actual?.stage !== 'completed' ||
+        Object.keys(actual).sort().join(',') !== 'attemptedAt,planSHA256,recordSHA256,schemaVersion,stage' ||
+        actual.schemaVersion !== 1 ||
+        actual.recordSHA256 !== recordSHA256 ||
+        actual.planSHA256 !== hash(plan) ||
+        !Number.isFinite(Date.parse(actual.attemptedAt)) ||
+        Date.parse(actual.attemptedAt) < Date.parse(plan.createdAt) ||
+        Date.parse(actual.attemptedAt) > Date.now() + 5000 ||
+        !current.exists ||
+        hash(current.data()) !== recordSHA256
+      )
+        fail();
+      fresh();
+    },
+    { readOnly: true }
+  );
+  fresh();
+  return {
+    ownedOperation: nativeSnapshotProof(parent),
+    prepared: {
+      operationId: o.operationId,
+      bindingDigest: o.bindingDigest,
+      buildId: plan.buildId,
+      image: plan.image,
+      kind: 'prepared',
+      proofSHA256: recordSHA256,
+    },
+  };
 }

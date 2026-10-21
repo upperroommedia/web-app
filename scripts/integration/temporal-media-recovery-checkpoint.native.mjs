@@ -5,7 +5,11 @@ import { createRequire } from 'node:module';
 import { randomUUID } from 'node:crypto';
 import { mediaRecoveryFixture } from '../tests/fixtures/media-recovery.mjs';
 import { runMediaRecoveryCycle } from '../temporal-media-recovery-cycle.mjs';
-import { saveMediaRecoveryCheckpoint, assertMediaRecoveryAuthority } from '../temporal-media-recovery-checkpoint.mjs';
+import {
+  saveMediaRecoveryCheckpoint,
+  assertMediaRecoveryAuthority,
+  prepareMediaRecoveryJournal,
+} from '../temporal-media-recovery-checkpoint.mjs';
 import { nativeSnapshotProof } from '../temporal-release-runtime.mjs';
 import { bounded } from './fixtures/owned-media-process.mjs';
 const require = createRequire(new URL('../../package.json', import.meta.url));
@@ -78,6 +82,11 @@ for (const mode of [
         state: nativeSnapshotProof(await bounded(stateRef.get())),
       };
       f.options.authorizeMutation = () => assertMediaRecoveryAuthority(options());
+      f.options.runtime.prepare = async ({ plan }) => {
+        const result = await bounded(prepareMediaRecoveryJournal({ ...options(), plan }));
+        ownedOperation = result.ownedOperation;
+        return result.prepared;
+      };
       const execute = f.options.runtime.execute;
       f.options.runtime.execute = async (args) => {
         recoveryCalls++;
@@ -183,7 +192,13 @@ for (const mode of [
     } finally {
       const failures = [];
       for (const cleanup of [
-        ...[immutableReceipt, lockRef, controlRef, stateRef].map((ref) => () => ref.delete()),
+        ...[
+          db.doc(`_control/temporalMediaRecoveryJournal-${f.options.operationId}`),
+          immutableReceipt,
+          lockRef,
+          controlRef,
+          stateRef,
+        ].map((ref) => () => ref.delete()),
         () => db.terminate(),
         () => deleteApp(app),
       ]) {
