@@ -7,7 +7,8 @@ owned pool under the original parent. Observation failure also enters owned stop
 uncertain authority, protected work or an unknown result retains the fence.
 The source also connects a kept-running role-specific activation and a separate stop of
 that exact unused activation. None of these operations has been applied to Cloud Run.
-Guarded native promotion remains unimplemented.
+Controls-only guarded native promotion is connected in source. Promotion of the
+other roles remains unimplemented, and no promotion has been applied to staging.
 
 The final native role-readiness collector still requires candidate versions current,
 with no ramp, on the real role queues. The cycle cannot replace that collector.
@@ -69,7 +70,49 @@ another deployment's queue ownership. Recheck actual queue routing, original
 history heads, pending attempts, provider leases and paused authority immediately
 before mutation; unknown acknowledgement permits readback only, never resend,
 rollback, retirement or a causal success claim. The canonical production
-promotion operation remains unimplemented.
+promotion operation is described below; this fixture does not execute it against
+staging.
+
+## Connected controls promotion
+
+`promote-cloud-run-controls` is a separate canonical controller action in the
+still-paused `provider-usage-ready` phase. It requires the same thirteen distinct
+owned preparation, bootstrap-cycle and retained-activation receipts as unused
+controls stop. The controller verifies the source/CI/image evidence and rederives
+the full original receipt chain, live pool identity/desired-one configuration,
+account identities, scoped grants and secret metadata. The operation never scales
+the pool and cannot promote another role.
+
+The native precondition requires exact controls-only Activity registration,
+candidate pollers, the real `urm-controls` queue routed to the old shared
+deployment, no ramp and no compute association anywhere in the namespace. Two
+stable scans require paused original authority, no pending Activities/Nexus work,
+provider locks or unresolved dispatch leases. They fetch complete, bounded native
+histories of each exact original running RunId without following replacements,
+check history length/event sequence, and replay against a freshly built bundle
+from the verified runtime source. Only hashes and plain metadata projections are
+saved; history payloads stay in memory. This establishes source compatibility,
+not deployed-image bundle identity. Orchestration needs separate image-bound
+workflow evidence before its own promotion can be implemented.
+
+An immutable attempted checkpoint saves the exact target, original conflict token,
+request identity, resource identities, replay/queue/protection hashes and original
+timestamps before one nonretrying `SetWorkerDeploymentCurrentVersion` RPC. A fresh
+native scan and an original-authority transaction follow that checkpoint, with
+freshness checked again immediately before the RPC. Definitive native rejection
+remains rejected; uncertain transport outcomes permit GET-only reconciliation and
+never a second mutation. Matching may expose its new queue routing after the RPC
+acknowledgement, so the postcondition waits by bounded GET before the full scan.
+Completion requires exact desired controls routing, unchanged shared-deployment
+routing and original protected history/lease inventory. An unknown ACK's desired
+observation is explicitly not causal proof. There is no rollback, admission,
+provider-epoch, WCI, old-worker retirement or readiness advance.
+
+`scripts/integration/temporal-controls-promotion.native.mjs` joins the actual local
+SDK CAS, full original-run replay and dedicated Firestore intent/checkpoint path.
+Cloud Run resources and permissions in that fixture remain controlled responses.
+Native routing/history records are projected into plain metadata before Firestore
+checkpointing; raw SDK message instances are not persisted.
 
 ## Connected role cycles and kept activation
 

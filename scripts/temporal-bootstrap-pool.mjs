@@ -211,10 +211,11 @@ async function verifyAccess(o, zeroPlan) {
     policyHas(policy, expected.grants[0], resource);
     proofs.push(proofDigest({ owned, policy }));
   }
+  const {observedAt:_observedAt,...scalerPolicyProjection}=scalerPolicies;
   return {
     runnerUniqueId: runner.uniqueId,
     scalerUniqueId: scaler.uniqueId,
-    policiesSHA256: proofDigest({ scalerPolicies, projectPolicy, proofs }),
+    policiesSHA256: proofDigest({ scalerPolicies:scalerPolicyProjection, projectPolicy, proofs }),
   };
 }
 /** Bootstrap one unused source-bound role pool, observe its non-current native queue,
@@ -241,7 +242,7 @@ async function runReviewedPoolOperation(o, mode, expectedRole) {
   if (
     role !== expectedRole ||
     !['controls','orchestration','search','email','images','media'].includes(expectedRole) ||
-    !['cycle', 'retain', 'abort'].includes(mode) ||
+    !['cycle', 'retain', 'abort', 'inspect-controls-promotion'].includes(mode) ||
     !uuid.test(operationId ?? '') ||
     !uuid.test(releaseId ?? '') ||
     !/^[a-f0-9]{64}$/.test(evidenceDigest ?? '') ||
@@ -285,7 +286,7 @@ async function runReviewedPoolOperation(o, mode, expectedRole) {
   const expectedKeys = [
     ...baseKeys,
     ...(mode !== 'cycle' ? ['bootstrapCycle'] : []),
-    ...(mode === 'abort' ? ['activation'] : []),
+    ...(['abort','inspect-controls-promotion'].includes(mode) ? ['activation'] : []),
   ];
   if (Object.keys(r).sort().join(',') !== expectedKeys.sort().join(',')) fail();
   const originalCyclePlan = (id) => ({
@@ -375,7 +376,7 @@ async function runReviewedPoolOperation(o, mode, expectedRole) {
     receiptsSHA256: proofDigest({ ...base, bootstrapCycle: r.bootstrapCycle }),
     origin: cycle.stop.pool,
   });
-  if (mode === 'abort') {
+  if (['abort','inspect-controls-promotion'].includes(mode)) {
     const activation = completed(r.activation, releaseId);
     if(role==='media')assertMediaDiskQuotaProof(activation.start?.protection?.mediaDiskQuota);
     if (
@@ -457,6 +458,15 @@ async function runReviewedPoolOperation(o, mode, expectedRole) {
       fail();
     return { ...pool, etag: resource.etag };
   };
+  if(mode==='inspect-controls-promotion') {
+    // Fixed read-only entrypoint rederives the original retained chain and all
+    // native resource permissions. No scale/checkpoint or noncurrent assumption.
+    if(role!=='controls'||saved!==undefined)fail();
+    const access=await verifyAccess(o,zeroPlan);
+    const pool=await current(1);
+    if(!isDeepStrictEqual(pool,origin))fail();
+    return {role,buildId:b.buildId,pool,access,receiptsSHA256:proofDigest(r)};
+  }
   const scale = async (key, target, origin) => {
     let x = state[key];
     const scalePlan = { operationId, mode: key, target, origin };
@@ -758,3 +768,5 @@ export const stopCloudRunImagesActivation=o=>execute(o,'abort','images');
 export const bootstrapStopCloudRunMediaPool=o=>execute(o,'cycle','media');
 export const activateCloudRunMediaPool=o=>execute(o,'retain','media');
 export const stopCloudRunMediaActivation=o=>execute(o,'abort','media');
+
+export const verifyControlsPromotionResources=o=>execute(o,'inspect-controls-promotion','controls');

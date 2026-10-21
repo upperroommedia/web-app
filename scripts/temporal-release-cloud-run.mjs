@@ -1,4 +1,5 @@
-import { observeBootstrapProtection, observeBootstrapRegistration } from './temporal-bootstrap-observations.mjs';
+import {promoteCloudRunControls} from './temporal-promote-controls.mjs';
+import { observeBootstrapProtection, observeBootstrapRegistration, observeControlsPromotionBefore, observeControlsPromotionAfter } from './temporal-bootstrap-observations.mjs';
 import { createHash } from 'node:crypto';
 import { isAbsolute, resolve } from 'node:path';
 import { realpath, open } from 'node:fs/promises';
@@ -75,7 +76,7 @@ export async function readCloudRunOperatorKey(path, expectedSHA256) {
 /** Load current verified TS source, not a possibly stale untracked lib/ build.
  * CI typechecking and the immutable release/source/image guards remain mandatory.
  * The compiler/SDK come from the frozen runtime's pinned dependency installation. */
-async function withNativeCloudRunClient({ binding, config, platform, firestore }, observe) {
+async function withNativeCloudRunClient({ binding, config, platform, firestore }, observe, purpose) {
   validateCloudRunReleasePlatform(platform);
   if (['FIRESTORE_EMULATOR_HOST', 'FIREBASE_AUTH_EMULATOR_HOST', 'FIREBASE_DATABASE_EMULATOR_HOST',
     'FIREBASE_STORAGE_EMULATOR_HOST'].some(name => process.env[name]))
@@ -89,14 +90,14 @@ async function withNativeCloudRunClient({ binding, config, platform, firestore }
       compilerOptions: { module: 'CommonJS', target: 'ES2022', esModuleInterop: true, moduleResolution: 'node' } });
     try {
       const workerRequire = createRequire(resolve(binding.runtimeRoot, 'apps/temporal-worker/package.json'));
-      return { ...workerRequire('@temporalio/client'),
+      return { ...(purpose==='controls-promotion'?{...workerRequire('@temporalio/worker'),workflowsPath:resolve(binding.runtimeRoot,'apps/temporal-worker/src/workflows/index.ts')}:{}),...workerRequire('@temporalio/client'),
         ...workerRequire(resolve(binding.runtimeRoot, 'apps/temporal-worker/src/runtime/serverless-release-readiness.ts')) };
     } finally { service.enabled(false); }
   });
   let connection;
   try {
     connection = await application.Connection.connect({ address: platform.cloudAddress, tls: true, apiKey: key,
-      connectTimeout: 15000 });
+      connectTimeout: 15000,...(purpose==='controls-promotion'?{interceptors:[],channelArgs:{'grpc.enable_retries':0}}:{}) });
     const client = new application.Client({ connection, namespace: platform.temporalNamespace });
     return await observe(client, application);
 
@@ -268,4 +269,22 @@ export async function verifyCloudRunBootstrapProtection(options) {
 }
 export async function verifyCloudRunBootstrapRegistration(options) {
   return withNativeCloudRunClient(options, client => observeBootstrapRegistration({...options, client}));
+}
+
+/** Source/CI/image guards are established by the canonical release controller. */
+export async function runCloudRunControlsPromotion(options){
+ return withNativeCloudRunClient(options,async(client,application)=>{
+  const bounded=async(p,ms)=>{let timer;try{return await Promise.race([p,new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('CONTROLS_PROMOTION_NATIVE_DEADLINE')),ms);})]);}finally{clearTimeout(timer);}};
+  application.Runtime.install({logger:new application.DefaultLogger('ERROR',()=>undefined)});
+  const bundle=await bounded(application.bundleWorkflowCode({workflowsPath:application.workflowsPath,logger:new application.DefaultLogger('ERROR',()=>undefined)}),30000);
+  const bundleSHA256=createHash('sha256').update(bundle.code).digest('hex'),replayed=new Set();
+  const replayHistory=async(history,id)=>{
+   const digest=createHash('sha256').update(JSON.stringify(history)).digest('hex');
+   if(replayed.has(digest))return;
+   await bounded(application.Worker.runReplayHistory({workflowBundle:{code:bundle.code}},history,id),20000);
+   replayed.add(digest);
+  };
+  const observe={...options,client,bundleSHA256,replayHistory};
+  return promoteCloudRunControls({...options,client,before:()=>observeControlsPromotionBefore(observe),after:()=>observeControlsPromotionAfter(observe)});
+ },'controls-promotion');
 }

@@ -26,10 +26,11 @@ function queueInventory(role,infos,complete=false){
  * any pending Activity, unversioned open run, active provider session/lock or
  * unresolved dispatch lease stops bootstrap. Never settles or edits old work.
  */
-export async function observeBootstrapProtection(o) {
+async function observeProtection(o, transition) {
   const { client, firestore: db, platform, role, operationId, bindingDigest, expectedAuthority, releaseId } = o;
   if (
     !Object.hasOwn(actions,role) ||
+    (transition && (role!=='controls'||typeof o.replayHistory!=='function'||!/^[a-f0-9]{64}$/.test(o.bundleSHA256??''))) ||
     db.projectId !== 'urm-app-staging' ||
     db.databaseId !== '(default)' ||
     client.options.namespace !== platform.temporalNamespace
@@ -72,7 +73,7 @@ export async function observeBootstrapProtection(o) {
       p.get('operationId') !== operationId ||
       p.get('bindingDigest') !== bindingDigest ||
       p.get('releaseId') !== releaseId ||
-      !actions[role].includes(p.get('action')) ||
+      !(transition ? p.get('action')==='promote-cloud-run-controls' : actions[role].includes(p.get('action'))) ||
       c.get('releaseId') !== releaseId ||
       s.get('releaseId') !== releaseId ||
       c.get('admission') !== 'paused' ||
@@ -129,7 +130,29 @@ export async function observeBootstrapProtection(o) {
           !found.workerDeploymentVersionInfo.taskQueueInfos?.some((q) => q.name === info.taskQueue && q.type === 1)
         )
           fail();
-        workflows.push({ executionSHA256: proofDigest(e), version: deployed, queue: info.taskQueue });
+        let replay;
+        if(transition){
+          const events=[],historyTokens=new Set();let cursor;
+          do{
+            if(Date.now()>=deadline||events.length>100000)fail();
+            const page=await rpc(()=>service.getWorkflowExecutionHistory({namespace,execution:e,maximumPageSize:1000,...(cursor?{nextPageToken:cursor}:{})}));
+            if(!Array.isArray(page.history?.events)||!page.history.events.length)fail();
+            for(const event of page.history.events){
+              if(BigInt(event.eventId?.toString()??'0')!==BigInt(events.length+1))fail();
+              events.push(event);
+            }
+            if(page.nextPageToken!=null&&!(page.nextPageToken instanceof Uint8Array)&&!(Array.isArray(page.nextPageToken)&&!page.nextPageToken.length))fail();
+            cursor=page.nextPageToken?.length?page.nextPageToken:undefined;
+            if(cursor){const token=Buffer.from(cursor).toString('base64');if(historyTokens.has(token)||historyTokens.size>=100)fail();historyTokens.add(token);}
+          }while(cursor);
+          if(BigInt(info.historyLength?.toString()??'0')!==BigInt(events.length))fail();
+          const history={events};
+          if(Buffer.byteLength(JSON.stringify(history))>20*1024*1024)fail();
+          await o.replayHistory(history,e.workflowId);
+          if(Date.now()>=deadline)fail();
+          replay={historySHA256:proofDigest(history),head:String(events.length),bundleSHA256:o.bundleSHA256};
+        }
+        workflows.push({ executionSHA256: proofDigest(e), version: deployed, queue: info.taskQueue,...(replay?{replay}:{}) });
       }
       if (
         page.nextPageToken != null &&
@@ -190,13 +213,29 @@ export async function observeBootstrapProtection(o) {
       );
       routing = report.workerDeploymentInfo?.routingConfig ?? null;
       if (
-        routing?.currentDeploymentVersion?.buildId === binding.buildId ||
+        (transition==='after' ? routing?.currentDeploymentVersion?.deploymentName!==binding.deploymentName||routing?.currentDeploymentVersion?.buildId!==binding.buildId : routing?.currentDeploymentVersion?.buildId === binding.buildId) ||
         routing?.rampingDeploymentVersion?.buildId === binding.buildId ||
         Number(routing?.rampingVersionPercentage ?? 0) !== 0
       )
         fail();
     } catch (error) {
-      if (error?.code !== 5) throw error;
+      if (transition || error?.code !== 5) throw error;
+    }
+    let queueRouting;
+    if(transition){
+      if(queueInventory(role,candidateQueues,true)===undefined)fail();
+      const report=await rpc(()=>service.describeTaskQueue({namespace,taskQueue:{name:'urm-controls'},taskQueueType:2,reportStats:true}));
+      const q=report.versioningInfo,old=platform.roleBindings.find(b=>b.role==='orchestration');
+      const current=q?.currentDeploymentVersion;
+      if(!current?.deploymentName||!current.buildId||q.rampingDeploymentVersion||Number(q.rampingVersionPercentage??0)!==0||!Array.isArray(report.pollers))fail();
+      if(transition==='before'?(current.deploymentName!==old.deploymentName||current.buildId===binding.buildId):(current.deploymentName!==binding.deploymentName||current.buildId!==binding.buildId))fail();
+      const peer=await rpc(()=>service.describeWorkerDeployment({namespace,deploymentName:old.deploymentName}));
+      const peerRouting=peer.workerDeploymentInfo?.routingConfig;
+      if(!peerRouting?.currentDeploymentVersion?.buildId||peerRouting.currentDeploymentVersion.buildId===binding.buildId||peerRouting.rampingDeploymentVersion||Number(peerRouting.rampingVersionPercentage??0)!==0)fail();
+      if(transition==='before'&&proofDigest(current)!==proofDigest(peerRouting.currentDeploymentVersion))fail();
+      const pollers=report.pollers.filter(p=>p.deploymentOptions?.deploymentName===binding.deploymentName&&p.deploymentOptions.buildId===binding.buildId);
+      if(!pollers.length||pollers.some(p=>typeof p.identity!=='string'||!p.identity))fail();
+      queueRouting={current:{deploymentName:current.deploymentName,buildId:current.buildId},peerRoutingSHA256:proofDigest(peerRouting),pollers:pollers.map(p=>({identity:p.identity,deploymentOptions:{deploymentName:p.deploymentOptions.deploymentName,buildId:p.deploymentOptions.buildId}})).sort((a,b)=>a.identity.localeCompare(b.identity))};
     }
     return {
       controlVersion: version(c),
@@ -204,7 +243,7 @@ export async function observeBootstrapProtection(o) {
       workflows: workflows.sort((a, b) => a.executionSHA256.localeCompare(b.executionSHA256)),
       rows: rows.sort((a, b) => a[0].localeCompare(b[0])),
       routing,
-      candidateQueues,
+      candidateQueues,...(queueRouting?{queueRouting}:{}),
     };
   };
   try {
@@ -230,6 +269,7 @@ export async function observeBootstrapProtection(o) {
       protectionSHA256: proofDigest(second),
       computeInventorySHA256: isolation.inventorySHA256,
       protectedRunCount: second.workflows.length,
+      ...(transition?{protectedWorkSHA256:proofDigest({controlVersion:second.controlVersion,stateVersion:second.stateVersion,workflows:second.workflows,rows:second.rows}),peerRoutingSHA256:second.queueRouting.peerRoutingSHA256,queueRouting:second.queueRouting,bundleSHA256:o.bundleSHA256}:{}),
       scope:
         'two stable paused native/Firestore observations; conservative pending-work denial; not cross-API exclusion, old-version drainage or readiness',
     };
@@ -237,6 +277,23 @@ export async function observeBootstrapProtection(o) {
     return fail();
   }
 }
+
+export const observeBootstrapProtection=o=>observeProtection(o);
+// Fixed source entrypoints: callers cannot turn bootstrap/stop into a current-role check.
+export const observeControlsPromotionBefore=o=>observeProtection(o,'before');
+export async function observeControlsPromotionAfter(o){
+  const binding=o.platform.roleBindings.find(b=>b.role==='controls'),end=Date.now()+15000;
+  // SetCurrent's acknowledgement may precede matching's queue routing update.
+  // Wait by GET only, then perform the complete protected-work/authority scan.
+  while(Date.now()<end){
+    const report=await o.client.connection.withDeadline(Math.min(end,Date.now()+5000),()=>o.client.connection.workflowService.describeTaskQueue({namespace:o.platform.temporalNamespace,taskQueue:{name:'urm-controls'},taskQueueType:2}));
+    const current=report.versioningInfo?.currentDeploymentVersion;
+    if(current?.deploymentName===binding.deploymentName&&current.buildId===binding.buildId)return observeProtection(o,'after');
+    await new Promise(resolve=>setTimeout(resolve,100));
+  }
+  return fail();
+}
+
 export async function observeBootstrapRegistration({ client, platform, role }) {
   const b = platform.roleBindings.find((x) => x.role === role),
     namespace = platform.temporalNamespace,
