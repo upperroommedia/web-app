@@ -1,3 +1,4 @@
+import { observeRestoredMediaPhasePool } from '../temporal-restored-media-phase-pool.mjs';
 import {
   readRestoredMediaActivationPool,
   readRestoredMediaActivationQuota,
@@ -43,6 +44,7 @@ for (const mode of [
   'activation-access',
   'restored-activation',
   'restored-resources',
+  'restored-phase-resources',
   'restored-startup',
   'restored-startup-drain',
   'restored-startup-readback',
@@ -605,7 +607,7 @@ for (const mode of [
       if (
         mode === 'normal' ||
         mode === 'capsule' ||
-        ['activation-access', 'restored-activation', 'restored-resources'].includes(mode) ||
+        ['activation-access', 'restored-activation', 'restored-resources', 'restored-phase-resources'].includes(mode) ||
         mode.startsWith('restored-startup') ||
         mode === 'phase-resource' ||
         ['idle-startup', 'idle-poller'].includes(mode)
@@ -650,7 +652,9 @@ for (const mode of [
           assert.equal((await confirmCompletedMediaRecoveryCapsule(options())).capsuleSHA256, proof.capsuleSHA256);
         }
         if (
-          ['activation-access', 'restored-activation', 'restored-resources'].includes(mode) ||
+          ['activation-access', 'restored-activation', 'restored-resources', 'restored-phase-resources'].includes(
+            mode
+          ) ||
           mode.startsWith('restored-startup')
         ) {
           const newId = randomUUID(),
@@ -676,7 +680,10 @@ for (const mode of [
           const proof = await readRestoredMediaActivationAccess(args);
           assert.equal(proof.pool.uid, result.restore.pool.uid);
           assert.equal(proof.pool.etag, result.restore.pool.etag);
-          if (['restored-activation', 'restored-resources'].includes(mode) || mode.startsWith('restored-startup')) {
+          if (
+            ['restored-activation', 'restored-resources', 'restored-phase-resources'].includes(mode) ||
+            mode.startsWith('restored-startup')
+          ) {
             const controlled = restoredActivationFixture();
             const origin = {
               ...controlled.origin,
@@ -928,7 +935,7 @@ for (const mode of [
             const ownReceipt = db.doc(`_control/temporalCloudRestoredMediaActivation-${newId}`);
             idlePrivate.push(ownReceipt);
 
-            if (mode === 'restored-resources') {
+            if (['restored-resources', 'restored-phase-resources'].includes(mode)) {
               const prefixes = {
                 runner: 'temporalCloudIdentityPreparation',
                 scaler: 'temporalCloudIdentityPreparation',
@@ -960,6 +967,80 @@ for (const mode of [
                 observeProtection: undefined,
               });
               idleRuntime.restoredResources = resources;
+              if (mode === 'restored-phase-resources') {
+                const controlledPhase = controlled.options.runtime.phase;
+                idleRuntime.restoredPhaseSamples = [];
+                controlled.options.runtime.phase = async (scope) => {
+                  const proof = await observeRestoredMediaPhasePool({ ...resources(), ...scope });
+                  idleRuntime.restoredPhaseSamples.push({
+                    key: scope.key,
+                    position: proof.position,
+                    stage: proof.expectation.stage,
+                  });
+                  assert.equal(proof.scope, 'resource-only-no-namespace-or-mutation-authority');
+                  if (scope.key === 'start' && scope.transition?.stage === 'attempted') {
+                    let operationReads = 0;
+                    await assert.rejects(
+                      observeRestoredMediaPhasePool({
+                        ...resources(),
+                        ...scope,
+                        api: async (...v) => {
+                          if (v[0].includes('/operations/')) operationReads++;
+                          const value = await resources().api(...v);
+                          if (v[0] === `https://run.googleapis.com/v2/${scope.plan.origin.pool.name}`)
+                            return {
+                              ...value,
+                              generation: String(BigInt(value.generation) + 1n),
+                              observedGeneration: String(BigInt(value.generation) + 1n),
+                              etag: 'CONTROLLED_UNKNOWN_SUCCESSOR',
+                              scaling: { manualInstanceCount: 1 },
+                            };
+                          return value;
+                        },
+                      })
+                    );
+                    assert.equal(operationReads, 0);
+                  }
+                  if (scope.key === 'start' && scope.transition?.stage === 'acknowledged') {
+                    const api = resources().api,
+                      before = scope.transition.before;
+                    const pending = async (...v) => {
+                      const value = await api(...v);
+                      if (v[0].includes('/operations/')) return { name: scope.transition.nativeOperation, done: false };
+                      if (v[0] === `https://run.googleapis.com/v2/${before.name}`)
+                        return {
+                          ...value,
+                          generation: before.generation,
+                          observedGeneration: before.generation,
+                          etag: before.etag,
+                          scaling: { manualInstanceCount: 0 },
+                        };
+                      return value;
+                    };
+                    assert.equal(
+                      (await observeRestoredMediaPhasePool({ ...resources(), ...scope, api: pending })).position,
+                      'before'
+                    );
+                    await assert.rejects(
+                      observeRestoredMediaPhasePool({
+                        ...resources(),
+                        ...scope,
+                        api: async (...v) => (v[0].includes('/operations/') ? api(...v) : pending(...v)),
+                      })
+                    );
+                    await assert.rejects(
+                      observeRestoredMediaPhasePool({
+                        ...resources(),
+                        ...scope,
+                        api: async (...v) => (v[0].includes('/operations/') ? pending(...v) : api(...v)),
+                      })
+                    );
+                  }
+
+                  return controlledPhase(scope); // Explicitly CONTROLLED namespace fixture; not production permission.
+                };
+              }
+
               controlled.options.runtime.readPool = (scope) =>
                 readRestoredMediaActivationPool({ ...resources(), ...scope });
               controlled.options.runtime.quota = (scope) =>
@@ -967,7 +1048,7 @@ for (const mode of [
             }
             let completionAckLost = false;
             controlled.options.save = async (identityState) => {
-              if (mode === 'restored-resources') await fixtureSave(identityState);
+              if (['restored-resources', 'restored-phase-resources'].includes(mode)) await fixtureSave(identityState);
               currentOwned = await saveRestoredMediaActivationCheckpoint({
                 ...args,
                 config,
@@ -984,12 +1065,22 @@ for (const mode of [
             await assert.rejects(activateRestoredCloudRunMedia(controlled.options), /CONTROLLED_RETAINED_ACK_LOST/);
             const retained = (await lockRef.get()).get('cloudRestoredMediaActivation');
             assert.equal(retained.disposition, 'retained');
-            assert.equal(mode === 'restored-resources' ? idleRuntime.restoredResourcePatches : controlled.patches, 1);
+            assert.equal(
+              ['restored-resources', 'restored-phase-resources'].includes(mode)
+                ? idleRuntime.restoredResourcePatches
+                : controlled.patches,
+              1
+            );
             assert.equal((await ownReceipt.get()).get('identityState.disposition'), 'retained');
             const frozen = (await ownReceipt.get()).data();
             controlled.options.saved = retained;
             await activateRestoredCloudRunMedia(controlled.options);
-            assert.equal(mode === 'restored-resources' ? idleRuntime.restoredResourcePatches : controlled.patches, 1);
+            assert.equal(
+              ['restored-resources', 'restored-phase-resources'].includes(mode)
+                ? idleRuntime.restoredResourcePatches
+                : controlled.patches,
+              1
+            );
             assert.equal(hash((await ownReceipt.get()).data()), hash(frozen));
             const bad = structuredClone(retained);
             bad.start.attemptedAt = new Date(Date.parse(bad.start.attemptedAt) + 1).toISOString();
@@ -1003,6 +1094,66 @@ for (const mode of [
                 identityState: bad,
               })
             );
+
+            if (mode === 'restored-phase-resources') {
+              assert.ok(idleRuntime.restoredPhaseSamples.some((p) => p.key === 'start' && p.position === 'before'));
+              assert.ok(idleRuntime.restoredPhaseSamples.some((p) => p.key === 'start' && p.position === 'successor'));
+              assert.ok(idleRuntime.restoredPhaseSamples.some((p) => p.key === 'retained' && p.position === 'exact'));
+              const scope = {
+                ...idleRuntime.restoredResources(),
+                plan: retained.plan,
+                state: retained,
+                key: 'retained',
+                transition: retained.start,
+              };
+              const api = scope.api;
+              for (const field of ['etag', 'uid'])
+                await assert.rejects(
+                  observeRestoredMediaPhasePool({
+                    ...scope,
+                    api: async (...v) => {
+                      const value = await api(...v);
+                      return v[0] === `https://run.googleapis.com/v2/${retained.plan.origin.pool.name}`
+                        ? { ...value, [field]: 'foreign' }
+                        : value;
+                    },
+                  })
+                );
+              await assert.rejects(
+                observeRestoredMediaPhasePool({
+                  ...scope,
+                  transition: { ...retained.start, attemptedAt: new Date().toISOString() },
+                })
+              );
+              let calls = 0;
+              await assert.rejects(
+                observeRestoredMediaPhasePool({
+                  ...scope,
+                  api: async (...v) => {
+                    const value = await api(...v);
+                    if (++calls === 1) await new Promise((resolve) => setTimeout(resolve, 5100));
+                    return value;
+                  },
+                })
+              );
+              const tx = db.runTransaction.bind(db);
+              let nativeReads = 0;
+              const delayed = new Proxy(db, {
+                get(target, key) {
+                  if (key === 'runTransaction')
+                    return async (...v) => {
+                      const value = await tx(...v);
+                      if (++nativeReads === 9) await new Promise((resolve) => setTimeout(resolve, 5100));
+                      return value;
+                    };
+                  const value = Reflect.get(target, key, target);
+                  return typeof value === 'function' ? value.bind(target) : value;
+                },
+              });
+              await assert.rejects(observeRestoredMediaPhasePool({ ...scope, firestore: delayed }));
+              assert.equal(nativeReads, 9);
+              await new Promise((resolve) => setTimeout(resolve, 200));
+            }
 
             if (mode === 'restored-startup') {
               const { startup, parent, auth } = idleRuntime.restored;

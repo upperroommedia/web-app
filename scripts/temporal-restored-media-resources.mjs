@@ -153,7 +153,9 @@ async function inspect(o, kind) {
     let result;
     const sampled = Date.now(),
       sampleMono = performance.now();
-    if (kind === 'quota') {
+    if (kind === 'phase-context') {
+      result = { ancestor, state, capsuleSHA256: first.capsule.capsuleSHA256, provenanceSHA256: hash(first) };
+    } else if (kind === 'quota') {
       result = await read(() => observeMediaDiskQuota(ancestor.zeroPlan, api));
       assertMediaDiskQuotaFresh(result);
     } else {
@@ -219,3 +221,7 @@ async function inspect(o, kind) {
 }
 export const readRestoredMediaActivationPool = (o) => inspect(o, 'pool');
 export const readRestoredMediaActivationQuota = (o) => inspect(o, 'quota');
+
+/** Read-only immutable context for the separate phase resource observer. No
+ * current pool, quota, namespace, startup or mutation authority is implied. */
+export const readRestoredMediaPhaseResourceContext = (o) => inspect(o, 'phase-context');
