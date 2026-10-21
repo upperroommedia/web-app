@@ -2,6 +2,9 @@ const mockTerminate = jest.fn(async () => {});
 const mockDelete = jest.fn(async () => {});
 const mockWitness = jest.fn(async () => ({ buildId: 'unit' }));
 const mockContext = jest.fn(async () => undefined as unknown);
+const mockRestoredContext = jest.fn(async () => undefined as unknown);
+const mockRestoredSupervise = jest.fn(async () => ({ code: 0 }));
+jest.mock('./runtime/restored-media-startup', () => ({ restoredMediaKernelContext: () => mockRestoredContext() }));
 const mockSupervise = jest.fn(async () => ({ code: 0 }));
 let mockRegistered = true;
 const mockStart = jest.fn(async () => {
@@ -22,6 +25,7 @@ jest.mock('./runtime/worker-witness', () => ({ loadWorkerWitness: () => mockWitn
 jest.mock('./runtime/media-kernel-supervisor', () => ({
   mediaKernelContext: () => mockContext(),
   superviseMediaKernel: () => mockSupervise(),
+  superviseRestoredMediaKernel: () => mockRestoredSupervise(),
 }));
 jest.mock('./index', () => ({ startWorkerProcess: () => mockStart() }));
 import { launchApplicationWorker } from './launcher';
@@ -68,6 +72,26 @@ test('supervised completion independently closes both parent resources', async (
 test('fallback early return without acquiring app keeps creator cleanup responsibility', async () => {
   mockStart.mockImplementationOnce(async () => {});
   await launchApplicationWorker();
+  expect(mockTerminate).toHaveBeenCalledTimes(1);
+  expect(mockDelete).toHaveBeenCalledTimes(1);
+});
+
+test('restored normal capability uses only its distinct fixed supervisor', async () => {
+  mockRestoredContext.mockResolvedValueOnce({ context: { protocol: 'restored-normal-media-kernel-v1' } });
+  await launchApplicationWorker();
+  expect(mockRestoredSupervise).toHaveBeenCalledTimes(1);
+  expect(mockContext).not.toHaveBeenCalled();
+  expect(mockSupervise).not.toHaveBeenCalled();
+  expect(mockStart).not.toHaveBeenCalled();
+  expect(mockTerminate).toHaveBeenCalledTimes(1);
+  expect(mockDelete).toHaveBeenCalledTimes(1);
+});
+test('invalid restored capability never falls back to ordinary media startup', async () => {
+  mockRestoredContext.mockRejectedValueOnce(new Error('CONTROLLED_RESTORED_AUTHORITY_DENIED'));
+  await expect(launchApplicationWorker()).rejects.toThrow('CONTROLLED_RESTORED_AUTHORITY_DENIED');
+  expect(mockContext).not.toHaveBeenCalled();
+  expect(mockStart).not.toHaveBeenCalled();
+  expect(mockRestoredSupervise).not.toHaveBeenCalled();
   expect(mockTerminate).toHaveBeenCalledTimes(1);
   expect(mockDelete).toHaveBeenCalledTimes(1);
 });

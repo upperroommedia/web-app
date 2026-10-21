@@ -38,6 +38,8 @@ for (const mode of [
   'capsule',
   'activation-access',
   'restored-activation',
+  'restored-startup',
+  'restored-startup-drain',
   'phase-resource',
   'idle-startup',
   'idle-poller',
@@ -597,6 +599,7 @@ for (const mode of [
         mode === 'normal' ||
         mode === 'capsule' ||
         ['activation-access', 'restored-activation'].includes(mode) ||
+        mode.startsWith('restored-startup') ||
         mode === 'phase-resource' ||
         ['idle-startup', 'idle-poller'].includes(mode)
       ) {
@@ -639,7 +642,7 @@ for (const mode of [
           ownedOperation = nativeSnapshotProof(await lockRef.get());
           assert.equal((await confirmCompletedMediaRecoveryCapsule(options())).capsuleSHA256, proof.capsuleSHA256);
         }
-        if (['activation-access', 'restored-activation'].includes(mode)) {
+        if (['activation-access', 'restored-activation'].includes(mode) || mode.startsWith('restored-startup')) {
           const newId = randomUUID(),
             newBinding = 'e'.repeat(64);
           await lockRef.set({
@@ -663,7 +666,7 @@ for (const mode of [
           const proof = await readRestoredMediaActivationAccess(args);
           assert.equal(proof.pool.uid, result.restore.pool.uid);
           assert.equal(proof.pool.etag, result.restore.pool.etag);
-          if (mode === 'restored-activation') {
+          if (mode === 'restored-activation' || mode.startsWith('restored-startup')) {
             const controlled = restoredActivationFixture();
             const origin = {
               ...controlled.origin,
@@ -687,6 +690,184 @@ for (const mode of [
               evidenceDigest: result.plan.evidenceDigest,
               receipts: { ...f.options.receipts, recovery: (await immutableReceipt.get()).data() },
             });
+
+            if (mode.startsWith('restored-startup')) {
+              const service = require('ts-node').register({
+                skipProject: true,
+                transpileOnly: true,
+                compilerOptions: {
+                  module: 'CommonJS',
+                  target: 'ES2022',
+                  esModuleInterop: true,
+                  moduleResolution: 'node',
+                },
+              });
+              idleRuntime.compiler = service;
+              const { fileURLToPath } = await import('node:url');
+              const source = (p) =>
+                require(fileURLToPath(new URL('../../apps/temporal-worker/src/runtime/' + p, import.meta.url)));
+              const startup = source('restored-media-startup.ts'),
+                kernelModule = source('media-kernel-supervisor.ts');
+              const { MEDIA_ALLOCATION_PROGRAM_SHA256 } = source('media-capacity-allocation.ts');
+              const { workerReadinessDigest: digest } = source('readiness-probe.ts');
+              const auth = getAuth(app);
+              idleActor = await auth.createUser({ email: base.operatorPrincipal.email });
+              await auth.setCustomUserClaims(idleActor.uid, { role: 'admin' });
+              const register = controlled.options.runtime.registration;
+              controlled.options.runtime.registration = async (scope) => {
+                const p = scope.plan;
+                const parent = {
+                  instanceId: randomUUID(),
+                  buildId: p.buildId,
+                  cloudRun: {
+                    projectId: 'urm-app-staging',
+                    region: 'us-central1',
+                    pool: p.origin.pool.name.split('/').at(-1),
+                    revision: p.origin.pool.revision.split('/').at(-1),
+                    revisionUid: p.origin.pool.revisionUid,
+                    serviceAccount: `tw-m-${p.buildId.slice(0, 20)}@urm-app-staging.iam.gserviceaccount.com`,
+                    imageDigest: p.image.split('@')[1],
+                    instanceId: 'controlled-cloud-instance',
+                  },
+                };
+                const cap = await startup.restoredMediaKernelContext(db, () => auth, parent);
+                idleRuntime.restored = { startup, parent, auth };
+                assert.equal(cap.context.protocol, 'restored-normal-media-kernel-v1');
+                assert.equal(cap.context.recoveryOperationId, base.operationId);
+                const witness = { ...parent, instanceId: randomUUID() };
+                const record = {
+                  schemaVersion: 1,
+                  stage: 'running',
+                  context: cap.context,
+                  intent: {
+                    createdAt: new Date().toISOString(),
+                    launchId: randomUUID(),
+                    parentPid: process.pid + 100000,
+                  },
+                  birth: { nonce: randomUUID(), pid: process.pid, spawnedAt: new Date().toISOString() },
+                  worker: witness,
+                };
+                const link = {
+                  operationId: newId,
+                  birthDigest: digest({
+                    context: record.context,
+                    intent: record.intent,
+                    birth: record.birth,
+                    worker: record.worker,
+                  }),
+                };
+                const kernelRef = db.doc(`_control/temporalRestoredMediaKernel-${newId}`),
+                  capacityRef = db.doc(`temporalRestoredMediaStartupCapacity/${newId}`);
+                idlePrivate.push(kernelRef, capacityRef);
+                await kernelRef.create(record);
+                let calls = 0;
+                const canary = async (_drain, _filesystem, _processing, authorize) => {
+                  calls++;
+                  await authorize();
+                  const now = new Date().toISOString();
+                  return {
+                    schemaVersion: 3,
+                    budgets: {
+                      sourceBytes: 20 * 1024 ** 3,
+                      outputBytes: 20 * 1024 ** 3,
+                      workspaceBytes: 64 * 1024 ** 3,
+                      headroomBytes: 16 * 1024 ** 3,
+                    },
+                    totalBytes: 100 * 1024 ** 3,
+                    availableBytes: 90 * 1024 ** 3,
+                    canaryBytes: 1024 * 1024,
+                    writeReadFsync: true,
+                    cleanupConfirmed: true,
+                    reservationReleased: true,
+                    observedAt: now,
+                    allocation: {
+                      schemaVersion: 1,
+                      requestedBytes: 64 * 1024 ** 3,
+                      allocatedBytes: 64 * 1024 ** 3,
+                      pythonSHA256: 'a'.repeat(64),
+                      programSHA256: MEDIA_ALLOCATION_PROGRAM_SHA256,
+                      filesystemDevice: 2,
+                      fileInode: 123,
+                      availableBytesAfterAllocation: 32 * 1024 ** 3,
+                      minimumAvailableBytesWhileHeld: 32 * 1024 ** 3,
+                      startedAt: now,
+                      releasedAt: now,
+                      cleanupConfirmed: true,
+                    },
+                    processing: {
+                      schemaVersion: 1,
+                      ffmpegSHA256: 'a'.repeat(64),
+                      ffprobeSHA256: 'b'.repeat(64),
+                      sourceBytes: 32044,
+                      outputBytes: 32044,
+                      sampleRate: 16000,
+                      channels: 1,
+                      durationSeconds: 1,
+                      pcmSamplesVerified: 16000,
+                      progressBeforeCancellation: true,
+                      cancelledChildDrained: true,
+                      retryCompleted: true,
+                    },
+                  };
+                };
+                let draining = false,
+                  writeAttempts = 0;
+                const input = {
+                  firestore: db,
+                  auth: () => auth,
+                  buildId: p.buildId,
+                  witness,
+                  kernel: link,
+                  canary,
+                  isDraining: () => draining,
+                };
+                const nativeTx = db.runTransaction.bind(db);
+                db.runTransaction = async (fn, opts) => {
+                  const value = await nativeTx(fn, opts);
+                  if (opts?.maxAttempts === 1) {
+                    writeAttempts++;
+                    if (mode === 'restored-startup-drain') {
+                      draining = true;
+                    } else {
+                      const error = new Error('CONTROLLED_CAPACITY_COMMITTED_ACK_LOST');
+                      error.code = 14;
+                      throw error;
+                    }
+                  }
+                  return value;
+                };
+                try {
+                  if (mode === 'restored-startup-drain')
+                    await assert.rejects(
+                      startup.recordRestoredMediaStartupCapacity(input),
+                      /RESTORED_MEDIA_STARTUP_UNCONFIRMED/
+                    );
+                  else assert.equal(await startup.recordRestoredMediaStartupCapacity(input), true);
+                } finally {
+                  db.runTransaction = nativeTx;
+                }
+                assert.equal(writeAttempts, 1);
+                assert.equal((await capacityRef.get()).get('kind'), 'restored-normal-media-startup-capacity-v1');
+                assert.equal((await db.doc(`temporalMediaStartupCapacity/${newId}`).get()).exists, false);
+                assert.equal((await db.doc(`_control/temporalMediaKernel-${newId}`).get()).exists, false);
+                assert.equal((await db.doc(`_control/temporalMediaRecoveryKernel-${newId}`).get()).exists, false);
+                await auth.updateUser(idleActor.uid, { disabled: true });
+                await assert.rejects(startup.restoredMediaKernelContext(db, () => auth, parent));
+                await auth.updateUser(idleActor.uid, { disabled: false });
+                await assert.rejects(
+                  startup.restoredMediaKernelContext(db, () => auth, {
+                    ...parent,
+                    cloudRun: { ...parent.cloudRun, revisionUid: 'foreign' },
+                  })
+                );
+                assert.equal(calls, 1);
+                // GET-only source birth reader cannot adopt a different action's path.
+                await assert.rejects(
+                  kernelModule.readMediaKernelBirth(db, newId, cap.context.intentSHA256, link, witness)
+                );
+                return register(scope);
+              };
+            }
             let currentOwned = args.ownedOperation;
             const ownReceipt = db.doc(`_control/temporalCloudRestoredMediaActivation-${newId}`);
             idlePrivate.push(ownReceipt);
@@ -727,6 +908,38 @@ for (const mode of [
                 identityState: bad,
               })
             );
+
+            if (mode === 'restored-startup') {
+              const { startup, parent, auth } = idleRuntime.restored;
+              await assert.rejects(
+                startup.restoredMediaKernelContext(
+                  db,
+                  () => ({
+                    getUserByEmail: async (email) => {
+                      await auth.getUserByEmail(email);
+                      return new Promise(() => {});
+                    },
+                  }),
+                  parent
+                ),
+                /RESTORED_MEDIA_STARTUP_UNCONFIRMED/
+              );
+              await assert.rejects(
+                startup.restoredMediaKernelContext(
+                  db,
+                  () => ({
+                    getUserByEmail: async (email) => {
+                      const actor = await auth.getUserByEmail(email);
+                      await new Promise((resolve) => setTimeout(resolve, 5100));
+                      return actor;
+                    },
+                  }),
+                  parent
+                ),
+                /RESTORED_MEDIA_STARTUP_UNCONFIRMED/
+              );
+              await new Promise((resolve) => setTimeout(resolve, 200));
+            }
             args.ownedOperation = currentOwned;
           }
 
@@ -972,6 +1185,11 @@ for (const mode of [
       }
     } finally {
       idleRuntime.active = false;
+      if (idleRuntime.compiler) {
+        idleRuntime.compiler.enabled(false);
+        if (process[Symbol.for('ts-node.register.instance')] === idleRuntime.compiler)
+          delete process[Symbol.for('ts-node.register.instance')];
+      }
       if (cycleTask)
         await bounded(
           cycleTask.catch(() => undefined),

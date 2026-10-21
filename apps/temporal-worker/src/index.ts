@@ -154,13 +154,24 @@ export async function runWorkerProcess(bindShutdown?: (shutdown: () => Promise<v
       config.queues.length === 1 &&
       config.queues[0] === 'urm-media'
     ) {
-      await recordMediaStartupCapacity({
+      const { recordRestoredMediaStartupCapacity } = await import('./runtime/restored-media-startup');
+      const { getAuth } = await import('firebase-admin/auth');
+      const restored = await recordRestoredMediaStartupCapacity({
         firestore: db,
+        auth: () => getAuth(ownedFirebase!.app),
         buildId: config.buildId,
         witness,
         kernel: mediaKernel,
         isDraining: () => lifecycle.draining,
       });
+      if (!restored)
+        await recordMediaStartupCapacity({
+          firestore: db,
+          buildId: config.buildId,
+          witness,
+          kernel: mediaKernel,
+          isDraining: () => lifecycle.draining,
+        });
       if (lifecycle.draining) return;
     }
     providerSandbox = await verifyProviderSandboxReadiness(db, config.projectId, config.queues, true);

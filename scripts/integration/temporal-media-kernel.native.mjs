@@ -14,7 +14,7 @@ require('ts-node').register({
   transpileOnly: true,
   compilerOptions: { module: 'CommonJS', target: 'ES2022', esModuleInterop: true, moduleResolution: 'node' },
 });
-const { superviseMediaKernel, superviseMediaRecoveryKernel } = require(fileURLToPath(
+const { superviseMediaKernel, superviseMediaRecoveryKernel, superviseRestoredMediaKernel } = require(fileURLToPath(
   new URL('../../apps/temporal-worker/src/runtime/media-kernel-supervisor.ts', import.meta.url)
 ));
 const witness = {
@@ -22,7 +22,7 @@ const witness = {
   instanceId: randomUUID(),
   cloudRun: { projectId: 'urm-app-staging', region: 'us-central1', pool: 'controlled', revision: 'controlled' },
 };
-for (const kind of ['normal', 'diagnostic'])
+for (const kind of ['normal', 'diagnostic', 'restored'])
   for (const mode of [
     'normal',
     'expired-birth-ack',
@@ -45,7 +45,11 @@ for (const kind of ['normal', 'diagnostic'])
         doc: (name) => {
           assert.ok(
             name.startsWith(
-              kind === 'normal' ? '_control/temporalMediaKernel-' : '_control/temporalMediaRecoveryKernel-'
+              kind === 'normal'
+                ? '_control/temporalMediaKernel-'
+                : kind === 'restored'
+                ? '_control/temporalRestoredMediaKernel-'
+                : '_control/temporalMediaRecoveryKernel-'
             )
           );
           return ref;
@@ -110,7 +114,11 @@ process.on('SIGTERM',()=>process.exit(0));
       try {
         if (['expired-birth-ack', 'authority-drift'].includes(mode)) {
           await assert.rejects(
-            (kind === 'normal' ? superviseMediaKernel : superviseMediaRecoveryKernel)(db, cap, entry)
+            (kind === 'normal'
+              ? superviseMediaKernel
+              : kind === 'restored'
+              ? superviseRestoredMediaKernel
+              : superviseMediaRecoveryKernel)(db, cap, entry)
           );
           await assert.rejects(readFile(marker), { code: 'ENOENT' });
           assert.equal(state.stage, 'born');
@@ -122,7 +130,11 @@ process.on('SIGTERM',()=>process.exit(0));
             )},pid:process.pid},()=>process.disconnect());setInterval(()=>{},1000);`
           );
           await assert.rejects(
-            (kind === 'normal' ? superviseMediaKernel : superviseMediaRecoveryKernel)(db, cap, entry)
+            (kind === 'normal'
+              ? superviseMediaKernel
+              : kind === 'restored'
+              ? superviseRestoredMediaKernel
+              : superviseMediaRecoveryKernel)(db, cap, entry)
           );
           assert.notEqual(state.stage, 'closed');
         } else if (mode === 'ipc-error') {
@@ -132,15 +144,19 @@ process.on('SIGTERM',()=>process.exit(0));
             "process.on('SIGTERM',()=>process.exit(0));process.send({kind:'invalid'});setInterval(()=>{},1000);"
           );
           await assert.rejects(
-            (kind === 'normal' ? superviseMediaKernel : superviseMediaRecoveryKernel)(db, cap, entry)
+            (kind === 'normal'
+              ? superviseMediaKernel
+              : kind === 'restored'
+              ? superviseRestoredMediaKernel
+              : superviseMediaRecoveryKernel)(db, cap, entry)
           );
           assert.equal(state.stage, 'armed');
         } else {
-          const result = await (kind === 'normal' ? superviseMediaKernel : superviseMediaRecoveryKernel)(
-            db,
-            cap,
-            entry
-          );
+          const result = await (kind === 'normal'
+            ? superviseMediaKernel
+            : kind === 'restored'
+            ? superviseRestoredMediaKernel
+            : superviseMediaRecoveryKernel)(db, cap, entry);
           assert.equal(result.code, 0);
           assert.equal(state.stage, 'closed');
           assert.equal(state.close.descendantsAbsent, true);

@@ -20,6 +20,19 @@ export async function launchApplicationWorker() {
       const { loadWorkerWitness } = await import('./runtime/worker-witness');
       const parent = await loadWorkerWitness(config.buildId, true);
       const { mediaKernelContext, superviseMediaKernel } = await import('./runtime/media-kernel-supervisor');
+      const { restoredMediaKernelContext } = await import('./runtime/restored-media-startup');
+      const { getAuth } = await import('firebase-admin/auth');
+      const restored = await restoredMediaKernelContext(db, () => getAuth(ownership.app), parent);
+      if (restored) {
+        const { superviseRestoredMediaKernel } = await import('./runtime/media-kernel-supervisor');
+        const result = await superviseRestoredMediaKernel(
+          db,
+          restored,
+          require('node:path').resolve(__dirname, 'index.js')
+        );
+        if (result.code !== 0) process.exitCode = 1;
+        return;
+      }
       const cap = await mediaKernelContext(db, parent);
       if (cap) {
         const result = await superviseMediaKernel(db, cap, require('node:path').resolve(__dirname, 'index.js'));

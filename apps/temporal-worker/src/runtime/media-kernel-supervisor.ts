@@ -520,3 +520,31 @@ export const readMediaRecoveryReplacementKernelBirth = (
     witness,
     path(operationId).replace('temporalMediaKernel-', 'temporalMediaRecoveryReplacementKernel-')
   );
+
+/** Separate fixed restored-normal lineage; no diagnostic fault/restart hooks. */
+export const superviseRestoredMediaKernel = (
+  db: Firestore,
+  cap: NonNullable<Awaited<ReturnType<typeof mediaKernelContext>>>,
+  entrypoint: string
+) =>
+  superviseKernel(
+    db,
+    cap,
+    entrypoint,
+    path(cap.context.operationId).replace('temporalMediaKernel-', 'temporalRestoredMediaKernel-')
+  );
+export const readRestoredMediaKernelBirth = (
+  db: Firestore,
+  operationId: string,
+  intentSHA256: string,
+  link: unknown,
+  witness: WorkerWitness
+) =>
+  readKernelBirth(
+    db,
+    operationId,
+    intentSHA256,
+    link,
+    witness,
+    path(operationId).replace('temporalMediaKernel-', 'temporalRestoredMediaKernel-')
+  );
