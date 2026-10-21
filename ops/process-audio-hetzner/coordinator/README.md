@@ -15,6 +15,8 @@ UTF-8 JSON line, at most 16 KiB, and receives one JSON line. Exact request shape
 {"v":1,"action":"verify","id":"<uuid>"}
 {"v":1,"action":"stop","id":"<uuid>"}
 {"v":1,"action":"close","id":"<uuid>"}
+{"v":1,"action":"seal","id":"<uuid>"}
+{"v":1,"action":"release","id":"<uuid>"}
 {"v":1,"action":"unstarted","id":"<uuid>"}
 ```
 
@@ -25,9 +27,9 @@ before a child is forked. `get` is readback, **never authorization to fork**.
 that exact enrolled child before it starts work. No request accepts paths,
 resource budgets, images, commands, task data, or an authorization boolean.
 Success is `{v:1,id,state,directory?,groupAbsent?,peerBound?,receiptHash?,descendantsStopped?}`; every failure is
-`{v:1,error:"UNAVAILABLE"}`. The directory is always
-`/workspace/host-resource/<uuid>` as seen by the application. Both applications
-must bind the policy's physical roots at that fixed path; the admission client
+`{v:1,error:"UNAVAILABLE"}`. The directory is `/workspace/host-resource/<uuid>`
+for legacy/canary work and `/workspace/yt-acquisition-scratch/<uuid>` for acquisition.
+Both applications must bind the policy's physical roots at those distinct fixed paths; the admission client
 must use the returned directory for **all** operation files.
 
 An uncertain reserve ACK is GET-only and may only be abandoned through
@@ -40,8 +42,24 @@ immutable native-drain receipt. There is no TTL, reconnect adoption, saved-PID
 kill, or daemon-restart recovery: an outstanding reservation at restart fences
 the daemon. Host-native operator reconciliation is deliberately unimplemented.
 
-Terminal success/GET includes `receiptHash` only after native closure and durable
-release both completed. A close fact followed by nonempty-directory, cgroup or
+Acquisition uses a distinct cleanup sequence: original live child CLOSE ->
+`stop` -> `seal` -> immutable application database original-close transaction ->
+`release`. `seal` requires original pidfd death and empty held cgroup, writes
+`state:"drained"`, and returns its immutable `receiptHash`/`groupAbsent` while
+retaining the physical reservation. GET drained is observation only, not release
+or new execution permission. `release` is acquisition-only and requires drained;
+the daemon receives no Firebase credential, database boolean or replacement
+authorization. The application must confirm its exact immutable database close
+before requesting this single release. `close` is rejected for acquisition;
+legacy/canary retain their original immediate-close protocol. Acquisition closed
+readback preserves the same original drain hash, with a separately journaled
+release event. Reserved/enrolled replies also expose their immutable event hash
+for the actual application's known-ACK episode binding; a GET hash never becomes
+a fresh fork or IPC grant.
+
+Closed/unstarted success/GET is available only after native closure and durable
+release both completed; acquisition drained remains explicitly nonterminal and
+retains reservation. A close fact followed by nonempty-directory, cgroup or
 release-journal failure remains fenced and cannot yield a successful terminal
 reply. In-memory completed readback retains original handles; after 64 completed
 episodes the daemon refuses new reservations rather than evict uncertain ACK
@@ -69,10 +87,11 @@ container start/birth, UID, image and cgroup, not just reusable container names.
 Finite host-process cgroups are required as well as container limits. Read-only
 container roots, `no-new-privileges`, no added capabilities and only reviewed
 bounded tmpfs/operation mounts are mandatory; existing unbounded containers do
-not satisfy this policy. One container selects one backing profile, never both
-physical and tmpfs at the same destination. A future acquisition caller therefore
-needs a genuinely reviewed streaming-profile binding; this source does not
-invent a mount transition for the existing legacy container.
+not satisfy this policy. The same container may declare both `fullMount` and
+`streamMount`; native inspect must then prove both distinct bind destinations.
+Full/canary work uses the physical quota-backed root, acquisition uses the exact
+256-MiB tmpfs root. This remains one host-wide slot and one application authority;
+the daemon does not infer a task/host switch or a mount transition.
 
 Required writable browser/cookie/authentication state is preserved through
 explicit `authMounts`, never an unbounded writable-root exception. Each approved

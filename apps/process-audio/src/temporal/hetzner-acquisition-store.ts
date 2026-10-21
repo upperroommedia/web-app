@@ -1,4 +1,6 @@
 import { isDeepStrictEqual } from 'node:util';
+import { claimYouTubeEpisode, assertOwnedYouTubeEpisode, validateEpisodeDrain } from './hetzner-acquisition-episode';
+import type { HostResourceReply } from '../host/resources';
 import type { YouTubeNativeClose } from './hetzner-acquisition-process';
 import { writeMediaUploadIntent } from '@upperroom/orchestration/media-artifacts';
 import { createHash } from 'node:crypto';
@@ -32,6 +34,7 @@ interface Operation {
   startedAt?: number;
   drainedAt?: number;
   nativeClose?: NativeCloseReceipt;
+  preparedEpisode?: string;
 }
 const fail = (): never => {
   throw new Error('YOUTUBE_ACQUISITION_OWNERSHIP');
@@ -43,7 +46,7 @@ export function assertStagingAcquisitionDatabase(database: Firestore): void {
     return fail();
 }
 const fingerprint = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
-function preparer(value: AcquisitionPreparer): AcquisitionPreparer {
+export function validateAcquisitionPreparer(value: AcquisitionPreparer): AcquisitionPreparer {
   if (
     !value ||
     Object.keys(value).sort().join(',') !== 'buildId,instanceId,serviceAccount' ||
@@ -133,7 +136,7 @@ function operation(raw: unknown, ref: MediaJobRef): Operation {
     ].includes(value.status)
   )
     return fail();
-  preparer(value.preparedBy);
+  validateAcquisitionPreparer(value.preparedBy);
   if (value.status === 'prepared') {
     if (
       value.owner !== undefined ||
@@ -202,7 +205,7 @@ export async function prepareYouTubeAcquisition(options: {
   assertStagingAcquisitionDatabase(options.firestore);
   const ref = Object.freeze({ ...options.ref });
   const id = youtubeAcquisitionId(ref);
-  const caller = preparer(options.caller);
+  const caller = validateAcquisitionPreparer(options.caller);
   const target = options.firestore.collection(YOUTUBE_ACQUISITIONS).doc(id);
   await options.firestore.runTransaction(async (tx) => {
     const snapshot = await tx.get(target);
@@ -211,7 +214,8 @@ export async function prepareYouTubeAcquisition(options: {
       const current = operation(snapshot.data(), ref);
       // Only an unclaimed preparation can change its native preparer. A pending
       // old POST races this transaction and can never launch a second operation.
-      if (current.status === 'prepared') tx.update(target, { preparedBy: caller });
+      if (current.status === 'prepared' && current.preparedEpisode === undefined)
+        tx.update(target, { preparedBy: caller });
       return;
     }
     tx.create(target, {
@@ -235,6 +239,8 @@ export function createYouTubeAcquisitionHostStore(options: {
   projectId: string;
   owner: AcquisitionHostProcess;
   assertEligible: (transaction: Transaction, ref: MediaJobRef, purpose?: 'source_available') => Promise<void>;
+  episodeId?: string;
+  nativeEnrollment?: HostResourceReply;
 }) {
   if (options.projectId !== 'urm-app-staging') return fail();
   assertStagingAcquisitionDatabase(options.firestore);
@@ -242,6 +248,11 @@ export function createYouTubeAcquisitionHostStore(options: {
   const target = (ref: MediaJobRef) =>
     options.firestore.collection(YOUTUBE_ACQUISITIONS).doc(youtubeAcquisitionId(ref));
   const owned = (current: Operation) => {
+    if (
+      current.preparedEpisode !== undefined &&
+      (!options.nativeEnrollment || options.episodeId !== current.preparedEpisode)
+    )
+      return fail();
     if (current.status !== 'running' || fingerprint(host(current.owner!)) !== fingerprint(owner)) return fail();
   };
   return {
@@ -253,24 +264,33 @@ export function createYouTubeAcquisitionHostStore(options: {
     async assertCurrent(ref: MediaJobRef): Promise<void> {
       ref = Object.freeze({ ...ref });
       await options.firestore.runTransaction(async (tx) => {
-        owned(operation((await tx.get(target(ref))).data(), ref));
+        const snapshot = await tx.get(target(ref));
+        owned(operation(snapshot.data(), ref));
+        await assertOwnedYouTubeEpisode(tx, snapshot, options.episodeId, owner, options.nativeEnrollment);
         await options.assertEligible(tx, ref);
       });
     },
     async claim(ref: MediaJobRef, verifiedCallerEmail: string, startedAt = Date.now()): Promise<{ launch: boolean }> {
       ref = Object.freeze({ ...ref });
       const doc = target(ref);
-      return options.firestore.runTransaction(async (tx) => {
-        const snapshot = await tx.get(doc);
-        if (!snapshot.exists) return fail(); // An HTTP caller cannot create its own delegation.
-        const current = operation(snapshot.data(), ref);
-        await options.assertEligible(tx, ref);
-        if (current.preparedBy.serviceAccount !== verifiedCallerEmail) return fail();
-        if (current.status !== 'prepared') return { launch: false };
-        if (!Number.isSafeInteger(startedAt) || startedAt < current.createdAt || startedAt > Date.now()) return fail();
-        tx.update(doc, { status: 'running', owner, startedAt });
-        return { launch: true };
-      });
+      return options.firestore.runTransaction(
+        async (tx) => {
+          const snapshot = await tx.get(doc);
+          if (!snapshot.exists) return fail(); // An HTTP caller cannot create its own delegation.
+          const current = operation(snapshot.data(), ref);
+          await options.assertEligible(tx, ref);
+          if (current.preparedBy.serviceAccount !== verifiedCallerEmail) return fail();
+          if (current.status !== 'prepared') return { launch: false };
+          if (!Number.isSafeInteger(startedAt) || startedAt < current.createdAt || startedAt > Date.now())
+            return fail();
+          if (current.preparedEpisode !== undefined)
+            await claimYouTubeEpisode(tx, snapshot, ref, options.episodeId, owner, startedAt);
+          else if (options.episodeId !== undefined) return fail();
+          tx.update(doc, { status: 'running', owner, startedAt });
+          return { launch: true };
+        },
+        options.episodeId ? { maxAttempts: 1 } : undefined
+      );
     },
     /** Upload attempts are private children of the actual running host owner.
      * An unresolved attempt fences later attempts; no timeout or lease takeover.
@@ -339,6 +359,7 @@ export function createYouTubeAcquisitionHostStore(options: {
       const current = async (tx: Transaction) => {
         const snapshot = await tx.get(parent);
         owned(operation(snapshot.data(), ref));
+        await assertOwnedYouTubeEpisode(tx, snapshot, options.episodeId, owner, options.nativeEnrollment);
         const upload = await tx.get(doc);
         await options.assertEligible(tx, ref);
         if (snapshot.get('activeUpload') !== attemptId) return fail();
@@ -356,6 +377,7 @@ export function createYouTubeAcquisitionHostStore(options: {
           return options.firestore.runTransaction(async (tx) => {
             const snapshot = await tx.get(parent);
             owned(operation(snapshot.data(), ref));
+            await assertOwnedYouTubeEpisode(tx, snapshot, options.episodeId, owner, options.nativeEnrollment);
             const upload = await tx.get(doc);
             await options.assertEligible(tx, ref);
             if (upload.exists) {
@@ -449,8 +471,10 @@ export function createYouTubeAcquisitionHostStore(options: {
       ref = Object.freeze({ ...ref });
       const doc = target(ref);
       await options.firestore.runTransaction(async (tx) => {
-        const current = operation((await tx.get(doc)).data(), ref);
+        const snapshot = await tx.get(doc);
+        const current = operation(snapshot.data(), ref);
         owned(current);
+        await assertOwnedYouTubeEpisode(tx, snapshot, options.episodeId, owner, options.nativeEnrollment);
         // A ready source must still be eligible. Inert stop/defer receipts may
         // settle after cancellation/deletion so resource drain remains visible.
         if (safe.kind === 'source') await options.assertEligible(tx, ref);
@@ -478,6 +502,7 @@ export async function closeYouTubeAcquisitionNativeProcess(o: {
   owner: Readonly<AcquisitionHostProcess>;
   startedAt: number;
   fact: Readonly<YouTubeNativeClose>;
+  episode?: { id: string; proof: HostResourceReply };
 }): Promise<void> {
   assertStagingAcquisitionDatabase(o.firestore);
   const ref = Object.freeze({ ...o.ref }),
@@ -498,9 +523,20 @@ export async function closeYouTubeAcquisitionNativeProcess(o: {
     try {
       await o.firestore.runTransaction(
         async (tx) => {
-          const [snapshot, existing] = await Promise.all([tx.get(parent), tx.get(close)]);
+          const [snapshot, existing, sealed] = await Promise.all([
+            tx.get(parent),
+            tx.get(close),
+            ...(o.episode
+              ? [tx.get(parent.collection('episodes').doc(o.episode.id).collection('facts').doc('sealed'))]
+              : []),
+          ]);
           fresh();
           const current = operation(snapshot.data(), ref);
+          if (current.preparedEpisode !== undefined) {
+            if (!o.episode || current.preparedEpisode !== o.episode.id) return fail();
+            validateEpisodeDrain(o.episode.proof, o.episode.id, 'drained');
+            await assertOwnedYouTubeEpisode(tx, snapshot, o.episode.id, owner);
+          } else if (o.episode) return fail();
           if (fingerprint(host(current.owner!)) !== fingerprint(owner) || current.startedAt !== originalStartedAt)
             return fail();
           const candidate = nativeClose(
@@ -521,12 +557,23 @@ export async function closeYouTubeAcquisitionNativeProcess(o: {
               !existing.exists ||
               !same(existing.data()) ||
               !same(current.nativeClose) ||
-              !existing.createTime?.isEqual(existing.updateTime!)
+              !existing.createTime?.isEqual(existing.updateTime!) ||
+              (o.episode &&
+                (!sealed?.exists ||
+                  !sealed.createTime?.isEqual(sealed.updateTime!) ||
+                  !isDeepStrictEqual(sealed.get('proof'), o.episode.proof) ||
+                  !sealed.createTime?.isEqual(existing.createTime!)))
             )
               return fail();
             return;
           }
           tx.create(close, candidate);
+          if (o.episode)
+            tx.create(parent.collection('episodes').doc(o.episode.id).collection('facts').doc('sealed'), {
+              schemaVersion: 1,
+              episodeId: o.episode.id,
+              proof: { ...o.episode.proof },
+            });
           tx.update(parent, { nativeClose: candidate });
         },
         { maxAttempts: 1 }
@@ -537,14 +584,23 @@ export async function closeYouTubeAcquisitionNativeProcess(o: {
       if (!expected) return fail();
       // GET-only, including permission/failure ambiguity; no saved owner becomes
       // signalling or retry authority. No current actor/quota/expiry renewal.
-      const [snapshot, saved] = await Promise.all([parent.get(), close.get()]);
+      const [snapshot, saved, sealed] = await Promise.all([
+        parent.get(),
+        close.get(),
+        ...(o.episode ? [parent.collection('episodes').doc(o.episode.id).collection('facts').doc('sealed').get()] : []),
+      ]);
       fresh();
       const current = operation(snapshot.data(), ref);
       if (
         !same(current.nativeClose) ||
         !saved.exists ||
         !same(saved.data()) ||
-        !saved.createTime?.isEqual(saved.updateTime!)
+        !saved.createTime?.isEqual(saved.updateTime!) ||
+        (o.episode &&
+          (!sealed?.exists ||
+            !sealed.createTime?.isEqual(sealed.updateTime!) ||
+            !isDeepStrictEqual(sealed.get('proof'), o.episode.proof) ||
+            !sealed.createTime?.isEqual(saved.createTime!)))
       )
         return fail();
     }

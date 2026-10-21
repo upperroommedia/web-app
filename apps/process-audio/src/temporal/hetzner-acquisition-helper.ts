@@ -19,8 +19,11 @@ async function execute(message: unknown, cancellation: CancelToken): Promise<voi
     ].some((key) => Boolean(process.env[key]))
   )
     throw denied();
-  const input = message as { operationId: string; ref: MediaJobRef; directory: string };
-  if (Object.keys(input).sort().join(',') !== 'directory,operationId,ref' || typeof input.directory !== 'string')
+  const input = message as { operationId: string; ref: MediaJobRef; directory: string; episodeId: string };
+  if (
+    Object.keys(input).sort().join(',') !== 'directory,episodeId,operationId,ref' ||
+    typeof input.directory !== 'string'
+  )
     throw denied();
   const { youtubeAcquisitionId } = await import('./hetzner-acquisition');
   const { acquisitionHostBuildId } = await import('./hetzner-acquisition-driver');
@@ -28,7 +31,9 @@ async function execute(message: unknown, cancellation: CancelToken): Promise<voi
   if (
     youtubeAcquisitionId(ref) !== input.operationId ||
     dirname(input.directory) !== ROOT ||
-    !new RegExp(`^${input.operationId}-[a-f0-9-]{36}$`).test(basename(input.directory))
+    !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(input.episodeId) ||
+    basename(input.directory) !== input.episodeId ||
+    process.env.TMPDIR !== input.directory
   )
     throw denied();
   const [path, directory, filesystem] = await Promise.all([
@@ -48,6 +53,10 @@ async function execute(message: unknown, cancellation: CancelToken): Promise<voi
   )
     throw denied();
   cancellation.signal.throwIfAborted();
+  const { hostResourceRequest } = await import('../host/resources');
+  const proof = await hostResourceRequest(input.episodeId, 'verify');
+  if (proof.state !== 'enrolled' || proof.directory !== input.directory || !proof.receiptHash) throw denied();
+  cancellation.signal.throwIfAborted();
   const { inspectNativeYouTubeProcess } = await import('./hetzner-acquisition-identity');
   const owner = await inspectNativeYouTubeProcess(process.pid, acquisitionHostBuildId());
   const { withOwnedAcquisitionFirebase } = await import('./hetzner-acquisition-firebase');
@@ -60,7 +69,14 @@ async function execute(message: unknown, cancellation: CancelToken): Promise<voi
     const db = firebaseAdmin.firestore(),
       auth = firebaseAdmin.auth();
     const { createCanonicalYouTubeHostStore } = await import('./hetzner-acquisition-authorization');
-    const store = createCanonicalYouTubeHostStore({ firestore: db, auth, owner, signal: cancellation.signal });
+    const store = createCanonicalYouTubeHostStore({
+      firestore: db,
+      auth,
+      owner,
+      signal: cancellation.signal,
+      episodeId: input.episodeId,
+      nativeEnrollment: proof,
+    });
     await store.assertCurrent(ref);
     const { readEligibleYouTubeAcquisition } = await import('./hetzner-acquisition-policy');
     const eligible = await db.runTransaction((transaction) =>

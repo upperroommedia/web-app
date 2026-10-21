@@ -58,6 +58,8 @@ export async function runYouTubeAcquisitionProcess(options: {
   directory: string;
   ref: MediaJobRef;
   signal: AbortSignal;
+  episodeId?: string;
+  assertStartFresh?: () => void;
   /** Host-internal native PID inspection + durable ownership/resource claim.
    * The helper must remain inert until this resolves true. Implementations must
    * honor the supplied cancellation budget and never accept an HTTP boolean.
@@ -72,6 +74,7 @@ export async function runYouTubeAcquisitionProcess(options: {
   if (process.platform === 'win32' || !isAbsolute(options.helperPath) || !isAbsolute(options.directory))
     throw failure();
   options.signal.throwIfAborted();
+  options.assertStartFresh?.();
   // A fresh POSIX group also contains yt-dlp's ffmpeg/browser descendants. Killing
   // only the direct child is insufficient for safe resource release.
   const child = fork(options.helperPath, [], {
@@ -80,6 +83,7 @@ export async function runYouTubeAcquisitionProcess(options: {
     execArgv: [],
     stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
     serialization: 'json',
+    ...(options.episodeId ? { env: { ...process.env, TMPDIR: options.directory } } : {}),
   });
   let exitCode: number | null = null;
   let exitSignal: NodeJS.Signals | null = null;
@@ -136,12 +140,27 @@ export async function runYouTubeAcquisitionProcess(options: {
       }
     }
     if (!stopped) {
-      child.send({ operationId: youtubeAcquisitionId(ref), ref, directory: options.directory }, (error) => {
-        if (error) {
-          spawnFailed = true;
-          stop('failed');
+      try {
+        options.assertStartFresh?.();
+      } catch {
+        stop('failed');
+      }
+    }
+    if (!stopped) {
+      child.send(
+        {
+          operationId: youtubeAcquisitionId(ref),
+          ref,
+          directory: options.directory,
+          ...(options.episodeId ? { episodeId: options.episodeId } : {}),
+        },
+        (error) => {
+          if (error) {
+            spawnFailed = true;
+            stop('failed');
+          }
         }
-      });
+      );
     }
     await closed;
     if (drain) await drain;

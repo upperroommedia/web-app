@@ -151,6 +151,41 @@ class SourceContract(unittest.TestCase):
                 daemon.stop_scope(operation, wait=True)
         self.assertEqual(operation['state'], 'enrolled')
 
+    def test_acquisition_seal_is_not_release_and_preserves_the_original_drain_hash(self):
+        daemon, operation = self.daemon(), self.operation()
+        operation.update(kind='acquisition', state='enrolled', stopped=True, child={'fixture': 'CONTROLLED_NATIVE_CHILD'}, childfd=123, scope={'fixture': 'CONTROLLED_SCOPE'})
+        daemon.live = operation
+        with tempfile.TemporaryDirectory(prefix='owned-seal-journal-') as directory, patch.object(c, 'STATE', pathlib.Path(directory)), patch.object(daemon, 'same_peer'), patch.object(daemon, 'scope_empty', return_value=True), patch.object(c, 'dead', return_value=True):
+            with self.assertRaises(RuntimeError):
+                daemon.handle({'v': 1, 'action': 'close', 'id': ID}, (1, 1, 1))
+            with self.assertRaises(RuntimeError):
+                daemon.handle({'v': 1, 'action': 'release', 'id': ID}, (1, 1, 1))
+            sealed = daemon.handle({'v': 1, 'action': 'seal', 'id': ID}, (1, 1, 1))
+            self.assertEqual(sealed['state'], 'drained')
+            self.assertTrue(sealed['groupAbsent'])
+            self.assertTrue(daemon.fenced)
+            self.assertIs(daemon.live, operation)
+            self.assertEqual(daemon.handle({'v': 1, 'action': 'get', 'id': ID}, (1, 1, 1)), sealed)
+            def controlled_release(op):
+                # Physical cleanup is CONTROLLED, not native capacity evidence.
+                op['released'] = True
+                daemon.live, daemon.fenced = None, False
+                return daemon.public(op)
+            with patch.object(daemon, 'release', side_effect=controlled_release):
+                released = daemon.handle({'v': 1, 'action': 'release', 'id': ID}, (1, 1, 1))
+            self.assertEqual(released['state'], 'closed')
+            self.assertEqual(released['receiptHash'], sealed['receiptHash'])
+            self.assertFalse(daemon.fenced)
+
+    def test_known_reservation_ack_has_kind_fixed_workspace_and_immutable_event_hash(self):
+        daemon, operation = self.daemon(), self.operation()
+        operation.update(state='reserved', eventSHA256='a' * 64)
+        self.assertEqual(daemon.public(operation)['directory'], '/workspace/host-resource/' + ID)
+        operation['kind'] = 'acquisition'
+        reply = daemon.public(operation)
+        self.assertEqual(reply['directory'], '/workspace/yt-acquisition-scratch/' + ID)
+        self.assertEqual(reply['receiptHash'], 'a' * 64)
+
 
 if __name__ == '__main__':
     unittest.main()

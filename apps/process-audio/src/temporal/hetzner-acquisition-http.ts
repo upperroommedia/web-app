@@ -1,3 +1,4 @@
+import { assertReleasedYouTubeEpisode } from './hetzner-acquisition-episode';
 import { executeCanonicalYouTubeAcquisition } from './hetzner-acquisition-driver';
 import { Router } from 'express';
 import type { Auth } from 'firebase-admin/auth';
@@ -75,6 +76,7 @@ export function createHetznerAcquisitionRouter(o: { firestore: Firestore; auth: 
           ref,
           verifiedCallerEmail: initial.preparedBy.serviceAccount,
           startSignal: birth.signal,
+          birthDeadline: { wall, monotonic: mono },
         });
         return undefined;
       }
@@ -97,6 +99,7 @@ export function createHetznerAcquisitionRouter(o: { firestore: Firestore; auth: 
             fresh();
             if (!saved.exists || !saved.createTime?.isEqual(saved.updateTime!)) throw unavailable();
             validateYouTubeAcquisitionNativeClose(record, ref, saved.data());
+            await assertReleasedYouTubeEpisode(tx, current);
           }
           // A canonical stop/source is not a remote process-drain proof.
           if (eligibility.kind !== 'ready') throw unavailable();

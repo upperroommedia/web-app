@@ -15,7 +15,11 @@ host or modify existing staging/production containers for these tests.
    existing child from before reserve, grandchild, another container's same PID,
    changed birth, existing descendants or wrong UID/cgroup.
 4. Exact child must `verify`; parent/other child cannot. Same verified context
-   receives only the fixed operation directory. Before this ACK no execution IPC.
+   receives only the kind-fixed operation directory. Before this ACK no execution IPC.
+   One index with both native binds may reserve full/canary at
+   `/workspace/host-resource/<uuid>` or acquisition at
+   `/workspace/yt-acquisition-scratch/<uuid>`, never cross the roots. Wrong source,
+   destination, physical backing or non-256-MiB streaming tmpfs denies either mode.
 
 ## Durable single-attempt authority
 
@@ -70,6 +74,21 @@ host or modify existing staging/production containers for these tests.
     failure must not require a new resource grant for cleanup. Cleanup uses held
     original directory/cgroup descriptors and pidfd, writes immutable close proof
     before release, and cannot target a replacement path/PID.
+16. Acquisition must reject `close`. `seal` requires exact original child pidfd
+    death, empty held scope and a prior native stop; it persists drained without
+    removing active reservation, directory, or cgroup. Drained GET returns the
+    identical hash/group-absence fact and cannot authorize a new reservation,
+    enrollment or execution. Unknown seal ACK is GET-only. `release` before
+    drained rejects; release after the application's exact immutable database
+    close preserves original drain hash and appends separate release lineage.
+    Simulate database close ACK loss: the app must confirm exact original close
+    by GET before its one release, with no second resource/task authority. A
+    failed physical release must not yield a successful closed GET. Legacy and
+    canary continue their existing close path and cannot call seal/release.
+17. Reserved/enrolled hashes bind actual known original ACKs. Unknown reserve or
+    enroll followed by GET of the same hash still never grants fork/IPC. Native
+    descendant kill is sealed in drained/closed facts and prevents business
+    success/adoption even if a direct child exited zero.
 
 These fixtures do not establish current physical host capacity, both deployed
 images' participation, production safety, remote HTTP/OIDC/native helper parity,

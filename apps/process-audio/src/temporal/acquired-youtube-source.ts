@@ -1,3 +1,4 @@
+import { assertReleasedYouTubeEpisode } from './hetzner-acquisition-episode';
 import { isDeepStrictEqual as same } from 'node:util';
 import { stat } from 'node:fs/promises';
 import type { Bucket } from '@google-cloud/storage';
@@ -78,6 +79,7 @@ export async function consumeAcquiredYouTubeSource(o: {
       ]);
       if (!close.exists || !close.createTime?.isEqual(close.updateTime!)) fail();
       validateYouTubeAcquisitionNativeClose(host.data(), ref, close.data());
+      await assertReleasedYouTubeEpisode(tx, host);
       const owner = validateYouTubeAcquisitionSourceReceipt(host.data(), ref, source);
       await o.assertCurrent(tx, ref);
       o.signal.throwIfAborted();

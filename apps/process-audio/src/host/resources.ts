@@ -7,7 +7,7 @@ const unavailable = () => new Error('HOST_RESOURCE_UNAVAILABLE');
 export interface HostResourceReply {
   v: 1;
   id: string;
-  state: 'intent' | 'reserved' | 'enrolling' | 'enrolled' | 'closed' | 'unstarted';
+  state: 'intent' | 'reserved' | 'enrolling' | 'enrolled' | 'drained' | 'closed' | 'unstarted';
   directory?: string;
   peerBound?: true;
   groupAbsent?: true;
@@ -43,8 +43,9 @@ async function assertNativeSocket(): Promise<void> {
  * the exact original ID. The whole native socket observation/ACK has one budget. */
 export async function hostResourceRequest(
   id: string,
-  action: 'reserve' | 'get' | 'enroll' | 'verify' | 'stop' | 'close' | 'unstarted',
-  extra: { kind?: HostWorkKind; childPid?: number } = {}
+  action: 'reserve' | 'get' | 'enroll' | 'verify' | 'stop' | 'close' | 'seal' | 'release' | 'unstarted',
+  extra: { kind?: HostWorkKind; childPid?: number } = {},
+  assertCallerFresh?: () => void
 ): Promise<HostResourceReply> {
   if (!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(id)) throw unavailable();
   const wall = Date.now(),
@@ -52,6 +53,7 @@ export async function hostResourceRequest(
   let timer: ReturnType<typeof setTimeout> | undefined;
   let socket: ReturnType<typeof connect> | undefined;
   const fresh = () => {
+    assertCallerFresh?.();
     if (Date.now() < wall || Date.now() - wall >= 5000 || performance.now() - mono >= 5000) throw unavailable();
   };
   const work = async () => {
@@ -99,14 +101,17 @@ export async function hostResourceRequest(
                   'receiptHash',
                 ].includes(key)
             ) ||
-            !['intent', 'reserved', 'enrolling', 'enrolled', 'closed', 'unstarted'].includes(value.state) ||
-            (value.directory !== undefined && value.directory !== `/workspace/host-resource/${id}`) ||
+            !['intent', 'reserved', 'enrolling', 'enrolled', 'drained', 'closed', 'unstarted'].includes(value.state) ||
+            (value.directory !== undefined &&
+              value.directory !== `/workspace/host-resource/${id}` &&
+              value.directory !== `/workspace/yt-acquisition-scratch/${id}`) ||
             (value.groupAbsent !== undefined && value.groupAbsent !== true) ||
             (value.descendantsStopped !== undefined && value.descendantsStopped !== true) ||
             (value.receiptHash !== undefined && !/^[a-f0-9]{64}$/.test(value.receiptHash))
           )
             throw unavailable();
-          if (value.state === 'closed' && (value.groupAbsent !== true || !value.receiptHash)) throw unavailable();
+          if (['drained', 'closed'].includes(value.state) && (value.groupAbsent !== true || !value.receiptHash))
+            throw unavailable();
           resolve(value);
         } catch {
           reject(unavailable());

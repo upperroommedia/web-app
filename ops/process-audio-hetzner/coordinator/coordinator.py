@@ -131,7 +131,6 @@ def validate_policy(p):
         require(type(c['cgroup']) is str and c['cgroup'].startswith('/')
                 and '..' not in c['cgroup'].split('/'))
         require(type(c['fullMount']) is bool and type(c['streamMount']) is bool)
-        require(not (c['fullMount'] and c['streamMount']))
         require(type(c['tmpfs']) is dict)
         for destination, options in c['tmpfs'].items():
             require(type(destination) is str and destination.startswith('/')
@@ -146,7 +145,7 @@ def validate_policy(p):
             for key in ('destination', 'source'):
                 require(type(m[key]) is str and m[key].startswith('/')
                         and '..' not in m[key].split('/'))
-            require(m['destination'] not in ('/', '/workspace', '/workspace/host-resource',
+            require(m['destination'] not in ('/', '/workspace', '/workspace/host-resource', '/workspace/yt-acquisition-scratch',
                                               '/run/urm-host-media', '/sys/fs/cgroup', '/var/run/docker.sock'))
             require(os.path.realpath(m['source']) == m['source'])
             for key in ('device', 'inode', 'mountId', 'projectId', 'hardBytes'): integer(m[key])
@@ -462,15 +461,18 @@ class Coordinator:
                 require(key not in auth_remaining)  # no shared-project accounting ambiguity
                 require(key != (p['fullWorkspace']['device'], p['fullWorkspace']['projectId']))
                 auth_remaining[key] = remaining
-            require(all(not m.get('RW') or m.get('Destination') == '/workspace/host-resource'
+            require(all(not m.get('RW')
+                        or (m.get('Destination') == '/workspace/host-resource' and c['fullMount'])
+                        or (m.get('Destination') == '/workspace/yt-acquisition-scratch' and c['streamMount'])
                         or (m.get('Type') == 'tmpfs' and m.get('Destination') in c['tmpfs'])
                         or any(m.get('Destination') == approved['destination'] for approved in c['authMounts'])
                         for m in mounts))
-            for enabled, w in ((c['fullMount'], p['fullWorkspace']), (c['streamMount'], p['streamWorkspace'])):
+            for enabled, w, destination in (
+                (c['fullMount'], p['fullWorkspace'], '/workspace/host-resource'),
+                (c['streamMount'], p['streamWorkspace'], '/workspace/yt-acquisition-scratch'),
+            ):
                 if enabled:
-                    # One canonical root per container; streaming-only helper
-                    # containers use the stream root, legacy apps the full root.
-                    selected = [m for m in mounts if m.get('Destination') == '/workspace/host-resource']
+                    selected = [m for m in mounts if m.get('Destination') == destination]
                     require(len(selected) == 1 and selected[0].get('Type') == 'bind'
                             and selected[0].get('Source') == w['path'] and selected[0].get('RW') is True)
             memory_sum += c['memoryBytes']
@@ -563,7 +565,7 @@ class Coordinator:
 
     def stop_scope(self, op, wait=False):
         until = time.monotonic() + 3
-        if op.get('scope') is None or op['state'] in ('closed', 'unstarted'):
+        if op.get('scope') is None or op['state'] in ('drained', 'closed', 'unstarted'):
             return
         # Native cgroup.kill is recursive and scoped by the original inode. It
         # cannot signal a reused PID or an independently named replacement scope.
@@ -588,13 +590,14 @@ class Coordinator:
             require(op.get('released') is True)
         value = {'v': 1, 'id': op['id'], 'state': op['state'], 'peerBound': True}
         if op['state'] in ('reserved', 'enrolled'):
-            value['directory'] = f"/workspace/host-resource/{op['id']}"
-        if op['state'] == 'closed':
+            root = '/workspace/yt-acquisition-scratch' if op['kind'] == 'acquisition' else '/workspace/host-resource'
+            value['directory'] = f"{root}/{op['id']}"
+        if op['state'] in ('drained', 'closed'):
             value['groupAbsent'] = True
             if op.get('killIssued'):
                 value['descendantsStopped'] = True
-        if op['state'] in ('closed', 'unstarted'):
-            value['receiptHash'] = op['eventSHA256']
+        if op['state'] in ('reserved', 'enrolled', 'drained', 'closed', 'unstarted'):
+            value['receiptHash'] = op.get('drainSHA256', op['eventSHA256'])
         return value
 
     def handle(self, request, credentials):
@@ -702,7 +705,27 @@ class Coordinator:
                         and self.scope_empty(op))
                 self.event(op, 'unstarted', {'noEnrollmentAttempt': True})
                 return self.release(op)
+            if action == 'seal':
+                require(op['kind'] == 'acquisition')
+                if op['state'] == 'drained':
+                    return self.public(op)  # exact observation, no second write
+                require(op['state'] in ('enrolled', 'enrolling') and op['child'] is not None
+                        and op.get('stopped') is True and dead(op['childfd']) and self.scope_empty(op))
+                self.event(op, 'drained', {'child': op['child'], 'pidfdDead': True,
+                                         'groupAbsent': True, 'scope': op['scope'],
+                                         'descendantsStopped': bool(op.get('killIssued'))})
+                op['drainSHA256'] = op['eventSHA256']
+                return self.public(op)
+            if action == 'release':
+                require(op['kind'] == 'acquisition' and op['state'] == 'drained'
+                        and op.get('drainSHA256') == op['eventSHA256'])
+                # The actual application calls this ONLY after its immutable
+                # database original-close transaction. No caller boolean or
+                # Firebase credential enters this physical-resource protocol.
+                self.event(op, 'closed', {'drainedReceiptSHA256': op['drainSHA256']})
+                return self.release(op)
             if action == 'close':
+                require(op['kind'] != 'acquisition')
                 if op['state'] == 'closed': return self.public(op)
                 require(op['state'] in ('enrolled', 'enrolling') and op['child'] is not None
                         and dead(op['childfd']) and self.scope_empty(op))
@@ -724,7 +747,8 @@ class Coordinator:
         self.scope_path(op)
         Path(op['scope']['path']).rmdir()
         self.immutable(op['id'] + '-release.json', {'v': 1, 'id': op['id'],
-                                                  'receiptSHA256': op['eventSHA256'], 'state': op['state']})
+                                                  'receiptSHA256': op.get('drainSHA256', op['eventSHA256']),
+                                                  'closeEventSHA256': op['eventSHA256'], 'state': op['state']})
         require(load_json(read(STATE / 'active.json')) == {'v': 1, 'id': op['id'], 'peer': op['peer']})
         (STATE / 'active.json').unlink()
         directory = os.open(STATE, os.O_RDONLY | os.O_DIRECTORY)

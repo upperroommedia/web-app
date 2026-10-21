@@ -5,18 +5,14 @@ import type { MediaJobRef } from './types';
 import { youtubeAcquisitionId } from './hetzner-acquisition';
 import { runYouTubeAcquisitionProcess } from './hetzner-acquisition-process';
 import { closeYouTubeAcquisitionNativeProcess, type AcquisitionHostProcess } from './hetzner-acquisition-store';
+import { readPreparedYouTubeEpisode } from './hetzner-acquisition-episode';
+import { reserveYouTubeEpisodeResources } from './hetzner-acquisition-resources';
+import { readEligibleYouTubeAcquisition } from './hetzner-acquisition-policy';
 import { createNativeYouTubeAuthorization } from './hetzner-acquisition-authorization';
 
-interface SharedHostReservation {
-  directory: string;
-  signal: AbortSignal;
-  releaseUnused(): Promise<void>;
-  releaseAfterNativeDrain(): Promise<void>;
-}
-/** Fixed source-owned gate. A directory marker or caller boolean cannot stand in
- * for physical backing, both legacy containers/canaries, cgroups and headroom.
- * No resource mutation or helper fork is reachable until that implementation exists. */
-async function reserveSharedHostResources(_ref: MediaJobRef, _buildId: string): Promise<SharedHostReservation> {
+/** Native installed enforcement and complete retry/auth/archive resumption
+ * acceptance are still missing. No environment flag can enable this producer. */
+function assertAcquisitionActivationSupported(): void {
   throw new Error('YOUTUBE_SHARED_HOST_RESOURCES_UNAVAILABLE');
 }
 export function acquisitionHostBuildId(): string {
@@ -33,16 +29,45 @@ export async function executeCanonicalYouTubeAcquisition(o: {
   ref: MediaJobRef;
   verifiedCallerEmail: string;
   startSignal: AbortSignal;
+  birthDeadline?: { wall: number; monotonic: number };
 }): Promise<void> {
+  const deadline = o.birthDeadline
+    ? Object.freeze({ ...o.birthDeadline })
+    : { wall: Date.now(), monotonic: performance.now() };
+  const fresh = () => {
+    o.startSignal.throwIfAborted();
+    if (
+      !Number.isFinite(deadline.wall) ||
+      !Number.isFinite(deadline.monotonic) ||
+      Date.now() < deadline.wall ||
+      performance.now() < deadline.monotonic ||
+      Date.now() - deadline.wall >= 5000 ||
+      performance.now() - deadline.monotonic >= 5000
+    )
+      throw new Error('YOUTUBE_BIRTH_DEADLINE');
+  };
   const ref = Object.freeze({ ...o.ref });
   youtubeAcquisitionId(ref);
-  o.startSignal.throwIfAborted();
+  fresh();
   if (o.auth.app.options.projectId !== ref.projectId) throw new Error('YOUTUBE_HOST_PROJECT_UNCONFIRMED');
   const buildId = acquisitionHostBuildId();
-  const reservation = await reserveSharedHostResources(ref, buildId);
+  assertAcquisitionActivationSupported();
+  const episode = await readPreparedYouTubeEpisode({ ...o, ref });
+  fresh();
+  const reservation = await reserveYouTubeEpisodeResources({
+    ...o,
+    episode,
+    assertStartFresh: fresh,
+    assertCurrent: async (transaction, bound) => {
+      fresh();
+      const current = await readEligibleYouTubeAcquisition({ ...o, transaction, ref: bound });
+      fresh();
+      if (current.kind !== 'ready') throw new Error('YOUTUBE_ACQUISITION_INELIGIBLE');
+    },
+  });
   // A late resource ACK must not fork after the HTTP birth budget has expired.
   try {
-    o.startSignal.throwIfAborted();
+    fresh();
   } catch (error) {
     await reservation.releaseUnused(); // No child was created; no fabricated drain fact.
     throw error;
@@ -53,6 +78,8 @@ export async function executeCanonicalYouTubeAcquisition(o: {
     ...o,
     ref,
     buildId,
+    episodeId: episode.id,
+    assertFresh: fresh,
     onInspected: (owner, startedAt) => {
       if (originalOwner) throw new Error('YOUTUBE_SECOND_NATIVE_OWNER');
       originalOwner = owner;
@@ -66,20 +93,25 @@ export async function executeCanonicalYouTubeAcquisition(o: {
     directory: reservation.directory,
     ref,
     signal: reservation.signal,
+    episodeId: episode.id,
+    assertStartFresh: fresh,
     onNativeClose: async (fact) => {
       if (!originalOwner || originalStartedAt === undefined) throw new Error('YOUTUBE_NATIVE_OWNER_UNCONFIRMED');
+      const sealed = await reservation.sealAfterNativeClose();
       await closeYouTubeAcquisitionNativeProcess({
         firestore: o.firestore,
         ref,
         owner: originalOwner,
         startedAt: originalStartedAt,
-        fact,
+        fact: sealed.descendantsStopped === true ? { ...fact, outcome: 'failed' } : fact,
+        episode: { id: episode.id, proof: sealed },
       });
     },
     authorize: async (pid, signal) => {
-      o.startSignal.throwIfAborted();
+      fresh();
+      await reservation.enroll(pid, signal);
       const allowed = await authorize(pid, AbortSignal.any([signal, o.startSignal]));
-      o.startSignal.throwIfAborted();
+      fresh();
       return allowed;
     },
   });

@@ -45,6 +45,61 @@ test('a native helper receives only the bound private reference and local worksp
   });`);
   await expect(run({ helperPath, directory, ref, signal: new AbortController().signal })).resolves.toBe('completed');
 });
+test('first episode sends the exact native-prepared ID and scratch root only after known enrollment and claim', async () => {
+  const episodeId = '00000000-0000-4000-8000-000000000001';
+  const helperPath = await helper(`process.once('message', m => {
+    if (Object.keys(m).sort().join(',') !== 'directory,episodeId,operationId,ref' || m.episodeId !== '${episodeId}' || process.env.TMPDIR !== m.directory || !require('node:fs').existsSync(m.directory+'/known-enrolled-and-claimed')) process.exit(2);
+    process.exit(0);
+  });`);
+  const events: string[] = [];
+  await expect(
+    runYouTubeAcquisitionProcess({
+      helperPath,
+      directory,
+      episodeId,
+      ref,
+      signal: new AbortController().signal,
+      authorize: async (pid) => {
+        process.kill(pid, 0);
+        await writeFile(join(directory, 'known-enrolled-and-claimed'), 'CONTROLLED_KNOWN_ROOT_AND_NATIVE_CLAIM');
+        events.push('enrolled-and-claimed');
+        return true;
+      },
+      onNativeClose: async (fact) => {
+        expect(() => process.kill(-fact.processId, 0)).toThrow(expect.objectContaining({ code: 'ESRCH' }));
+        events.push('original-close');
+      },
+    })
+  ).resolves.toBe('completed');
+  expect(events).toEqual(['enrolled-and-claimed', 'original-close']);
+});
+test('first episode cannot send IPC after a final authorization starves the original absolute observation deadline', async () => {
+  const helperPath = await helper(
+    `process.once('message', m => { require('node:fs').writeFileSync(m.directory+'/late-episode-IPC','bad'); process.exit(0); });`
+  );
+  const start = performance.now();
+  const authorize = async () => {
+    const until = performance.now() + 70;
+    while (performance.now() < until) {
+      /* actual event-loop starvation */
+    }
+    return true;
+  };
+  await expect(
+    runYouTubeAcquisitionProcess({
+      helperPath,
+      directory,
+      ref,
+      signal: new AbortController().signal,
+      episodeId: '00000000-0000-4000-8000-000000000001',
+      authorize,
+      assertStartFresh: () => {
+        if (performance.now() - start >= 50) throw Error('CONTROLLED_ORIGINAL_TEST_DEADLINE');
+      },
+    })
+  ).resolves.toBe('failed');
+  await expect(access(join(directory, 'late-episode-IPC'))).rejects.toMatchObject({ code: 'ENOENT' });
+});
 test('cancelled native work drains its descendant process group before returning', async () => {
   const helperPath = await helper(`process.once('message', m => {
     const {spawn}=require('node:child_process');

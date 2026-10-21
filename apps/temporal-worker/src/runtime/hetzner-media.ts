@@ -7,7 +7,7 @@ import {
   createHetznerAcquisitionClient,
   createHetznerAcquisitionTransport,
 } from '../../../process-audio/src/temporal/hetzner-acquisition';
-import { prepareYouTubeAcquisition } from '../../../process-audio/src/temporal/hetzner-acquisition-store';
+import { prepareNativeYouTubeEpisode } from '../../../process-audio/src/temporal/hetzner-acquisition-episode';
 const fail = (): never => {
   throw ApplicationFailure.nonRetryable(
     'YouTube acquisition binding is unavailable.',
@@ -42,7 +42,7 @@ export function createRuntimeYouTubeAcquisition(o: {
       Context.current().info.activityType !== 'acquireMedia'
     )
       return fail();
-    await prepareYouTubeAcquisition({
+    await prepareNativeYouTubeEpisode({
       firestore: o.firestore,
       ref,
       caller: { buildId: w.buildId, serviceAccount: cloud.serviceAccount, instanceId: cloud.instanceId },
