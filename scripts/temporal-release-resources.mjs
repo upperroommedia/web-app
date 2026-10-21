@@ -14,11 +14,16 @@ export function createReleaseFirebaseResources(projectId, databaseURL, sdk) {
       throw new Error('Release Firebase app identity changed; refusing shared-resource cleanup');
   };
   validate();
-  let firestore,
+  let auth,
+    firestore,
     database,
     closed = false;
   return {
     credential: app.options.credential,
+    get auth() {
+      validate();
+      return (auth ??= sdk.getAuth(app));
+    },
     get firestore() {
       return (firestore ??= sdk.getFirestore(app));
     },

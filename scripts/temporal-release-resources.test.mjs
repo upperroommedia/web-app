@@ -23,6 +23,10 @@ function fixture({ existing = false, failures = [] } = {}) {
       apps.push(app);
       return app;
     },
+    getAuth: (app) => {
+      events.push('auth');
+      return { app };
+    },
     getFirestore: () => {
       events.push('firestore');
       return { terminate: step('terminate') };
@@ -227,3 +231,13 @@ for (const scenario of [
       assert(receipt.events.indexOf('lock-delete') < receipt.events.indexOf('database-offline'));
     }
   });
+
+test('Auth uses the exact owned named app once and cleanup never initializes it', async () => {
+  const f = fixture();
+  const resources = createReleaseFirebaseResources(project, url, f.sdk);
+  const first = resources.auth;
+  assert.equal(resources.auth, first);
+  assert.equal(first.app.name, `temporal-release-${project}`);
+  await resources.close();
+  assert.equal(f.events.filter((v) => v === 'auth').length, 1);
+});

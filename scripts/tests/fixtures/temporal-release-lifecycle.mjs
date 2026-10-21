@@ -168,6 +168,11 @@ const imports = {
     },
   },
   './temporal-release-resources.mjs': { runWithCleanup },
+  './temporal-release-api.mjs': {
+    createReleaseApi: () => async () => {
+      throw new Error('UNEXPECTED_API_REQUEST');
+    },
+  },
   './temporal-release-runtime.mjs': {
     pinReleaseCheckouts: () => ({
       operatorRoot: '/fixture',

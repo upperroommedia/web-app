@@ -946,3 +946,22 @@ original birth/startup/container/image and still forbid private execution until
 the later saved SDK intent. Stable protected-baseline hashes must be separate
 from independently checked monotonic own-startup facts. That policy remains
 unavailable, and canonical preflight continues to deny before any live mutation.
+
+The canonical startup sub-fence now reads the actual source-authenticated idle
+original child. It reuses the production diagnostic capability and current
+Firebase admin check, and accepts only the original source-owned armed, born or
+running kernel stages before SDK START. No execution, fault or replacement facts
+may exist. A running child yields an identity only after its exact birth,
+startup, consumed private bundle, image tool hashes and capacity evidence join.
+Armed/born children and running children without startup yield no allowed poller
+identity. Two exact native fact snapshots bracket capability checks under the
+original deadline. The canonical image inspection and final authority check
+retain the original phase-resource and startup sample ages.
+
+Auth comes lazily from the controller's existing named Firebase app; cleanup
+never opens an unused Auth service or changes app ownership. Local emulator tests
+exercise the real capability/admin and Firestore reads with controlled kernel,
+capacity and image metadata. They establish identity evidence only. Native
+version/partition/namespace poller and work protection must still consume this
+identity under its fixed phase policy and preserve the separate protected
+baseline. That policy and canonical preflight remain unavailable.

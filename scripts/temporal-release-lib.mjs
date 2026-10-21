@@ -297,6 +297,7 @@ export function firebaseAdmin(projectId, databaseURL) {
     deleteApp,
     getFirestore,
     getDatabase,
+    getAuth:app=>require('firebase-admin/auth').getAuth(app),
     serverTimestamp: () => FieldValue.serverTimestamp(),
   });
 }

@@ -426,3 +426,17 @@ const confirmMediaDiagnosticZero=(o,kind,observe)=>withNativeCloudRunClient(o,as
 });
 export const confirmCloudRunMediaRecoveryStopped=o=>confirmMediaDiagnosticZero(o,'stopped',observeMediaDiagnosticStopped);
 export const confirmCloudRunMediaRecoveryNeverStarted=o=>confirmMediaDiagnosticZero(o,'never-started',observeMediaDiagnosticNeverStarted);
+
+/** Exact source-authenticated original startup identity, not a poller policy. */
+export const observeCloudRunMediaIdleStartup=o=>withNativeCloudRunClient(o,async(_client,application)=>{
+ try{
+  const boundedRead=async fn=>{let timer;try{return await Promise.race([Promise.resolve().then(fn),new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('MEDIA_RECOVERY_IDLE_STARTUP_UNCONFIRMED')),5000);})]);}finally{clearTimeout(timer);}};
+  await boundedRead(()=>assertMediaRecoveryAuthority(o));
+  const startup=await boundedRead(()=>o.firestore.doc(`_control/temporalMediaRecoveryStartup-${o.operationId}`).get());
+  const image=startup.exists?await createMediaRecoveryImageReplayObserver({image:o.plan.image,buildId:o.plan.buildId,operationId:o.operationId,bindingDigest:o.bindingDigest,evidenceDigest:o.plan.evidenceDigest,historyToJSON:application.historyToJSON}):undefined;
+  const result=await application.collectMediaRecoveryIdleStartup({db:o.firestore,auth:o.firebaseAuth,operationId:o.operationId,plan:o.plan,phasePool:o.phasePool,expectedRootSHA256:o.ownedOperation.dataDigest,expectedControlSHA256:o.expectedAuthority.control.dataDigest,expectedStateSHA256:o.expectedAuthority.state.dataDigest,...(image?{image:{bundleSHA256:image.bundleSHA256,tools:image.tools}}:{})});
+  await boundedRead(()=>assertMediaRecoveryAuthority(o));
+  if(!Number.isFinite(Date.parse(result.observedAt))||!Number.isFinite(Date.parse(o.phasePool.observedAt))||Math.abs(Date.now()-Date.parse(result.observedAt))>=5000||Math.abs(Date.now()-Date.parse(o.phasePool.observedAt))>=5000)throw Error();
+  return result;
+ }catch{throw new Error('MEDIA_RECOVERY_IDLE_STARTUP_UNCONFIRMED');}
+});
