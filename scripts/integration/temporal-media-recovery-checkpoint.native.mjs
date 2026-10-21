@@ -1,3 +1,6 @@
+import { activateRestoredCloudRunMedia } from '../temporal-media-restored-activation.mjs';
+import { saveRestoredMediaActivationCheckpoint } from '../temporal-media-restored-checkpoint.mjs';
+import { restoredActivationFixture } from '../tests/fixtures/restored-media-activation.mjs';
 import { observeMediaRecoveryProtection } from '../temporal-media-recovery-protection.mjs';
 import {
   controlledRecoveryCapsuleFacts,
@@ -34,6 +37,7 @@ for (const mode of [
   'normal',
   'capsule',
   'activation-access',
+  'restored-activation',
   'phase-resource',
   'idle-startup',
   'idle-poller',
@@ -592,7 +596,7 @@ for (const mode of [
       if (
         mode === 'normal' ||
         mode === 'capsule' ||
-        mode === 'activation-access' ||
+        ['activation-access', 'restored-activation'].includes(mode) ||
         mode === 'phase-resource' ||
         ['idle-startup', 'idle-poller'].includes(mode)
       ) {
@@ -635,7 +639,7 @@ for (const mode of [
           ownedOperation = nativeSnapshotProof(await lockRef.get());
           assert.equal((await confirmCompletedMediaRecoveryCapsule(options())).capsuleSHA256, proof.capsuleSHA256);
         }
-        if (mode === 'activation-access') {
+        if (['activation-access', 'restored-activation'].includes(mode)) {
           const newId = randomUUID(),
             newBinding = 'e'.repeat(64);
           await lockRef.set({
@@ -659,6 +663,73 @@ for (const mode of [
           const proof = await readRestoredMediaActivationAccess(args);
           assert.equal(proof.pool.uid, result.restore.pool.uid);
           assert.equal(proof.pool.etag, result.restore.pool.etag);
+          if (mode === 'restored-activation') {
+            const controlled = restoredActivationFixture();
+            const origin = {
+              ...controlled.origin,
+              operationId: newId,
+              recoveryOperationId: base.operationId,
+              bindingDigest: newBinding,
+              releaseId: config.releaseId,
+              buildId: result.plan.buildId,
+              image: result.plan.image,
+              pool: proof.pool,
+              capsuleSHA256: proof.capsuleSHA256,
+              proofSHA256: hash(proof),
+              observedAt: new Date().toISOString(),
+            };
+            controlled.replaceOrigin(origin);
+            Object.assign(controlled.options, {
+              operationId: newId,
+              recoveryOperationId: base.operationId,
+              bindingDigest: newBinding,
+              releaseId: config.releaseId,
+              evidenceDigest: result.plan.evidenceDigest,
+              receipts: { ...f.options.receipts, recovery: (await immutableReceipt.get()).data() },
+            });
+            let currentOwned = args.ownedOperation;
+            const ownReceipt = db.doc(`_control/temporalCloudRestoredMediaActivation-${newId}`);
+            idlePrivate.push(ownReceipt);
+            let completionAckLost = false;
+            controlled.options.save = async (identityState) => {
+              currentOwned = await saveRestoredMediaActivationCheckpoint({
+                ...args,
+                config,
+                operatorPrincipal: { email: base.operatorPrincipal.email, adcAndGcloudAccountMatch: true },
+                ownedOperation: currentOwned,
+                immutableReceipt: ownReceipt,
+                identityState,
+              });
+              if (identityState.disposition === 'retained' && !completionAckLost) {
+                completionAckLost = true;
+                throw new Error('CONTROLLED_RETAINED_ACK_LOST');
+              }
+            };
+            await assert.rejects(activateRestoredCloudRunMedia(controlled.options), /CONTROLLED_RETAINED_ACK_LOST/);
+            const retained = (await lockRef.get()).get('cloudRestoredMediaActivation');
+            assert.equal(retained.disposition, 'retained');
+            assert.equal(controlled.patches, 1);
+            assert.equal((await ownReceipt.get()).get('identityState.disposition'), 'retained');
+            const frozen = (await ownReceipt.get()).data();
+            controlled.options.saved = retained;
+            await activateRestoredCloudRunMedia(controlled.options);
+            assert.equal(controlled.patches, 1);
+            assert.equal(hash((await ownReceipt.get()).data()), hash(frozen));
+            const bad = structuredClone(retained);
+            bad.start.attemptedAt = new Date(Date.parse(bad.start.attemptedAt) + 1).toISOString();
+            await assert.rejects(
+              saveRestoredMediaActivationCheckpoint({
+                ...args,
+                config,
+                operatorPrincipal: frozen.operatorPrincipal,
+                ownedOperation: currentOwned,
+                immutableReceipt: ownReceipt,
+                identityState: bad,
+              })
+            );
+            args.ownedOperation = currentOwned;
+          }
+
           await assert.rejects(readRestoredMediaActivationAccess({ ...args, recoveryOperationId: newId }));
           await assert.rejects(readRestoredMediaActivationAccess({ ...args, bindingDigest: base.bindingDigest }));
           const api = args.api;
