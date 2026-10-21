@@ -60,7 +60,8 @@ export interface MediaActivityDependencies {
   bucket: Bucket;
   ytdlpPath: string;
   projectJob: (ref: MediaJobRef, projection: MediaJobProjection) => Promise<void>;
-  /** Must perform a real authenticated media-byte canary, not merely inspect cookies. */
+  /** Local acquisition only: performs a real authenticated media-byte canary.
+   * Remote acquisition requires its separate same-host episode protocol. */
   checkAuthenticatedMedia?: (ref: MediaJobRef) => Promise<{ ready: boolean; generation: string | null }>;
 }
 
@@ -88,7 +89,12 @@ export function storagePathFromMediaUrl(value: string, bucket: string): string {
 /** Private request documents are never serialized into Temporal event history. */
 export function createMediaActivities(dependencies: MediaActivityDependencies): MediaActivities {
   const { firestore: db, database: realtime, bucket } = dependencies;
-  const authenticationProbe = dependencies.checkAuthenticatedMedia ?? createMediaAuthenticationProbe(dependencies);
+  // A successful canary on this worker cannot recover the retained host's
+  // authenticated session. Keep that separate protocol unavailable until its
+  // original episode, physical admission, native drain and generation are joined.
+  const authenticationProbe = dependencies.acquireYouTubeSource
+    ? undefined
+    : dependencies.checkAuthenticatedMedia ?? createMediaAuthenticationProbe(dependencies);
   const requestDoc = (ref: MediaJobRef) => db.collection('temporalMediaRequests').doc(ref.jobId);
   const stateDoc = (ref: MediaJobRef) => db.collection('temporalMediaState').doc(ref.sermonId);
   const sermonDoc = (ref: MediaJobRef) => db.collection('sermons').doc(ref.sermonId);
@@ -684,6 +690,11 @@ export function createMediaActivities(dependencies: MediaActivityDependencies): 
       return result;
     },
     recoverMediaAuthentication: async (ref) => {
+      if (!authenticationProbe)
+        throw ApplicationFailure.nonRetryable(
+          'YouTube authentication requires verified recovery on the acquisition host.',
+          'YOUTUBE_SAME_HOST_AUTHENTICATION_REQUIRED'
+        );
       if ((await eligibility(ref)).kind !== 'ready') return { ready: false, generation: null };
       return authenticationProbe(ref);
     },
