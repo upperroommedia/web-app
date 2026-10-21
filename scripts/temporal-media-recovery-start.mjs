@@ -418,3 +418,6 @@ async function livePool(o, plan, pool) {
     fail();
   return { sampledAt: sampled, deadline: sampled + 5000, sampledMonotonic };
 }
+
+/** Fixed read-only diagnostic pool/revision join, also used by historical collection. */
+export const observeMediaRecoveryStartedPool = livePool;

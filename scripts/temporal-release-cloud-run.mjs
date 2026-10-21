@@ -1,10 +1,12 @@
-import {startMediaRecoveryWorkflow} from './temporal-media-recovery-start.mjs';
+import {assertMediaRecoveryAuthority} from './temporal-media-recovery-checkpoint.mjs';
+import {proofDigest as recoveryHash} from './temporal-release-runtime.mjs';
+import {startMediaRecoveryWorkflow,observeMediaRecoveryStartedPool} from './temporal-media-recovery-start.mjs';
 import {independentPromotionRoles,denyUnprovedMediaPromotion} from './temporal-promotion-roles.mjs';
 import {loadNativeReleaseApplication} from './temporal-native-application.mjs';
 import {promoteCloudRunControls,promoteCloudRunSearch,promoteCloudRunEmail,promoteCloudRunImages,promoteCloudRunMedia} from './temporal-promote-controls.mjs';
 import { observeBootstrapProtection, observeBootstrapRegistration, observeControlsPromotionBefore, observeControlsPromotionAfter,observeSearchPromotionBefore,observeSearchPromotionAfter,observeEmailPromotionBefore,observeEmailPromotionAfter,observeImagesPromotionBefore,observeImagesPromotionAfter,observeMediaPromotionBefore,observeMediaPromotionAfter } from './temporal-bootstrap-observations.mjs';
 import { createHash, randomUUID } from 'node:crypto';
-import { createImageReplayObserver } from './temporal-image-replay.mjs';
+import { createImageReplayObserver,createMediaRecoveryImageReplayObserver,assertMediaRecoveryImageReplayReceipt } from './temporal-image-replay.mjs';
 import { isAbsolute, join } from 'node:path';
 import { realpath, open, writeFile } from 'node:fs/promises';
 import { constants } from 'node:fs';
@@ -365,3 +367,34 @@ export function joinMediaStartupRegistration(registration,capacity){
 
 /** Source/CI/image/authority loader and a fixed nonretrying native START purpose. */
 export const startCloudRunMediaRecovery=o=>withNativeCloudRunClient(o,(client,application)=>startMediaRecoveryWorkflow({...o,client,application}),'media-recovery-start');
+
+/** Exact verified-image private profile; GET-only native facts and offline replay.
+ * This returns an episode proof only, never a drain or restored-origin proof. */
+export const collectCloudRunMediaRecovery=o=>withNativeCloudRunClient(o,async(client,application)=>{
+ try{
+  await assertMediaRecoveryAuthority(o);
+  if(o.platform.workerImage!==o.plan.image||o.platform.workerBuildId!==o.plan.buildId)throw Error();
+  const collectorAuthority={db:o.firestore,client,operationId:o.operationId,plan:o.plan,
+   expectedRootSHA256:o.ownedOperation.dataDigest,expectedControlSHA256:o.expectedAuthority.control.dataDigest,
+   expectedStateSHA256:o.expectedAuthority.state.dataDigest};
+  await application.waitForMediaRecoveryEpisode({...collectorAuthority,runId:o.start.runId});
+  const image=await createMediaRecoveryImageReplayObserver({image:o.plan.image,buildId:o.plan.buildId,
+   operationId:o.operationId,bindingDigest:o.bindingDigest,evidenceDigest:o.plan.evidenceDigest,historyToJSON:application.historyToJSON});
+  const read=()=>application.collectMediaRecoveryExecution({db:o.firestore,client,operationId:o.operationId,plan:o.plan,
+   expectedRootSHA256:o.ownedOperation.dataDigest,expectedControlSHA256:o.expectedAuthority.control.dataDigest,
+   expectedStateSHA256:o.expectedAuthority.state.dataDigest,image:{bundleSHA256:image.bundleSHA256,tools:image.tools}});
+  await observeMediaRecoveryStartedPool(o,o.plan,o.pool);
+  const first=await read();
+  const replay=await image.replayHistory(first.history,first.workflowId,first.runId);
+  assertMediaRecoveryImageReplayReceipt(replay,{image:o.plan.image,buildId:o.plan.buildId,operationId:o.operationId,
+   bindingDigest:o.bindingDigest,evidenceDigest:o.plan.evidenceDigest,bundleSHA256:image.bundleSHA256,
+   workflowId:first.workflowId,runId:first.runId,historySHA256:recoveryHash(first.history)});
+  const second=await read();
+  if(second.evidenceSHA256!==first.evidenceSHA256)throw Error();
+  const pool=await observeMediaRecoveryStartedPool(o,o.plan,o.pool);
+  await assertMediaRecoveryAuthority(o);
+  if(Date.now()>=pool.deadline||performance.now()-pool.sampledMonotonic>=5000)throw Error();
+  return {kind:'recovery',operationId:o.operationId,bindingDigest:o.bindingDigest,buildId:o.plan.buildId,image:o.plan.image,
+   proofSHA256:recoveryHash({evidence:first.evidenceSHA256,image:image.imageProof,replay})};
+ }catch{throw new Error('MEDIA_RECOVERY_COLLECTION_UNCONFIRMED');}
+});

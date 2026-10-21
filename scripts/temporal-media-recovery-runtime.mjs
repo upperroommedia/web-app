@@ -1,4 +1,4 @@
-import {startCloudRunMediaRecovery} from './temporal-release-cloud-run.mjs';
+import {startCloudRunMediaRecovery,collectCloudRunMediaRecovery} from './temporal-release-cloud-run.mjs';
 import { prepareMediaRecoveryJournal } from './temporal-media-recovery-checkpoint.mjs';
 /** Canonical boundary, deliberately unavailable until the real image protocol,
  * fixed diagnostic queues, native original-run recovery and authoritative drain
@@ -28,12 +28,12 @@ export function mediaRecoveryPreparation(o) {
   };
 }
 
-/** The START journal is operational source; execution acceptance remains unavailable
- * until the same-image supervisor death/rebirth and native adoption collector exist. */
+/** Source execution joins the original START and historical same-image episode.
+ * Canonical preflight remains denied pending native drain/restored-origin consumers. */
 export function mediaRecoveryExecution(o){
  return async scope=>{
    const result=await startCloudRunMediaRecovery({...o.options(),...scope,onOwnedOperation:o.setOwnedOperation});
    o.setOwnedOperation(result.ownedOperation);
-   return unavailable();
+   return collectCloudRunMediaRecovery({...o.options(),...scope,start:result.start});
  };
 }

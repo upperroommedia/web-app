@@ -44,6 +44,53 @@ export const imageReplayRunner = String.raw`
 `;
 export const imageReplayRunnerSHA256 = sha(imageReplayRunner);
 
+/** Separate fixed private-media profile. No caller may select a bundle/tool path.
+ * The same hardened owned-container protocol is used for both profiles. */
+export const mediaRecoveryImageRunner = imageReplayRunner
+  .replace("lib/workflow-bundle.js'", "lib/media-recovery-workflow-bundle.js'")
+  .replace(
+    ' const chunks=[];let size=0;',
+    String.raw`
+ const toolHash=(path,limit,follow=false)=>{
+   const actual=follow?fs.realpathSync(path):path;
+   if(!follow&&fs.realpathSync(path)!==path)throw Error();
+   const fd=fs.openSync(actual,fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW);
+   try{
+     const a=fs.fstatSync(fd);if(!a.isFile()||a.uid!==0||(a.mode&0o022)||a.size<1||a.size>limit)throw Error();
+     const h=crypto.createHash('sha256'),b=Buffer.alloc(65536);let n,total=0;
+     while((n=fs.readSync(fd,b,0,b.length,null))>0){total+=n;if(total>limit)throw Error();h.update(b.subarray(0,n));}
+     const z=fs.fstatSync(fd);
+     if(total!==a.size||['dev','ino','size','mtimeMs','ctimeMs'].some(k=>a[k]!==z[k]))throw Error();
+     return h.digest('hex');
+   }finally{fs.closeSync(fd);}
+ };
+ const tools={pythonSHA256:toolHash('/usr/bin/python3',64*1024*1024,true),
+   ffmpegSHA256:toolHash('/usr/local/bin/ffmpeg',256*1024*1024),
+   ffprobeSHA256:toolHash('/usr/local/bin/ffprobe',256*1024*1024)};
+ const chunks=[];let size=0;`
+  )
+  .replace(
+    'schemaVersion:1,buildId,bundleSHA256:hash(bytes),',
+    'schemaVersion:1,tools,buildId,bundleSHA256:hash(bytes),'
+  );
+export const mediaRecoveryImageRunnerSHA256 = sha(mediaRecoveryImageRunner);
+const normalProfile = Object.freeze({
+  runner: imageReplayRunner,
+  runnerSHA256: imageReplayRunnerSHA256,
+  prefix: 'urm-image-replay',
+  media: false,
+});
+const mediaProfile = Object.freeze({
+  runner: mediaRecoveryImageRunner,
+  runnerSHA256: mediaRecoveryImageRunnerSHA256,
+  prefix: 'urm-media-image-replay',
+  media: true,
+});
+const validTools = (value) =>
+  value &&
+  Object.keys(value).sort().join(',') === 'ffmpegSHA256,ffprobeSHA256,pythonSHA256' &&
+  Object.values(value).every((x) => hex.test(x));
+
 /** CLI completion is awaited; killing the CLI is not container termination proof. */
 async function docker(args, input = '', timeout = 10000, configDirectory) {
   // Never inherit a remote Docker context or send private histories to another daemon.
@@ -116,7 +163,7 @@ async function save(path, value) {
 /** Canonical caller supplies only its verified image/build/original operation bindings.
  * Transport injection is for isolated contract tests; descriptors cannot choose it.
  */
-async function createObserver(options, transport) {
+async function createObserver(options, transport, profile = normalProfile) {
   const { image, buildId, operationId, bindingDigest, evidenceDigest } = options;
   if (
     !imagePattern.test(image ?? '') ||
@@ -127,7 +174,7 @@ async function createObserver(options, transport) {
     typeof options.historyToJSON !== 'function'
   )
     fail();
-  const root = join(await realpath(tmpdir()), `urm-image-replay-${operationId}`);
+  const root = join(await realpath(tmpdir()), `${profile.prefix}-${operationId}`);
   try {
     await mkdir(root, { mode: 0o700 });
   } catch (error) {
@@ -171,7 +218,7 @@ async function createObserver(options, transport) {
     evidenceDigest,
     imageId: nativeImage.Id,
     platform: `${nativeImage.Os}/${nativeImage.Architecture}`,
-    runnerSHA256: imageReplayRunnerSHA256,
+    runnerSHA256: profile.runnerSHA256,
   };
   async function execute(kind, historyJSON = '', workflowId = '', runId = '', originalHistorySHA256 = sha('')) {
     if (Buffer.byteLength(historyJSON) > 20 * 1024 * 1024 || typeof workflowId !== 'string' || workflowId.length > 1000)
@@ -215,7 +262,7 @@ async function createObserver(options, transport) {
         config?.Image !== image ||
         config.User !== 'node' ||
         !isDeepStrictEqual(config.Entrypoint, ['node']) ||
-        !isDeepStrictEqual(config.Cmd, ['-e', imageReplayRunner]) ||
+        !isDeepStrictEqual(config.Cmd, ['-e', profile.runner]) ||
         Object.entries(labels).some(([k, v]) => config.Labels?.[k] !== v) ||
         h?.NetworkMode !== 'none' ||
         h.ReadonlyRootfs !== true ||
@@ -310,7 +357,7 @@ async function createObserver(options, transport) {
           ...Object.entries(labels).flatMap(([k, v]) => ['--label', `${k}=${v}`]),
           image,
           '-e',
-          imageReplayRunner,
+          profile.runner,
         ]);
         id = (await privateRead(cidPath, true))?.trim();
         if (!id || !hex.test(id) || result.code !== 0 || result.stdout.trim() !== id) fail();
@@ -343,7 +390,10 @@ async function createObserver(options, transport) {
         const response = decode(result);
         if (
           Object.keys(response).sort().join(',') !==
-            'buildId,bundleSHA256,historyJSONSHA256,historySHA256,kind,runId,schemaVersion,workflowId' ||
+            (profile.media
+              ? 'buildId,bundleSHA256,historyJSONSHA256,historySHA256,kind,runId,schemaVersion,tools,workflowId'
+              : 'buildId,bundleSHA256,historyJSONSHA256,historySHA256,kind,runId,schemaVersion,workflowId') ||
+          (profile.media && !validTools(response.tools)) ||
           response.schemaVersion !== 1 ||
           response.buildId !== buildId ||
           response.kind !== kind ||
@@ -354,13 +404,20 @@ async function createObserver(options, transport) {
           !hex.test(response.bundleSHA256 ?? '')
         )
           fail();
-        output = { ...plan, containerId: id, containerCreatedAt: c.Created, bundleSHA256: response.bundleSHA256 };
+        output = {
+          ...plan,
+          containerId: id,
+          containerCreatedAt: c.Created,
+          bundleSHA256: response.bundleSHA256,
+          ...(profile.media ? { tools: response.tools } : {}),
+        };
         await save(path('result'), output);
       }
       if (
         !isDeepStrictEqual(Object.fromEntries(Object.keys(plan).map((k) => [k, output[k]])), plan) ||
         output.containerId !== id ||
-        !hex.test(output.bundleSHA256 ?? '')
+        !hex.test(output.bundleSHA256 ?? '') ||
+        (profile.media && !validTools(output.tools))
       )
         fail();
     } catch {
@@ -379,6 +436,7 @@ async function createObserver(options, transport) {
   return {
     bundleSHA256: imageProof.bundleSHA256,
     imageProof,
+    ...(profile.media ? { tools: imageProof.tools } : {}),
     replayHistory: async (history, workflowId, runId) => {
       let proof;
       try {
@@ -388,7 +446,11 @@ async function createObserver(options, transport) {
       } catch {
         return fail();
       }
-      if (proof.bundleSHA256 !== imageProof.bundleSHA256) fail();
+      if (
+        proof.bundleSHA256 !== imageProof.bundleSHA256 ||
+        (profile.media && !isDeepStrictEqual(proof.tools, imageProof.tools))
+      )
+        fail();
       return proof;
     },
   };
@@ -403,12 +465,26 @@ export async function createImageReplayObserver(options, transport) {
 }
 
 export function assertImageReplayReceipt(receipt, expected) {
+  return assertReceipt(receipt, expected, normalProfile);
+}
+export async function createMediaRecoveryImageReplayObserver(options, transport) {
+  try {
+    return await createObserver(options, transport, mediaProfile);
+  } catch {
+    return fail();
+  }
+}
+export function assertMediaRecoveryImageReplayReceipt(receipt, expected) {
+  return assertReceipt(receipt, expected, mediaProfile);
+}
+function assertReceipt(receipt, expected, profile) {
   if (
     !receipt ||
     receipt.schemaVersion !== 1 ||
     receipt.kind !== 'replay' ||
     receipt.cleanupConfirmed !== true ||
-    receipt.runnerSHA256 !== imageReplayRunnerSHA256 ||
+    receipt.runnerSHA256 !== profile.runnerSHA256 ||
+    (profile.media && !validTools(receipt.tools)) ||
     !hex.test(receipt.receiptSHA256 ?? '') ||
     !hex.test(receipt.historyJSONSHA256 ?? '') ||
     !hex.test(receipt.containerId ?? '') ||

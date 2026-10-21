@@ -322,7 +322,7 @@ async function recordStartup(options: {
   }
 }
 
-function validateCapacity(raw: unknown, attemptedAt: string) {
+function validateCapacity(raw: unknown, attemptedAt: string, observedNow = Date.now()) {
   const c = object(raw),
     at = Date.parse(c.observedAt ?? '');
   if (
@@ -340,8 +340,8 @@ function validateCapacity(raw: unknown, attemptedAt: string) {
     c.reservationReleased !== true ||
     !Number.isFinite(at) ||
     at < Date.parse(attemptedAt) ||
-    at > Date.now() + 5000 ||
-    Date.now() - at > 120000
+    at > observedNow + 5000 ||
+    observedNow - at > 120000
   )
     failure();
   const a = object(c.allocation);
@@ -535,3 +535,13 @@ export async function collectMediaStartupCapacity(options: Parameters<typeof col
 /** Shared strict evidence reader only; normal intent/receipt collectors stay separate. */
 export const validateMediaStartupCapacityEvidence = (raw: unknown, attemptedAt: string) =>
   validateCapacity(raw, attemptedAt);
+
+/** Historical GET-only validation anchors age to the immutable startup record.
+ * It does not renew capacity or work authorization at collection time. */
+export function validateHistoricalMediaRecoveryCapacity(raw: unknown, attemptedAt: string, registeredAt: string) {
+  const at = Date.parse(registeredAt);
+  if (!Number.isFinite(at) || at > Date.now() + 5000) failure();
+  const value = validateCapacity(raw, attemptedAt, at);
+  if (Date.parse(value.observedAt) > at) failure();
+  return value;
+}

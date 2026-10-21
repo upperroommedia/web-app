@@ -12,10 +12,11 @@ import { mediaRecoveryPinnedVersion } from './media-recovery-pin';
 import { originalMediaArtifacts, superviseOriginalMediaFault } from './media-recovery-original-fault';
 import { readMediaRecoveryReplacementKernelBirth, superviseMediaRecoveryReplacement } from './media-kernel-supervisor';
 type Cap = Awaited<ReturnType<typeof mediaRecoveryKernelContext>>;
+type LineageBase = Pick<Cap, 'context' | 'plan'>;
 const fail = (): never => {
   throw new Error('MEDIA_RECOVERY_REPLACEMENT_UNCONFIRMED');
 };
-const name = (kind: string, cap: Cap) => `_control/temporalMediaRecovery${kind}-${cap.context.operationId}`;
+const name = (kind: string, cap: LineageBase) => `_control/temporalMediaRecovery${kind}-${cap.context.operationId}`;
 const uuid = (x: unknown) =>
   typeof x === 'string' && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(x);
 const bounded = async <T>(p: Promise<T>): Promise<T> => {
@@ -32,7 +33,7 @@ const bounded = async <T>(p: Promise<T>): Promise<T> => {
   }
 };
 /** Exact immutable original preimages, independently read before every grant. */
-async function originals(db: Firestore, base: Cap, tx: Transaction) {
+async function originals(db: Firestore, base: LineageBase, tx: Transaction) {
   const [readySnap, signalSnap, kernelSnap, deathSnap, workSnap] = await Promise.all(
     ['OriginalReady', 'OriginalSignal', 'Kernel', 'OriginalDeath', 'Work'].map((k) => tx.get(db.doc(name(k, base))))
   );
@@ -103,7 +104,7 @@ async function originals(db: Firestore, base: Cap, tx: Transaction) {
     fail();
   return { ready: ready!, signal: signal!, kernel: kernel!, death: death!, work: work! };
 }
-async function intentRecord(db: Firestore, base: Cap, tx: Transaction) {
+async function intentRecord(db: Firestore, base: LineageBase, tx: Transaction) {
   const original = await originals(db, base, tx);
   const intent = (await tx.get(db.doc(name('ReplacementIntent', base)))).data();
   if (
@@ -133,6 +134,8 @@ async function intentRecord(db: Firestore, base: Cap, tx: Transaction) {
     fail();
   return { ...original, intent: intent! };
 }
+/** GET-only historical lineage validation; no authorize callback, signal or birth authority. */
+export const readMediaRecoveryOriginalLineage = intentRecord;
 export async function mediaReplacementCapability(db: Firestore, base: Cap) {
   let original: any;
   const read = async (tx: Transaction) => {

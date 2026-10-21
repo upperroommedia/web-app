@@ -14,6 +14,10 @@ import {
   imageReplayRunner,
   imageReplayRunnerSHA256,
   assertImageReplayReceipt,
+  createMediaRecoveryImageReplayObserver,
+  mediaRecoveryImageRunner,
+  mediaRecoveryImageRunnerSHA256,
+  assertMediaRecoveryImageReplayReceipt,
 } from './temporal-image-replay.mjs';
 const sha = (x) => createHash('sha256').update(x).digest('hex');
 const image = `us-central1-docker.pkg.dev/urm-app-staging/urm-temporal/worker@sha256:${'a'.repeat(64)}`;
@@ -24,7 +28,7 @@ const options = () => ({
   bindingDigest: 'c'.repeat(64),
   evidenceDigest: 'd'.repeat(64),
 });
-function fixture(mode = 'normal') {
+function fixture(mode = 'normal', media = false) {
   const o = { ...options(), historyToJSON },
     containers = new Map(),
     calls = [],
@@ -51,7 +55,13 @@ function fixture(mode = 'normal') {
         Image: `sha256:${'1'.repeat(64)}`,
         Name: `/${flag('--name')}`,
         Created: new Date().toISOString(),
-        Config: { Image: image, User: 'node', Entrypoint: ['node'], Cmd: ['-e', imageReplayRunner], Labels: labels },
+        Config: {
+          Image: image,
+          User: 'node',
+          Entrypoint: ['node'],
+          Cmd: ['-e', media ? mediaRecoveryImageRunner : imageReplayRunner],
+          Labels: labels,
+        },
         HostConfig: {
           NetworkMode: 'none',
           ReadonlyRootfs: true,
@@ -90,6 +100,14 @@ function fixture(mode = 'normal') {
         code: 0,
         stdout: JSON.stringify({
           schemaVersion: 1,
+          ...(media
+            ? {
+                tools:
+                  mode === 'wrong-tools'
+                    ? {}
+                    : { pythonSHA256: '1'.repeat(64), ffmpegSHA256: '2'.repeat(64), ffprobeSHA256: '3'.repeat(64) },
+              }
+            : {}),
           buildId: o.buildId,
           bundleSHA256: 'e'.repeat(64),
           historySHA256: request.historySHA256,
@@ -118,7 +136,10 @@ function fixture(mode = 'normal') {
     inputs,
     transport,
     cleanup: async () =>
-      rm(join(await realpath(tmpdir()), `urm-image-replay-${o.operationId}`), { recursive: true, force: true }),
+      rm(join(await realpath(tmpdir()), `${media ? 'urm-media-image-replay' : 'urm-image-replay'}-${o.operationId}`), {
+        recursive: true,
+        force: true,
+      }),
   };
 }
 test('exact image inspection/replay is cleanup gated, history/run bound, durable and GET-only on repeat', async () => {
@@ -309,4 +330,107 @@ test('Docker os.Create CID mode is normalized through owned private-directory de
   } finally {
     await f.cleanup();
   }
+});
+
+for (const mode of ['normal', 'wrong-tools', 'lost-start', 'lost-remove'])
+  test(`private fixed image profile is distinct and cleanup-bound / ${mode}`, async () => {
+    const f = fixture(mode, true);
+    try {
+      if (['wrong-tools', 'lost-start'].includes(mode)) {
+        await assert.rejects(createMediaRecoveryImageReplayObserver(f.o, f.transport), /UNCONFIRMED/);
+        assert.equal(f.containers.size, 0);
+        return;
+      }
+      const image = await createMediaRecoveryImageReplayObserver(f.o, f.transport);
+      const receipt = await image.replayHistory({ events: [] }, 'private', randomUUID());
+      assert.equal(receipt.runnerSHA256, mediaRecoveryImageRunnerSHA256);
+      assert.notEqual(receipt.runnerSHA256, imageReplayRunnerSHA256);
+      assertMediaRecoveryImageReplayReceipt(receipt, { bundleSHA256: image.bundleSHA256 });
+      assert.throws(() => assertImageReplayReceipt(receipt, {}), /UNCONFIRMED/);
+      assert.throws(
+        () =>
+          assertMediaRecoveryImageReplayReceipt(
+            { ...receipt, tools: { ...receipt.tools, pythonSHA256: 'f'.repeat(64) } },
+            {}
+          ),
+        /UNCONFIRMED/
+      );
+      assert.equal(f.containers.size, 0);
+    } finally {
+      await f.cleanup();
+    }
+  });
+test('private runner uses only fixed private bundle/tool paths and stable bounded root-owned tool bytes', async () => {
+  const paths = [],
+    positions = new Map(),
+    output = [],
+    exits = [];
+  const build = 'b'.repeat(40),
+    bytes = Buffer.from('\ufeffprivate-image-bytes'),
+    tool = Buffer.from('fixed-tool');
+  const request = {
+    buildId: build,
+    kind: 'inspect',
+    historyJSON: '',
+    historyJSONSHA256: sha(''),
+    historySHA256: sha(''),
+    workflowId: '',
+    runId: '',
+  };
+  const fs = {
+    constants: { O_RDONLY: 0, O_NOFOLLOW: 1 },
+    realpathSync: (p) => p,
+    openSync: (p) => {
+      paths.push(p);
+      positions.set(p, 0);
+      return p;
+    },
+    closeSync: () => {},
+    fstatSync: (p) => ({
+      isFile: () => true,
+      uid: 0,
+      mode: 0o100755,
+      size: p.includes('build-id') ? build.length : p.includes('bundle') ? bytes.length : tool.length,
+      dev: 1,
+      ino: 2,
+      mtimeMs: 1,
+      ctimeMs: 1,
+    }),
+    readFileSync: (p) => (p.includes('build-id') ? build : bytes),
+    readSync: (p, b) => {
+      const n = positions.get(p);
+      if (n) return 0;
+      tool.copy(b);
+      positions.set(p, tool.length);
+      return tool.length;
+    },
+  };
+  const proc = {
+    stdin: (async function* () {
+      yield Buffer.from(JSON.stringify(request));
+    })(),
+    stdout: { write: (v) => output.push(v) },
+    stderr: { write: () => {} },
+    exit: (v) => exits.push(v),
+  };
+  await vm.runInNewContext(mediaRecoveryImageRunner, {
+    Buffer,
+    TextDecoder,
+    process: proc,
+    require: (p) => (p === 'node:fs' ? fs : p === 'node:crypto' ? { createHash } : assert.fail('Unexpected module')),
+  });
+  assert.deepEqual(exits, [0]);
+  assert.equal(JSON.parse(output[0]).bundleSHA256, sha(bytes));
+  assert.deepEqual(JSON.parse(output[0]).tools, {
+    pythonSHA256: sha(tool),
+    ffmpegSHA256: sha(tool),
+    ffprobeSHA256: sha(tool),
+  });
+  assert.deepEqual(paths, [
+    '/workspace/apps/temporal-worker/lib/media-recovery-workflow-bundle.js',
+    '/etc/temporal-worker-build-id',
+    '/usr/bin/python3',
+    '/usr/local/bin/ffmpeg',
+    '/usr/local/bin/ffprobe',
+  ]);
 });

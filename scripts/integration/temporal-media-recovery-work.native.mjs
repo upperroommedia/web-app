@@ -514,7 +514,8 @@ test(
         assert.equal(version.buildId, plan.buildId);
         stage = `${mode}/native-start`;
         let startCalls = 0,
-          startOptions;
+          startOptions,
+          episodeWait;
         if (mode === 'preexisting-native-run') {
           handle = await rpc(() =>
             client.workflow.start('MediaRecoveryProbe', {
@@ -686,6 +687,26 @@ test(
             assert.equal(startCalls, 1);
           }
         }
+        if (mode === 'joint-supervised-recovery') {
+          const { waitForMediaRecoveryEpisode } = require(fileURLToPath(
+            new URL('../../apps/temporal-worker/src/runtime/media-recovery-collector.ts', import.meta.url)
+          ));
+          assert.equal(
+            (await bounded(db.doc(`_control/temporalMediaRecoveryReplacementCompleted-${op}`).get())).exists,
+            false
+          );
+          episodeWait = waitForMediaRecoveryEpisode({
+            db,
+            client,
+            operationId: op,
+            plan,
+            runId: handle.firstExecutionRunId,
+            expectedRootSHA256: nativeSnapshotProof(await bounded(lockRef.get())).dataDigest,
+            expectedControlSHA256: nativeSnapshotProof(await bounded(controlRef.get())).dataDigest,
+            expectedStateSHA256: nativeSnapshotProof(await bounded(stateRef.get())).dataDigest,
+          });
+          void episodeWait.catch(() => {});
+        }
         if (['joint-intent-ack-loss', 'joint-control-drift-after-intent'].includes(mode)) {
           stage = 'joint-intent-ack-loss/no-second-birth';
           await assert.rejects(bounded(supervised, 45000));
@@ -801,6 +822,117 @@ test(
             assert.equal(
               (await bounded(db.doc(`_control/temporalMediaRecoveryReplacementAdoption-${op}`).get())).get('attempt'),
               2
+            );
+            await bounded(episodeWait, 30000);
+            stage = 'joint-supervised-recovery/GET-only-collector';
+            const { collectMediaRecoveryExecution } = require(fileURLToPath(
+              new URL('../../apps/temporal-worker/src/runtime/media-recovery-collector.ts', import.meta.url)
+            ));
+            const collectorOptions = {
+              db,
+              client,
+              operationId: op,
+              plan,
+              expectedRootSHA256: nativeSnapshotProof(await bounded(lockRef.get())).dataDigest,
+              expectedControlSHA256: nativeSnapshotProof(await bounded(controlRef.get())).dataDigest,
+              expectedStateSHA256: nativeSnapshotProof(await bounded(stateRef.get())).dataDigest,
+              image: {
+                bundleSHA256: 'e'.repeat(64),
+                tools: { pythonSHA256: 'a'.repeat(64), ffmpegSHA256: 'b'.repeat(64), ffprobeSHA256: 'c'.repeat(64) },
+              },
+            };
+            const collected = await bounded(collectMediaRecoveryExecution(collectorOptions), 25000);
+            assert.equal(collected.runId, handle.firstExecutionRunId);
+            assert.equal(collected.workflowId, id);
+            assert.equal(collected.history.events.length, (await bounded(handle.fetchHistory())).events.length);
+            assert.equal(
+              (await bounded(collectMediaRecoveryExecution(collectorOptions), 25000)).evidenceSHA256,
+              collected.evidenceSHA256
+            );
+            for (const [kind, mutate] of [
+              [
+                'Startup',
+                (v) => {
+                  v.bundle.bundleSHA256 = 'f'.repeat(64);
+                },
+              ],
+              [
+                'ReplacementStartup',
+                (v) => {
+                  v.capacity.allocation.pythonSHA256 = 'f'.repeat(64);
+                },
+              ],
+              [
+                'ReplacementStartup',
+                (v) => {
+                  v.capacity.schemaVersion = 2;
+                },
+              ],
+              [
+                'ReplacementKernel',
+                (v) => {
+                  v.close.observerFailed = true;
+                },
+              ],
+              [
+                'ReplacementStop',
+                (v) => {
+                  v.kernelSHA256 = 'f'.repeat(64);
+                },
+              ],
+              [
+                'ReplacementAdoption',
+                (v) => {
+                  v.inventorySHA256 = 'f'.repeat(64);
+                },
+              ],
+              [
+                'ReplacementCompleted',
+                (v) => {
+                  v.historyEvents += 1;
+                },
+              ],
+            ]) {
+              const ref = db.doc(`_control/temporalMediaRecovery${kind}-${op}`),
+                original = (await bounded(ref.get())).data(),
+                changed = structuredClone(original);
+              mutate(changed);
+              await bounded(ref.set(changed));
+              await assert.rejects(
+                bounded(collectMediaRecoveryExecution(collectorOptions), 25000),
+                /^Error: MEDIA_RECOVERY_COLLECTION_UNCONFIRMED$/
+              );
+              await bounded(ref.set(original));
+            }
+            await assert.rejects(
+              bounded(
+                collectMediaRecoveryExecution({
+                  ...collectorOptions,
+                  image: { ...collectorOptions.image, bundleSHA256: 'f'.repeat(64) },
+                }),
+                25000
+              )
+            );
+            // A mutation during external native/object reads must not be accepted
+            // by combining separate consistent transaction snapshots.
+            let reads = 0;
+            const driftingDB = new Proxy(db, {
+              get(t, key) {
+                if (key === 'runTransaction')
+                  return async (...args) => {
+                    const result = await t.runTransaction(...args);
+                    if (++reads === 1)
+                      await t
+                        .doc(`_control/temporalMediaRecoveryReplacementStop-${op}`)
+                        .update({ kernelSHA256: 'f'.repeat(64) });
+                    return result;
+                  };
+                const value = Reflect.get(t, key);
+                return typeof value === 'function' ? value.bind(t) : value;
+              },
+            });
+            await assert.rejects(
+              bounded(collectMediaRecoveryExecution({ ...collectorOptions, db: driftingDB }), 25000)
             );
             supervised = undefined;
           } else assert.equal(acquireCalls, 1);

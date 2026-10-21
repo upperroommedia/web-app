@@ -132,6 +132,17 @@ async function readKernelBirth(
   journalPath: string
 ) {
   const value = (await db.doc(journalPath).get()).data() ?? fail();
+  return validateMediaKernelBirthRecord(value, operationId, intentSHA256, link, witness);
+}
+/** Pure historical identity check shared by GET-only collectors. No live handle,
+ * signal, journal write or polling authority can be obtained from this reader. */
+export function validateMediaKernelBirthRecord(
+  value: any,
+  operationId: string,
+  intentSHA256: string,
+  link: unknown,
+  witness: WorkerWitness
+) {
   const x = link as { operationId?: string; birthDigest?: string };
   if (
     !x ||

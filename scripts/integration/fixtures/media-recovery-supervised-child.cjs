@@ -119,6 +119,66 @@ for (const sig of ['SIGTERM', 'SIGINT', 'SIGQUIT', 'SIGUSR2']) process.on(sig, r
     kernel: link,
     acquire: production.acquireMedia,
   });
+  // CONTROLLED image/capacity metadata only. The joint test still does not run
+  // index.js, an immutable image, a native 64GiB allocation or Cloud Run.
+  const { workerReadinessDigest: hash } = require('../../../apps/temporal-worker/src/runtime/readiness-probe.ts');
+  const { mediaStartupBudget } = require('../../../apps/temporal-worker/src/runtime/media-startup-capacity.ts');
+  const {
+    MEDIA_ALLOCATION_PROGRAM_SHA256,
+  } = require('../../../apps/temporal-worker/src/runtime/media-capacity-allocation.ts');
+  const at = new Date().toISOString(),
+    GiB = 1024 ** 3;
+  await db
+    .doc(`_control/temporalMediaRecovery${replacement ? 'ReplacementStartup' : 'Startup'}-${operationId}`)
+    .create({
+      schemaVersion: 1,
+      kind: 'private-diagnostic-startup-only-no-recovery-proof',
+      operationId,
+      intentSHA256: r.cap.context.intentSHA256,
+      worker: witness,
+      kernel: link,
+      bundle: { schemaVersion: 1, buildId: witness.buildId, bundleSHA256: 'e'.repeat(64), bundleBytes: 123 },
+      capacity: {
+        schemaVersion: 3,
+        budgets: mediaStartupBudget,
+        totalBytes: 100 * GiB,
+        availableBytes: 90 * GiB,
+        canaryBytes: 1024 * 1024,
+        writeReadFsync: true,
+        cleanupConfirmed: true,
+        reservationReleased: true,
+        observedAt: at,
+        allocation: {
+          schemaVersion: 1,
+          requestedBytes: 64 * GiB,
+          allocatedBytes: 64 * GiB,
+          pythonSHA256: 'a'.repeat(64),
+          programSHA256: MEDIA_ALLOCATION_PROGRAM_SHA256,
+          filesystemDevice: 2,
+          fileInode: 123,
+          availableBytesAfterAllocation: 26 * GiB,
+          minimumAvailableBytesWhileHeld: 26 * GiB,
+          startedAt: at,
+          releasedAt: at,
+          cleanupConfirmed: true,
+        },
+        processing: {
+          schemaVersion: 1,
+          ffmpegSHA256: 'b'.repeat(64),
+          ffprobeSHA256: 'c'.repeat(64),
+          sourceBytes: 32044,
+          outputBytes: 32044,
+          sampleRate: 16000,
+          channels: 1,
+          durationSeconds: 1,
+          pcmSamplesVerified: 16000,
+          progressBeforeCancellation: true,
+          cancelledChildDrained: true,
+          retryCompleted: true,
+        },
+      },
+      observedAt: at,
+    });
   const activities = replacement
     ? {
         ...r.activities,

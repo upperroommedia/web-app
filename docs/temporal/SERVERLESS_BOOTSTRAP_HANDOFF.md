@@ -686,11 +686,11 @@ lost restore acknowledgements. Cleanup does not expire or require a new quota
 read. Failed/not-started cycles cannot become successful recovery evidence.
 
 **The canonical runtime adapter is unconditionally unavailable before any cycle
-checkpoint or native mutation.** The real expiring diagnostic producer, private
-job and actor authorization, actual image queue/config path, original live-child
-signal/death/replacement journal, native recovery/drain collector and next-normal
-origin consumer still require implementation. The fixed denial must remain until
-that whole protocol exists; no CLI flag or controlled receipt can enable it.
+checkpoint or native mutation.** Subsequent source phases below implement the
+private producer, image configuration, supervisor episode and recovery collector.
+Fresh native version-wide drain and next-normal origin consumption still require
+implementation. The fixed denial must remain until the complete protocol exists;
+no CLI flag or controlled receipt can enable it.
 Source tests use controlled Cloud and runtime adapters; dedicated Firestore tests
 establish checkpoint authority, immutable progress and acknowledgement recovery.
 They prove no Cloud Run API acceptance, actual diagnostic execution or readiness.
@@ -731,8 +731,8 @@ atomic race fence, and actual backend conditional-write acceptance remains a
 required native platform check.
 
 This source is not reachable through the canonical diagnostic CLI: preflight
-continues to deny execution. Diagnostic image queue registration, supervisor
-fault/death/replacement/adoption collector and
+continues to deny execution. Subsequent source phases connect the image queue,
+supervisor episode and adoption collector; native version-wide drainage and the
 restored-normal lineage consumer remain pending. Ordinary media remains
 Activity-only, media promotion remains denied, and orchestration promotion
 remains unavailable. No Cloud Run or immutable-image execution is established by
@@ -757,9 +757,9 @@ after its capability expires; it returns an expired-authorization marker and
 grants no renewed work permission. Native event 1 must still fall within the
 original window. A final atomic read joins the original authority and unchanged
 confirmation receipt. START confirmation is separate from recovery acceptance:
-the execution adapter continues to deny recovery success, and canonical preflight
-remains fixed-deny until image queue registration, supervisor replacement and
-native adoption/drain collectors are complete.
+the later episode collector must independently accept recovery success. Canonical
+preflight remains fixed-deny until native drainage and restored-origin consumers
+are complete.
 
 The image now has a separate private configuration and an explicit launcher /
 `index.js` branch for the diagnostic queue. Normal configuration still rejects
@@ -824,8 +824,36 @@ Local integration exercises the source supervisor, real SDK, production actor
 and durable ownership checks, dedicated Firebase stores, original SIGKILL and a
 distinct SDK child adopting the same artifacts on native retry. Its Cloud witness,
 small budgets and fixture bootstrap remain controlled; it is not actual index.js,
-final-image or Cloud Run acceptance. Canonical collection of image/startup
-lineage, fresh native version-wide drain and restored-normal-origin consumption
-remain pending. Application-child replacement within an instance does not prove
+final-image or Cloud Run acceptance. The canonical GET-only episode collector
+now joins image/startup lineage as described below; fresh native version-wide
+drain and restored-normal-origin consumption remain pending. Application-child replacement within an instance does not prove
 Cloud Run instance replacement. Canonical preflight, media promotion and
 orchestration gates remain closed.
+
+
+The canonical execution adapter waits for the original owned episode to finish
+using GET-only observations of its exact confirmed run, explicit native pin,
+unchanged paused authority and successful replacement close. A START response
+cannot be mistaken for completion. The bounded wait cannot issue a START,
+signal, fork or work mutation, and does not renew the original work expiry.
+
+The separate private-image inspection profile reads the fixed diagnostic bundle
+and root-owned Python/ffmpeg/ffprobe bytes from the verified immutable digest.
+Its runner digest and private checkpoint directory differ from ordinary replay.
+It retains the ordinary offline container restrictions and ownership/cleanup
+protocol. Both original and replacement startup receipts must match these exact
+bundle/tool hashes. Historical capacity validation uses each immutable original
+startup timestamp; it grants no current capacity reservation or work authority.
+
+The collector joins the arming/START producer facts, both kernel births and
+startup/capacity records, original ready/signal/death, distinct replacement
+intent/adoption, original native run/history/result, replacement stop and clean
+close. Both complete artifact inventories/current generations and request stamps
+remain unchanged. Transactions bracket external native/object reads; the entire
+collection repeats around exact-image offline replay. Only a safe episode proof
+hash leaves the canonical adapter. Failed-observer cleanup cannot satisfy it.
+The collector is not a version-wide drain, restored normal origin, promotion or
+Cloud Run instance recovery certificate. Canonical preflight and the media and
+orchestration gates remain denied until their separate consumers and required
+native evidence are connected. Controlled local image/capacity metadata is not
+immutable-image, 64 GiB allocation, effective-credential or Cloud Run acceptance.

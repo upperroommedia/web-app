@@ -10,6 +10,7 @@ export function loadNativeReleaseApplication(runtimeRoot){
       const workerRequire = createRequire(resolve(runtimeRoot, 'apps/temporal-worker/package.json'));
       return { ...workerRequire('@temporalio/common/lib/proto-utils'),
         ...workerRequire(resolve(runtimeRoot,'apps/temporal-worker/src/runtime/media-recovery-work.ts')), ...workerRequire('@temporalio/client'),
+        ...workerRequire(resolve(runtimeRoot,'apps/temporal-worker/src/runtime/media-recovery-collector.ts')),
         ...workerRequire(resolve(runtimeRoot, 'apps/temporal-worker/src/runtime/serverless-release-readiness.ts')) };
     } finally {
       service.enabled(false);
