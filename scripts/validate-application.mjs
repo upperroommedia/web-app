@@ -93,6 +93,7 @@ export function applicationStages(root = ROOT) {
         node('--test', 'scripts/temporal-media-recovery-cycle.test.mjs'),
         node('--test', 'scripts/temporal-media-diagnostic-drain.test.mjs'),
         node('--test', 'scripts/temporal-media-stop-confirmation.test.mjs'),
+        node('--test', 'scripts/temporal-media-recovery-phase-pool.test.mjs'),
         pnpm(
           '--dir',
           'functions',

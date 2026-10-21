@@ -927,3 +927,22 @@ new disk quota. Canonical preflight and phase-aware mutation protection remain
 unavailable; the separate restored-origin activation consumer and actual final
 image/platform acceptance are still required. No operational gate is enabled by
 these local tests.
+
+The canonical diagnostic protection entry now runs a separate phase/resource
+sub-fence before its still-unavailable namespace policy. This sub-fence derives
+source-fixed transition requests and permitted resource states from the exact
+native parent checkpoint. Before/attempted transitions can observe only their
+original predecessor. A known acknowledged LRO may reconcile that predecessor
+while pending, or its exact generation/revision/template successor; a completed
+transition must match its saved exact resource. LRO name, completion response,
+original twelve ancestors, native revision identity and paused authority are
+joined under one original five-second wall/monotonic window. An unknown ACK
+cannot adopt the observed successor or grant another PATCH.
+
+This is resource reconciliation only. Startup can legitimately register owned
+idle pollers before the SDK START, so it cannot reuse a blanket no-pollers rule.
+The separate version/partition/namespace policy must authenticate that exact
+original birth/startup/container/image and still forbid private execution until
+the later saved SDK intent. Stable protected-baseline hashes must be separate
+from independently checked monotonic own-startup facts. That policy remains
+unavailable, and canonical preflight continues to deny before any live mutation.

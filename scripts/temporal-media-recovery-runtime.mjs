@@ -1,3 +1,4 @@
+import {observeMediaRecoveryPhasePool} from './temporal-media-recovery-phase-pool.mjs';
 import {startCloudRunMediaRecovery,collectCloudRunMediaRecovery,drainCloudRunMediaRecovery,confirmCloudRunMediaRecoveryStopped,confirmCloudRunMediaRecoveryNeverStarted} from './temporal-release-cloud-run.mjs';
 import { prepareMediaRecoveryJournal } from './temporal-media-recovery-checkpoint.mjs';
 /** Canonical preflight stays unavailable. Source preparation, episode and drain
@@ -43,3 +44,12 @@ export const mediaRecoveryDrainage=o=>scope=>drainCloudRunMediaRecovery({...o.op
 
 export const mediaRecoveryStoppedConfirmation=o=>scope=>confirmCloudRunMediaRecoveryStopped({...o.options(),...scope});
 export const mediaRecoveryNeverStartedConfirmation=o=>scope=>confirmCloudRunMediaRecoveryNeverStarted({...o.options(),...scope});
+
+/** A real native resource sub-fence, not complete mutation protection. The
+ * separate namespace/poller/own-startup policy stays unavailable; this cannot
+ * manufacture its proof or enable canonical preflight. */
+export const mediaRecoveryProtection=o=>async scope=>{
+ const options=o.options();
+ const phasePool=await observeMediaRecoveryPhasePool({...options,...scope});
+ return canonicalMediaRecoveryRuntime.observeProtection({...options,scope,phasePool});
+};

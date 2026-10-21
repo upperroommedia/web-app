@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { randomUUID } from 'node:crypto';
 import { mediaRecoveryFixture } from '../tests/fixtures/media-recovery.mjs';
+import { observeMediaRecoveryPhasePool } from '../temporal-media-recovery-phase-pool.mjs';
 import { readRestoredMediaRecoveryOrigin } from '../temporal-media-restored-origin.mjs';
 import { runMediaRecoveryCycle } from '../temporal-media-recovery-cycle.mjs';
 import {
@@ -21,6 +22,7 @@ if (process.env.FIRESTORE_EMULATOR_HOST !== `127.0.0.1:${harness.emulators.fires
   throw new Error('Dedicated emulator required');
 for (const mode of [
   'normal',
+  'phase-resource',
   'control-drift',
   'state-drift',
   'never-started',
@@ -138,14 +140,59 @@ for (const mode of [
           throw new Error('CONTROLLED_CHECKPOINT_ACK_LOST');
         }
       };
+      if (mode === 'phase-resource') {
+        const baseline = f.options.observeProtection;
+        f.options.observeProtection = async (scope) => {
+          const observed = await bounded(observeMediaRecoveryPhasePool({ ...f.options, ...options(), ...scope }));
+          assert.equal(observed.readOnly, true);
+          return baseline(scope);
+        };
+      }
       const api = f.options.api;
       f.options.api = (...args) => {
         if (denyQuota && args[0].includes('cloudquotas')) throw new Error('CONTROLLED_QUOTA_UNAVAILABLE');
         return api(...args);
       };
-      if (mode === 'normal') {
+      if (mode === 'normal' || mode === 'phase-resource') {
         const result = await bounded(runMediaRecoveryCycle(f.options));
         assert.equal((await bounded(immutableReceipt.get())).get('identityState.stage'), 'completed');
+        if (mode === 'phase-resource') {
+          const scope = { plan: result.plan, phase: 'completed', pool: result.restore.pool };
+          const readOptions = { ...f.options, ...options(), ...scope };
+          assert.equal((await bounded(observeMediaRecoveryPhasePool(readOptions))).position, 'exact');
+          const api = f.options.api;
+          await assert.rejects(
+            bounded(
+              observeMediaRecoveryPhasePool({
+                ...readOptions,
+                api: async (url, ...args) => {
+                  const v = await api(url, ...args);
+                  return url === `https://run.googleapis.com/v2/${result.plan.name}` ? { ...v, etag: 'foreign' } : v;
+                },
+              })
+            ),
+            /PHASE_POOL_UNCONFIRMED/
+          );
+          const tx = db.runTransaction.bind(db);
+          let reads = 0;
+          const delayed = new Proxy(db, {
+            get(t, k) {
+              if (k === 'runTransaction')
+                return async (...args) => {
+                  const v = await tx(...args);
+                  if (++reads === 2) await new Promise((r) => setTimeout(r, 5100));
+                  return v;
+                };
+              const v = Reflect.get(t, k);
+              return typeof v === 'function' ? v.bind(t) : v;
+            },
+          });
+          await assert.rejects(
+            bounded(observeMediaRecoveryPhasePool({ ...readOptions, firestore: delayed }), 7000),
+            /PHASE_POOL_UNCONFIRMED/
+          );
+        }
+
         await assert.rejects(
           saveMediaRecoveryCheckpoint({ ...options(), identityState: { ...result, stage: 'planned' } })
         );
@@ -222,6 +269,14 @@ for (const mode of [
         assert.equal(origin.kind, 'restored-media-normal-origin-v1');
         assert.notEqual(origin.pool.revision, f.saved.plan.origin.revision);
         assert.equal(origin.pool.desiredManualInstanceCount, 0);
+        if (mode === 'phase-resource') {
+          const baseline = f.options.observeProtection;
+          f.options.observeProtection = async (scope) => {
+            const observed = await bounded(observeMediaRecoveryPhasePool({ ...f.options, ...options(), ...scope }));
+            assert.equal(observed.readOnly, true);
+            return baseline(scope);
+          };
+        }
         const api = f.options.api;
         let sampled = false,
           drifted = false;
