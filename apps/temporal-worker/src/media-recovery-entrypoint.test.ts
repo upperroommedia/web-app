@@ -1,4 +1,5 @@
 const mockEvents: string[] = [];
+const mockReceiptPaths: string[] = [];
 let mockRegistered = true,
   mockParent = true,
   mockBundleFailure = false;
@@ -66,7 +67,10 @@ jest.mock('./runtime/activities', () => ({
 }));
 jest.mock('firebase-admin/firestore', () => ({
   getFirestore: () => ({
-    doc: () => ({ get: async () => ({ data: () => undefined }) }),
+    doc: (path: string) => {
+      mockReceiptPaths.push(path);
+      return { get: async () => ({ data: () => undefined }) };
+    },
     runTransaction: async (fn: any) =>
       fn({
         get: async () => ({ exists: false }),
@@ -85,8 +89,8 @@ jest.mock('@google-cloud/storage', () => ({
   },
 }));
 jest.mock('./runtime/media-recovery-original-fault', () => ({ holdOriginalMediaCompletion: (o: any) => o.acquire }));
-jest.mock('./runtime/media-recovery-registration', () => ({
-  createMediaRecoveryRegistration: async () => ({
+jest.mock('./runtime/media-recovery-registration', () => {
+  const make = async () => ({
     cap: {
       authorize: mockAuthorize,
       context: { intentSHA256: 'd'.repeat(64) },
@@ -94,8 +98,18 @@ jest.mock('./runtime/media-recovery-registration', () => ({
     },
     activities: mockActivities,
     authorize: mockAuthorize,
-  }),
-}));
+  });
+  return {
+    createMediaRecoveryRegistration: async () => {
+      mockEvents.push('original.registration');
+      return make();
+    },
+    createMediaRecoveryReplacementRegistration: async () => {
+      mockEvents.push('replacement.registration');
+      return make();
+    },
+  };
+});
 jest.mock('./runtime/media-startup-capacity', () => ({
   runMediaFilesystemCanary: async () => {
     mockEvents.push('canary');
@@ -142,6 +156,7 @@ const originalSend = process.send;
 beforeEach(() => {
   jest.clearAllMocks();
   mockEvents.length = 0;
+  mockReceiptPaths.length = 0;
   mockRegistered = true;
   mockParent = true;
   mockBundleFailure = false;
@@ -175,5 +190,20 @@ test('early bundle failure still closes creator-owned Firebase and installed run
   mockBundleFailure = true;
   await expect(runMediaRecoveryApplication()).rejects.toThrow('CONTROLLED_BUNDLE_FAILURE');
   expect(mockEvents).toEqual(expect.arrayContaining(['firebase.close', 'runtime.close']));
+  expect(mockCreate).not.toHaveBeenCalled();
+});
+
+test('replacement uses separate lineage registration and startup receipt', async () => {
+  process.env.TEMPORAL_MEDIA_RECOVERY_CHILD = 'replacement';
+  await runMediaRecoveryApplication();
+  expect(mockEvents).toContain('replacement.registration');
+  expect(mockEvents).not.toContain('original.registration');
+  expect(mockReceiptPaths.some((p) => p.includes('temporalMediaRecoveryReplacementStartup-'))).toBe(true);
+  expect(mockReceiptPaths.some((p) => p.includes('temporalMediaRecoveryStartup-'))).toBe(false);
+});
+test('unrecognized child ordinal cannot initialize or poll', async () => {
+  process.env.TEMPORAL_MEDIA_RECOVERY_CHILD = 'third';
+  await expect(runMediaRecoveryApplication()).rejects.toThrow('MEDIA_RECOVERY_ORIGINAL_CHILD_REQUIRED');
+  expect(mockEvents).toEqual([]);
   expect(mockCreate).not.toHaveBeenCalled();
 });

@@ -14,6 +14,11 @@ import {
 } from './media-recovery-work';
 import { mediaRecoveryKernelContext } from './media-recovery-capability';
 import { readMediaRecoveryKernelBirth } from './media-kernel-supervisor';
+import {
+  mediaReplacementCapability,
+  readReplacementBirth,
+  replacementMediaAcquisition,
+} from './media-recovery-replacement';
 import { workerReadinessDigest as hash } from './readiness-probe';
 function fail(): never {
   throw ApplicationFailure.nonRetryable(
@@ -24,7 +29,7 @@ function fail(): never {
 /** Fixed image Worker surface. It exposes neither ordinary media dispatch nor
  * readiness/provider Activities. The production acquire path retains its own
  * durable execution, ownership, actor and artifact authorization. */
-export async function createMediaRecoveryRegistration(o: {
+type Options = {
   firestore: Firestore;
   auth: Auth;
   bucket: Bucket;
@@ -33,7 +38,8 @@ export async function createMediaRecoveryRegistration(o: {
   operationId: string;
   kernel: unknown;
   acquire: (ref: MediaJobRef) => Promise<MediaOutcome>;
-}) {
+};
+export async function createMediaRecoveryRegistration(o: Options) {
   const cap = await mediaRecoveryKernelContext(o.firestore, o.auth, o.witness, o.operationId);
   const birth = await readMediaRecoveryKernelBirth(
     o.firestore,
@@ -42,6 +48,38 @@ export async function createMediaRecoveryRegistration(o: {
     o.kernel,
     o.witness
   );
+  return registration(o, cap, birth, () =>
+    readMediaRecoveryKernelBirth(o.firestore, o.operationId, cap.context.intentSHA256, o.kernel, o.witness)
+  );
+}
+export async function createMediaRecoveryReplacementRegistration(o: Options) {
+  const base = await mediaRecoveryKernelContext(o.firestore, o.auth, o.witness, o.operationId);
+  const cap = await mediaReplacementCapability(o.firestore, base);
+  const read = () => readReplacementBirth(o.firestore, cap, o.kernel, o.witness);
+  const birth = await read();
+  const result = await registration(o, cap, birth, read, cap.replacement);
+  return {
+    ...result,
+    activities: Object.freeze({
+      admitMediaRecoveryWork: async () => fail(),
+      acquireMedia: replacementMediaAcquisition({
+        db: o.firestore,
+        bucket: o.bucket,
+        client: o.client,
+        cap,
+        birth,
+        acquire: result.activities.acquireMedia,
+      }),
+    }),
+  };
+}
+async function registration(
+  o: Options,
+  cap: Awaited<ReturnType<typeof mediaRecoveryKernelContext>>,
+  birth: any,
+  readBirth: () => Promise<any>,
+  replacement?: any
+) {
   if (birth.value.stage !== 'running') fail();
   const authorize = async () => {
     await o.firestore.runTransaction(cap.authorize, { readOnly: true });
@@ -60,7 +98,11 @@ export async function createMediaRecoveryRegistration(o: {
         info.workflowType !== 'MediaRecoveryProbe' ||
         info.activityId !== 'media-recovery-acquire' ||
         info.activityType !== 'acquireMedia' ||
-        execution?.workflowId !== `media-recovery-${o.operationId}`
+        execution?.workflowId !== `media-recovery-${o.operationId}` ||
+        (replacement &&
+          (info.attempt !== 2 ||
+            execution?.runId !== replacement.ready.runId ||
+            hash(ref) !== hash(replacement.ready.ref)))
       )
         fail();
       await authorize();
@@ -86,7 +128,8 @@ export async function createMediaRecoveryRegistration(o: {
             hash(grant.deploymentVersion) !==
               hash({ deploymentName: MEDIA_RECOVERY_DEPLOYMENT, buildId: o.witness.buildId }) ||
             grant.expiresAt !== cap.plan.expiresAt ||
-            hash(record.worker) !== hash(o.witness) ||
+            hash(record.worker) !== hash(replacement ? replacement.kernel.worker : o.witness) ||
+            (replacement && hash(grant) !== replacement.ready.grantSHA256) ||
             hash(intent.data()) !== grant.intentSHA256 ||
             intent.get('actorUid') !== grant.actorUid ||
             hash(request.get('ref')) !== hash(ref) ||
@@ -98,13 +141,7 @@ export async function createMediaRecoveryRegistration(o: {
         },
         { readOnly: true }
       );
-      const currentBirth = await readMediaRecoveryKernelBirth(
-        o.firestore,
-        o.operationId,
-        cap.context.intentSHA256,
-        o.kernel,
-        o.witness
-      );
+      const currentBirth = await readBirth();
       if (currentBirth.value.stage !== 'running') fail();
       const d = await o.client.connection.withDeadline(Date.now() + 5000, () =>
         o.client.workflow.getHandle(execution!.workflowId, execution!.runId, { followRuns: false }).describe()

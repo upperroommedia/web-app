@@ -75,7 +75,9 @@ test(
       handle,
       current,
       stage = 'setup',
-      primary;
+      primary,
+      supervised,
+      supervisedSettled = false;
     const users = [],
       owned = [];
     let ownsControls = false;
@@ -124,6 +126,9 @@ test(
       const client = new Client({ connection: mutationConnection, namespace });
       let version;
       for (const mode of [
+        'joint-supervised-recovery',
+        'joint-intent-ack-loss',
+        'joint-control-drift-after-intent',
         'original-completion-held',
         'start-late-authority',
         'normal',
@@ -378,7 +383,76 @@ test(
         admissionCalls = 0;
         acquireCalls = 0;
         productionCalls = 0;
-        if (!worker) {
+        if (mode.startsWith('joint-')) {
+          const { superviseMediaRecoveryReplacementCycle } = require(fileURLToPath(
+            new URL('../../apps/temporal-worker/src/runtime/media-recovery-replacement.ts', import.meta.url)
+          ));
+          const cap = await bounded(mediaRecoveryKernelContext(db, auth, witness, op));
+          process.env.URM_RECOVERY_TEST_ADDRESS = environment.address;
+          process.env.URM_RECOVERY_TEST_OPERATION = op;
+          process.env.URM_RECOVERY_TEST_PARENT = JSON.stringify(witness);
+          const selectedDB = ['joint-intent-ack-loss', 'joint-control-drift-after-intent'].includes(mode)
+            ? new Proxy(db, {
+                get(target, key) {
+                  if (key === 'runTransaction')
+                    return async (fn, options) => {
+                      let wrote = false;
+                      const value = await target.runTransaction(
+                        async (tx) =>
+                          fn(
+                            new Proxy(tx, {
+                              get(t, k) {
+                                if (k === 'create')
+                                  return (r, v) => {
+                                    if (r.path === `_control/temporalMediaRecoveryReplacementIntent-${op}`)
+                                      wrote = true;
+                                    return t.create(r, v);
+                                  };
+                                const x = Reflect.get(t, k);
+                                return typeof x === 'function' ? x.bind(t) : x;
+                              },
+                            })
+                          ),
+                        options
+                      );
+                      if (wrote && mode === 'joint-control-drift-after-intent')
+                        await controlRef.update({ ownedReplacementDrift: true });
+                      if (wrote && mode === 'joint-intent-ack-loss')
+                        throw new Error('CONTROLLED_COMMITTED_INTENT_ACK_LOSS');
+                      return value;
+                    };
+                  const v = Reflect.get(target, key);
+                  return typeof v === 'function' ? v.bind(target) : v;
+                },
+              })
+            : db;
+          supervisedSettled = false;
+          supervised = superviseMediaRecoveryReplacementCycle(
+            selectedDB,
+            bucket,
+            cap,
+            fileURLToPath(new URL('./fixtures/media-recovery-supervised-child.cjs', import.meta.url)),
+            client
+          );
+          void supervised
+            .finally(() => {
+              supervisedSettled = true;
+            })
+            .catch(() => {});
+          version = { deploymentName: 'urm-worker-media-recovery-staging', buildId: plan.buildId };
+          const end = Date.now() + 20000;
+          while (true) {
+            try {
+              const d = await rpc(() =>
+                client.workflowService.describeWorkerDeploymentVersion({ namespace, deploymentVersion: version })
+              );
+              if (d.workerDeploymentVersionInfo?.taskQueueInfos?.length === 2) break;
+            } catch {}
+            if (Date.now() >= end) throw new Error('Owned child registration timed out');
+            await new Promise((r) => setTimeout(r, 50));
+          }
+        }
+        if (!worker && !mode.startsWith('joint-')) {
           version = { deploymentName: 'urm-worker-media-recovery-staging', buildId: plan.buildId };
           worker = await rpc(() =>
             Worker.create({
@@ -612,6 +686,29 @@ test(
             assert.equal(startCalls, 1);
           }
         }
+        if (['joint-intent-ack-loss', 'joint-control-drift-after-intent'].includes(mode)) {
+          stage = 'joint-intent-ack-loss/no-second-birth';
+          await assert.rejects(bounded(supervised, 45000));
+          assert.equal((await bounded(db.doc(`_control/temporalMediaRecoveryOriginalDeath-${op}`).get())).exists, true);
+          assert.equal(
+            (await bounded(db.doc(`_control/temporalMediaRecoveryReplacementIntent-${op}`).get())).exists,
+            true
+          );
+          assert.equal(
+            (await bounded(db.doc(`_control/temporalMediaRecoveryReplacementKernel-${op}`).get())).exists,
+            false
+          );
+          assert.equal(
+            (await bounded(db.doc(`_control/temporalMediaRecoveryReplacementAdoption-${op}`).get())).exists,
+            false
+          );
+          if ((await bounded(handle.describe())).raw.workflowExecutionInfo.status === 1)
+            await bounded(handle.terminate('Owned LOCAL uncertain intent cleanup'));
+          await assert.rejects(bounded(handle.result()));
+          supervised = undefined;
+          handle = undefined;
+          continue;
+        }
         if (mode === 'original-completion-held') {
           stage = 'original-completion-held/ready-wait';
           const end = Date.now() + 15000;
@@ -666,6 +763,7 @@ test(
         }
         if (
           [
+            'joint-supervised-recovery',
             'normal',
             'admission-ack-loss',
             'start-ack-loss',
@@ -688,8 +786,25 @@ test(
             assert.equal(startCalls, 1);
           }
 
-          assert.equal(acquireCalls, 1);
-          assert.equal(admissionCalls, mode === 'admission-ack-loss' ? 2 : 1);
+          if (mode === 'joint-supervised-recovery') {
+            assert.deepEqual(await bounded(supervised, 30000), { code: 0, signal: null });
+            assert.equal(
+              (await bounded(db.doc(`_control/temporalMediaRecoveryReplacementKernel-${op}`).get())).get(
+                'close.descendantsAbsent'
+              ),
+              true
+            );
+            assert.equal(
+              (await bounded(db.doc(`_control/temporalMediaRecoveryReplacementAdoption-${op}`).get())).get('runId'),
+              handle.firstExecutionRunId
+            );
+            assert.equal(
+              (await bounded(db.doc(`_control/temporalMediaRecoveryReplacementAdoption-${op}`).get())).get('attempt'),
+              2
+            );
+            supervised = undefined;
+          } else assert.equal(acquireCalls, 1);
+          if (mode !== 'joint-supervised-recovery') assert.equal(admissionCalls, mode === 'admission-ack-loss' ? 2 : 1);
           const record = await bounded(db.doc(`_control/temporalMediaRecoveryWork-${op}`).get());
           assert.equal(record.get('stage'), 'admitted');
           assert.equal(record.get('grant.runId'), handle.firstExecutionRunId);
@@ -778,6 +893,10 @@ test(
           failures.push(new Error('Owned private media cleanup failed'));
         }
       };
+      if (supervised && !supervisedSettled) process.emit('SIGTERM');
+      if (supervised) await cleanup(() => supervised);
+      for (const key of ['URM_RECOVERY_TEST_ADDRESS', 'URM_RECOVERY_TEST_OPERATION', 'URM_RECOVERY_TEST_PARENT'])
+        delete process.env[key];
       if (handle) await cleanup(() => handle.terminate('Owned LOCAL fixture cleanup'));
       if (worker) await cleanup(() => worker.shutdown());
       if (running) await cleanup(() => running);
@@ -801,6 +920,16 @@ test(
             `temporalMediaRecoveryKernel-${op}`,
             `temporalMediaRecoveryStartup-${op}`,
             `temporalMediaRecoveryOriginalReady-${op}`,
+            ...[
+              'OriginalSignal',
+              'OriginalDeath',
+              'ReplacementIntent',
+              'ReplacementKernel',
+              'ReplacementStartup',
+              'ReplacementAdoption',
+              'ReplacementCompleted',
+              'ReplacementStop',
+            ].map((k) => `temporalMediaRecovery${k}-${op}`),
           ])
             await cleanup(() => db.doc(`_control/${name}`).delete());
           const { durableEntityKey, DURABLE_COLLECTIONS } = require('@upperroom/orchestration/job-store');

@@ -406,6 +406,10 @@ process.on('SIGTERM',()=>process.exit(0));
       } else {
         await assert.rejects(superviseOriginalMediaFault(db, bucket, cap, entry, client));
         assert.equal(docs.has(name('OriginalDeath')), false);
+        if (mode === 'grant-drift') {
+          assert.equal(docs.get(name('Kernel')).stage, 'closed');
+          assert.equal(docs.get(name('Kernel')).close.observerFailed, true);
+        }
       }
       assert.equal(forks, 1);
       if (childPid) assert.throws(() => process.kill(-childPid, 0), { code: 'ESRCH' });

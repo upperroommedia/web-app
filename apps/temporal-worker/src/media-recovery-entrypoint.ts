@@ -2,7 +2,10 @@ import { loadMediaRecoveryRuntimeConfig } from './runtime/media-recovery-config'
 import { loadWorkerWitness } from './runtime/worker-witness';
 import { loadConsumedMediaRecoveryBundle } from './runtime/consumed-workflow-bundle';
 import { reportMediaKernelWitness } from './runtime/media-kernel-supervisor';
-import { createMediaRecoveryRegistration } from './runtime/media-recovery-registration';
+import {
+  createMediaRecoveryRegistration,
+  createMediaRecoveryReplacementRegistration,
+} from './runtime/media-recovery-registration';
 import { runMediaFilesystemCanary, validateMediaStartupCapacityEvidence } from './runtime/media-startup-capacity';
 import { WorkerLifecycle } from './runtime/worker-lifecycle';
 import { initializeWorkerObservability, flushWorkerObservability } from './runtime/observability';
@@ -16,7 +19,7 @@ import { VersioningBehavior } from '@temporalio/common';
  * normal media queue. Canonical release preflight remains fixed-deny separately. */
 export async function runMediaRecoveryApplication(bindShutdown?: (shutdown: () => Promise<void>) => void) {
   const config = loadMediaRecoveryRuntimeConfig();
-  if (process.env.TEMPORAL_MEDIA_RECOVERY_CHILD !== 'original')
+  if (!['original', 'replacement'].includes(process.env.TEMPORAL_MEDIA_RECOVERY_CHILD ?? ''))
     throw new Error('MEDIA_RECOVERY_ORIGINAL_CHILD_REQUIRED');
   let runtime: Runtime | undefined,
     native: NativeConnection | undefined,
@@ -135,7 +138,10 @@ export async function runMediaRecoveryApplication(bindShutdown?: (shutdown: () =
     const production = createRuntimeActivities(config.projectId, ['urm-media'], client, witness);
     const media = production.queues['urm-media'];
     if (!('acquireMedia' in media)) throw new Error('MEDIA_RECOVERY_MEDIA_FACTORY_REQUIRED');
-    const registration = await createMediaRecoveryRegistration({
+    const replacement = process.env.TEMPORAL_MEDIA_RECOVERY_CHILD === 'replacement';
+    const registration = await (replacement
+      ? createMediaRecoveryReplacementRegistration
+      : createMediaRecoveryRegistration)({
       firestore: db,
       auth,
       bucket,
@@ -165,7 +171,9 @@ export async function runMediaRecoveryApplication(bindShutdown?: (shutdown: () =
       capacity,
       observedAt: new Date().toISOString(),
     };
-    const ref = db.doc(`_control/temporalMediaRecoveryStartup-${config.operationId}`);
+    const ref = db.doc(
+      `_control/temporalMediaRecovery${replacement ? 'ReplacementStartup' : 'Startup'}-${config.operationId}`
+    );
     try {
       await db.runTransaction(
         async (tx) => {
@@ -189,14 +197,16 @@ export async function runMediaRecoveryApplication(bindShutdown?: (shutdown: () =
       workflowBundle: { code: bundle.code },
       activities: {
         ...registration.activities,
-        acquireMedia: holdOriginalMediaCompletion({
-          db,
-          bucket,
-          client,
-          cap: registration.cap,
-          birth: registration.birth,
-          acquire: registration.activities.acquireMedia,
-        }),
+        acquireMedia: replacement
+          ? registration.activities.acquireMedia
+          : holdOriginalMediaCompletion({
+              db,
+              bucket,
+              client,
+              cap: registration.cap,
+              birth: registration.birth,
+              acquire: registration.activities.acquireMedia,
+            }),
       },
       workerDeploymentOptions: {
         useWorkerVersioning: true,

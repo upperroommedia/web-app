@@ -801,9 +801,31 @@ acknowledgements; stale or changed work denies the fault. Native Activity
 metadata may omit its deployment for Workflow-bound work; this is not relabeled
 as explicit Activity deployment evidence.
 
-This phase cannot start a replacement or claim recovery success. Distinct
-replacement birth intent/authorization, natural retry and original artifact
-adoption collection, authoritative drain and restored-normal-origin consumption
-remain pending. A death fact proves application-child termination within its
-instance, not Cloud Run instance replacement. Canonical preflight, media promotion and orchestration gates
-remain closed.
+A death fact still grants no replacement authority. A separate same-parent phase
+revalidates the exact original ready/signal/closed/death/grant preimages and
+persists one new birth intent. Only a known create acknowledgement permits the
+first fork; an unknown acknowledgement performs GET-only reconciliation and
+stops. A separate kernel journal, derived capability, explicit child ordinal
+and startup receipt preserve original identities and prohibit name/PID adoption.
+The new process must have distinct PID, launch nonce and worker identity in the
+same container/image/revision. Admission retries are denied.
+
+Before entering production acquisition, the replacement requires native started
+attempt2 of the same original run and scheduled Activity, exact current pin and
+new worker identity. The remaining deadline uses the later of the new attempt
+start and a carried previous heartbeat; it does not claim a fresh heartbeat.
+Both complete artifact inventories and current byte identities must match before
+and after the real production adoption call. Adoption and exact native Workflow
+completion are separate immutable facts, followed by owned stop and actual
+close/group absence. Observer failure preserves a cleanup-only closed fact and
+cannot become recovery acceptance.
+
+Local integration exercises the source supervisor, real SDK, production actor
+and durable ownership checks, dedicated Firebase stores, original SIGKILL and a
+distinct SDK child adopting the same artifacts on native retry. Its Cloud witness,
+small budgets and fixture bootstrap remain controlled; it is not actual index.js,
+final-image or Cloud Run acceptance. Canonical collection of image/startup
+lineage, fresh native version-wide drain and restored-normal-origin consumption
+remain pending. Application-child replacement within an instance does not prove
+Cloud Run instance replacement. Canonical preflight, media promotion and
+orchestration gates remain closed.

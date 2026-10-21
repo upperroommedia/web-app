@@ -192,6 +192,7 @@ async function superviseKernel(
       control: { fault: () => boolean; stop: () => void; exited: () => boolean },
       state: any
     ) => Promise<void>;
+    replacementIntent?: { parentPid: number; launchId: string; createdAt: string };
   }
 ) {
   const ref = db.doc(journalPath);
@@ -203,7 +204,11 @@ async function superviseKernel(
     schemaVersion: 1,
     stage: 'armed',
     context: cap.context,
-    intent: { parentPid: process.pid, launchId: randomUUID(), createdAt: new Date().toISOString() },
+    intent: recovery?.replacementIntent ?? {
+      parentPid: process.pid,
+      launchId: randomUUID(),
+      createdAt: new Date().toISOString(),
+    },
   };
   let child: ChildProcess | undefined,
     exited = false,
@@ -233,7 +238,14 @@ async function superviseKernel(
       detached: true,
       stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
       execArgv: [],
-      ...(recovery ? { env: { ...process.env, TEMPORAL_MEDIA_RECOVERY_CHILD: 'original' } } : {}),
+      ...(recovery
+        ? {
+            env: {
+              ...process.env,
+              TEMPORAL_MEDIA_RECOVERY_CHILD: recovery.replacementIntent ? 'replacement' : 'original',
+            },
+          }
+        : {}),
     });
     let pending = Promise.resolve(),
       protocolError = false;
@@ -331,6 +343,23 @@ async function superviseKernel(
     child.removeListener('message', onMessage);
     await pending;
     await absent(child);
+    if (protocolError && recovery && state.stage === 'running') {
+      await put(
+        {
+          ...state,
+          stage: 'closed',
+          close: {
+            ...close,
+            observedAt: new Date().toISOString(),
+            descendantsAbsent: true,
+            observerFailed: true,
+            scope: 'owned-cleanup-only-no-recovery-authority',
+          },
+        },
+        false
+      );
+      fail();
+    }
     if (protocolError || state.stage !== 'running') fail();
     // Cleanup facts remain writable after work expiry/control drift, but only over
     // this parent's exact original journal. They grant no polling/restart authority.
@@ -448,4 +477,35 @@ export const superviseMediaRecoveryOriginal = (
     entrypoint,
     path(cap.context.operationId).replace('temporalMediaKernel-', 'temporalMediaRecoveryKernel-'),
     { onRunning }
+  );
+
+/** Only the separately saved replacement birth intent supplies this fixed path. */
+export const superviseMediaRecoveryReplacement = (
+  db: Firestore,
+  cap: NonNullable<Awaited<ReturnType<typeof mediaKernelContext>>>,
+  entrypoint: string,
+  intent: { parentPid: number; launchId: string; createdAt: string },
+  onRunning: NonNullable<Parameters<typeof superviseKernel>[4]>['onRunning']
+) =>
+  superviseKernel(
+    db,
+    cap,
+    entrypoint,
+    path(cap.context.operationId).replace('temporalMediaKernel-', 'temporalMediaRecoveryReplacementKernel-'),
+    { replacementIntent: intent, onRunning }
+  );
+export const readMediaRecoveryReplacementKernelBirth = (
+  db: Firestore,
+  operationId: string,
+  intentSHA256: string,
+  link: unknown,
+  witness: WorkerWitness
+) =>
+  readKernelBirth(
+    db,
+    operationId,
+    intentSHA256,
+    link,
+    witness,
+    path(operationId).replace('temporalMediaKernel-', 'temporalMediaRecoveryReplacementKernel-')
   );

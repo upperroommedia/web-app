@@ -383,6 +383,7 @@ export async function superviseOriginalMediaFault(
   if (
     closed?.stage !== 'closed' ||
     closed.close?.descendantsAbsent !== true ||
+    closed.close.observerFailed === true ||
     closed.close.signal !== 'SIGKILL' ||
     closed.close.code !== null ||
     hash({ context: closed.context, intent: closed.intent, birth: closed.birth, worker: closed.worker }) !==

@@ -65,7 +65,7 @@ async function launchMediaRecoveryApplication() {
       { getAuth } = await import('firebase-admin/auth');
     const { loadWorkerWitness } = await import('./runtime/worker-witness');
     const { mediaRecoveryKernelContext } = await import('./runtime/media-recovery-capability');
-    const { superviseOriginalMediaFault } = await import('./runtime/media-recovery-original-fault');
+    const { superviseMediaRecoveryReplacementCycle } = await import('./runtime/media-recovery-replacement');
     const { Storage } = await import('@google-cloud/storage');
     if (process.env.TEMPORAL_MEDIA_RECOVERY_CHILD !== undefined) throw new Error('MEDIA_RECOVERY_PARENT_REQUIRED');
     const parent = await loadWorkerWitness(config.buildId, true);
@@ -84,7 +84,7 @@ async function launchMediaRecoveryApplication() {
       channelArgs: { 'grpc.enable_retries': 0 },
     });
     const parentClient = new Client({ connection: parentConnection, namespace: config.namespace });
-    const result = await superviseOriginalMediaFault(
+    const result = await superviseMediaRecoveryReplacementCycle(
       getFirestore(ownership.app),
       new Storage({ projectId: config.projectId, retryOptions: { autoRetry: false } }).bucket(
         'urm-app-staging.firebasestorage.app'

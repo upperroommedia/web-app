@@ -34,8 +34,8 @@ jest.mock('@google-cloud/storage', () => ({
     }
   },
 }));
-jest.mock('./runtime/media-recovery-original-fault', () => ({
-  superviseOriginalMediaFault: (...args: any[]) => mockSupervise(...args),
+jest.mock('./runtime/media-recovery-replacement', () => ({
+  superviseMediaRecoveryReplacementCycle: (...args: any[]) => mockSupervise(...args),
 }));
 jest.mock('@temporalio/client', () => ({
   Connection: { connect: async () => ({ close: async () => {} }) },
