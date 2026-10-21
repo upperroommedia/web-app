@@ -11,9 +11,11 @@ const compiler = require('ts-node').register({
   transpileOnly: true,
   compilerOptions: { module: 'CommonJS', target: 'ES2022', esModuleInterop: true, moduleResolution: 'node' },
 });
-const { restoredMediaStartupIntent, restoredMediaKernelContext } = require(fileURLToPath(
-  new URL('../apps/temporal-worker/src/runtime/restored-media-startup.ts', import.meta.url)
-));
+const {
+  restoredMediaStartupIntent,
+  restoredMediaHistoricalStartupIntent,
+  restoredMediaKernelContext,
+} = require(fileURLToPath(new URL('../apps/temporal-worker/src/runtime/restored-media-startup.ts', import.meta.url)));
 const { mediaStartupIntent } = require(fileURLToPath(
   new URL('../apps/temporal-worker/src/runtime/media-startup-capacity.ts', import.meta.url)
 ));
@@ -119,4 +121,32 @@ test('stalled initial authority read is bounded before any Auth/IPC', async () =
   ]);
   assert.equal(result, 'denied');
   assert.equal(auth, 0);
+});
+
+test('fixed historical cleanup preserves original start intent while live bootstrap stays denied', async () => {
+  const op = await operation(),
+    s = op.cloudRestoredMediaActivation,
+    before = restoredMediaStartupIntent(op);
+  s.start.stage = 'completed';
+  s.start.pool = {
+    ...s.plan.origin.pool,
+    generation: String(BigInt(s.plan.origin.pool.generation) + 1n),
+    etag: 'known-start',
+    desiredManualInstanceCount: 1,
+  };
+  s.stage = 'cleaning';
+  s.cleanup = {
+    kind: 'unused-cleanup',
+    operationId: op.operationId,
+    planSHA256: 'a'.repeat(64),
+    decisionAt: new Date().toISOString(),
+  };
+  const { proofDigest } = await import('./temporal-release-runtime.mjs');
+  s.cleanup.planSHA256 = proofDigest(s.plan);
+  const read = restoredMediaHistoricalStartupIntent(op);
+  assert.equal(read.intentSHA256, before.intentSHA256);
+  assert.equal(read.start.attemptedAt, before.start.attemptedAt);
+  assert.throws(() => restoredMediaStartupIntent(op));
+  s.start.stage = 'attempted';
+  assert.throws(() => restoredMediaHistoricalStartupIntent(op));
 });

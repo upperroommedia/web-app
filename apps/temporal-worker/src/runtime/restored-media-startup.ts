@@ -54,6 +54,14 @@ export const RESTORED_MEDIA_STARTUP_COLLECTION = 'temporalRestoredMediaStartupCa
 /** Fixed new-action preimage. Neither an old bootstrap state nor a diagnostic
  * birth can be converted into this intent. ACK/LRO convergence never retimes it. */
 export function restoredMediaStartupIntent(raw: unknown) {
+  return parseRestoredMediaStartupIntent(raw, 'live');
+}
+/** Fixed read-only historical phase preimage. It conveys no birth, polling,
+ * work, or renewed live capability and never changes the current parent. */
+export function restoredMediaHistoricalStartupIntent(raw: unknown) {
+  return parseRestoredMediaStartupIntent(raw, 'historical');
+}
+function parseRestoredMediaStartupIntent(raw: unknown, scope: 'live' | 'historical') {
   const op = object(raw),
     s = object(op.cloudRestoredMediaActivation),
     p = object(s.plan),
@@ -76,10 +84,18 @@ export function restoredMediaStartupIntent(raw: unknown) {
     !sha(p.receiptsSHA256) ||
     !/^[a-f0-9]{40}$/.test(p.buildId ?? '') ||
     !/^us-central1-docker\.pkg\.dev\/urm-app-staging\/urm-temporal\/worker@sha256:[a-f0-9]{64}$/.test(p.image ?? '') ||
-    !['starting', 'started', 'completed'].includes(s.stage) ||
-    s.stop ||
-    s.cleanup ||
-    (s.stage === 'completed' && s.disposition !== 'retained') ||
+    !(
+      scope === 'live' ? ['starting', 'started', 'completed'] : ['starting', 'started', 'cleaning', 'completed']
+    ).includes(s.stage) ||
+    (scope === 'live' && (s.stop || s.cleanup || (s.stage === 'completed' && s.disposition !== 'retained'))) ||
+    (scope === 'historical' &&
+      s.cleanup &&
+      (x.stage !== 'completed' ||
+        s.cleanup.kind !== 'unused-cleanup' ||
+        s.cleanup.operationId !== p.operationId ||
+        s.cleanup.planSHA256 !== hash(p) ||
+        !Number.isFinite(Date.parse(s.cleanup.decisionAt)))) ||
+    (scope === 'historical' && s.stop && (!s.cleanup || x.stage !== 'completed' || s.registration)) ||
     !['attempted', 'acknowledged', 'completed'].includes(x.stage) ||
     !Number.isFinite(Date.parse(x.attemptedAt)) ||
     Date.parse(x.attemptedAt) < Date.parse(p.createdAt) ||

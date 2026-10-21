@@ -170,11 +170,12 @@ export async function scanRestoredMediaInventory({ client, plan, startup, rpc })
   const sort = (rows) => rows.sort((a, b) => hash(a).localeCompare(hash(b)));
   return {
     protected: {
-      versions: sort(versions),
+      versions: sort(versions.filter((v) => v.buildId !== plan.buildId)),
       partitions: sort(partitions),
       pollers: sort(protectedPollers),
       peers: [...peerVersions].sort(([a], [b]) => a.localeCompare(b)),
     },
+    ownVersion: versions.find((v) => v.buildId === plan.buildId) ?? null,
     ownedPollers: sort(ownedPollers),
   };
 }

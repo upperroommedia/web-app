@@ -1,3 +1,5 @@
+import { observeRestoredMediaPhaseProtection } from '../temporal-restored-media-protection.mjs';
+import { restoredMediaProtectionFixture } from '../tests/fixtures/restored-media-protection.mjs';
 import { observeRestoredMediaPhasePool } from '../temporal-restored-media-phase-pool.mjs';
 import {
   readRestoredMediaActivationPool,
@@ -46,6 +48,8 @@ for (const mode of [
   'restored-resources',
   'restored-phase-resources',
   'restored-startup',
+  'restored-startup-phase',
+  'restored-startup-phase-failure',
   'restored-startup-drain',
   'restored-startup-readback',
   'restored-startup-readback-expired',
@@ -749,6 +753,92 @@ for (const mode of [
                 };
                 const cap = await startup.restoredMediaKernelContext(db, () => auth, parent);
                 idleRuntime.restored = { startup, parent, auth };
+                if (mode === 'restored-startup-phase-failure') {
+                  const { mkdtemp, writeFile, rm } = await import('node:fs/promises');
+                  const { join } = await import('node:path'),
+                    { tmpdir } = await import('node:os');
+                  const dir = await mkdtemp(join(tmpdir(), 'urm-restored-failed-'));
+                  const childWitness = { ...parent, instanceId: randomUUID() },
+                    entry = join(dir, 'failed-child.cjs');
+                  const kernelRef = db.doc(`_control/temporalRestoredMediaKernel-${newId}`),
+                    capacityRef = db.doc(`temporalRestoredMediaStartupCapacity/${newId}`);
+                  idlePrivate.push(kernelRef, capacityRef);
+                  await writeFile(
+                    entry,
+                    `require(${JSON.stringify(
+                      require.resolve('ts-node')
+                    )}).register({skipProject:true,transpileOnly:true,compilerOptions:{module:'CommonJS',target:'ES2022',esModuleInterop:true,moduleResolution:'node'}});const k=require(${JSON.stringify(
+                      fileURLToPath(
+                        new URL('../../apps/temporal-worker/src/runtime/media-kernel-supervisor.ts', import.meta.url)
+                      )
+                    )});(async()=>{await k.awaitMediaKernelLaunch();await k.reportMediaKernelWitness(${JSON.stringify(
+                      childWitness
+                    )});process.exitCode=1;process.disconnect();})().catch(()=>process.exit(2));`
+                  );
+                  try {
+                    const close = await bounded(
+                      kernelModule.superviseRestoredMediaKernel(db, cap, entry),
+                      15000,
+                      'actual failed child close'
+                    );
+                    assert.equal(close.code, 1);
+                  } finally {
+                    await rm(dir, { recursive: true, force: true });
+                  }
+                  const closed = (await kernelRef.get()).data();
+                  assert.equal(closed.stage, 'closed');
+                  assert.equal(closed.close.descendantsAbsent, true);
+                  assert.throws(
+                    () => process.kill(closed.birth.pid, 0),
+                    (e) => e.code === 'ESRCH'
+                  );
+                  assert.equal((await capacityRef.get()).exists, false);
+                  const collect = source('restored-media-collector.ts').collectRestoredMediaPhaseStartup;
+                  const client = restoredMediaProtectionFixture().options.client;
+                  const guard = async (phaseScope) => {
+                    const resources = idleRuntime.restoredResources();
+                    const resource = await observeRestoredMediaPhasePool({ ...resources, ...phaseScope });
+                    const args = {
+                      db,
+                      auth,
+                      operationId: newId,
+                      bindingDigest: newBinding,
+                      plan: phaseScope.plan,
+                      pool: resource.pool,
+                      expectedRootSHA256: resources.ownedOperation.dataDigest,
+                      expectedControlSHA256: expectedAuthority.control.dataDigest,
+                      expectedStateSHA256: expectedAuthority.state.dataDigest,
+                      image: {
+                        pythonSHA256: 'a'.repeat(64),
+                        ffmpegSHA256: 'a'.repeat(64),
+                        ffprobeSHA256: 'b'.repeat(64),
+                      },
+                    };
+                    const phase = await collect(args);
+                    assert.equal(phase.stage, 'closed');
+                    assert.equal(phase.allowedPollerIdentity, null);
+                    return observeRestoredMediaPhaseProtection({
+                      ...resources,
+                      ...phaseScope,
+                      client,
+                      phasePool: resource,
+                      originalPlan: result.plan,
+                      originalAuth: {},
+                      readStartup: () => collect(args),
+                    });
+                  };
+                  controlled.options.runtime.unused = async (scope) => {
+                    await guard({ ...scope, key: 'stop', transition: scope.state.stop ?? null });
+                    idleRuntime.restoredUnusedPassed = true;
+                  };
+                  const nativePhase = controlled.options.runtime.phase;
+                  controlled.options.runtime.phase = async (scope) => {
+                    if (scope.key === 'stop' || scope.key === 'stopped') await guard(scope);
+                    return nativePhase(scope);
+                  };
+                  throw Error('CONTROLLED_PRE_CAPACITY_FAILURE');
+                }
+
                 assert.equal(cap.context.protocol, 'restored-normal-media-kernel-v1');
                 assert.equal(cap.context.recoveryOperationId, base.operationId);
                 const witness = { ...parent, instanceId: randomUUID() };
@@ -776,7 +866,40 @@ for (const mode of [
                 const kernelRef = db.doc(`_control/temporalRestoredMediaKernel-${newId}`),
                   capacityRef = db.doc(`temporalRestoredMediaStartupCapacity/${newId}`);
                 idlePrivate.push(kernelRef, capacityRef);
-                await kernelRef.create(record);
+
+                if (mode === 'restored-startup-phase') {
+                  const collect = source('restored-media-collector.ts').collectRestoredMediaPhaseStartup;
+                  const snapshot = await lockRef.get();
+                  const args = {
+                    db,
+                    auth,
+                    operationId: newId,
+                    bindingDigest: newBinding,
+                    plan: p,
+                    pool: scope.pool,
+                    expectedRootSHA256: nativeSnapshotProof(snapshot).dataDigest,
+                    expectedControlSHA256: expectedAuthority.control.dataDigest,
+                    expectedStateSHA256: expectedAuthority.state.dataDigest,
+                    image: {
+                      pythonSHA256: 'a'.repeat(64),
+                      ffmpegSHA256: 'a'.repeat(64),
+                      ffprobeSHA256: 'b'.repeat(64),
+                    },
+                  };
+                  const before = await collect(args);
+                  assert.equal(before.stage, 'absent');
+                  assert.equal(before.allowedPollerIdentity, null);
+                  const { birth, worker, ...armed } = record;
+                  await kernelRef.create({ ...armed, stage: 'armed' });
+                  assert.equal((await collect(args)).stage, 'armed');
+                  await kernelRef.set({ ...armed, birth, stage: 'born' });
+                  assert.equal((await collect(args)).stage, 'born');
+                  await kernelRef.set(record);
+                  const pending = await collect(args);
+                  assert.equal(pending.stage, 'running');
+                  assert.equal(pending.allowedPollerIdentity, null);
+                  idleRuntime.phaseStartup = { collect, args };
+                } else await kernelRef.create(record);
                 let calls = 0;
                 const canary = async (_drain, _filesystem, _processing, authorize) => {
                   calls++;
@@ -878,8 +1001,19 @@ for (const mode of [
                   })
                 );
                 assert.equal(calls, 1);
+                if (mode === 'restored-startup-phase') {
+                  const { collect, args } = idleRuntime.phaseStartup;
+                  const positive = await collect(args);
+                  assert.equal(positive.allowedPollerIdentity, `media-restored-${witness.instanceId}`);
+                  await assert.rejects(collect({ ...args, image: { ...args.image, ffmpegSHA256: 'f'.repeat(64) } }));
+                  await auth.updateUser(idleActor.uid, { disabled: true });
+                  await assert.rejects(collect(args));
+                  await auth.updateUser(idleActor.uid, { disabled: false });
+                }
+
                 if (mode.startsWith('restored-startup-readback')) {
-                  const { collectRestoredMediaStartup } = source('restored-media-collector.ts');
+                  const { collectRestoredMediaStartup, collectRestoredMediaPhaseStartup } =
+                    source('restored-media-collector.ts');
                   const readOptions = () => ({
                     db,
                     auth,
@@ -918,6 +1052,7 @@ for (const mode of [
                   assert.equal((await collectRestoredMediaStartup(readOptions())).proofSHA256, positive.proofSHA256);
                   idleRuntime.restoredReadback = {
                     collect: collectRestoredMediaStartup,
+                    phaseCollect: collectRestoredMediaPhaseStartup,
                     readOptions,
                     auth,
                     capacityRef,
@@ -935,7 +1070,7 @@ for (const mode of [
             const ownReceipt = db.doc(`_control/temporalCloudRestoredMediaActivation-${newId}`);
             idlePrivate.push(ownReceipt);
 
-            if (['restored-resources', 'restored-phase-resources'].includes(mode)) {
+            if (['restored-resources', 'restored-phase-resources', 'restored-startup-phase-failure'].includes(mode)) {
               const prefixes = {
                 runner: 'temporalCloudIdentityPreparation',
                 scaler: 'temporalCloudIdentityPreparation',
@@ -1048,7 +1183,8 @@ for (const mode of [
             }
             let completionAckLost = false;
             controlled.options.save = async (identityState) => {
-              if (['restored-resources', 'restored-phase-resources'].includes(mode)) await fixtureSave(identityState);
+              if (['restored-resources', 'restored-phase-resources', 'restored-startup-phase-failure'].includes(mode))
+                await fixtureSave(identityState);
               currentOwned = await saveRestoredMediaActivationCheckpoint({
                 ...args,
                 config,
@@ -1062,11 +1198,26 @@ for (const mode of [
                 throw new Error('CONTROLLED_RETAINED_ACK_LOST');
               }
             };
+
+            if (mode === 'restored-startup-phase-failure') {
+              await assert.rejects(
+                activateRestoredCloudRunMedia(controlled.options),
+                /RESTORED_MEDIA_ACTIVATION_UNCONFIRMED/
+              );
+              const stopped = (await lockRef.get()).get('cloudRestoredMediaActivation');
+              assert.equal(stopped.disposition, 'stopped');
+              assert.equal(idleRuntime.restoredUnusedPassed, true);
+              assert.equal(idleRuntime.restoredResourcePatches, 2);
+              controlled.options.saved = stopped;
+              assert.equal((await activateRestoredCloudRunMedia(controlled.options)).disposition, 'stopped');
+              assert.equal(idleRuntime.restoredResourcePatches, 2);
+              return;
+            }
             await assert.rejects(activateRestoredCloudRunMedia(controlled.options), /CONTROLLED_RETAINED_ACK_LOST/);
             const retained = (await lockRef.get()).get('cloudRestoredMediaActivation');
             assert.equal(retained.disposition, 'retained');
             assert.equal(
-              ['restored-resources', 'restored-phase-resources'].includes(mode)
+              ['restored-resources', 'restored-phase-resources', 'restored-startup-phase-failure'].includes(mode)
                 ? idleRuntime.restoredResourcePatches
                 : controlled.patches,
               1
@@ -1076,7 +1227,7 @@ for (const mode of [
             controlled.options.saved = retained;
             await activateRestoredCloudRunMedia(controlled.options);
             assert.equal(
-              ['restored-resources', 'restored-phase-resources'].includes(mode)
+              ['restored-resources', 'restored-phase-resources', 'restored-startup-phase-failure'].includes(mode)
                 ? idleRuntime.restoredResourcePatches
                 : controlled.patches,
               1
@@ -1153,6 +1304,15 @@ for (const mode of [
               await assert.rejects(observeRestoredMediaPhasePool({ ...scope, firestore: delayed }));
               assert.equal(nativeReads, 9);
               await new Promise((resolve) => setTimeout(resolve, 200));
+            }
+
+            if (mode === 'restored-startup-phase') {
+              const { collect, args } = idleRuntime.phaseStartup;
+              const current = { ...args, expectedRootSHA256: nativeSnapshotProof(await lockRef.get()).dataDigest };
+              const auth = idleRuntime.restored.auth;
+              await assert.rejects(
+                collect({ ...current, auth: { app: auth.app, getUserByEmail: () => new Promise(() => {}) } })
+              );
             }
 
             if (mode === 'restored-startup') {
@@ -1252,6 +1412,9 @@ for (const mode of [
                 await assert.rejects(live.startup.restoredMediaKernelContext(db, () => live.auth, live.parent));
               }
               assert.equal((await r.collect(op)).operationId, newId);
+              const historicalPhase = await r.phaseCollect(op);
+              assert.equal(historicalPhase.stage, 'running');
+              assert.ok(historicalPhase.allowedPollerIdentity);
               await assert.rejects(
                 r.collect({
                   ...op,

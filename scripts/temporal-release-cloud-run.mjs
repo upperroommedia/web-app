@@ -1,3 +1,5 @@
+import { observeRestoredMediaPhasePool } from './temporal-restored-media-phase-pool.mjs';
+import { observeRestoredMediaPhaseProtection } from './temporal-restored-media-protection.mjs';
 import {readRestoredMediaRecoveryPlan} from './temporal-restored-media-registration.mjs';
 import {scanRestoredMediaInventory} from './temporal-restored-media-inventory.mjs';
 import {readRestoredMediaActivationPool} from './temporal-restored-media-resources.mjs';
@@ -660,3 +662,129 @@ export const readRestoredMediaRegistration = (o) =>
       throw new Error('RESTORED_MEDIA_REGISTRATION_UNCONFIRMED');
     }
   });
+
+/** Fixed source-owned phase/unused namespace collector. Full original episode
+ * reads remain separate from the new parent's monotonic startup facts. */
+export const readRestoredMediaPhaseProtection = (o) =>
+  withNativeCloudRunClient(o, async (client, application) => {
+    try {
+      const p = await readRestoredMediaRecoveryPlan(o);
+      const image = await createMediaRecoveryImageReplayObserver({
+        image: p.image,
+        buildId: p.buildId,
+        operationId: o.recoveryOperationId,
+        bindingDigest: p.bindingDigest,
+        evidenceDigest: p.evidenceDigest,
+        historyToJSON: application.historyToJSON,
+      });
+      const args = {
+        db: o.firestore,
+        client,
+        recoveryOperationId: o.recoveryOperationId,
+        activationOperationId: o.operationId,
+        activationBindingDigest: o.bindingDigest,
+        releaseId: o.releaseId,
+        expectedRootSHA256: o.ownedOperation.dataDigest,
+        expectedControlSHA256: o.expectedAuthority.control.dataDigest,
+        expectedStateSHA256: o.expectedAuthority.state.dataDigest,
+        buildId: p.buildId,
+        imageDigest: p.image,
+        image: { bundleSHA256: image.bundleSHA256, tools: image.tools },
+      };
+      const first = await application.collectCompletedMediaRecoveryExecution(args);
+      const replay = await image.replayHistory(first.history, first.workflowId, first.runId);
+      assertMediaRecoveryImageReplayReceipt(replay, {
+        image: p.image,
+        buildId: p.buildId,
+        operationId: o.recoveryOperationId,
+        bindingDigest: p.bindingDigest,
+        evidenceDigest: p.evidenceDigest,
+        bundleSHA256: image.bundleSHA256,
+        workflowId: first.workflowId,
+        runId: first.runId,
+        historySHA256: recoveryHash(first.history),
+      });
+      const second = await application.collectCompletedMediaRecoveryExecution(args);
+      if (first.evidenceSHA256 !== second.evidenceSHA256 || first.provenanceSHA256 !== second.provenanceSHA256)
+        throw Error();
+      const at = Date.now(),
+        mono = performance.now();
+      const fresh = () => {
+        if (Date.now() < at || Date.now() - at >= 5000 || performance.now() < mono || performance.now() - mono >= 5000)
+          throw Error();
+      };
+      const read = async (fn) => {
+        let timer;
+        try {
+          fresh();
+          const v = await Promise.race([
+            Promise.resolve().then(() => {
+              fresh();
+              return fn();
+            }),
+            new Promise((_, reject) => {
+              timer = setTimeout(() => reject(Error()), Math.max(1, 5000 - (Date.now() - at)));
+            }),
+          ]);
+          fresh();
+          return v;
+        } finally {
+          clearTimeout(timer);
+        }
+      };
+      const phasePool = await read(() => observeRestoredMediaPhasePool(o));
+      const startupArgs = {
+        db: o.firestore,
+        auth: o.firebaseAuth,
+        operationId: o.operationId,
+        bindingDigest: o.bindingDigest,
+        plan: o.plan,
+        pool: phasePool.pool,
+        expectedRootSHA256: o.ownedOperation.dataDigest,
+        expectedControlSHA256: o.expectedAuthority.control.dataDigest,
+        expectedStateSHA256: o.expectedAuthority.state.dataDigest,
+        image: image.tools,
+      };
+      const ready = await read(() =>
+        o.firestore.doc(`_control/temporalMediaRecoveryOriginalReady-${o.recoveryOperationId}`).get()
+      );
+      const kernel = await read(() =>
+        o.firestore.doc(`_control/temporalMediaRecoveryReplacementKernel-${o.recoveryOperationId}`).get()
+      );
+      const proof = await read(() =>
+        observeRestoredMediaPhaseProtection({
+          ...o,
+          client,
+          phasePool,
+          originalPlan: p,
+          originalAuth: { ready: ready.data(), worker: kernel.get('worker') },
+          readStartup: () => application.collectRestoredMediaPhaseStartup(startupArgs),
+        })
+      );
+      const lastPool = await read(() => observeRestoredMediaPhasePool(o));
+      if (
+        recoveryHash(phasePool.pool) !== recoveryHash(lastPool.pool) ||
+        phasePool.position !== lastPool.position ||
+        phasePool.provenanceSHA256 !== lastPool.provenanceSHA256
+      )
+        throw Error();
+      const original = await read(() => application.confirmCompletedMediaRecoveryProvenance(args));
+      if (original.provenanceSHA256 !== first.provenanceSHA256) throw Error();
+      await read(() => assertRestoredMediaActivationAuthority(o));
+      fresh();
+      if (Math.abs(Date.now() - Date.parse(proof.observedAt)) >= 5000) throw Error();
+      return proof;
+    } catch {
+      throw new Error('RESTORED_MEDIA_PHASE_PROTECTION_UNCONFIRMED');
+    }
+  });
+export const readRestoredMediaUnused = (o) => {
+  if (
+    o.state?.cleanup?.kind !== 'unused-cleanup' ||
+    o.state?.start?.stage !== 'completed' ||
+    o.state?.registration ||
+    o.state?.disposition === 'retained'
+  )
+    throw new Error('RESTORED_MEDIA_UNUSED_UNCONFIRMED');
+  return readRestoredMediaPhaseProtection({ ...o, key: 'stop', transition: o.state.stop ?? null });
+};
