@@ -1,5 +1,5 @@
 import { isDeepStrictEqual as equal } from 'node:util';
-import { proofDigest as hash, assertNativeSnapshot } from './temporal-release-runtime.mjs';
+import { proofDigest as hash, assertNativeSnapshot, nativeSnapshotProof } from './temporal-release-runtime.mjs';
 import { readMediaRecoveryAncestorAccess } from './temporal-bootstrap-pool.mjs';
 import { diagnosticTemplate } from './temporal-media-recovery-cycle.mjs';
 import { verifyPreparedPoolMetadata } from './temporal-prepare-cloud-pool.mjs';
@@ -167,6 +167,259 @@ async function readOrigin(o) {
   const before = await authority(),
     s = before.state,
     p = s.plan;
+  const { pool } = await readRestoredNativeLineage(o, ancestor, s, read);
+  const access = await read(() => readMediaRecoveryAncestorAccess({ ...o, saved: undefined }));
+  if (access.receiptsSHA256 !== ancestor.receiptsSHA256) fail();
+  const sampledAt = Date.now(),
+    sampledMonotonic = performance.now();
+  const latest = await read(() => o.api(`https://run.googleapis.com/v2/${p.name}`));
+  const latestPool = { ...verifyPreparedPoolMetadata(ancestor.zeroPlan, latest), etag: latest.etag };
+  if (!equal(latestPool, pool)) fail();
+  const latestRevision = await read(() => o.api(`https://run.googleapis.com/v2/${s.restore.pool.revision}`));
+  if (
+    normal(latestRevision?.name) !== s.restore.pool.revision ||
+    latestRevision.uid !== s.restore.pool.revisionUid ||
+    latestRevision.deleteTime
+  )
+    fail();
+  if (
+    hash(await authority()) !== hash(before) ||
+    Date.now() - sampledAt > 5000 ||
+    performance.now() - sampledMonotonic > 5000
+  )
+    fail();
+  const observedAt = new Date(sampledAt).toISOString();
+  const value = {
+    schemaVersion: 1,
+    kind: 'restored-media-normal-origin-v1',
+    operationId: o.operationId,
+    releaseId: o.releaseId,
+    bindingDigest: o.bindingDigest,
+    buildId: p.buildId,
+    image: p.image,
+    runner: p.runner,
+    ancestorsSHA256: p.ancestorsSHA256,
+    cycleSHA256: before.receiptSHA256,
+    drainSHA256: before.drainSHA256,
+    normalTemplateSHA256: hash(p.normalTemplate),
+    pool: s.restore.pool,
+    observedAt,
+  };
+  return { ...value, originSHA256: hash(value) };
+}
+export async function readRestoredMediaRecoveryOrigin(o) {
+  try {
+    return await readOrigin(o);
+  } catch {
+    return fail();
+  }
+}
+
+/** Fixed NEW-parent read-side authorization. This cannot authorize a scale
+ * request; later activation needs its own immutable intent and final fence. */
+export async function assertRestoredMediaActivationAuthority(o) {
+  return o.firestore.runTransaction(
+    async (tx) => {
+      const [root, c, s] = await Promise.all([o.lockRef, o.controlRef, o.stateRef].map((r) => tx.get(r)));
+      assertNativeSnapshot(o.ownedOperation, root);
+      assertNativeSnapshot(o.expectedAuthority.control, c);
+      assertNativeSnapshot(o.expectedAuthority.state, s);
+      if (
+        o.firestore.projectId !== 'urm-app-staging' ||
+        o.firestore.databaseId !== '(default)' ||
+        o.role !== 'media' ||
+        o.operationId === o.recoveryOperationId ||
+        root.get('action') !== 'activate-restored-cloud-run-media' ||
+        root.get('operationId') !== o.operationId ||
+        root.get('bindingDigest') !== o.bindingDigest ||
+        root.get('releaseId') !== o.releaseId ||
+        root.get('operatorPrincipal.adcAndGcloudAccountMatch') !== true ||
+        c.get('releaseId') !== o.releaseId ||
+        s.get('releaseId') !== o.releaseId ||
+        c.get('admission') !== 'paused' ||
+        s.get('phase') !== 'provider-usage-ready' ||
+        ['media', 'publishing', 'images', 'emails', 'accounts', 'bundles', 'search'].some(
+          (k) => c.get(`domains.${k}.admission`) !== 'paused'
+        )
+      )
+        fail();
+      return root.data();
+    },
+    { readOnly: true }
+  );
+}
+
+/** Native resource/receipt half only. The canonical entrypoint additionally
+ * requires actual original history/artifacts and exact-image replay. */
+export async function readRestoredMediaActivationAccess(o) {
+  const began = Date.now(),
+    mono = performance.now();
+  let active = true;
+  const fresh = () => {
+    if (!active || Date.now() < began || Date.now() - began >= 30000 || performance.now() - mono >= 30000) fail();
+  };
+  const read = async (fn) => {
+    let timer;
+    try {
+      fresh();
+      const value = await Promise.race([
+        Promise.resolve().then(fn),
+        new Promise((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error('RESTORED_MEDIA_ORIGIN_UNCONFIRMED')),
+            Math.min(5000, Math.max(1, 30000 - (Date.now() - began)))
+          );
+        }),
+      ]);
+      fresh();
+      return value;
+    } catch {
+      active = false;
+      return fail();
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+  try {
+    if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(o.recoveryOperationId ?? '')) fail();
+    const root = await read(() => assertRestoredMediaActivationAuthority(o));
+    const receiptRef = o.firestore.doc(`_control/temporalCloudMediaRecovery-${o.recoveryOperationId}`),
+      capRef = o.firestore.doc(`_control/temporalMediaRecoveryCapsule-${o.recoveryOperationId}`),
+      drainRef = o.firestore.doc(`_control/temporalMediaRecoveryDrain-${o.recoveryOperationId}`);
+    const snapshots = () =>
+      read(() =>
+        o.firestore.runTransaction(
+          async (tx) => {
+            const all = await Promise.all([receiptRef, capRef, drainRef].map((r) => tx.get(r)));
+            if (
+              all.some((s) => !s.exists || hash(s.createTime) !== hash(s.updateTime)) ||
+              hash(all[0].createTime) !== hash(all[1].createTime)
+            )
+              fail();
+            return {
+              receipt: all[0].data(),
+              capsule: all[1].data(),
+              drain: all[2].data(),
+              stamps: all.map(nativeSnapshotProof),
+            };
+          },
+          { readOnly: true }
+        )
+      );
+    const first = await snapshots(),
+      v = first.capsule,
+      { capsuleSHA256, ...preimage } = v,
+      s = first.receipt.identityState,
+      p = s?.plan;
+    if (
+      v.schemaVersion !== 1 ||
+      v.kind !== 'completed-media-recovery-provenance-only-v1' ||
+      hash(preimage) !== capsuleSHA256 ||
+      v.operationId !== o.recoveryOperationId ||
+      v.releaseId !== o.releaseId ||
+      first.receipt.operationId !== o.recoveryOperationId ||
+      first.receipt.releaseId !== o.releaseId ||
+      v.bindingDigest !== first.receipt.bindingDigest ||
+      p?.bindingDigest !== v.bindingDigest ||
+      p.operationId !== o.recoveryOperationId ||
+      p.releaseId !== o.releaseId ||
+      p.evidenceDigest !== o.evidenceDigest ||
+      p.buildId !== o.platform.workerBuildId ||
+      p.image !== o.platform.workerImage ||
+      hash(v.originalParent?.cloudMediaRecovery) !== hash(s) ||
+      hash(first.receipt) !== v.completionSHA256 ||
+      hash(first.drain) !== v.drainSHA256 ||
+      s.stage !== 'completed' ||
+      s.disposition !== 'restored-normal-zero' ||
+      !s.recovery ||
+      s.recoveryFailed ||
+      s.neverStarted ||
+      !s.drained ||
+      !s.stopped ||
+      hash(s.restore?.pool) !== hash(v.restoredPool)
+    )
+      fail();
+    for (const key of [
+      'descriptorSHA256',
+      'operatorCommit',
+      'runtimeCommit',
+      'operatorClosureDigest',
+      'runtimePins',
+      'resourceBinding',
+    ])
+      if (
+        !v.originalParent.operatorIdentity ||
+        hash(v.originalParent.operatorIdentity[key]) !== hash(root.operatorIdentity?.[key])
+      )
+        fail();
+    const originalOptions = {
+      ...o,
+      operationId: o.recoveryOperationId,
+      bindingDigest: v.bindingDigest,
+      saved: undefined,
+    };
+    const ancestor = await read(() => readMediaRecoveryAncestorAccess(originalOptions));
+    if (
+      p.ancestorsSHA256 !== ancestor.receiptsSHA256 ||
+      p.name !== ancestor.zeroPlan.body.name ||
+      p.runner !== ancestor.binding.runnerServiceAccount ||
+      !equal(p.normalTemplate, ancestor.zeroPlan.body.template) ||
+      !equal(p.diagnosticTemplate, diagnosticTemplate(p.normalTemplate, o.recoveryOperationId)) ||
+      !equal((({ revisionUid, ...value }) => value)(p.origin), ancestor.origin) ||
+      !p.origin.revisionUid
+    )
+      fail();
+    assertStoredMediaDiagnosticDrain(s.drained.observation, p, s.start.pool);
+    if (
+      s.drained.proofSHA256 !== hash(s.drained.observation) ||
+      !equal(first.drain, {
+        schemaVersion: 1,
+        operationId: o.recoveryOperationId,
+        releaseId: o.releaseId,
+        bindingDigest: v.bindingDigest,
+        planSHA256: hash(p),
+        proof: s.drained,
+      })
+    )
+      fail();
+    const { pool } = await readRestoredNativeLineage(originalOptions, ancestor, s, read);
+    const access = await read(() => readMediaRecoveryAncestorAccess(originalOptions));
+    if (access.receiptsSHA256 !== ancestor.receiptsSHA256) fail();
+    const sampled = Date.now(),
+      sampleMono = performance.now(),
+      actual = await read(() => o.api(`https://run.googleapis.com/v2/${p.name}`));
+    const latest = { ...verifyPreparedPoolMetadata(ancestor.zeroPlan, actual), etag: actual.etag };
+    if (!equal(latest, pool)) fail();
+    const revision = await read(() => o.api(`https://run.googleapis.com/v2/${s.restore.pool.revision}`));
+    if (
+      normal(revision?.name) !== s.restore.pool.revision ||
+      revision.uid !== s.restore.pool.revisionUid ||
+      revision.deleteTime
+    )
+      fail();
+    if (
+      hash(await snapshots()) !== hash(first) ||
+      hash(await read(() => assertRestoredMediaActivationAuthority(o))) !== hash(root) ||
+      Date.now() < sampled ||
+      Date.now() - sampled >= 5000 ||
+      performance.now() - sampleMono >= 5000
+    )
+      fail();
+    return {
+      plan: p,
+      pool: s.restore.pool,
+      capsuleSHA256,
+      provenanceSHA256: hash(first),
+      accessSHA256: hash(access),
+      observedAt: new Date(sampled).toISOString(),
+    };
+  } catch {
+    return fail();
+  }
+}
+
+async function readRestoredNativeLineage(o, ancestor, s, read) {
+  const p = s.plan;
   let preceding = p.origin;
   for (const key of ['diagnostic', 'start', 'stop', 'restore']) {
     const x = s[key],
@@ -231,49 +484,6 @@ async function readOrigin(o) {
     )
       fail();
   }
-  const access = await read(() => readMediaRecoveryAncestorAccess({ ...o, saved: undefined }));
-  if (access.receiptsSHA256 !== ancestor.receiptsSHA256) fail();
-  const sampledAt = Date.now(),
-    sampledMonotonic = performance.now();
-  const latest = await read(() => o.api(`https://run.googleapis.com/v2/${p.name}`));
-  const latestPool = { ...verifyPreparedPoolMetadata(ancestor.zeroPlan, latest), etag: latest.etag };
-  if (!equal(latestPool, pool)) fail();
-  const latestRevision = await read(() => o.api(`https://run.googleapis.com/v2/${s.restore.pool.revision}`));
-  if (
-    normal(latestRevision?.name) !== s.restore.pool.revision ||
-    latestRevision.uid !== s.restore.pool.revisionUid ||
-    latestRevision.deleteTime
-  )
-    fail();
-  if (
-    hash(await authority()) !== hash(before) ||
-    Date.now() - sampledAt > 5000 ||
-    performance.now() - sampledMonotonic > 5000
-  )
-    fail();
-  const observedAt = new Date(sampledAt).toISOString();
-  const value = {
-    schemaVersion: 1,
-    kind: 'restored-media-normal-origin-v1',
-    operationId: o.operationId,
-    releaseId: o.releaseId,
-    bindingDigest: o.bindingDigest,
-    buildId: p.buildId,
-    image: p.image,
-    runner: p.runner,
-    ancestorsSHA256: p.ancestorsSHA256,
-    cycleSHA256: before.receiptSHA256,
-    drainSHA256: before.drainSHA256,
-    normalTemplateSHA256: hash(p.normalTemplate),
-    pool: s.restore.pool,
-    observedAt,
-  };
-  return { ...value, originSHA256: hash(value) };
-}
-export async function readRestoredMediaRecoveryOrigin(o) {
-  try {
-    return await readOrigin(o);
-  } catch {
-    return fail();
-  }
+
+  return { pool };
 }

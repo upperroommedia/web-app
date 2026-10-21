@@ -1,3 +1,5 @@
+import {assertRestoredMediaActivationAuthority,readRestoredMediaActivationAccess} from './temporal-media-restored-origin.mjs';
+import {scanPrivateMediaInventory} from './temporal-media-private-inventory.mjs';
 import {observeMediaRecoveryProtection} from './temporal-media-recovery-protection.mjs';
 import {observeMediaRecoveryDiagnosticZeroPool,mediaDiagnosticConfirmationProof} from './temporal-media-stop-confirmation.mjs';
 import {waitForMediaDiagnosticDrain,assertFreshMediaDiagnosticDrain,observeMediaDiagnosticStopped,observeMediaDiagnosticNeverStarted} from './temporal-media-diagnostic-drain.mjs';
@@ -462,4 +464,33 @@ export const protectCloudRunMediaRecovery=o=>withNativeCloudRunClient(o,async(cl
   fresh();
   return result;
  }catch{throw new Error('MEDIA_RECOVERY_PHASE_PROTECTION_UNCONFIRMED');}
+});
+
+/** Fixed NEW-parent historical origin, never scale/promotion authority. */
+export const readRestoredMediaActivationOrigin=o=>withNativeCloudRunClient(o,async(client,application)=>{
+ try{
+  const bounded=async fn=>{let timer;try{return await Promise.race([Promise.resolve().then(fn),new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('RESTORED_MEDIA_ORIGIN_UNCONFIRMED')),5000);})]);}finally{clearTimeout(timer);}};
+  await bounded(()=>assertRestoredMediaActivationAuthority(o));
+  const before=await readRestoredMediaActivationAccess(o),p=before.plan;
+  const image=await createMediaRecoveryImageReplayObserver({image:p.image,buildId:p.buildId,operationId:o.recoveryOperationId,bindingDigest:p.bindingDigest,evidenceDigest:p.evidenceDigest,historyToJSON:application.historyToJSON});
+  const args={db:o.firestore,client,recoveryOperationId:o.recoveryOperationId,activationOperationId:o.operationId,activationBindingDigest:o.bindingDigest,releaseId:o.releaseId,expectedRootSHA256:o.ownedOperation.dataDigest,expectedControlSHA256:o.expectedAuthority.control.dataDigest,expectedStateSHA256:o.expectedAuthority.state.dataDigest,buildId:p.buildId,imageDigest:p.image,image:{bundleSHA256:image.bundleSHA256,tools:image.tools}};
+  const first=await application.collectCompletedMediaRecoveryExecution(args);
+  const replay=await image.replayHistory(first.history,first.workflowId,first.runId);
+  assertMediaRecoveryImageReplayReceipt(replay,{image:p.image,buildId:p.buildId,operationId:o.recoveryOperationId,bindingDigest:p.bindingDigest,evidenceDigest:p.evidenceDigest,bundleSHA256:image.bundleSHA256,workflowId:first.workflowId,runId:first.runId,historySHA256:recoveryHash(first.history)});
+  const second=await application.collectCompletedMediaRecoveryExecution(args);
+  if(first.evidenceSHA256!==second.evidenceSHA256||first.provenanceSHA256!==second.provenanceSHA256)throw Error();
+  const at=Date.now(),mono=performance.now(),fresh=()=>{if(Date.now()<at||Date.now()-at>=5000||performance.now()-mono>=5000)throw Error();};
+  const read=async fn=>{fresh();const value=await bounded(fn);fresh();return value;},rpc=fn=>read(()=>client.connection.withDeadline(at+5000,fn));
+  const ready=await read(()=>o.firestore.doc(`_control/temporalMediaRecoveryOriginalReady-${o.recoveryOperationId}`).get()),kernel=await read(()=>o.firestore.doc(`_control/temporalMediaRecoveryReplacementKernel-${o.recoveryOperationId}`).get());
+  const scan=()=>scanPrivateMediaInventory({client,db:o.firestore,plan:p,operationId:o.recoveryOperationId,read,rpc,auth:{ready:ready.data(),worker:kernel.get('worker')}});
+  const native1=await scan(),native2=await scan(),compute=await read(()=>observeNamespaceComputeIsolation(client,'urm-app-staging.qwejt'));
+  if(recoveryHash(native1)!==recoveryHash(native2))throw Error();
+  const proven=await read(()=>application.confirmCompletedMediaRecoveryProvenance(args));
+  if(proven.provenanceSHA256!==first.provenanceSHA256)throw Error();
+  const after=await readRestoredMediaActivationAccess(o);
+  if(recoveryHash(before.plan)!==recoveryHash(after.plan)||recoveryHash(before.pool)!==recoveryHash(after.pool)||before.capsuleSHA256!==after.capsuleSHA256||before.provenanceSHA256!==after.provenanceSHA256||before.accessSHA256!==after.accessSHA256)throw Error();
+  await read(()=>assertRestoredMediaActivationAuthority(o));fresh();
+  if(!Number.isFinite(Date.parse(after.observedAt))||Math.abs(Date.now()-Date.parse(after.observedAt))>=5000)throw Error();
+  return {kind:'restored-media-activation-origin-v1',operationId:o.operationId,recoveryOperationId:o.recoveryOperationId,bindingDigest:o.bindingDigest,releaseId:o.releaseId,buildId:p.buildId,image:p.image,pool:after.pool,capsuleSHA256:after.capsuleSHA256,proofSHA256:recoveryHash({before:after.provenanceSHA256,access:after.accessSHA256,evidence:first.evidenceSHA256,image:image.imageProof,replay,inventory:native2,compute}),observedAt:new Date(at).toISOString(),scope:'historical-origin-only-no-scale-or-promotion-authority'};
+ }catch{throw new Error('RESTORED_MEDIA_ORIGIN_UNCONFIRMED');}
 });

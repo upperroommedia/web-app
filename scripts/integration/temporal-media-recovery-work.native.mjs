@@ -1,6 +1,6 @@
 /** Actual LOCAL SDK + dedicated Auth/Firestore/Storage/RTDB + production source
  * admission and media factory. Cloud/revision witnesses and pool cycle are CONTROLLED.
- * No Cloud Run, final image, supervisor replacement or readiness acceptance. */
+ * Fixture bootstrap/controlled image and Cloud metadata; no actual index.js, final image, Cloud Run or readiness acceptance. */
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
@@ -9,7 +9,7 @@ import { randomUUID } from 'node:crypto';
 import { bounded } from './fixtures/owned-media-process.mjs';
 import { mediaRecoveryFixture } from '../tests/fixtures/media-recovery.mjs';
 import { runMediaRecoveryCycle } from '../temporal-media-recovery-cycle.mjs';
-import { prepareMediaRecoveryJournal } from '../temporal-media-recovery-checkpoint.mjs';
+import { prepareMediaRecoveryJournal, saveMediaRecoveryCheckpoint } from '../temporal-media-recovery-checkpoint.mjs';
 import { startMediaRecoveryWorkflow } from '../temporal-media-recovery-start.mjs';
 import { nativeSnapshotProof, proofDigest as hash } from '../temporal-release-runtime.mjs';
 const require = createRequire(new URL('../../package.json', import.meta.url));
@@ -79,7 +79,8 @@ test(
       supervised,
       supervisedSettled = false;
     const users = [],
-      owned = [];
+      owned = [],
+      ownedActivationOperations = new Set();
     let ownsControls = false;
     let admissionCalls = 0,
       acquireCalls = 0,
@@ -151,7 +152,7 @@ test(
         'auth-private-error',
         'storage-private-error',
         'firestore-private-error',
-      ]) {
+      ].filter((mode) => process.env.URM_MEDIA_HISTORY_ONLY !== '1' || mode === 'joint-supervised-recovery')) {
         stage = `${mode}/setup`;
         const f = await mediaRecoveryFixture();
         let cycle;
@@ -185,6 +186,7 @@ test(
             bindingDigest: plan.bindingDigest,
             operatorPrincipal: { email, adcAndGcloudAccountMatch: true },
             cloudMediaRecovery: { plan, stage: 'planned' },
+            createdAt: require('firebase-admin/firestore').FieldValue.serverTimestamp(),
           })
         );
         await bounded(
@@ -915,6 +917,7 @@ test(
             );
             // A mutation during external native/object reads must not be accepted
             // by combining separate consistent transaction snapshots.
+            const savedStop = (await db.doc(`_control/temporalMediaRecoveryReplacementStop-${op}`).get()).data();
             let reads = 0;
             const driftingDB = new Proxy(db, {
               get(t, key) {
@@ -934,6 +937,122 @@ test(
             await assert.rejects(
               bounded(collectMediaRecoveryExecution({ ...collectorOptions, db: driftingDB }), 25000)
             );
+            await db.doc(`_control/temporalMediaRecoveryReplacementStop-${op}`).set(savedStop);
+            {
+              stage = 'new-parent-historical/complete-capsule';
+              const original = (await lockRef.get()).data();
+              const completed = {
+                ...structuredClone(cycle),
+                stage: 'completed',
+                recovery: {
+                  kind: 'recovery',
+                  operationId: op,
+                  bindingDigest: plan.bindingDigest,
+                  buildId: plan.buildId,
+                  image: plan.image,
+                  proofSHA256: collected.evidenceSHA256,
+                },
+                drained: structuredClone(f.saved.drained),
+                stopped: structuredClone(f.saved.stopped),
+                stop: structuredClone(f.saved.stop),
+                restore: structuredClone(f.saved.restore),
+                disposition: 'restored-normal-zero',
+              };
+              const operatorIdentity = {
+                descriptorSHA256: 'a'.repeat(64),
+                operatorClosureDigest: 'b'.repeat(64),
+                operatorCommit: 'c'.repeat(40),
+                operatorRoot: '/CONTROLLED',
+                resourceBinding: { CONTROLLED: true },
+                runtimeCommit: 'd'.repeat(40),
+                runtimePins: { CONTROLLED: true },
+                runtimeRoot: '/CONTROLLED',
+              };
+              completed.drained.observation.poolSHA256 = hash(completed.start.pool);
+              completed.drained.proofSHA256 = hash(completed.drained.observation);
+              stage = 'new-parent-historical/owned-stopped';
+              await lockRef.update({ cloudMediaRecovery: { ...completed, stage: 'stopped' }, operatorIdentity });
+              await db.doc(`_control/temporalMediaRecoveryDrain-${op}`).create({
+                schemaVersion: 1,
+                operationId: op,
+                releaseId: plan.releaseId,
+                bindingDigest: plan.bindingDigest,
+                planSHA256: hash(plan),
+                proof: completed.drained,
+              });
+              stage = 'new-parent-historical/seal-native-completion';
+              await saveMediaRecoveryCheckpoint({
+                firestore: db,
+                lockRef,
+                controlRef,
+                stateRef,
+                immutableReceipt: db.doc(`_control/temporalCloudMediaRecovery-${op}`),
+                ownedOperation: nativeSnapshotProof(await lockRef.get()),
+                expectedAuthority: {
+                  control: nativeSnapshotProof(await controlRef.get()),
+                  state: nativeSnapshotProof(await stateRef.get()),
+                },
+                config: { releaseId: plan.releaseId },
+                operationId: op,
+                bindingDigest: plan.bindingDigest,
+                operatorPrincipal: original.operatorPrincipal,
+                identityState: completed,
+              });
+              const activationId = randomUUID(),
+                activationBinding = 'f'.repeat(64);
+              const { FieldValue } = require('firebase-admin/firestore');
+              await lockRef.set({
+                action: 'activate-restored-cloud-run-media',
+                operationId: activationId,
+                bindingDigest: activationBinding,
+                releaseId: plan.releaseId,
+                operatorPrincipal: original.operatorPrincipal,
+                operatorIdentity,
+                createdAt: FieldValue.serverTimestamp(),
+              });
+              ownedActivationOperations.add(activationId);
+              const {
+                collectCompletedMediaRecoveryExecution,
+                confirmCompletedMediaRecoveryProvenance,
+              } = require(fileURLToPath(
+                new URL('../../apps/temporal-worker/src/runtime/media-recovery-collector.ts', import.meta.url)
+              ));
+              const historical = {
+                db,
+                client,
+                recoveryOperationId: op,
+                activationOperationId: activationId,
+                activationBindingDigest: activationBinding,
+                releaseId: plan.releaseId,
+                expectedRootSHA256: nativeSnapshotProof(await lockRef.get()).dataDigest,
+                expectedControlSHA256: nativeSnapshotProof(await controlRef.get()).dataDigest,
+                expectedStateSHA256: nativeSnapshotProof(await stateRef.get()).dataDigest,
+                buildId: plan.buildId,
+                imageDigest: plan.image,
+                image: collectorOptions.image,
+              };
+              stage = 'new-parent-historical/actual-original-run';
+              const h = await bounded(collectCompletedMediaRecoveryExecution(historical), 25000);
+              assert.equal(h.runId, handle.firstExecutionRunId);
+              assert.equal(h.workflowId, id);
+              assert.equal(
+                (await confirmCompletedMediaRecoveryProvenance(historical)).provenanceSHA256,
+                h.provenanceSHA256
+              );
+              await assert.rejects(
+                collectCompletedMediaRecoveryExecution({ ...historical, activationOperationId: op })
+              );
+              await assert.rejects(
+                collectCompletedMediaRecoveryExecution({ ...historical, activationBindingDigest: plan.bindingDigest })
+              );
+              const capRef = db.doc(`_control/temporalMediaRecoveryCapsule-${op}`),
+                capData = (await capRef.get()).data();
+              await capRef.update({ completionSHA256: '0'.repeat(64) });
+              await assert.rejects(collectCompletedMediaRecoveryExecution(historical));
+              await capRef.set(capData);
+              // Restoring identical data cannot restore create-only native provenance.
+              await assert.rejects(collectCompletedMediaRecoveryExecution(historical));
+            }
             supervised = undefined;
           } else assert.equal(acquireCalls, 1);
           if (mode !== 'joint-supervised-recovery') assert.equal(admissionCalls, mode === 'admission-ack-loss' ? 2 : 1);
@@ -1029,7 +1148,13 @@ test(
       if (supervised) await cleanup(() => supervised);
       for (const key of ['URM_RECOVERY_TEST_ADDRESS', 'URM_RECOVERY_TEST_OPERATION', 'URM_RECOVERY_TEST_PARENT'])
         delete process.env[key];
-      if (handle) await cleanup(() => handle.terminate('Owned LOCAL fixture cleanup'));
+      if (handle)
+        await cleanup(async () => {
+          const d = await bounded(handle.describe(), 5000),
+            status = d.raw.workflowExecutionInfo?.status;
+          if (status === 1) await bounded(handle.terminate('Owned LOCAL fixture cleanup'));
+          else if (![2, 3, 4, 5, 6, 7].includes(status)) throw Error('Owned local Workflow status unconfirmed');
+        });
       if (worker) await cleanup(() => worker.shutdown());
       if (running) await cleanup(() => running);
       if (mutationConnection) await cleanup(() => mutationConnection.close());
@@ -1046,6 +1171,9 @@ test(
           ])
             await cleanup(() => db.doc(`${collection}/${id}`).delete());
           for (const name of [
+            `temporalMediaRecoveryCapsule-${op}`,
+            `temporalCloudMediaRecovery-${op}`,
+            `temporalMediaRecoveryDrain-${op}`,
             `temporalMediaRecoveryWork-${op}`,
             `temporalMediaRecoveryJournal-${op}`,
             `temporalMediaRecoveryStart-${op}`,
@@ -1104,7 +1232,7 @@ test(
               assert.ok(
                 owned.some(({ op, releaseId }) =>
                   name === 'temporalReleaseOperation'
-                    ? snapshot.get('operationId') === op
+                    ? snapshot.get('operationId') === op || ownedActivationOperations.has(snapshot.get('operationId'))
                     : snapshot.get('releaseId') === releaseId
                 )
               );

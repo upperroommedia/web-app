@@ -11,7 +11,10 @@ import { createRequire } from 'node:module';
 import { randomUUID } from 'node:crypto';
 import { mediaRecoveryFixture } from '../tests/fixtures/media-recovery.mjs';
 import { observeMediaRecoveryPhasePool } from '../temporal-media-recovery-phase-pool.mjs';
-import { readRestoredMediaRecoveryOrigin } from '../temporal-media-restored-origin.mjs';
+import {
+  readRestoredMediaRecoveryOrigin,
+  readRestoredMediaActivationAccess,
+} from '../temporal-media-restored-origin.mjs';
 import { runMediaRecoveryCycle } from '../temporal-media-recovery-cycle.mjs';
 import {
   saveMediaRecoveryCheckpoint,
@@ -30,6 +33,7 @@ if (process.env.FIRESTORE_EMULATOR_HOST !== `127.0.0.1:${harness.emulators.fires
 for (const mode of [
   'normal',
   'capsule',
+  'activation-access',
   'phase-resource',
   'idle-startup',
   'idle-poller',
@@ -588,6 +592,7 @@ for (const mode of [
       if (
         mode === 'normal' ||
         mode === 'capsule' ||
+        mode === 'activation-access' ||
         mode === 'phase-resource' ||
         ['idle-startup', 'idle-poller'].includes(mode)
       ) {
@@ -629,6 +634,54 @@ for (const mode of [
           await lockRef.update({ action: 'diagnose-cloud-run-media-recovery' });
           ownedOperation = nativeSnapshotProof(await lockRef.get());
           assert.equal((await confirmCompletedMediaRecoveryCapsule(options())).capsuleSHA256, proof.capsuleSHA256);
+        }
+        if (mode === 'activation-access') {
+          const newId = randomUUID(),
+            newBinding = 'e'.repeat(64);
+          await lockRef.set({
+            action: 'activate-restored-cloud-run-media',
+            operationId: newId,
+            releaseId: config.releaseId,
+            bindingDigest: newBinding,
+            operatorPrincipal: { email: base.operatorPrincipal.email, adcAndGcloudAccountMatch: true },
+            operatorIdentity: controlledCapsuleOperatorIdentity,
+          });
+          const args = {
+            ...f.options,
+            ...options(),
+            operationId: newId,
+            bindingDigest: newBinding,
+            recoveryOperationId: base.operationId,
+            ownedOperation: nativeSnapshotProof(await lockRef.get()),
+            releaseId: config.releaseId,
+            role: 'media',
+          };
+          const proof = await readRestoredMediaActivationAccess(args);
+          assert.equal(proof.pool.uid, result.restore.pool.uid);
+          assert.equal(proof.pool.etag, result.restore.pool.etag);
+          await assert.rejects(readRestoredMediaActivationAccess({ ...args, recoveryOperationId: newId }));
+          await assert.rejects(readRestoredMediaActivationAccess({ ...args, bindingDigest: base.bindingDigest }));
+          const api = args.api;
+          let late = false;
+          const changed = {
+            ...args,
+            api: async (...v) => {
+              const value = await api(...v);
+              if (v[0] === `https://run.googleapis.com/v2/${result.plan.name}`) {
+                late = true;
+                return { ...value, etag: 'foreign-etag' };
+              }
+              return value;
+            },
+          };
+          await assert.rejects(readRestoredMediaActivationAccess(changed));
+          assert(late);
+          const foreign = structuredClone(controlledCapsuleOperatorIdentity);
+          foreign.runtimeCommit = '0'.repeat(40);
+          await lockRef.update({ operatorIdentity: foreign });
+          await assert.rejects(
+            readRestoredMediaActivationAccess({ ...args, ownedOperation: nativeSnapshotProof(await lockRef.get()) })
+          );
         }
         if (mode === 'phase-resource') {
           const scope = { plan: result.plan, phase: 'completed', pool: result.restore.pool };
@@ -743,6 +796,54 @@ for (const mode of [
         assert.equal(origin.kind, 'restored-media-normal-origin-v1');
         assert.notEqual(origin.pool.revision, f.saved.plan.origin.revision);
         assert.equal(origin.pool.desiredManualInstanceCount, 0);
+        if (mode === 'activation-access') {
+          const newId = randomUUID(),
+            newBinding = 'e'.repeat(64);
+          await lockRef.set({
+            action: 'activate-restored-cloud-run-media',
+            operationId: newId,
+            releaseId: config.releaseId,
+            bindingDigest: newBinding,
+            operatorPrincipal: { email: base.operatorPrincipal.email, adcAndGcloudAccountMatch: true },
+            operatorIdentity: controlledCapsuleOperatorIdentity,
+          });
+          const args = {
+            ...f.options,
+            ...options(),
+            operationId: newId,
+            bindingDigest: newBinding,
+            recoveryOperationId: base.operationId,
+            ownedOperation: nativeSnapshotProof(await lockRef.get()),
+            releaseId: config.releaseId,
+            role: 'media',
+          };
+          const proof = await readRestoredMediaActivationAccess(args);
+          assert.equal(proof.pool.uid, result.restore.pool.uid);
+          assert.equal(proof.pool.etag, result.restore.pool.etag);
+          await assert.rejects(readRestoredMediaActivationAccess({ ...args, recoveryOperationId: newId }));
+          await assert.rejects(readRestoredMediaActivationAccess({ ...args, bindingDigest: base.bindingDigest }));
+          const api = args.api;
+          let late = false;
+          const changed = {
+            ...args,
+            api: async (...v) => {
+              const value = await api(...v);
+              if (v[0] === `https://run.googleapis.com/v2/${result.plan.name}`) {
+                late = true;
+                return { ...value, etag: 'foreign-etag' };
+              }
+              return value;
+            },
+          };
+          await assert.rejects(readRestoredMediaActivationAccess(changed));
+          assert(late);
+          const foreign = structuredClone(controlledCapsuleOperatorIdentity);
+          foreign.runtimeCommit = '0'.repeat(40);
+          await lockRef.update({ operatorIdentity: foreign });
+          await assert.rejects(
+            readRestoredMediaActivationAccess({ ...args, ownedOperation: nativeSnapshotProof(await lockRef.get()) })
+          );
+        }
         if (mode === 'phase-resource') {
           const baseline = f.options.observeProtection;
           f.options.observeProtection = async (scope) => {

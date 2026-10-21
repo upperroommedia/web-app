@@ -9,6 +9,11 @@ import { readMediaRecoveryOriginalLineage } from './media-recovery-replacement';
 import { originalMediaArtifacts } from './media-recovery-original-fault';
 import { mediaRecoveryNativeStart } from './media-recovery-work';
 import { mediaRecoveryPinnedVersion } from './media-recovery-pin';
+import {
+  releaseProvenanceDigest,
+  readCompletedMediaRecoverySnapshot,
+  type CompletedMediaRecoveryOptions,
+} from './media-recovery-history';
 import { validateHistoricalMediaRecoveryCapacity } from './media-startup-capacity';
 const fail = (): never => {
   throw new Error('MEDIA_RECOVERY_COLLECTION_UNCONFIRMED');
@@ -89,9 +94,9 @@ async function collect(o: Options, deadline: number) {
           start = op.mediaRecoveryWorkflowStart,
           ack = facts.Start;
         if (
-          hash(op) !== o.expectedRootSHA256 ||
-          hash(control.data()) !== o.expectedControlSHA256 ||
-          hash(state.data()) !== o.expectedStateSHA256 ||
+          releaseProvenanceDigest(op) !== o.expectedRootSHA256 ||
+          releaseProvenanceDigest(control.data()) !== o.expectedControlSHA256 ||
+          releaseProvenanceDigest(state.data()) !== o.expectedStateSHA256 ||
           op.action !== 'diagnose-cloud-run-media-recovery' ||
           op.operationId !== id ||
           op.releaseId !== p.releaseId ||
@@ -111,8 +116,8 @@ async function collect(o: Options, deadline: number) {
           op.mediaRecoveryJournalAttempt.recordSHA256 !== hash(j) ||
           op.mediaRecoveryJournalAttempt.attemptedAt !== j.attemptedAt ||
           j.expiresAt !== p.expiresAt ||
-          j.authority.control.dataDigest !== hash(control.data()) ||
-          j.authority.state.dataDigest !== hash(state.data()) ||
+          j.authority.control.dataDigest !== releaseProvenanceDigest(control.data()) ||
+          j.authority.state.dataDigest !== releaseProvenanceDigest(state.data()) ||
           start?.stage !== 'attempted' ||
           start.planSHA256 !== hash(p) ||
           start.poolSHA256 !== hash(c.start.pool) ||
@@ -167,6 +172,19 @@ async function collect(o: Options, deadline: number) {
       },
       { readOnly: true }
     );
+  return collectWithEpisodeReader(o, deadline, read);
+}
+/** Both readers are constructed by fixed source entrypoints. No public option
+ * can inject a reader or substitute a historical parent for current authority. */
+async function collectWithEpisodeReader(
+  o: Pick<Options, 'db' | 'client' | 'operationId' | 'plan' | 'image'>,
+  deadline: number,
+  read: () => Promise<any>
+) {
+  const fresh = () => {
+    if (Date.now() >= deadline) fail();
+  };
+  const { db, plan: p, operationId: id } = o;
   const before = await read();
   fresh();
   const f = before.facts,
@@ -428,6 +446,7 @@ async function collect(o: Options, deadline: number) {
   // Raw native history remains in-memory solely for exact-image offline replay.
   return {
     history,
+    provenanceSHA256: before.stampsSHA256,
     workflowId: ready.workflowId,
     runId: ready.runId,
     evidenceSHA256: hash({
@@ -509,9 +528,9 @@ export async function waitForMediaRecoveryEpisode(o: Omit<Options, 'image'> & { 
               paths.map((p) => tx.get(o.db.doc(p)))
             );
             if (
-              hash(op.data()) !== o.expectedRootSHA256 ||
-              hash(c.data()) !== o.expectedControlSHA256 ||
-              hash(s.data()) !== o.expectedStateSHA256 ||
+              releaseProvenanceDigest(op.data()) !== o.expectedRootSHA256 ||
+              releaseProvenanceDigest(c.data()) !== o.expectedControlSHA256 ||
+              releaseProvenanceDigest(s.data()) !== o.expectedStateSHA256 ||
               start.get('stage') !== 'confirmed' ||
               start.get('runId') !== o.runId ||
               start.get('intentSHA256') !== hash(op.get('mediaRecoveryWorkflowStart'))
@@ -565,5 +584,65 @@ export async function waitForMediaRecoveryEpisode(o: Omit<Options, 'image'> & { 
     return fail();
   } catch {
     return fail();
+  }
+}
+
+/** Fixed new-parent historical read. Never waits for, starts or renews work. */
+export async function collectCompletedMediaRecoveryExecution(o: CompletedMediaRecoveryOptions) {
+  const began = Date.now(),
+    mono = performance.now(),
+    deadline = began + 20000;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const fresh = () => {
+    if (Date.now() < began || Date.now() >= deadline || performance.now() - mono >= 20000) fail();
+  };
+  try {
+    const task = async () => {
+      const read = () => readCompletedMediaRecoverySnapshot(o, fresh);
+      const first = await read();
+      fresh();
+      const result = await collectWithEpisodeReader(
+        { db: o.db, client: o.client, operationId: o.recoveryOperationId, plan: first.plan, image: o.image },
+        deadline,
+        read
+      );
+      fresh();
+      if (result.provenanceSHA256 !== first.stampsSHA256) fail();
+      return result;
+    };
+    return await Promise.race([
+      task(),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('MEDIA_RECOVERY_COLLECTION_UNCONFIRMED')), 20000);
+      }),
+    ]);
+  } catch {
+    return fail();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Final fixed GET-only provenance fence after native/image external reads. */
+export async function confirmCompletedMediaRecoveryProvenance(o: CompletedMediaRecoveryOptions) {
+  const at = Date.now(),
+    mono = performance.now();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const fresh = () => {
+    if (Date.now() < at || Date.now() - at >= 5000 || performance.now() - mono >= 5000) fail();
+  };
+  try {
+    const result = await Promise.race([
+      readCompletedMediaRecoverySnapshot(o, fresh),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('MEDIA_RECOVERY_COLLECTION_UNCONFIRMED')), 5000);
+      }),
+    ]);
+    fresh();
+    return { provenanceSHA256: result.stampsSHA256 };
+  } catch {
+    return fail();
+  } finally {
+    clearTimeout(timer);
   }
 }
