@@ -30,7 +30,7 @@ async function observeProtection(o, transition, expectedRole) {
   const { client, firestore: db, platform, role, operationId, bindingDigest, expectedAuthority, releaseId } = o;
   if (
     !Object.hasOwn(actions,role) ||
-    (transition && (role!==expectedRole||!['controls','search'].includes(expectedRole)||typeof o.replayHistory!=='function'||!/^[a-f0-9]{64}$/.test(o.bundleSHA256??''))) ||
+    (transition && (role!==expectedRole||!['controls','search','email','images','media'].includes(expectedRole)||typeof o.replayHistory!=='function'||!/^[a-f0-9]{64}$/.test(o.bundleSHA256??''))) ||
     db.projectId !== 'urm-app-staging' ||
     db.databaseId !== '(default)' ||
     client.options.namespace !== platform.temporalNamespace
@@ -345,3 +345,12 @@ export async function observeBootstrapRegistration({ client, platform, role }) {
   }
   return fail();
 }
+
+export const observeEmailPromotionBefore=o=>observeProtection(o,'before','email');
+export const observeEmailPromotionAfter=o=>observePromotionAfter(o,'email');
+
+export const observeImagesPromotionBefore=o=>observeProtection(o,'before','images');
+export const observeImagesPromotionAfter=o=>observePromotionAfter(o,'images');
+
+export const observeMediaPromotionBefore=o=>observeProtection(o,'before','media');
+export const observeMediaPromotionAfter=o=>observePromotionAfter(o,'media');

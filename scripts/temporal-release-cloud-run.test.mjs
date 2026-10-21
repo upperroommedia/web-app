@@ -181,3 +181,9 @@ for (const version of ['latest', '', '0', 7, null])
     const p = profile(); p.dispatch.apiKeyVersion = version;
     assert.throws(() => validateCloudRunReleasePlatform(p));
   });
+
+for(const role of ['controls','search','email','images','media'])test(`${role} canonical native connection disables SDK and gRPC retries`,async()=>{
+ const {nativePromotionConnectionOptions}=await import('./temporal-release-cloud-run.mjs');
+ assert.deepEqual(nativePromotionConnectionOptions(`${role}-promotion`),{interceptors:[],channelArgs:{'grpc.enable_retries':0}});
+ assert.deepEqual(nativePromotionConnectionOptions('workers-ready'),{});
+});

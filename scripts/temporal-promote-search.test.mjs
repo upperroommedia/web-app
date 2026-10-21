@@ -17,7 +17,7 @@ async function fixture(){
   plan:{schemaVersion:1,operationId:id,releaseId:f.options.releaseId,evidenceDigest:f.options.evidenceDigest,role:'controls',namespace:f.options.platform.temporalNamespace,deploymentName:c.deploymentName,buildId:c.buildId,image:c.image,receiptsSHA256:'e'.repeat(64),settingsSHA256:'f'.repeat(64)},
   request:{namespace:f.options.platform.temporalNamespace,deploymentName:c.deploymentName,buildId:c.buildId,identity:`urm-controls-promotion-${id}`}}};
  const stamp=new Date().toISOString(),state=predecessor.identityState;
- state.plan.operationBindingDigest=bindingDigest;
+ state.plan.operationBindingDigest=bindingDigest;state.plan.ownReceiptsSHA256=state.plan.receiptsSHA256;state.plan.predecessorReceiptSHA256=null;
  state.attemptedAt=stamp;state.verifiedAt=stamp;state.request.conflictTokenBase64=Buffer.from('before').toString('base64');state.acknowledgement={conflictTokenBase64:Buffer.from('after').toString('base64')};
  state.resources={role:'controls',buildId:c.buildId,receiptsSHA256:state.plan.receiptsSHA256,pool:{name:`projects/${c.projectId}/locations/${c.region}/workerPools/${c.poolName}`,uid:'owned-controls-pool',generation:'4',revision:'owned-controls-revision',desiredManualInstanceCount:1},access:{runnerUniqueId:'11111111111111111111',scalerUniqueId:'22222222222222222222'}};
  state.proof={role:'controls',buildId:c.buildId,namespace:f.options.platform.temporalNamespace,observedAt:stamp,protectionSHA256:'a'.repeat(64),protectedWorkSHA256:'b'.repeat(64),computeInventorySHA256:'c'.repeat(64),peerRoutingSHA256:'d'.repeat(64),bundleSHA256:'e'.repeat(64),queueRouting:{current:{deploymentName:'urm-worker-staging',buildId:'old'}}};
@@ -30,7 +30,7 @@ async function fixture(){
   describeTaskQueue:async()=>({versioningInfo:{currentDeploymentVersion:{deploymentName:c.deploymentName,buildId:c.buildId}},pollers:[{identity:'owned-controls',deploymentOptions:{deploymentName:c.deploymentName,buildId:c.buildId}}]}),
   setWorkerDeploymentCurrentVersion:async request=>{assert.equal(saved.stage,'attempted');assert.equal(request.deploymentName,b.deploymentName);calls++;target={deploymentName:b.deploymentName,buildId:b.buildId};token=Buffer.from('after');return {conflictToken:token};},
  };
- const proof=()=>({role:'search',buildId:b.buildId,namespace:f.options.platform.temporalNamespace,observedAt:new Date().toISOString(),protectionSHA256:'a'.repeat(64),protectedWorkSHA256:'b'.repeat(64),computeInventorySHA256:'c'.repeat(64),peerRoutingSHA256:'d'.repeat(64),bundleSHA256:'e'.repeat(64),queueRouting:{current:target}});
+ const proof=()=>({role:'search',buildId:b.buildId,namespace:f.options.platform.temporalNamespace,observedAt:new Date().toISOString(),protectionSHA256:'a'.repeat(64),protectedWorkSHA256:'b'.repeat(64),computeInventorySHA256:'c'.repeat(64),peerRoutingSHA256:'d'.repeat(64),bundleSHA256:'e'.repeat(64),queueRouting:{current:target??{deploymentName:'urm-worker-staging',buildId:'old-shared'},pollers:[{identity:'owned-search',deploymentOptions:{deploymentName:b.deploymentName,buildId:b.buildId}}]}});
  const options={...f.options,bindingDigest,client:{options:{namespace:f.options.platform.temporalNamespace},connection:{options:{interceptors:[],channelArgs:{'grpc.enable_retries':0}},workflowService:service,withDeadline:(_d,fn)=>fn()}},before:async()=>proof(),after:async()=>proof(),authorizeMutation:async()=>{},save:async s=>{saved=structuredClone(s);}};
  return {f,options,service,predecessor,get saved(){return saved;},get calls(){return calls;}};
 }

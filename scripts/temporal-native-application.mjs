@@ -8,7 +8,7 @@ export function loadNativeReleaseApplication(runtimeRoot,purpose){
       compilerOptions: { module: 'CommonJS', target: 'ES2022', esModuleInterop: true, moduleResolution: 'node' } });
     try {
       const workerRequire = createRequire(resolve(runtimeRoot, 'apps/temporal-worker/package.json'));
-      return { ...(['controls-promotion','search-promotion'].includes(purpose)?{...workerRequire('@temporalio/worker'),workflowsPath:resolve(runtimeRoot,'apps/temporal-worker/src/workflows/index.ts')}:{}),...workerRequire('@temporalio/client'),
+      return { ...(['controls-promotion','search-promotion','email-promotion','images-promotion','media-promotion'].includes(purpose)?{...workerRequire('@temporalio/worker'),workflowsPath:resolve(runtimeRoot,'apps/temporal-worker/src/workflows/index.ts')}:{}),...workerRequire('@temporalio/client'),
         ...workerRequire(resolve(runtimeRoot, 'apps/temporal-worker/src/runtime/serverless-release-readiness.ts')) };
     } finally {
       service.enabled(false);

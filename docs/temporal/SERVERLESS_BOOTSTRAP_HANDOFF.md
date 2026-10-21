@@ -7,8 +7,9 @@ owned pool under the original parent. Observation failure also enters owned stop
 uncertain authority, protected work or an unknown result retains the fence.
 The source also connects a kept-running role-specific activation and a separate stop of
 that exact unused activation. None of these operations has been applied to Cloud Run.
-Controls and search guarded native promotion are connected in source. Promotion
-of the other roles remains unimplemented, and no promotion has been applied to staging.
+Controls, search, email and images guarded native promotions are connected in
+source. Media is hard-stopped pending actual capacity proof; orchestration remains
+unimplemented. No promotion has been applied to staging.
 
 The final native role-readiness collector still requires candidate versions current,
 with no ramp, on the real role queues. The cycle cannot replace that collector.
@@ -139,6 +140,44 @@ The native fixture runs controls first, consumes its actual completed Firestore
 receipt under a distinct search binding, and checks both roles' authority drift
 without additional mutations. This is local SDK evidence with controlled Cloud
 resource observations, not deployed search delivery or effective credential proof.
+
+## Connected independent promotion sequence
+
+The fixed source sequence is controls, search, email, images and media.
+Controls through images have connected canonical operations. Media has a fixed
+canonical denial before credentials or operations until native allocation,
+statfs/reservation, same-host canary and recovery evidence is connected. Email consumes the completed search certificate; images consumes email;
+media consumes images. Their manifests require respectively twelve, fourteen and
+fourteen distinct owned receipts, including their own preparation, completed
+bootstrap cycle, retained activation and immediate predecessor promotion.
+Orchestration promotion remains a separate, unimplemented final step requiring
+image-bound Workflow replay and protected original-work evidence.
+
+Every later action freshly checks the entire earlier role prefix: each native
+current deployment/version, zero ramp, exact Activity-only queue, queue routing
+and current pollers. The original immediate predecessor certificate retains its
+own binding and receipt hash; its aggregate chain hash is distinct from its own
+resource receipts. A historical completed certificate cannot replace fresh
+ancestor routing. Checks run before the attempt and during post-observation and
+GET-only reconciliation.
+
+Email accepts no Storage authority. Images and media retain their exact approved
+bucket identities, scoped policies, numeric secrets and retained pool identity.
+The planned media routing step preserves retained quota evidence and the
+100 GiB disk budget without another allocation or quota request, but this does
+not replace its still-required native capacity gate. The media action remains
+hard-stopped and has no bypass flag. The actual
+canonical native connection disables both SDK interceptors and gRPC retries for
+all five promotion purposes. Each operation saves its exact conflict-token request
+before one CAS; rejection and unknown-acknowledgement fences remain unchanged.
+No role promotion scales a pool, opens admission, advances the release phase,
+retires old workers or attaches WCI.
+
+The expanded local SDK/Firestore fixture creates each predecessor through the
+actual source operation with distinct bindings before promoting its successor.
+Controlled Cloud resource fixtures and a verification Workflow bundle do not
+establish Cloud Run acceptance, image-byte compatibility, effective credentials,
+process counts, drainage, provider behavior or staging readiness.
 
 ## Connected role cycles and kept activation
 

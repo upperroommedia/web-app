@@ -1,8 +1,10 @@
-import {validateCompletedControlsPromotionReceipt} from './temporal-promotion-receipt.mjs';
-import {verifySearchPromotionPredecessor} from './temporal-promotion-predecessor.mjs';
+import {denyUnprovedMediaPromotion} from './temporal-promotion-roles.mjs';
+import {independentPromotionPredecessor,independentPromotionRoles} from './temporal-promotion-roles.mjs';
+import {validateCompletedRolePromotionReceipt} from './temporal-promotion-receipt.mjs';
+import {verifySearchPromotionPredecessor,verifyEmailPromotionPredecessor,verifyImagesPromotionPredecessor,verifyMediaPromotionPredecessor} from './temporal-promotion-predecessor.mjs';
 import { isDeepStrictEqual } from 'node:util';
 import { proofDigest } from './temporal-release-runtime.mjs';
-import { verifyControlsPromotionResources,verifySearchPromotionResources } from './temporal-bootstrap-pool.mjs';
+import { verifyControlsPromotionResources,verifySearchPromotionResources,verifyEmailPromotionResources,verifyImagesPromotionResources,verifyMediaPromotionResources } from './temporal-bootstrap-pool.mjs';
 
 const fail=()=>{throw new Error('CLOUD_RUN_CONTROLS_PROMOTION_UNCONFIRMED');};
 const uuid=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
@@ -17,19 +19,21 @@ async function promote(o,expectedRole){
   const {platform,role,operationId,releaseId,evidenceDigest,bindingDigest,receipts,settings,client,
     before,after,save,authorizeMutation}=o;
   const b=platform.roleBindings.find(x=>x.role===expectedRole),namespace=platform.temporalNamespace;
-  if(role!==expectedRole||!['controls','search'].includes(expectedRole)||!uuid.test(operationId??'')||!uuid.test(releaseId??'')||!digest.test(evidenceDigest??'')||!digest.test(bindingDigest??'')||
+  if(role!==expectedRole||!independentPromotionRoles.includes(expectedRole)||!uuid.test(operationId??'')||!uuid.test(releaseId??'')||!digest.test(evidenceDigest??'')||!digest.test(bindingDigest??'')||
     client.options.namespace!==namespace||!Array.isArray(client.connection.options?.interceptors)||client.connection.options.interceptors.length||
     client.connection.options?.channelArgs?.['grpc.enable_retries']!==0||[before,after,save,authorizeMutation].some(x=>typeof x!=='function'))fail();
+  const previous=independentPromotionPredecessor[role],key=previous?`${previous}Promotion`:undefined;
+  const ownReceipts=Object.fromEntries(Object.entries(receipts).filter(([name])=>name!==key));
   const plan={schemaVersion:1,operationId,operationBindingDigest:bindingDigest,releaseId,evidenceDigest,role,namespace,
     deploymentName:b.deploymentName,buildId:b.buildId,image:b.image,
-    receiptsSHA256:proofDigest(receipts),settingsSHA256:proofDigest(settings)};
+    receiptsSHA256:proofDigest(receipts),ownReceiptsSHA256:proofDigest(ownReceipts),predecessorReceiptSHA256:previous?proofDigest(receipts[key]):null,settingsSHA256:proofDigest(settings)};
   let state=o.saved;
   const put=async next=>{await save(next);state=next;};
   const resources=async()=>{
-    const {controlsPromotion,...ownReceipts}=receipts;
-    if(role==='controls'&&controlsPromotion!==undefined)fail();
-    const owned=await (role==='controls'?verifyControlsPromotionResources:verifySearchPromotionResources)({...o,receipts:ownReceipts,saved:undefined,observeProtection:before,observeRegistration:async()=>fail()});
-    return role==='search'?{...owned,predecessor:await verifySearchPromotionPredecessor(o)}:owned;
+    const inspect={controls:verifyControlsPromotionResources,search:verifySearchPromotionResources,email:verifyEmailPromotionResources,images:verifyImagesPromotionResources,media:verifyMediaPromotionResources}[role];
+    const owned=await inspect({...o,receipts:ownReceipts,saved:undefined,observeProtection:before,observeRegistration:async()=>fail()});
+    const verify={search:verifySearchPromotionPredecessor,email:verifyEmailPromotionPredecessor,images:verifyImagesPromotionPredecessor,media:verifyMediaPromotionPredecessor}[role];
+    return previous?{...owned,predecessor:await verify(o)}:owned;
   };
   const readTarget=()=>client.connection.withDeadline(Date.now()+5000,()=>client.connection.workflowService
     .describeWorkerDeployment({namespace,deploymentName:b.deploymentName}));
@@ -89,7 +93,7 @@ async function promote(o,expectedRole){
     const completed={...state,stage:'completed',observed,verifiedAt:new Date().toISOString(),
       outcome:state.stage==='acknowledged'?'native-acknowledgement-and-readback':'desired-routing-observed-after-unknown-ack',
       scope:`${role}-only routing observation; unknown ACK not causal; no admission/ownership/WCI/retirement or readiness advance`};
-    if(role==='controls')validateCompletedControlsPromotionReceipt({receipt:{operationId,releaseId,bindingDigest,identityState:completed},platform,releaseId,evidenceDigest});
+    validateCompletedRolePromotionReceipt({receipt:{operationId,releaseId,bindingDigest,identityState:completed},platform,releaseId,evidenceDigest,role});
     await put(completed);
     return state;
   }catch{return fail();}
@@ -97,3 +101,9 @@ async function promote(o,expectedRole){
 
 export const promoteCloudRunControls=o=>promote(o,'controls');
 export const promoteCloudRunSearch=o=>promote(o,'search');
+
+export const promoteCloudRunEmail=o=>promote(o,'email');
+
+export const promoteCloudRunImages=o=>promote(o,'images');
+
+export const promoteCloudRunMedia=async()=>denyUnprovedMediaPromotion();

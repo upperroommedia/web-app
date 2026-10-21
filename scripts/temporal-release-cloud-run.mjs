@@ -1,6 +1,7 @@
+import {independentPromotionRoles,denyUnprovedMediaPromotion} from './temporal-promotion-roles.mjs';
 import {loadNativeReleaseApplication} from './temporal-native-application.mjs';
-import {promoteCloudRunControls,promoteCloudRunSearch} from './temporal-promote-controls.mjs';
-import { observeBootstrapProtection, observeBootstrapRegistration, observeControlsPromotionBefore, observeControlsPromotionAfter,observeSearchPromotionBefore,observeSearchPromotionAfter } from './temporal-bootstrap-observations.mjs';
+import {promoteCloudRunControls,promoteCloudRunSearch,promoteCloudRunEmail,promoteCloudRunImages,promoteCloudRunMedia} from './temporal-promote-controls.mjs';
+import { observeBootstrapProtection, observeBootstrapRegistration, observeControlsPromotionBefore, observeControlsPromotionAfter,observeSearchPromotionBefore,observeSearchPromotionAfter,observeEmailPromotionBefore,observeEmailPromotionAfter,observeImagesPromotionBefore,observeImagesPromotionAfter,observeMediaPromotionBefore,observeMediaPromotionAfter } from './temporal-bootstrap-observations.mjs';
 import { createHash } from 'node:crypto';
 import { isAbsolute } from 'node:path';
 import { realpath, open } from 'node:fs/promises';
@@ -89,7 +90,7 @@ async function withNativeCloudRunClient({ binding, config, platform, firestore }
   let connection;
   try {
     connection = await application.Connection.connect({ address: platform.cloudAddress, tls: true, apiKey: key,
-      connectTimeout: 15000,...(['controls-promotion','search-promotion'].includes(purpose)?{interceptors:[],channelArgs:{'grpc.enable_retries':0}}:{}) });
+      connectTimeout: 15000,...nativePromotionConnectionOptions(purpose) });
     const client = new application.Client({ connection, namespace: platform.temporalNamespace });
     return await observe(client, application);
 
@@ -277,9 +278,22 @@ async function runPromotion(options,role){
    replayed.add(digest);
   };
   const observe={...options,client,bundleSHA256,replayHistory};
-  return (role==='controls'?promoteCloudRunControls:promoteCloudRunSearch)({...options,client,before:()=>role==='controls'?observeControlsPromotionBefore(observe):observeSearchPromotionBefore(observe),after:()=>role==='controls'?observeControlsPromotionAfter(observe):observeSearchPromotionAfter(observe)});
+  const operations={controls:[promoteCloudRunControls,observeControlsPromotionBefore,observeControlsPromotionAfter],search:[promoteCloudRunSearch,observeSearchPromotionBefore,observeSearchPromotionAfter],email:[promoteCloudRunEmail,observeEmailPromotionBefore,observeEmailPromotionAfter],images:[promoteCloudRunImages,observeImagesPromotionBefore,observeImagesPromotionAfter],media:[promoteCloudRunMedia,observeMediaPromotionBefore,observeMediaPromotionAfter]};
+  const [run,before,after]=operations[role];
+  return run({...options,client,before:()=>before(observe),after:()=>after(observe)});
  },`${role}-promotion`);
 }
 
 export const runCloudRunControlsPromotion=o=>runPromotion(o,'controls');
 export const runCloudRunSearchPromotion=o=>runPromotion(o,'search');
+
+export const runCloudRunEmailPromotion=o=>runPromotion(o,'email');
+
+export const runCloudRunImagesPromotion=o=>runPromotion(o,'images');
+
+export const runCloudRunMediaPromotion=async()=>denyUnprovedMediaPromotion();
+
+/** Fixed promotion purposes use one transport attempt, including SDK interceptors. */
+export function nativePromotionConnectionOptions(purpose){
+ return independentPromotionRoles.some(role=>purpose===`${role}-promotion`)?{interceptors:[],channelArgs:{'grpc.enable_retries':0}}:{};
+}

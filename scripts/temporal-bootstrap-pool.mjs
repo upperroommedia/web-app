@@ -461,7 +461,7 @@ async function runReviewedPoolOperation(o, mode, expectedRole) {
   if(mode==='inspect-promotion') {
     // Fixed read-only entrypoint rederives the original retained chain and all
     // native resource permissions. No scale/checkpoint or noncurrent assumption.
-    if(!['controls','search'].includes(role)||saved!==undefined)fail();
+    if(!['controls','search','email','images','media'].includes(role)||saved!==undefined)fail();
     const access=await verifyAccess(o,zeroPlan);
     const pool=await current(1);
     if(!isDeepStrictEqual(pool,origin))fail();
@@ -772,3 +772,9 @@ export const stopCloudRunMediaActivation=o=>execute(o,'abort','media');
 export const verifyControlsPromotionResources=o=>execute(o,'inspect-promotion','controls');
 
 export const verifySearchPromotionResources=o=>execute(o,'inspect-promotion','search');
+
+export const verifyEmailPromotionResources=o=>execute(o,'inspect-promotion','email');
+
+export const verifyImagesPromotionResources=o=>execute(o,'inspect-promotion','images');
+
+export const verifyMediaPromotionResources=o=>execute(o,'inspect-promotion','media');
