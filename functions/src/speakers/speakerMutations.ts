@@ -554,35 +554,67 @@ export const createSubsplashSpeakerTag = async (
     };
 
     const accessToken = await authenticateSubsplash();
-    const config = createAxiosConfig(url, accessToken, input.tagId ? 'PATCH' : 'POST', payload);
-    let response: { id?: unknown };
-    try {
-      response = (await withSubsplashSpeakerRetry('createSpeakerTag', () => axios(config))).data as { id?: unknown };
-    } catch (error) {
-      if (input.tagId || getAxiosStatusCode(error) !== 400) {
-        throw error;
-      }
-
-      const existingTag = await findSubsplashSpeakerTagByTitle(input.title, accessToken);
-      if (!existingTag) {
-        throw error;
-      }
-
-      logger.warn('Reusing an existing Subsplash speaker tag that is missing from Firestore', {
-        speakerTitle: input.title,
-        tagId: existingTag.id,
-      });
-
-      const reconcileConfig = createAxiosConfig(
-        `https://core.subsplash.com/tags/v1/tags/${existingTag.id}`,
+    const createOrReconcileTag = async (): Promise<{ id?: unknown }> => {
+      const createConfig = createAxiosConfig(
+        'https://core.subsplash.com/tags/v1/tags',
         accessToken,
-        'PATCH',
+        'POST',
         payload
       );
-      await withSubsplashSpeakerRetry('reconcileExistingSpeakerTag', () => axios(reconcileConfig));
-      response = { id: existingTag.id };
+
+      try {
+        return (await withSubsplashSpeakerRetry('createSpeakerTag', () => axios(createConfig))).data as {
+          id?: unknown;
+        };
+      } catch (error) {
+        if (getAxiosStatusCode(error) !== 400) {
+          throw error;
+        }
+
+        const existingTag = await findSubsplashSpeakerTagByTitle(input.title, accessToken);
+        if (!existingTag) {
+          throw error;
+        }
+
+        logger.warn('Reusing an existing Subsplash speaker tag that is missing from Firestore', {
+          speakerTitle: input.title,
+          tagId: existingTag.id,
+        });
+
+        const reconcileConfig = createAxiosConfig(
+          `https://core.subsplash.com/tags/v1/tags/${existingTag.id}`,
+          accessToken,
+          'PATCH',
+          payload
+        );
+        await withSubsplashSpeakerRetry('reconcileExistingSpeakerTag', () => axios(reconcileConfig));
+        return { id: existingTag.id };
+      }
+    };
+
+    let response: { id?: unknown };
+    let responseTagIdFallback = input.tagId;
+    if (!input.tagId) {
+      response = await createOrReconcileTag();
+    } else {
+      const config = createAxiosConfig(url, accessToken, 'PATCH', payload);
+      try {
+        response = (await withSubsplashSpeakerRetry('updateSpeakerTag', () => axios(config))).data as {
+          id?: unknown;
+        };
+      } catch (error) {
+        if (getAxiosStatusCode(error) !== 404) {
+          throw error;
+        }
+
+        logger.warn('Recreating a Subsplash speaker tag that no longer exists', {
+          staleTagId: input.tagId,
+        });
+        response = await createOrReconcileTag();
+        responseTagIdFallback = undefined;
+      }
     }
-    const tagId = typeof response.id === 'string' ? response.id : input.tagId || '';
+    const tagId = typeof response.id === 'string' ? response.id : responseTagIdFallback || '';
     if (!tagId) {
       throw new HttpsError('internal', 'Subsplash did not return a tag id.');
     }
@@ -893,15 +925,17 @@ export const updateSpeakerMutation = async (
       }
     }
 
-    if (existingSpeaker.tagId) {
-      await createSubsplashSpeakerTag({
-        tagId: existingSpeaker.tagId,
+    let nextTagId = existingSpeaker.tagId;
+    if (nextTagId) {
+      const updatedTag = await createSubsplashSpeakerTag({
+        tagId: nextTagId,
         title: normalizedName,
         squareImage: requireSquareImage(nextImages),
         shortDescription: nextShortDescription,
         description: nextDescription,
-        operationKey: scopeOperationKey(input.operationKey, `update-speaker-tag-${existingSpeaker.tagId}`),
+        operationKey: scopeOperationKey(input.operationKey, `update-speaker-tag-${nextTagId}`),
       });
+      nextTagId = updatedTag.tagId;
     }
 
     if (
@@ -936,7 +970,7 @@ export const updateSpeakerMutation = async (
       description: nextDescription ?? '',
       images: nextImages,
       sermonCount: existingSpeaker.sermonCount,
-      ...(existingSpeaker.tagId ? { tagId: existingSpeaker.tagId } : {}),
+      ...(nextTagId ? { tagId: nextTagId } : {}),
       ...(nextListId ? { listId: nextListId } : {}),
     };
 
