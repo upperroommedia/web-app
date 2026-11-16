@@ -2,6 +2,7 @@
  * Page for uploaders to use to upload, trim, and add intro/outro to audio file
  */
 import editSermon from '../../pages/api/editSermon';
+import { getSubsplashTagValidationError } from '@upperroom/shared/shared/subsplashTagValidation';
 import { isSermonProcessingConflict } from '../../utils/sermonEditing';
 import { ChangeEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import TextField from '@mui/material/TextField';
@@ -465,6 +466,7 @@ const Uploader = (props: UploaderProps) => {
   const validateForm = useCallback((): boolean => {
     const isEditingExistingSermon = Boolean(props.existingSermon);
     const topicLists = sermonList.filter((list) => list.type === ListType.TOPIC_LIST);
+    const topicValidationError = getSubsplashTagValidationError({ topics: topicLists.map((list) => list.name) });
     const shouldRequireBibleChapter = !uploadAsSeries && sermon.subtitle === BIBLE_STUDIES_STRING;
     const shouldRequireSundayMonth = !uploadAsSeries && sermon.subtitle === SUNDAY_HOMILIES_STRING;
     const shouldRequireHolyWeekYear = !uploadAsSeries && sermon.subtitle === PASCHA_WEEK_STRING;
@@ -488,8 +490,8 @@ const Uploader = (props: UploaderProps) => {
         initialState: false,
       },
       topics: {
-        error: topicLists.length === 0,
-        message: 'You must select at least one topic',
+        error: topicLists.length === 0 || Boolean(topicValidationError),
+        message: topicValidationError ?? 'You must select at least one topic',
         initialState: false,
       },
       subtitle: {

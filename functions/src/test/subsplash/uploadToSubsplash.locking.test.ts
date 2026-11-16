@@ -30,7 +30,7 @@ jest.mock('firebase-functions/v2/https', () => {
   return {
     ...actual,
     onCall: jest.fn((optsOrHandler: unknown, maybeHandler?: unknown) =>
-      (typeof optsOrHandler === 'function' ? optsOrHandler : maybeHandler)
+      typeof optsOrHandler === 'function' ? optsOrHandler : maybeHandler
     ),
   };
 });
@@ -83,6 +83,39 @@ describe('uploadToSubsplash lock contract', () => {
         data: { ...buildValidPayload(), operationKey: '   ' },
       })
     ).rejects.toBeInstanceOf(HttpsError);
+  });
+
+  it.each([
+    { topics: Array.from({ length: 11 }, (_, index) => `Topic ${index}`) },
+    { speakers: Array.from({ length: 4 }, (_, index) => ({ name: `Speaker ${index}` })) },
+    { topics: null },
+    { topics: [''] },
+    { speakers: [null] },
+  ])('rejects invalid tags before locks, authentication, or provider side effects: %j', async (tags) => {
+    await expect(
+      uploadHandler({
+        auth: { token: { role: 'admin' } },
+        data: { ...buildValidPayload(), ...tags },
+      })
+    ).rejects.toMatchObject({ code: 'invalid-argument' });
+    expect(mockWithIdempotency).not.toHaveBeenCalled();
+    expect(mockWithSubsplashLocks).not.toHaveBeenCalled();
+    expect(mockAuthenticateSubsplash).not.toHaveBeenCalled();
+    expect(mockAxios).not.toHaveBeenCalled();
+  });
+
+  it('publishes all tags at the supported limits', async () => {
+    const topics = Array.from({ length: 10 }, (_, index) => `Topic ${index}`);
+    const speakers = Array.from({ length: 3 }, (_, index) => ({ name: `Speaker ${index}` }));
+    await uploadHandler({ auth: { token: { role: 'admin' } }, data: { ...buildValidPayload(), topics, speakers } });
+    const mediaCall = mockAxios.mock.calls.find(([config]) =>
+      (config as { url?: string }).url?.includes('/media/v1/media-items')
+    );
+    expect(mediaCall).toBeDefined();
+    expect(JSON.parse(String((mediaCall![0] as unknown as { data: string }).data)).tags).toEqual([
+      ...speakers.map((speaker) => `speaker:${speaker.name}`),
+      ...topics.map((topic) => `topic:${topic}`),
+    ]);
   });
 
   it('wraps mutations with idempotency and media-item lock scope', async () => {

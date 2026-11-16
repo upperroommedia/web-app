@@ -1,3 +1,4 @@
+import { getSubsplashTagValidationError } from '@upperroom/shared/shared/subsplashTagValidation';
 import { logger } from 'firebase-functions/v2';
 import { onCall, CallableRequest, HttpsError } from 'firebase-functions/v2/https';
 import axios from 'axios';
@@ -47,6 +48,10 @@ const editSubsplashSermon = onCall(
     if (!data.subsplashId || !data.subsplashId.trim()) {
       throw new HttpsError('invalid-argument', 'subsplashId is required.');
     }
+    const tagValidationError = getSubsplashTagValidationError(data);
+    if (tagValidationError) {
+      throw new HttpsError('invalid-argument', tagValidationError);
+    }
     const operationKey = data.operationKey.trim();
     const subsplashId = data.subsplashId.trim();
     logger.log('data', data);
@@ -59,15 +64,9 @@ const editSubsplashSermon = onCall(
             // create media item with title
             let tags: string[] = [];
             if (Array.isArray(data.speakers)) {
-              if (data.speakers.length > 3) {
-                throw new Error('Too many speakers: Max 3 speakers allowed');
-              }
               tags = tags.concat(data.speakers.map((speaker) => `speaker:${speaker.name}`));
             }
             if (Array.isArray(data.topics)) {
-              if (data.topics.length > 10) {
-                throw new Error('Too many topics: Max 10 topics allowed');
-              }
               tags = tags.concat(data.topics.map((topic: string) => `topic:${topic}`));
             }
 
