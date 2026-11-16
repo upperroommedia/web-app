@@ -1,3 +1,4 @@
+import { getSubsplashTagValidationError, MAX_SUBSPLASH_TOPICS } from '@upperroom/shared/shared/subsplashTagValidation';
 import TextField from '@mui/material/TextField';
 import ListItem from '@mui/material/ListItem';
 import Chip from '@mui/material/Chip';
@@ -189,6 +190,11 @@ const BundleListSelector: FunctionComponent<BundleListSelectorProps> = (props: B
           fullWidth
           value={value}
           loading={isLoadingBundles}
+          getOptionDisabled={(option) =>
+            props.listType === ListType.TOPIC_LIST &&
+            value.length >= MAX_SUBSPLASH_TOPICS &&
+            !value.some((list) => list.id === option.id)
+          }
           // Enhanced scrolling configuration
           ListboxProps={{
             style: {
@@ -202,7 +208,11 @@ const BundleListSelector: FunctionComponent<BundleListSelectorProps> = (props: B
             // Mark field as touched for error display
             if (props.setError && props.listType === ListType.TOPIC_LIST) {
               const hasTopics = value.length > 0;
-              props.setError(!hasTopics, hasTopics ? '' : 'You must select at least one topic');
+              const validationError = getSubsplashTagValidationError({ topics: value.map((list) => list.name) });
+              props.setError(
+                !hasTopics || Boolean(validationError),
+                validationError ?? (hasTopics ? '' : 'You must select at least one topic')
+              );
             }
           }}
           onChange={async (_, newValue, reason) => {

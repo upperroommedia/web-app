@@ -1,3 +1,4 @@
+import { getSubsplashTagValidationError } from '@upperroom/shared/shared/subsplashTagValidation';
 import { FunctionComponent, ReactElement, ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
@@ -858,6 +859,11 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
     const existingMediaItemId = resolveSessionSubsplashMediaItemId(sessionSubsplashMediaItemId, sermon.subsplashId);
     if (existingMediaItemId && !options?.forceCreate) {
       return { mediaItemId: existingMediaItemId };
+    }
+
+    const tagValidationError = getSubsplashTagValidationError(sermon);
+    if (tagValidationError) {
+      throw new Error(tagValidationError);
     }
 
     const currentUploadGeneration = resolveSessionSubsplashUploadGeneration(
