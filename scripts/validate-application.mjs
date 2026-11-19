@@ -49,6 +49,7 @@ export function applicationStages(root = ROOT) {
       node(
         '--test',
         'scripts/tests/validate-application.test.mjs',
+        'scripts/tests/validate-application-parallel.test.mjs',
         'scripts/tests/local-validation-launcher.test.mjs',
         'scripts/tests/test-temporal-worker.test.mjs',
         'scripts/tests/local-test-server-owner.test.mjs',

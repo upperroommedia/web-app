@@ -1,0 +1,76 @@
+name: Temporal staging application validation
+
+on:
+  pull_request:
+    branches: [staging]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: temporal-staging-validation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  application-group:
+    name: Application group (${{ matrix.group }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [functions, integration, browser, worker]
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: ./.github/actions/temporal-application-tools
+        timeout-minutes: 8
+      - name: Validate application group
+        id: application_validation
+        env:
+          VALIDATION_GROUP: ${{ matrix.group }}
+        run: node scripts/validate-application-parallel.mjs run "$VALIDATION_GROUP"
+      - name: Preserve authenticated media failure traces
+        if: ${{ failure() && steps.application_validation.outputs.media_failed == 'true' }}
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: parallel-media-failure-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.group }}
+          path: apps/web/test-results/
+          if-no-files-found: warn
+          retention-days: 3
+      - name: Preserve group summary
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: parallel-application-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.group }}
+          path: output/validation/application-summary.json
+          if-no-files-found: error
+          retention-days: 3
+      - name: Preserve worker suite summary
+        if: ${{ always() && matrix.group == 'worker' }}
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: parallel-worker-${{ github.run_id }}-${{ github.run_attempt }}
+          path: output/validation/temporal-worker-summary.json
+          if-no-files-found: warn
+          retention-days: 3
+
+  parallel-application:
+    if: ${{ always() }}
+    needs: application-group
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require all application jobs to pass
+        env:
+          GROUP_RESULT: ${{ needs.application-group.result }}
+        run: test "$GROUP_RESULT" = success
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '22.23.3'
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          pattern: parallel-application-${{ github.run_id }}-${{ github.run_attempt }}-*
+          path: output/validation/groups/
+      - name: Verify complete coverage for this commit and attempt
+        run: node scripts/validate-application-parallel.mjs verify output/validation/groups
