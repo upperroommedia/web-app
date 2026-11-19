@@ -54,11 +54,29 @@ jobs:
           "$jdk_home/bin/java" -version
           echo "JAVA_HOME=$jdk_home" >> "$GITHUB_ENV"
           echo "$jdk_home/bin" >> "$GITHUB_PATH"
-      - name: Install pinned package manager and native test tools
+      - name: Install pinned pnpm
+        timeout-minutes: 4
         run: |
-          npm install --global pnpm@12.11.2
-          sudo apt-get update
-          sudo apt-get install --yes ffmpeg rsync
+          npm install --global --fetch-retries=2 --fetch-timeout=45000 pnpm@12.11.2
+          test "$(pnpm --version)" = '12.11.2'
+      - name: Verify native test tools
+        timeout-minutes: 5
+        run: |
+          missing=()
+          if ! command -v ffmpeg >/dev/null || ! command -v ffprobe >/dev/null; then
+            missing+=(ffmpeg)
+          fi
+          if ! command -v rsync >/dev/null; then
+            missing+=(rsync)
+          fi
+          if (( ${#missing[@]} )); then
+            apt_options=(-o Acquire::Retries=2 -o Acquire::http::Timeout=25 -o Acquire::https::Timeout=25)
+            sudo apt-get "${apt_options[@]}" update
+            sudo apt-get "${apt_options[@]}" install --yes "${missing[@]}"
+          fi
+          ffmpeg -version
+          ffprobe -version
+          rsync --version
       - name: Set up read-only upload manifest validation
         uses: google-github-actions/setup-gcloud@v3.0.1
         with:
