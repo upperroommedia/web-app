@@ -26,8 +26,8 @@ function fixture() {
     save: async next => { events.push(`save:${next.stage}`); state = structuredClone(next); },
     api: async (url, method = 'GET', body) => {
       events.push(`${method}:${url}`);
-      if (url.includes('iam.googleapis.com')) return { projectId: 'urm-app-staging', email: runner, uniqueId: '12345678901234567890', description: 'owned-create' };
-      if (url.includes('run.googleapis.com')) throw Object.assign(new Error('absent'), { status: 404 });
+      if (new URL(url).origin === 'https://iam.googleapis.com') return { projectId: 'urm-app-staging', email: runner, uniqueId: '12345678901234567890', description: 'owned-create' };
+      if (new URL(url).origin === 'https://run.googleapis.com') throw Object.assign(new Error('absent'), { status: 404 });
       if (url.includes('/versions/')) return { name: 'projects/urm-app-staging/secrets/TEMPORAL_WORKER_API_KEY/versions/2', state: 'ENABLED' };
       if (method === 'POST') {
         writes.push(structuredClone(body)); assert.equal(state.stage, 'attempted');
@@ -102,9 +102,9 @@ for (const bad of ['foreign-secret', 'runner-uid', 'disabled-version', 'existing
     if (bad === 'bad-version') f.policy.version = 1;
     if (bad === 'duplicate-role') f.policy.bindings.push(structuredClone(f.policy.bindings[0]));
     f.options.api = async (...args) => {
-      if (bad === 'existing-pool' && args[0].includes('run.googleapis.com')) return { name: 'existing' };
+      if (bad === 'existing-pool' && new URL(args[0]).origin === 'https://run.googleapis.com') return { name: 'existing' };
       const value = await api(...args);
-      if (bad === 'runner-uid' && args[0].includes('iam.googleapis.com')) value.uniqueId = '99999999999999999999';
+      if (bad === 'runner-uid' && new URL(args[0]).origin === 'https://iam.googleapis.com') value.uniqueId = '99999999999999999999';
       if (bad === 'disabled-version' && args[0].includes('/versions/')) value.state = 'DISABLED';
       return value;
     };

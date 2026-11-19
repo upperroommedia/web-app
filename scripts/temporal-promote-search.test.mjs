@@ -37,7 +37,7 @@ async function fixture(){
 test('search promotion requires own receipts plus completed owned controls/current native predecessor and resumes GET-only',async()=>{
  const x=await fixture(),result=await promoteCloudRunSearch(x.options);
  assert.equal(result.stage,'completed');assert.equal(result.plan.role,'search');assert.equal(x.calls,1);
- assert.equal(x.f.calls.some(c=>c.url.includes('storage.googleapis.com')),false);
+ assert.equal(x.f.calls.some(c=>new URL(c.url).origin === 'https://storage.googleapis.com'),false);
  await promoteCloudRunSearch({...x.options,saved:result});assert.equal(x.calls,1);
 });
 test('controls and search have distinct own operation bindings',async()=>{

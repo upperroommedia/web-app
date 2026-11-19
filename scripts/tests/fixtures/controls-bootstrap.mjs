@@ -288,7 +288,7 @@ export function controlsBootstrapFixture(role='controls',scope={}) {
     api: async (url, method = 'GET', request, beforeSend) => {
       if(beforeSend)await beforeSend();
       calls.push({ url, method, request: structuredClone(request) });
-      if(url.includes('cloudquotas.googleapis.com'))return {name:url.split('/v1/')[1],quotaId:url.split('/').at(-1),metric:url.endsWith('MaxPerInstanceEphemeralDiskSizePerProjectRegion')?'run.googleapis.com/max_per_instance_ephemeral_disk':'run.googleapis.com/ephemeral_disk_allocation',service:'run.googleapis.com',metricUnit:'By',dimensions:['region'],dimensionsInfos:[{dimensions:{region:'us-central1'},applicableLocations:['us-central1'],details:{value:'107374182400'}}]};
+      if(new URL(url).origin === 'https://cloudquotas.googleapis.com')return {name:url.split('/v1/')[1],quotaId:url.split('/').at(-1),metric:url.endsWith('MaxPerInstanceEphemeralDiskSizePerProjectRegion')?'run.googleapis.com/max_per_instance_ephemeral_disk':'run.googleapis.com/ephemeral_disk_allocation',service:'run.googleapis.com',metricUnit:'By',dimensions:['region'],dimensionsInfos:[{dimensions:{region:'us-central1'},applicableLocations:['us-central1'],details:{value:'107374182400'}}]};
       if (method === 'PATCH') {
         if (
           saved?.[request.scaling.manualInstanceCount === 1 ? 'start' : 'stop']?.stage !== 'attempted' ||
@@ -324,8 +324,8 @@ export function controlsBootstrapFixture(role='controls',scope={}) {
         return { ...r.identityState.account, projectId: 'urm-app-staging' };
       }
       if (url.includes('/roles/')) return structuredClone(roles.get(url.split('/v1/')[1]));
-      if (url.includes('firestore.googleapis.com')) return structuredClone(database);
-      if (url.includes('storage.googleapis.com')) return structuredClone(bucket);
+      if (new URL(url).origin === 'https://firestore.googleapis.com') return structuredClone(database);
+      if (new URL(url).origin === 'https://storage.googleapis.com') return structuredClone(bucket);
       if (url === `https://run.googleapis.com/v2/${body.name}`) return structuredClone(pool);
       throw new Error('unexpected controlled API');
     },

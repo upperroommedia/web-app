@@ -37,10 +37,10 @@ async function fixture(role){
 for(const role of ['email','images']){
  test(`${role} own resource-safe promotion consumes exact completed/native predecessor and resumes GET-only`,async()=>{
   const x=await fixture(role),api=x.options.api;
-  x.options.api=async(...args)=>{if(args[0].includes('cloudquotas.googleapis.com'))throw new Error('No new allocation');return api(...args);};
+  x.options.api=async(...args)=>{if(new URL(args[0]).origin === 'https://cloudquotas.googleapis.com')throw new Error('No new allocation');return api(...args);};
   const result=await x.run(x.options);assert.equal(result.stage,'completed');assert.equal(x.calls,1);assert.equal(result.resources.predecessor.role,previous[role]);
   await x.run({...x.options,saved:result});assert.equal(x.calls,1);assert.equal(x.f.pool.scaling.manualInstanceCount,1);
-  if(role==='email')assert.equal(x.f.calls.some(x=>x.url.includes('storage.googleapis.com')),false);
+  if(role==='email')assert.equal(x.f.calls.some(x=>new URL(x.url).origin === 'https://storage.googleapis.com'),false);
  });
  for(const bad of ['ancestor-drift','role','missing-predecessor','missing-intent','foreign-binding','wrong-predecessor','native-extra-queue','native-ramp','native-no-poller','pool','secret','bucket'])test(`${role} promotion fences ${bad}`,async()=>{
   const x=await fixture(role);

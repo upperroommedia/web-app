@@ -14,7 +14,7 @@ function validate(binding: Binding): void {
   try { url = new URL(binding.audience); } catch { return fail(); }
   const service = `urm-dispatch-${binding.buildId.slice(0, 20)}`;
   if (binding.projectId !== 'urm-app-staging' || !/^[a-f0-9]{40}$/.test(binding.buildId) ||
-    url.origin !== binding.audience || url.protocol !== 'https:' || url.username || url.password || url.port ||
+    url.origin !== binding.audience || url.protocol !== 'https:' || url.port ||
     !url.hostname.startsWith(`${service}-`) || !/^[a-z0-9-]+\.(?:[a-z0-9-]+\.)?run\.app$/.test(url.hostname) ||
     !/^[0-9]{10,30}$/.test(binding.eventSubject) || !/^[0-9]{10,30}$/.test(binding.schedulerSubject) ||
     binding.eventSubject === binding.schedulerSubject) fail();

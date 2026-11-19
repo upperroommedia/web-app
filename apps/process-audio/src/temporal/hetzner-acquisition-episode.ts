@@ -365,6 +365,9 @@ export async function prepareNativeYouTubeEpisode(o: {
         episode.invocation.attempt > parsed.invocation.attempt &&
         (o.render === true || !['prepared', 'retryable'].includes(current.status))
       ) {
+        // An unresolved upload still fences later acquisition invocations.
+        // The running episode may be observed again once its upload is settled.
+        if (!o.render && execution.get('activeUpload') !== undefined) return fail();
         selectedEpisodeId = parsed.id;
         return;
       }

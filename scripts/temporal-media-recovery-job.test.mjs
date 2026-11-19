@@ -102,7 +102,10 @@ function fixture() {
   const reads = [];
   const api = async (url, method) => {
     assert.equal(method, undefined);
-    const target = paths.get(url.replace(/^https:\/\/run.googleapis.com\/v2\//, ''));
+    const endpoint = new URL(url);
+    const target = endpoint.origin === 'https://run.googleapis.com' && endpoint.pathname.startsWith('/v2/')
+      ? paths.get(endpoint.pathname.slice('/v2/'.length))
+      : undefined;
     assert.ok(target, 'only exact owned resources may be queried');
     reads.push(target);
     return structuredClone(maps[target]);

@@ -50,7 +50,7 @@ export function renderServerlessDispatchService(config, admission, callerIdentit
     let url;
     try { url = new URL(callerIdentity?.audience); } catch { throw new Error('Native dispatch caller identity required'); }
     if (Object.keys(callerIdentity).sort().join(',') !== 'audience,eventSubject,schedulerSubject' ||
-      url.origin !== callerIdentity.audience || url.protocol !== 'https:' || url.username || url.password || url.port ||
+      url.origin !== callerIdentity.audience || url.protocol !== 'https:' || url.port ||
       !url.hostname.startsWith(`${names.serviceId}-`) || !/^[a-z0-9-]+\.(?:[a-z0-9-]+\.)?run\.app$/.test(url.hostname) ||
       !/^[0-9]{10,30}$/.test(callerIdentity.eventSubject ?? '') || !/^[0-9]{10,30}$/.test(callerIdentity.schedulerSubject ?? '') ||
       callerIdentity.eventSubject === callerIdentity.schedulerSubject) throw new Error('Native dispatch caller identity required');

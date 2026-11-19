@@ -33,9 +33,10 @@ export const imageReplayRunner = String.raw`
     !['inspect','replay'].includes(input.kind)||typeof input.historyJSON!=='string'||hash(input.historyJSON)!==input.historyJSONSHA256||!/^[a-f0-9]{64}$/.test(input.historySHA256))throw Error();
  if(input.kind==='replay'){
    if(typeof input.runId!=='string'||!/^[a-f0-9-]{36}$/.test(input.runId)||typeof input.workflowId!=='string'||!input.workflowId.length||input.workflowId.length>1000)throw Error();
-   const {Worker,Runtime,DefaultLogger}=require('/workspace/apps/temporal-worker/node_modules/@temporalio/worker');
+   const workerRequire=require('node:module').createRequire('/workspace/apps/temporal-worker/package.json');
+   const {Worker,Runtime,DefaultLogger}=workerRequire('@temporalio/worker');
    Runtime.install({shutdownSignals:[],logger:new DefaultLogger('ERROR',()=>undefined)});
-   const {historyFromJSON}=require('/workspace/apps/temporal-worker/node_modules/@temporalio/common/lib/proto-utils');
+   const {historyFromJSON}=workerRequire('@temporalio/common/lib/proto-utils');
    try{await Worker.runReplayHistory({workflowBundle:{code}},historyFromJSON(JSON.parse(input.historyJSON)),input.workflowId);}
    finally{await Runtime.instance().shutdown();}
  }else if(input.historyJSON!==''||input.workflowId!==''||input.runId!=='')throw Error();

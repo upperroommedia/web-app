@@ -25,7 +25,7 @@ function fixture(role='controls') {
     save: async next => { state = structuredClone(next); states.push(state.stage); },
     api: async (url, method = 'GET', body,beforeSend) => {
       if(beforeSend)await beforeSend();
-      if(url.includes('cloudquotas.googleapis.com'))return {name:url.split('/v1/')[1],quotaId:url.split('/').at(-1),metric:url.endsWith('MaxPerInstanceEphemeralDiskSizePerProjectRegion')?'run.googleapis.com/max_per_instance_ephemeral_disk':'run.googleapis.com/ephemeral_disk_allocation',service:'run.googleapis.com',metricUnit:'By',dimensions:['region'],dimensionsInfos:[{dimensions:{region:'us-central1'},applicableLocations:['us-central1'],details:{value:'107374182400'}}]};
+      if(new URL(url).origin === 'https://cloudquotas.googleapis.com')return {name:url.split('/v1/')[1],quotaId:url.split('/').at(-1),metric:url.endsWith('MaxPerInstanceEphemeralDiskSizePerProjectRegion')?'run.googleapis.com/max_per_instance_ephemeral_disk':'run.googleapis.com/ephemeral_disk_allocation',service:'run.googleapis.com',metricUnit:'By',dimensions:['region'],dimensionsInfos:[{dimensions:{region:'us-central1'},applicableLocations:['us-central1'],details:{value:'107374182400'}}]};
       calls.push([method, url]);
       if (url.startsWith('https://iam.googleapis.com/')) return { projectId: 'urm-app-staging', email: runner, uniqueId: '12345678901234567890', description: 'owned-create' };
       if (url.includes('secretmanager') && url.includes(':getIamPolicy')) return { etag: 'native', bindings: [{ role: 'roles/secretmanager.secretAccessor', members: [`serviceAccount:${runner}`] }] };
@@ -118,7 +118,7 @@ for(const bad of ['instance','regional','desired-only','credential-drift','delay
  f.options.api=async(...args)=>{
   if(args[1]==='POST'&&bad==='credential-drift')credential=true;
   const result=await api(...args);
-  if(args[0].includes('cloudquotas.googleapis.com')){
+  if(new URL(args[0]).origin === 'https://cloudquotas.googleapis.com'){
    if(bad==='desired-only'){delete result.dimensionsInfos[0].details.value;result.dimensionsInfos[0].details.desiredValue='107374182400';}
    if(bad==='instance'&&args[0].includes('MaxPerInstance')||bad==='regional'&&args[0].endsWith('EphemeralDiskAllocPerProjectRegion')||credential)result.dimensionsInfos[0].details.value='10737418240';
   }return result;

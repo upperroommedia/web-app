@@ -57,7 +57,7 @@ function fixture() {
  save:async value=>{saved=structuredClone(value);},api:async(url,method='GET',body)=>{
  calls.push([url,method]);
  if(url.startsWith('https://cloudresourcemanager.')) { assert.equal(method,'POST'); assert.deepEqual(body,{options:{requestedPolicyVersion:3}}); return { version: 3, etag: 'native-project', auditConfigs: [{service:'eventarc.googleapis.com',auditLogConfigs:[{logType:'DATA_WRITE'}]}], bindings: ['eventarc','cloudscheduler','pubsub'].map(s => ({ role: `roles/${s}.serviceAgent`, members: [`serviceAccount:service-251680231116@gcp-sa-${s}.iam.gserviceaccount.com`] })) }; }
- if(url.includes('iam.googleapis.com/'))return {projectId:'urm-app-staging',email:runner,uniqueId:'12345678901234567890',description:'owned'};
+ if(new URL(url).origin === 'https://iam.googleapis.com')return {projectId:'urm-app-staging',email:runner,uniqueId:'12345678901234567890',description:'owned'};
  if(url.includes('secretmanager')&&url.includes(':getIamPolicy'))return{etag:'secret',bindings:[{role:'roles/secretmanager.secretAccessor',members:[`serviceAccount:${runner}`]}]};
  if(url.includes('secretmanager'))return{name:'projects/urm-app-staging/secrets/TEMPORAL_WORKER_API_KEY/versions/7',state:'ENABLED'};
  if(url.includes(':getIamPolicy'))return{etag:'empty',bindings:[]};
@@ -131,7 +131,7 @@ test('completed readback requires the original enabled runner, secret permission
  for(const bad of ['runner','accessor','invokers']){
  const f=fixture();await prepareCloudRunDispatchService(f.options);const api=f.options.api;
  f.options.api=async(...args)=>{const value=await api(...args);
- if(bad==='runner'&&args[0].includes('iam.googleapis.com/'))value.disabled=true;
+ if(bad==='runner'&&new URL(args[0]).origin === 'https://iam.googleapis.com')value.disabled=true;
  if(bad==='accessor'&&args[0].includes('secretmanager')&&args[0].includes('getIamPolicy'))value.bindings=[];
  if(bad==='invokers'&&args[0].startsWith('https://run.')&&args[0].includes('getIamPolicy'))value.bindings=[{role:'roles/run.invoker',members:['allUsers']}];return value;};
  await assert.rejects(prepareCloudRunDispatchService({...f.options,saved:f.saved}));assert.equal(f.posts,1);

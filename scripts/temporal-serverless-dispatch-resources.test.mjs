@@ -107,7 +107,11 @@ test('enabled caller environment requires the native URI and distinct original n
  assert.equal(env.find(e=>e.name==='TEMPORAL_DISPATCH_AUDIENCE').value,identity.audience);
  assert.equal(env.find(e=>e.name==='TEMPORAL_DISPATCH_EVENT_SUBJECT').value,identity.eventSubject);
  for(const bad of [undefined,{...identity,audience:identity.audience+'/foreign'},{...identity,eventSubject:'not-a-subject'},
-  {...identity,eventSubject:identity.schedulerSubject},{...identity,unexpected:true}])
+  {...identity,eventSubject:identity.schedulerSubject},{...identity,unexpected:true},
+  ...['fixture-user@', '%66ixture-user@', '@'].map((userinfo) => ({
+    ...identity,
+    audience: identity.audience.replace('https://', `https://${userinfo}`),
+  }))])
   assert.throws(()=>renderServerlessDispatchService(c,'enabled',bad));
  assert.throws(()=>renderServerlessDispatchService(c,'disabled',identity));
 });

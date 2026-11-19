@@ -252,10 +252,17 @@ for (const mode of ['inspect', 'replay', 'bom', 'wrong-build', 'bad-history'])
           ? fs
           : p === 'node:crypto'
           ? { createHash }
-          : p === '/workspace/apps/temporal-worker/node_modules/@temporalio/common/lib/proto-utils'
-          ? { historyFromJSON }
-          : p === '/workspace/apps/temporal-worker/node_modules/@temporalio/worker'
-          ? sdk
+          : p === 'node:module'
+          ? {
+              createRequire: (packagePath) => {
+                assert.equal(packagePath, '/workspace/apps/temporal-worker/package.json');
+                return (name) => {
+                  if (name === '@temporalio/worker') return sdk;
+                  if (name === '@temporalio/common/lib/proto-utils') return { historyFromJSON };
+                  assert.fail('Unexpected worker module');
+                };
+              },
+            }
           : assert.fail('Unexpected image module'),
     });
     assert.equal(paths[0], '/workspace/apps/temporal-worker/lib/workflow-bundle.js');

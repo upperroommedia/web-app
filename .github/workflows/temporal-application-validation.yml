@@ -54,11 +54,29 @@ jobs:
           "$jdk_home/bin/java" -version
           echo "JAVA_HOME=$jdk_home" >> "$GITHUB_ENV"
           echo "$jdk_home/bin" >> "$GITHUB_PATH"
-      - name: Install pinned package manager and native test tools
+      - name: Install pinned pnpm
+        timeout-minutes: 4
         run: |
-          npm install --global pnpm@12.11.2
-          sudo apt-get update
-          sudo apt-get install --yes ffmpeg rsync
+          npm install --global --fetch-retries=2 --fetch-timeout=45000 pnpm@12.11.2
+          test "$(pnpm --version)" = '12.11.2'
+      - name: Set up FFmpeg
+        timeout-minutes: 4
+        run: |
+          # Same checksum-pinned Linux x64 archive as the worker image.
+          ffmpeg_archive="$RUNNER_TEMP/ffmpeg.tar.xz"
+          ffmpeg_home="$RUNNER_TEMP/ffmpeg"
+          curl --fail --location --silent --show-error --retry 1 --connect-timeout 10 --max-time 90 \
+            'https://github.com/FFmpeg-Builds/FFmpeg-Builds/releases/download/autobuild-2026-11-18-12-39/ffmpeg-n8.1.3-36-ge22a4510c9-linux64-gpl-8.1.tar.xz' \
+            --output "$ffmpeg_archive"
+          echo "fce424851b0a982bdd4ac4e96f0e7b32cf29de999e54500676d41ad175ed0c79  $ffmpeg_archive" | sha256sum --check
+          mkdir -p "$ffmpeg_home"
+          tar -xJf "$ffmpeg_archive" -C "$ffmpeg_home" --strip-components=1 --no-same-owner
+          # Media code resolves these absolute paths, as in the worker image.
+          sudo install -m 0755 "$ffmpeg_home/bin/ffmpeg" "$ffmpeg_home/bin/ffprobe" /usr/local/bin/
+          /usr/local/bin/ffmpeg -version
+          /usr/local/bin/ffprobe -version
+      - name: Verify rsync
+        run: rsync --version
       - name: Set up read-only upload manifest validation
         uses: google-github-actions/setup-gcloud@v3.0.1
         with:

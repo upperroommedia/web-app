@@ -178,7 +178,7 @@ function policyApi(p, mutate = () => {}) {
     } else {
       assert.equal(body, undefined, 'getIamPolicy has an empty request body');
       assert.ok(url.endsWith('?options.requestedPolicyVersion=3'));
-      if (url.includes('iam.googleapis.com')) assert.equal(method, 'POST');
+      if (new URL(url).origin === 'https://iam.googleapis.com') assert.equal(method, 'POST');
       else assert.equal(method, 'GET');
       result = {
         etag: 'synthetic-etag',

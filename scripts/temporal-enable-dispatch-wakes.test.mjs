@@ -65,7 +65,7 @@ async function fixture() {
     }),
     api: async (url, method = 'GET', body, beforeSend) => {
       if (beforeSend) await beforeSend();
-      if (url.includes('logging.googleapis.com')) {
+      if (new URL(url).origin === 'https://logging.googleapis.com') {
         const [response] = operations.values();
         const name = [...operations.keys()][0];
         return {

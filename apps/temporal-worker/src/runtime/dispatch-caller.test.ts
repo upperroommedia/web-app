@@ -10,6 +10,14 @@ const payload = (): TokenPayload => ({ iss: 'https://accounts.google.com', sub: 
   email: `td-e-${buildId.slice(0,20)}@urm-app-staging.iam.gserviceaccount.com`, email_verified: true });
 const signal = () => new AbortController().signal;
 const header = { authorization: 'Bearer fixture.header.signature' };
+test.each(['fixture-user@', '%66ixture-user@', '@'])('rejects a noncanonical audience with user info (%s)', (userinfo) => {
+  const audience = binding.audience.replace('https://', `https://${userinfo}`);
+  const verify = jest.fn();
+  expect(() => observeDispatchCallerAuthorization({ ...binding, audience }, verify)).toThrow(
+    /^DISPATCH_CALLER_UNCONFIRMED$/
+  );
+  expect(verify).not.toHaveBeenCalled();
+});
 test('actual Google SDK signature verification accepts the exact caller and denies a tampered signed payload', async()=>{
  const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
  const encode = (v:unknown) => Buffer.from(JSON.stringify(v)).toString('base64url');

@@ -119,8 +119,18 @@ test('actual LOCAL payload-bearing history replays through fixed runner and prod
         require: (path) => {
           if (path === 'node:fs') return fs;
           if (path === 'node:crypto') return { createHash };
-          if (path === '/workspace/apps/temporal-worker/node_modules/@temporalio/worker') return replaySDK;
-          if (path === '/workspace/apps/temporal-worker/node_modules/@temporalio/common/lib/proto-utils') return codec;
+          if (path === 'node:module') {
+            return {
+              createRequire: (packagePath) => {
+                assert.equal(packagePath, '/workspace/apps/temporal-worker/package.json');
+                return (name) => {
+                  if (name === '@temporalio/worker') return replaySDK;
+                  if (name === '@temporalio/common/lib/proto-utils') return codec;
+                  throw new Error('Unexpected worker module');
+                };
+              },
+            };
+          }
           throw new Error('Unexpected runner module');
         },
       })

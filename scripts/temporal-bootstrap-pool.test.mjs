@@ -424,7 +424,7 @@ test('search consumes nine own receipts, exact numeric config, project-only Auth
  assert.equal(kept.disposition,'retained');assert.equal(Object.keys(f.options.receipts).length,10);
  assert.deepEqual(f.options.receipts.projectRole.identityState.nativeRole.includedPermissions,['firebaseauth.users.get']);
  assert.deepEqual(f.options.settings.runtimeSecrets,[{name:'TEMPORAL_SEARCH_CONFIG_JSON',secret:'TEMPORAL_SEARCH_CONFIG',version:'2'}]);
- assert.equal(f.options.receipts.storageRole,undefined);assert.equal(f.calls.some(c=>c.url.includes('storage.googleapis.com')),false);
+ assert.equal(f.options.receipts.storageRole,undefined);assert.equal(f.calls.some(c=>new URL(c.url).origin === 'https://storage.googleapis.com'),false);
  f.options.receipts.activation={operationId:f.options.operationId,releaseId:f.options.releaseId,identityState:structuredClone(kept)};f.options.operationId=randomUUID();
  await searchAbort(f.options);assert.equal(f.pool.scaling.manualInstanceCount,0);
  assert.deepEqual(f.calls.filter(c=>c.method==='PATCH').map(c=>c.request.scaling.manualInstanceCount),[1,0,1,0]);
@@ -457,7 +457,7 @@ test('email nine own receipts include enabled numeric mounted egress metadata an
  assert.deepEqual(body.template.volumes.find(v=>v.name==='email-egress').secret.items,[{version:'2',path:'egress.json'}]);
  assert.equal(body.template.containers[0].env.find(v=>v.name==='EMAIL_EGRESS_DESCRIPTOR_PATH').value,'/run/email/egress.json');
  assert.ok(f.calls.some(c=>c.url.includes('TEMPORAL_EMAIL_EGRESS_DESCRIPTOR/versions/2')));
- assert.equal(f.calls.some(c=>/storage.googleapis.com|:access|smtp|nodemailer/.test(c.url)),false);
+ assert.equal(f.calls.some(c=>new URL(c.url).origin === 'https://storage.googleapis.com' || /:access|smtp|nodemailer/.test(c.url)),false);
  f.options.receipts.activation={operationId:f.options.operationId,releaseId:f.options.releaseId,identityState:structuredClone(kept)};f.options.operationId=randomUUID();
  await emailAbort(f.options);assert.deepEqual(f.calls.filter(c=>c.method==='PATCH').map(c=>c.request.scaling.manualInstanceCount),[1,0,1,0]);
 });
@@ -483,7 +483,7 @@ test('images joins its own bucket/grants and preserves the exact pre-existing pu
  assert.equal(f.options.receipts.storageAccess.identityState.plan.resource,'projects/_/buckets/urm-app-staging-images');
  assert.deepEqual(f.options.receipts.storageRole.identityState.nativeRole.includedPermissions,['storage.objects.delete','storage.objects.get','storage.objects.update']);
  assert.equal(f.calls.some(c=>c.url.includes('/b/urm-app-staging.firebasestorage.app')),false);
- assert.equal(f.calls.some(c=>['PUT','POST'].includes(c.method)&&/setIamPolicy|storage.googleapis.com/.test(c.url)),false);
+ assert.equal(f.calls.some(c=>['PUT','POST'].includes(c.method)&&(c.url.includes('setIamPolicy') || new URL(c.url).origin === 'https://storage.googleapis.com')),false);
  f.options.receipts.activation={operationId:f.options.operationId,releaseId:f.options.releaseId,identityState:structuredClone(kept)};f.options.operationId=randomUUID();await imagesAbort(f.options);
  assert.deepEqual(f.calls.filter(c=>c.method==='PATCH').map(c=>c.request.scaling.manualInstanceCount),[1,0,1,0]);
 });
@@ -514,7 +514,7 @@ async function mediaAfterCycle(){const f=fixture('media'),r=await mediaCycle(f.o
 test('media quota read loss after start cannot strand same-parent unused cleanup',async()=>{
  const f=fixture('media'),api=f.options.api,observe=f.options.observeRegistration;let quotaLost=false;
  f.options.observeRegistration=async()=>{quotaLost=true;return observe();};
- f.options.api=async(...args)=>{if(quotaLost&&args[0].includes('cloudquotas.googleapis.com'))throw new Error('quota unavailable');return api(...args);};
+ f.options.api=async(...args)=>{if(quotaLost&&new URL(args[0]).origin === 'https://cloudquotas.googleapis.com')throw new Error('quota unavailable');return api(...args);};
  try{await mediaCycle(f.options);}catch{}
  assert.equal(f.pool.scaling.manualInstanceCount,0);assert.equal(f.saved.stop.stage,'completed');
 });
@@ -526,7 +526,7 @@ test('media exact budgets and original quota proof survive cycle/retention/unuse
  const env=Object.fromEntries(body.template.containers[0].env.map(v=>[v.name,v.value]));assert.equal(env.TEMPORAL_MEDIA_WORKSPACE_MAX_BYTES,String(64*2**30));assert.equal(env.TEMPORAL_MEDIA_DISK_HEADROOM_BYTES,String(16*2**30));
  assert.equal(kept.start.protection.mediaDiskQuota.components.length,2);
  f.options.receipts.activation={operationId:f.options.operationId,releaseId:f.options.releaseId,identityState:structuredClone(kept)};f.options.operationId=randomUUID();
- const api=f.options.api;f.options.api=async(...args)=>{if(args[0].includes('cloudquotas.googleapis.com'))throw new Error('quota unavailable during deallocation');return api(...args);};
+ const api=f.options.api;f.options.api=async(...args)=>{if(new URL(args[0]).origin === 'https://cloudquotas.googleapis.com')throw new Error('quota unavailable during deallocation');return api(...args);};
  await mediaAbort(f.options);assert.deepEqual(f.calls.filter(c=>c.method==='PATCH').map(c=>c.request.scaling.manualInstanceCount),[1,0,1,0]);
  assert.equal(f.calls.some(c=>c.url.includes('cloudquotas')&&c.method!=='GET'),false);
 });
