@@ -39,10 +39,21 @@ jobs:
       - uses: actions/setup-node@v7.1.0
         with:
           node-version: '22.23.3'
-      - uses: actions/setup-java@v6.0.1
-        with:
-          distribution: temurin
-          java-version: '21.0.12.1'
+      - name: Install pinned Temurin JDK
+        # Match the verified archive used by ops/local-validation/Dockerfile.
+        run: |
+          jdk_archive="$RUNNER_TEMP/temurin-21.0.12.1.tar.gz"
+          jdk_home="$RUNNER_TEMP/temurin-21.0.12.1"
+          curl --fail --location --silent --show-error \
+            'https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.12.1%2B1/OpenJDK21U-jdk_x64_linux_hotspot_21.0.12.1_1.tar.gz' \
+            --output "$jdk_archive"
+          echo "ce79869e1307ed8ee1e2baa86a412b1eb5b75d10a01006d788a6f968bcfaee94  $jdk_archive" | sha256sum --check
+          mkdir -p "$jdk_home"
+          tar -xzf "$jdk_archive" -C "$jdk_home" --strip-components=1
+          rm "$jdk_archive"
+          "$jdk_home/bin/java" -version
+          echo "JAVA_HOME=$jdk_home" >> "$GITHUB_ENV"
+          echo "$jdk_home/bin" >> "$GITHUB_PATH"
       - name: Install pinned package manager and native test tools
         run: |
           npm install --global pnpm@12.11.2
