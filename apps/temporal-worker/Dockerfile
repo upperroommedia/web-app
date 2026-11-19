@@ -40,8 +40,8 @@ ARG YT_DLP_VERSION=2026.08.19
 ARG BGUTIL_YTDLP_POT_PROVIDER_VERSION=1.3.2
 ARG DENO_VERSION=2.9.5
 ARG FFMPEG_VERSION=8.1.3
-ARG FFMPEG_RELEASE=autobuild-2026-10-12-13-12
-ARG FFMPEG_BUILD=n8.1.3-18-g46d899d7a0
+ARG FFMPEG_RELEASE=autobuild-2026-11-18-12-39
+ARG FFMPEG_BUILD=n8.1.3-36-ge22a4510c9
 ENV NODE_ENV=production PORT=8080
 ENV FFMPEG_PATH=/usr/local/bin/ffmpeg FFPROBE_PATH=/usr/local/bin/ffprobe YTDLP_PATH=/usr/local/bin/yt-dlp
 ENV TEMPORAL_WORKFLOW_BUNDLE=/workspace/apps/temporal-worker/lib/workflow-bundle.js
@@ -50,9 +50,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     && python3 -m pip install --break-system-packages --no-cache-dir "yt-dlp[default]==${YT_DLP_VERSION}" "bgutil-ytdlp-pot-provider==${BGUTIL_YTDLP_POT_PROVIDER_VERSION}" \
     && rm -rf /var/lib/apt/lists/*
 # Versioned release assets and publisher-reported SHA256 digests, checked before extraction.
-# Digests: GitHub release API for Deno v2.9.5 and BtbN autobuild-2026-10-12-13-12.
+# Digests: GitHub release API for Deno v2.9.5 and BtbN autobuild-2026-11-18-12-39.
 RUN arch="$(dpkg --print-architecture)" \
-    && case "$arch" in amd64) deno_arch=x86_64; ffmpeg_arch=linux64; deno_sha=8b010a3b1a4a0188a67cdb8a7a27348b2a501af78aec7fc74f2ace167368d530; ffmpeg_sha=5b9d661315095a781ac8e285f788db059076cd41f17fec8b7d78a7b32afa7bbd ;; arm64) deno_arch=aarch64; ffmpeg_arch=linuxarm64; deno_sha=6b7cae3a8fc4385a59dea3146fcb8bad7fea4230e0ad36a8c692afacbc254be0; ffmpeg_sha=33faed5564d12c53ee210442f4e6f2ab80adc23a8430399e041dad692cbb18a4 ;; *) exit 1 ;; esac \
+    && case "$arch" in amd64) deno_arch=x86_64; ffmpeg_arch=linux64; deno_sha=8b010a3b1a4a0188a67cdb8a7a27348b2a501af78aec7fc74f2ace167368d530; ffmpeg_sha=fce424851b0a982bdd4ac4e96f0e7b32cf29de999e54500676d41ad175ed0c79 ;; arm64) deno_arch=aarch64; ffmpeg_arch=linuxarm64; deno_sha=6b7cae3a8fc4385a59dea3146fcb8bad7fea4230e0ad36a8c692afacbc254be0; ffmpeg_sha=c99da5b6996d28203180bcb0497f6ad58902e9a6eab96a4f563a3819c0545dde ;; *) exit 1 ;; esac \
     && curl -fsSL "https://github.com/denoland/deno/releases/download/v${DENO_VERSION}/deno-${deno_arch}-unknown-linux-gnu.zip" -o /tmp/deno.zip \
     && echo "${deno_sha}  /tmp/deno.zip" | sha256sum --check --strict \
     && unzip /tmp/deno.zip -d /usr/local/bin && rm /tmp/deno.zip \
