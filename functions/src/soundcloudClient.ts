@@ -42,9 +42,9 @@ export const normalizeSoundCloudAccountId = (account: { urn?: unknown; id?: unkn
   if (!numeric) throw new Error('SoundCloud account response is missing a stable user identifier.');
   return `soundcloud:users:${numeric}`;
 };
-export const getAuthenticatedSoundCloudAccountId = async (accessToken: string): Promise<string> =>
+export const getAuthenticatedSoundCloudAccountId = async (accessToken: string, timeout = 30_000): Promise<string> =>
   normalizeSoundCloudAccountId(
-    (await axios.get(`${SOUNDCLOUD_API_BASE}/me`, { headers: authHeaders(accessToken), timeout: 30_000 })).data ?? {}
+    (await axios.get(`${SOUNDCLOUD_API_BASE}/me`, { headers: authHeaders(accessToken), timeout })).data ?? {}
   );
 
 export interface UploadTrackParams {
