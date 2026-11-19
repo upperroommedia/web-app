@@ -8,11 +8,12 @@ import {
 } from './runtime/media-recovery-registration';
 import { runMediaFilesystemCanary, validateMediaStartupCapacityEvidence } from './runtime/media-startup-capacity';
 import { WorkerLifecycle } from './runtime/worker-lifecycle';
+import { MediaRecoveryPollingWorker } from './runtime/media-recovery-polling-worker';
 import { initializeWorkerObservability, flushWorkerObservability } from './runtime/observability';
 import { workerReadinessDigest as hash } from './runtime/readiness-probe';
 import { holdOriginalMediaCompletion } from './runtime/media-recovery-original-fault';
 import { Client, Connection } from '@temporalio/client';
-import { NativeConnection, Worker, type Runtime } from '@temporalio/worker';
+import { NativeConnection, type Runtime } from '@temporalio/worker';
 import { getSharedFirebaseAppOwnership } from '@upperroom/shared/firebase/firebaseAdminOwnership';
 import { VersioningBehavior } from '@temporalio/common';
 /** Actual index.js private branch. No fallback, dispatcher, ordinary readiness or
@@ -109,8 +110,10 @@ export async function runMediaRecoveryApplication(bindShutdown?: (shutdown: () =
       client.workflowService.describeNamespace({ namespace: config.namespace })
     );
     if (ns.namespaceInfo?.name !== config.namespace) throw new Error('MEDIA_RECOVERY_NAMESPACE_UNCONFIRMED');
-    const witness = await loadWorkerWitness(config.buildId, true),
-      kernel = await reportMediaKernelWitness(witness);
+    const witness = await loadWorkerWitness(config.buildId, true);
+    if (Boolean(witness.cloudRun) === Boolean(witness.cloudRunJob))
+      throw new Error('MEDIA_RECOVERY_CLOUD_WITNESS_REQUIRED');
+    const kernel = await reportMediaKernelWitness(witness);
     if (!kernel || !process.send) throw new Error('MEDIA_RECOVERY_PARENT_REQUIRED');
     if (lifecycle.draining) return;
     await import('@upperroom/shared/firebase/firebaseAdmin');
@@ -189,7 +192,29 @@ export async function runMediaRecoveryApplication(bindShutdown?: (shutdown: () =
     }
     await registration.authorize();
     if (lifecycle.draining) return;
-    const worker = await Worker.create({
+    console.log(
+      JSON.stringify({
+        event: 'temporal_media_recovery_worker_started',
+        workerIdentity: `media-recovery-${witness.instanceId}`,
+        ...(witness.cloudRunJob
+          ? {
+              job: witness.cloudRunJob.job,
+              executionUid: witness.cloudRunJob.executionUid,
+              taskUid: witness.cloudRunJob.taskUid,
+            }
+          : {
+              pool: witness.cloudRun?.pool,
+              revision: witness.cloudRun?.revision,
+              revisionUid: witness.cloudRun?.revisionUid,
+            }),
+        buildId: config.buildId,
+        taskQueue: config.queues[0],
+        operationId: config.operationId,
+        child: replacement ? 'replacement' : 'original',
+        startupSHA256: hash(record),
+      })
+    );
+    const worker = await MediaRecoveryPollingWorker.create({
       connection: native,
       namespace: config.namespace,
       taskQueue: config.queues[0],
@@ -221,6 +246,7 @@ export async function runMediaRecoveryApplication(bindShutdown?: (shutdown: () =
     lifecycle.workers.push(worker);
     await registration.authorize();
     if (lifecycle.draining) return;
+    worker.allowPolling(() => !lifecycle.draining && Date.now() < registration.cap.plan.expiresAt);
     expiry = setTimeout(stop, Math.max(0, registration.cap.plan.expiresAt - Date.now()));
     monitor = setInterval(() => {
       if (lifecycle.draining || probe) return;

@@ -91,7 +91,7 @@ export async function activateCloudRunDispatchService(options) {
   };
   const proofValid = (proof, fresh = true) => {
     intentValid(state.workerIntent, bindings);
-    if (proof?.schemaVersion !== 1 || proof.scope !== 'observed-role-execution-and-declared-pool-identity' ||
+    if (proof?.schemaVersion !== 1 || proof.scope !== 'observed-role-execution-and-native-poller-identity' ||
       proof.imageWorkflowBundleSHA256 !== state.workerIntent.imageWorkflowBundleSHA256 || proof.workflowId !== state.workerIntent.workflowId || !uuid.test(proof.runId ?? '') || !hash.test(proof.historyDigest ?? '') ||
       !Number.isFinite(Date.parse(proof.verifiedAt)) || Date.parse(proof.verifiedAt) > Date.now() + 5000 ||
       Date.parse(proof.verifiedAt) < Date.parse(state.workerIntent.createdAt) - 5000 ||
@@ -115,6 +115,7 @@ export async function activateCloudRunDispatchService(options) {
     }
     if (['rejected', 'failed'].includes(state.stage)) fail();
     if (state.stage === 'planned') {
+      if (typeof options.authorizePatch !== 'function') fail();
       const before = await prerequisites(true);
       const proof = await probe({ artifactDirectory, savedIntent: state.workerIntent,
         recordIntent: async intent => {
@@ -131,19 +132,31 @@ export async function activateCloudRunDispatchService(options) {
       const request = { name: desired.name, etag: native.service.etag, template: desired.template, annotations: desired.annotations };
       state = { ...state, stage: 'attempted', attemptedAt: new Date().toISOString(), prerequisites: fresh, proof, request };
       await save(state);
-      // The checkpoint may block; refresh prerequisites after it without changing authority.
-      proofValid(proof);
-      if (!isDeepStrictEqual(fresh, await prerequisites(true))) fail();
-      proofValid(proof);
+      // The native token acquisition happens before this source-owned gate.
+      // Only a refusal returned after that gate can be a provider rejection.
+      let authorized = false;
+      const beforeSend = async () => {
+        if (authorized) fail();
+        proofValid(proof);
+        if (!isDeepStrictEqual(fresh, await prerequisites(true))) fail();
+        const current = await observeCloudRunDispatchService(platform, api, 'disabled');
+        if (current.service.etag !== request.etag) fail();
+        await options.authorizePatch(state);
+        proofValid(proof);
+        authorized = true;
+      };
+      let response;
       try {
-        const response = await api(`https://run.googleapis.com/v2/${desired.name}?updateMask=template,annotations`, 'PATCH', request);
-        state = { ...state, stage: 'acknowledged', nativeOperation: operation(response?.name) }; await save(state);
+        response = await api(`https://run.googleapis.com/v2/${desired.name}?updateMask=template,annotations`, 'PATCH', request, beforeSend);
       } catch (error) {
-        if (Number.isInteger(error?.status) && error.status >= 400 && error.status < 500 && ![408, 429].includes(error.status)) {
+        if (authorized && Number.isInteger(error?.status) && error.status >= 400 && error.status < 500 && ![408, 429].includes(error.status)) {
           state = { ...state, stage: 'rejected', httpStatus: error.status }; await save(state);
         }
         throw error;
       }
+      if (!authorized) fail();
+      state = { ...state, stage: 'acknowledged', nativeOperation: operation(response?.name) };
+      await save(state);
     }
     if (state.stage === 'attempted') {
       // Observation only: no causal claim and never resend an unacknowledged PATCH.

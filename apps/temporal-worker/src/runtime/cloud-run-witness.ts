@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { GoogleAuth } from 'google-auth-library';
 
 import type { DurableCloudRunWorkerIdentity } from '@upperroom/orchestration/job-store';
@@ -20,8 +21,25 @@ interface InstanceMetadata {
 const fail = (): never => {
   throw new Error('CLOUD_RUN_WORKER_IDENTITY_MISMATCH');
 };
+/** Join the provider's instance to one SDK process, including same-instance restarts. */
+export function cloudRunPollerIdentity(instanceId: string, processId: string): string {
+  if (
+    !/^[A-Za-z0-9_-]{1,256}$/.test(instanceId) ||
+    !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(processId)
+  )
+    return fail();
+  const instance = createHash('sha256').update(instanceId).digest('hex');
+  return `cloud-run-${instance}-${processId}`;
+}
+
 const record = (value: unknown): Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : fail();
+
+export function isCloudRunWorkerRevision(pool: string, revision: string): boolean {
+  if (!/^[a-z][a-z0-9-]{1,61}[a-z0-9]$/.test(pool) || revision.length > 63) return false;
+  const suffix = revision.slice(pool.length);
+  return revision.startsWith(pool) && /^(?:-[a-z0-9][a-z0-9-]*|\.[1-9][0-9]*)$/.test(suffix);
+}
 
 /** Compare platform metadata and the authenticated Cloud Run revision GET.
  * Environment variables alone are not accepted as runtime execution evidence.
@@ -30,9 +48,7 @@ function validateBinding(binding: CloudRunBinding, metadata: InstanceMetadata): 
   if (
     !['urm-app-staging', 'urm-app'].includes(binding.projectId) ||
     binding.region !== 'us-central1' ||
-    !/^[a-z][a-z0-9-]{1,61}[a-z0-9]$/.test(binding.pool) ||
-    !binding.revision.startsWith(`${binding.pool}-`) ||
-    !/^[a-z0-9-]{1,63}$/.test(binding.revision) ||
+    !isCloudRunWorkerRevision(binding.pool, binding.revision) ||
     !/^[a-f0-9]{40}$/.test(binding.buildId) ||
     !new RegExp(`^us-central1-docker\\.pkg\\.dev/${binding.projectId}/urm-temporal/worker@sha256:[a-f0-9]{64}$`).test(
       binding.image
@@ -87,6 +103,19 @@ export function verifyCloudRunWorkerIdentity(
   };
 }
 
+// Fixed platform metadata endpoint only; no caller-supplied URL or redirects.
+export async function readCloudRunMetadata(path: string) {
+  const response = await fetch(`http://metadata.google.internal/computeMetadata/v1/${path}`, {
+    headers: { 'Metadata-Flavor': 'Google' },
+    redirect: 'error',
+    signal: AbortSignal.timeout(5000),
+  });
+  if (!response.ok || response.headers.get('metadata-flavor') !== 'Google') return fail();
+  const value = (await response.text()).trim();
+  if (!value || value.length > 512) return fail();
+  return value;
+}
+
 export async function loadCloudRunWorkerIdentity(
   buildId: string,
   env: NodeJS.ProcessEnv = process.env
@@ -101,23 +130,11 @@ export async function loadCloudRunWorkerIdentity(
     serviceAccount: env.TEMPORAL_CLOUD_RUN_SERVICE_ACCOUNT ?? '',
   };
   try {
-    // Fixed platform metadata endpoint only; no caller-supplied URL or redirects.
-    const metadata = async (path: string) => {
-      const response = await fetch(`http://metadata.google.internal/computeMetadata/v1/${path}`, {
-        headers: { 'Metadata-Flavor': 'Google' },
-        redirect: 'error',
-        signal: AbortSignal.timeout(5000),
-      });
-      if (!response.ok || response.headers.get('metadata-flavor') !== 'Google') return fail();
-      const value = (await response.text()).trim();
-      if (!value || value.length > 512) return fail();
-      return value;
-    };
     const [projectId, projectNumber, serviceAccount, instanceId] = await Promise.all([
-      metadata('project/project-id'),
-      metadata('project/numeric-project-id'),
-      metadata('instance/service-accounts/default/email'),
-      metadata('instance/id'),
+      readCloudRunMetadata('project/project-id'),
+      readCloudRunMetadata('project/numeric-project-id'),
+      readCloudRunMetadata('instance/service-accounts/default/email'),
+      readCloudRunMetadata('instance/id'),
     ]);
     validateBinding(binding, { projectId, projectNumber, serviceAccount, instanceId });
     const client = await new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/cloud-platform'] }).getClient();

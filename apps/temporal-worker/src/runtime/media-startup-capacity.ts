@@ -1,3 +1,4 @@
+import { cloudRunPollerIdentity } from './cloud-run-witness';
 import { readMediaKernelBirth, MEDIA_KERNEL_KIND } from './media-kernel-supervisor';
 import {
   allocateMediaCapacity,
@@ -401,6 +402,12 @@ async function collectStartup(options: {
   operationId: string;
   readResource: (name: string) => Promise<unknown>;
   verifyPool: (binding: any, pool: unknown, revision: unknown) => unknown;
+  observePoller?: (origin: {
+    identity: string;
+    revision: string;
+    revisionUid: string;
+    observedAt: string;
+  }) => Promise<void>;
 }) {
   const { firestore: db, binding, operationId } = options;
   if (
@@ -426,7 +433,7 @@ async function collectStartup(options: {
         const owned = mediaStartupIntent(o.data());
         paused(o.data(), c.data(), s.data());
         if (owned.intent.operationId !== operationId || (requireReceipt && !r.exists)) failure();
-        return { o, c, s, owned, evidence: r.exists ? object(r.data()) : undefined };
+        return { o, c, s, r, owned, evidence: r.exists ? object(r.data()) : undefined };
       },
       { readOnly: true }
     );
@@ -485,23 +492,46 @@ async function collectStartup(options: {
     failure();
   const parent = `projects/urm-app-staging/locations/us-central1/workerPools/${binding.poolName}`;
   if (parent !== owned.plan.name) failure();
-  const pool = object(await options.readResource(parent));
   const revisionName = `${parent}/revisions/${cloud.revision}`;
-  const revision = object(await options.readResource(revisionName));
-  options.verifyPool(binding, pool, revision);
   const normalize = (s: unknown) =>
     typeof s === 'string' ? s.replace('projects/251680231116/', 'projects/urm-app-staging/') : failure();
-  if (
-    pool.uid !== owned.start.before.uid ||
-    pool.scaling?.manualInstanceCount !== 1 ||
-    normalize(pool.latestReadyRevision) !== revisionName ||
-    revision.uid !== cloud.revisionUid
-  )
-    failure();
+  const readServingRevision = async () => {
+    const [rawPool, rawRevision] = await Promise.all([
+      options.readResource(parent),
+      options.readResource(revisionName),
+    ]);
+    const pool = object(rawPool),
+      revision = object(rawRevision);
+    options.verifyPool(binding, pool, revision);
+    if (
+      pool.uid !== owned.start.before.uid ||
+      pool.scaling?.manualInstanceCount !== 1 ||
+      normalize(pool.latestReadyRevision) !== revisionName ||
+      revision.uid !== cloud.revisionUid
+    )
+      failure();
+    return workerReadinessDigest({
+      poolGeneration: pool.generation,
+      poolEtag: pool.etag,
+      revisionGeneration: revision.generation,
+      revisionEtag: revision.etag,
+    });
+  };
+  const originalServingRevision = await readServingRevision();
+  if (options.observePoller)
+    await options.observePoller({
+      identity: cloudRunPollerIdentity(cloud.instanceId, worker.instanceId),
+      revision: cloud.revision,
+      revisionUid: cloud.revisionUid,
+      observedAt: value.observedAt,
+    });
+  if ((await readServingRevision()) !== originalServingRevision) failure();
   const fresh = await read();
   if (
     fresh.owned.intentSHA256 !== owned.intentSHA256 ||
     workerReadinessDigest(fresh.evidence) !== workerReadinessDigest(evidence) ||
+    !sameTime(fresh.r.createTime, original.r.createTime) ||
+    !sameTime(fresh.r.updateTime, original.r.updateTime) ||
     !sameTime(fresh.o.createTime, original.o.createTime) ||
     !sameTime(fresh.c.updateTime, original.c.updateTime) ||
     !sameTime(fresh.s.updateTime, original.s.updateTime)

@@ -1,3 +1,4 @@
+import { expectedCloudRunStorageAccess } from './cloud-run-storage-readiness';
 export { collectMediaStartupCapacity } from './media-startup-capacity';
 import { createHash, randomBytes } from 'node:crypto';
 import { writeFile, realpath, stat, open } from 'node:fs/promises';
@@ -7,7 +8,7 @@ import { GoogleAuth } from 'google-auth-library';
 import { Connection, type Client } from '@temporalio/client';
 import { defaultPayloadConverter } from '@temporalio/common';
 import type { Firestore } from 'firebase-admin/firestore';
-import { verifyCloudRunWorkerIdentity } from './cloud-run-witness';
+import { cloudRunPollerIdentity, isCloudRunWorkerRevision, verifyCloudRunWorkerIdentity } from './cloud-run-witness';
 import {
   workerReadinessDigest,
   WORKER_READINESS_COLLECTION,
@@ -113,13 +114,14 @@ export function verifyServerlessPool(binding: ServerlessRoleBinding, rawPool: un
   const pool = object(rawPool),
     revision = object(rawRevision);
   const parent = `projects/${binding.projectId}/locations/${binding.region}/workerPools/${binding.poolName}`;
+  const revisionParent = `${parent}/revisions/`;
   const revisionName = normalize(pool.latestReadyRevision);
   if (
     normalize(pool.name) !== parent ||
     typeof pool.uid !== 'string' ||
     !/^[A-Za-z0-9_-]{1,256}$/.test(pool.uid) ||
-    !revisionName.startsWith(`${parent}/revisions/${binding.poolName}-`) ||
-    !/^[a-z0-9-]+$/.test(revisionName.slice(revisionName.lastIndexOf('/') + 1)) ||
+    !revisionName.startsWith(revisionParent) ||
+    !isCloudRunWorkerRevision(binding.poolName, revisionName.slice(revisionParent.length)) ||
     revisionName !== normalize(pool.latestCreatedRevision) ||
     normalize(revision.name) !== revisionName ||
     pool.terminalCondition?.state !== 'CONDITION_SUCCEEDED'
@@ -181,7 +183,7 @@ export function verifyServerlessPool(binding: ServerlessRoleBinding, rawPool: un
 
 export async function readServerlessResource(name: string): Promise<unknown> {
   if (
-    !/^projects\/urm-app-staging\/locations\/us-central1\/workerPools\/[a-z0-9-]+(?:\/revisions\/[a-z0-9-]+)?$/.test(
+    !/^projects\/urm-app-staging\/locations\/us-central1\/workerPools\/[a-z0-9-]+(?:\/revisions\/[a-z0-9-]+(?:\.[1-9][0-9]*)?)?$/.test(
       name
     )
   )
@@ -298,7 +300,6 @@ export async function collectServerlessReadinessObservations(options: {
     if (workerReadinessDigest(localIntent) !== workerReadinessDigest(intent)) fail();
   } else {
     await writeExclusiveReceipt(options.artifactDirectory, 'readiness-start-intent.json', intent);
-    await options.onStartIntent?.(intent);
   }
   const read = options.readResource ?? readServerlessResource;
   const service = options.client.connection.workflowService;
@@ -385,6 +386,7 @@ export async function collectServerlessReadinessObservations(options: {
       )
         fail();
     } else {
+      await options.onStartIntent?.(intent);
       const started = await options.client.connection.withDeadline(Date.now() + 15000, () =>
         options.client.workflow.start('WorkerRuntimeProbe', {
           workflowId,
@@ -408,6 +410,11 @@ export async function collectServerlessReadinessObservations(options: {
         .filter((e) => e.activityTaskScheduledEventAttributes)
         .map((e) => [String(e.eventId), e.activityTaskScheduledEventAttributes!])
     );
+    const startedActivities = new Map(
+      (history.events ?? [])
+        .filter((e) => e.activityTaskStartedEventAttributes)
+        .map((e) => [String(e.eventId), e.activityTaskStartedEventAttributes!])
+    );
     const roles = [];
     if (
       Object.keys(result).sort().join(',') !==
@@ -429,8 +436,8 @@ export async function collectServerlessReadinessObservations(options: {
       const { digest, ...evidence } = object(stored.data());
       if (
         Object.keys(evidence).sort().join(',') !==
-          'activityId,attempt,buildId,email,firebaseRtdb,nonce,observedAt,projectId,role,runId,schemaVersion,taskQueue,worker,workflowBundle,workflowId' ||
-        evidence.schemaVersion !== 2 ||
+          'activityId,attempt,buildId,cloudStorage,email,firebaseRtdb,nonce,observedAt,projectId,role,runId,schemaVersion,taskQueue,worker,workflowBundle,workflowId' ||
+        evidence.schemaVersion !== 3 ||
         digest !== receipt.digest ||
         workerReadinessDigest(evidence) !== digest ||
         evidence.projectId !== binding.projectId ||
@@ -473,6 +480,24 @@ export async function collectServerlessReadinessObservations(options: {
         )
           fail();
       } else if (evidence.firebaseRtdb !== null) fail();
+      const expectedStorage = expectedCloudRunStorageAccess(binding.role);
+      if (expectedStorage) {
+        const storage = object(evidence.cloudStorage);
+        if (
+          Object.keys(storage).sort().join(',') !== 'bucket,observedAt,permissions' ||
+          storage.bucket !== expectedStorage.bucket ||
+          !Array.isArray(storage.permissions) ||
+          storage.permissions.length !== expectedStorage.permissions.length ||
+          storage.permissions.some(
+            (permission: unknown, index: number) => permission !== expectedStorage.permissions[index]
+          ) ||
+          !Number.isFinite(Date.parse(storage.observedAt)) ||
+          Date.parse(storage.observedAt) < startedAt - 5000 ||
+          Date.parse(storage.observedAt) > Date.parse(evidence.observedAt)
+        )
+          fail();
+      } else if (evidence.cloudStorage !== null) fail();
+
       if (binding.role === 'email') {
         const mail = object(evidence.email);
         if (
@@ -532,21 +557,33 @@ export async function collectServerlessReadinessObservations(options: {
         workerReadinessDigest(cloud) !== workerReadinessDigest(expected)
       )
         fail();
+      const observedIdentity = cloudRunPollerIdentity(expected.instanceId, evidence.worker.instanceId);
+      const started = startedActivities.get(String(completed?.startedEventId));
+      if (
+        !started ||
+        String(started.scheduledEventId) !== String(completed?.scheduledEventId) ||
+        started.attempt !== evidence.attempt ||
+        started.identity !== completed?.identity ||
+        (started.identity !== observedIdentity &&
+          (binding.role !== 'media' || started.identity !== `media-restored-${evidence.worker.instanceId}`))
+      )
+        fail();
       roles.push({
         role: binding.role,
         workflowBundle: evidence.workflowBundle,
         firebaseRtdb: evidence.firebaseRtdb,
+        cloudStorage: evidence.cloudStorage,
         email: evidence.email,
         ...platform,
         receipt,
         ...(await routing(binding)),
-        poolDigest: createHash('sha256').update(JSON.stringify(pool)).digest('hex'),
-        revisionDigest: createHash('sha256').update(JSON.stringify(revision)).digest('hex'),
+        poolDigest: workerReadinessDigest(pool),
+        revisionDigest: workerReadinessDigest(revision),
       });
     }
     const proof = {
       schemaVersion: 1,
-      scope: 'observed-role-execution-and-declared-pool-identity',
+      scope: 'observed-role-execution-and-native-poller-identity',
       workflowId,
       runId,
       imageWorkflowBundleSHA256: options.imageWorkflowBundleSHA256,
@@ -577,7 +614,13 @@ export async function collectServerlessRoleReadiness(
 ) {
   if (typeof options.onStartIntent !== 'function' || Object.prototype.hasOwnProperty.call(options, 'savedIntent'))
     fail();
-  assertNativeReadinessConnection(options.client);
+  const connection = assertNativeReadinessConnection(options.client);
+  if (
+    !Array.isArray(connection.interceptors) ||
+    connection.interceptors.length ||
+    connection.channelArgs['grpc.enable_retries'] !== 0
+  )
+    fail();
   return collectServerlessReadinessObservations({ ...options, readResource: readServerlessResource });
 }
 
@@ -602,7 +645,7 @@ export async function reconcileServerlessRoleReadiness(
     readResource: readServerlessResource,
   });
 }
-function assertNativeReadinessConnection(client: Client): void {
+function assertNativeReadinessConnection(client: Client) {
   const native = client.connection;
   const connection = native instanceof Connection ? native.options : fail();
   // The pinned SDK normalizes tls into native gRPC ChannelCredentials and
@@ -614,6 +657,7 @@ function assertNativeReadinessConnection(client: Client): void {
     ['grpc.ssl_target_name_override', 'grpc.default_authority'].some((key) => connection.channelArgs[key] !== undefined)
   )
     fail();
+  return connection;
 }
 
 export { collectDispatchDiagnosticExecution } from './dispatch-diagnostic';

@@ -362,3 +362,71 @@ test('pool quota and isolation original attempt cannot be replaced or rolled bac
  for(const bad of [{...attempted,stage:'planned'},{...attempted,prerequisites:{mediaDiskQuota:{quotaSHA256:'c'.repeat(64)}}},{...attempted,isolation:{inventorySHA256:'d'.repeat(64)}}])await assert.rejects(savePoolPreparationCheckpoint({...options,ownedOperation,identityState:bad}));
  }finally{for(const ref of [lockRef,controlRef,stateRef,immutableReceipt])await ref.delete();await deleteApp(app);}
 });
+
+test('dispatch activation confirms a lost probe-intent commit acknowledgement by exact Firestore readback', async () => {
+  const app = initializeApp({ projectId: 'demo-preparation-checkpoint' }, randomUUID());
+  const db = getFirestore(app);
+  try {
+    for (const scenario of ['committed', 'missing', 'changed lock', 'changed authority', 'known PATCH', 'lost PATCH', 'changed PATCH']) {
+      const patch = scenario.endsWith('PATCH');
+      const outcome = ({ 'known PATCH': 'committed', 'lost PATCH': 'committed', 'changed PATCH': 'changed lock' })[scenario] ?? scenario;
+      const operationId = randomUUID(), releaseId = randomUUID(), bindingDigest = 'e'.repeat(64);
+      const prefix = `_dispatchIntentAckTests/${operationId}/records`;
+      const [lockRef, controlRef, stateRef, immutableReceipt] =
+        ['operation', 'control', 'state', 'receipt'].map(name => db.doc(`${prefix}/${name}`));
+      const action = 'activate-cloud-run-dispatch-service';
+      const nonce = randomUUID().replaceAll('-', '');
+      const workerIntent = { nonce, workflowId: `serverless-readiness-${nonce}` };
+      const planned = { stage: 'planned', plan: { operationId, releaseId }, ...(patch && { workerIntent }) };
+      await Promise.all([
+        lockRef.create({ operationId, releaseId, bindingDigest, action, cloudDispatchActivation: planned }),
+        controlRef.create({ releaseId, admission: 'paused', domains: { publishing: { admission: 'paused' } } }),
+        stateRef.create({ releaseId, phase: 'provider-usage-ready' }),
+      ]);
+      try {
+        const [lock, control, state] = await db.getAll(lockRef, controlRef, stateRef);
+        let writes = 0, reads = 0;
+        const firestore = {
+          async runTransaction(callback, options) {
+            if (options?.readOnly) {
+              reads++;
+              return db.runTransaction(callback, options);
+            }
+            assert.deepEqual(options, { maxAttempts: 1 });
+            writes++;
+            await db.runTransaction(tx => callback(
+              outcome === 'missing' ? { get: tx.get.bind(tx), update() {} } : tx
+            ), options);
+            if (outcome === 'changed lock') await lockRef.update({ unrelatedWrite: true });
+            if (outcome === 'changed authority') await stateRef.update({ unrelatedWrite: true });
+            if (!patch || scenario === 'lost PATCH') throw Object.assign(new Error('Injected acknowledgement loss'), { code: 4 });
+          },
+        };
+        const save = () => saveDispatchActivationCheckpoint({
+          firestore, lockRef, controlRef, stateRef, immutableReceipt, operationId, bindingDigest,
+          config: { releaseId, domains: ['publishing'] }, operatorPrincipal: { email: 'fixture@example.test' },
+          ownedOperation: nativeSnapshotProof(lock),
+          expectedAuthority: { control: nativeSnapshotProof(control), state: nativeSnapshotProof(state) },
+          identityState: { ...planned, workerIntent, ...(patch && { stage: 'attempted' }) },
+        });
+        if (scenario === 'lost PATCH') {
+          await assert.rejects(save, /Injected acknowledgement loss/);
+          assert.equal((await lockRef.get()).get('cloudDispatchActivation.stage'), 'attempted');
+        } else if (outcome === 'committed') {
+          assertNativeSnapshot(await save(), await lockRef.get());
+          assert.deepEqual((await lockRef.get()).get('cloudDispatchActivation.workerIntent'), workerIntent);
+        } else {
+          await assert.rejects(save, /RELEASE_NATIVE_AUTHORITY_CHANGED/);
+        }
+        assert.equal(writes, 1);
+        assert.equal(reads, scenario === 'lost PATCH' ? 0 : 1);
+        assert.equal((await immutableReceipt.get()).exists, false);
+      } finally {
+        await Promise.all([lockRef.delete(), controlRef.delete(), stateRef.delete()]);
+      }
+    }
+  } finally {
+    await db.terminate();
+    await deleteApp(app);
+  }
+});

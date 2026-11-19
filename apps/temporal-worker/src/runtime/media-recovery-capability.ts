@@ -2,9 +2,11 @@ import type { Firestore, Transaction } from 'firebase-admin/firestore';
 import type { Auth } from 'firebase-admin/auth';
 import type { WorkerWitness } from './worker-witness';
 import { workerReadinessDigest as hash } from './readiness-probe';
+import { matchMediaRecoveryJobRun } from './media-recovery-job-witness';
 function fail(): never {
   throw new Error('MEDIA_RECOVERY_CAPABILITY_UNCONFIRMED');
 }
+class PendingMediaRecoveryJobIdentity extends Error {}
 const domains = ['media', 'publishing', 'images', 'emails', 'accounts', 'bundles', 'search'];
 const stamp = (s: any) => {
   if (!s.exists || !s.createTime || !s.updateTime) fail();
@@ -55,20 +57,10 @@ export async function mediaRecoveryKernelContext(
       p?.operationId !== operationId ||
       p.role !== 'media' ||
       cycle.stage !== 'prepared' ||
-      cycle.diagnostic?.stage !== 'completed' ||
       cycle.stop ||
       cycle.recovery ||
       cycle.recoveryFailed ||
       cycle.drained ||
-      !['attempted', 'acknowledged', 'completed'].includes(start?.stage) ||
-      start.plan?.key !== 'start' ||
-      start.plan.operationId !== operationId ||
-      start.plan.target !== 1 ||
-      start.request?.method !== 'PATCH' ||
-      start.request.body?.scaling?.manualInstanceCount !== 1 ||
-      start.request.body.name !== p.name ||
-      start.request.body.etag !== before?.etag ||
-      hash(cycle.diagnostic.pool) !== hash(before) ||
       p.schemaVersion !== 1 ||
       !/^([a-f0-9]{40})$/.test(p.buildId ?? '') ||
       p.name !==
@@ -104,33 +96,72 @@ export async function mediaRecoveryKernelContext(
       s.get('releaseId') !== p.releaseId ||
       s.get('phase') !== 'provider-usage-ready' ||
       domains.some((d) => c.get(`domains.${d}.admission`) !== 'paused') ||
-      !cloud ||
       witness.buildId !== p.buildId ||
-      cloud.projectId !== 'urm-app-staging' ||
-      cloud.region !== 'us-central1' ||
-      cloud.pool !== p.name.split('/').at(-1) ||
-      cloud.revision !== before.revision?.split('/').at(-1) ||
-      cloud.revisionUid !== before.revisionUid ||
-      cloud.serviceAccount !== p.runner ||
-      cloud.imageDigest !== p.image.split('@')[1] ||
-      !cloud.instanceId ||
       !Number.isFinite(Date.parse(p.createdAt)) ||
       p.expiresAt !== Date.parse(p.createdAt) + 300000 ||
       Date.parse(p.createdAt) > Date.now() + 5000 ||
-      Date.now() >= p.expiresAt ||
-      !Number.isFinite(Date.parse(start.attemptedAt)) ||
-      Date.parse(start.attemptedAt) < Date.parse(p.createdAt) ||
-      Date.parse(start.attemptedAt) >= p.expiresAt
+      Date.now() >= p.expiresAt
     )
       fail();
-    if (
-      start.stage === 'completed' &&
-      (start.pool?.uid !== before.uid ||
-        start.pool.revision !== before.revision ||
-        start.pool.revisionUid !== before.revisionUid ||
-        start.pool.desiredManualInstanceCount !== 1)
-    )
-      fail();
+    const job = witness.cloudRunJob;
+    let computeIntent;
+    if (job) {
+      const native = op.get('mediaRecoveryJobProvider');
+      if (
+        cloud ||
+        cycle.diagnostic ||
+        cycle.start ||
+        cycle.restore ||
+        !p.job ||
+        p.job.name !== job.job ||
+        job.projectId !== 'urm-app-staging' ||
+        job.region !== 'us-central1' ||
+        job.serviceAccount !== p.runner ||
+        job.imageDigest !== p.image.split('@')[1] ||
+        native?.jobPlanSHA256 !== hash(p.job) ||
+        native.create?.stage !== 'acknowledged' ||
+        !['attempted', 'acknowledged'].includes(native.run?.stage)
+      )
+        fail();
+      if (!native.runIdentity && !original) throw new PendingMediaRecoveryJobIdentity();
+      if (!matchMediaRecoveryJobRun(job, p, native)) fail();
+      computeIntent = { jobProviderSHA256: hash(native), jobIdentity: job };
+    } else {
+      if (
+        cycle.diagnostic?.stage !== 'completed' ||
+        !['attempted', 'acknowledged', 'completed'].includes(start?.stage) ||
+        start.plan?.key !== 'start' ||
+        start.plan.operationId !== operationId ||
+        start.plan.target !== 1 ||
+        start.request?.method !== 'PATCH' ||
+        start.request.body?.scaling?.manualInstanceCount !== 1 ||
+        start.request.body.name !== p.name ||
+        start.request.body.etag !== before?.etag ||
+        hash(cycle.diagnostic.pool) !== hash(before) ||
+        !cloud ||
+        cloud.projectId !== 'urm-app-staging' ||
+        cloud.region !== 'us-central1' ||
+        cloud.pool !== p.name.split('/').at(-1) ||
+        cloud.revision !== before.revision?.split('/').at(-1) ||
+        cloud.revisionUid !== before.revisionUid ||
+        cloud.serviceAccount !== p.runner ||
+        cloud.imageDigest !== p.image.split('@')[1] ||
+        !cloud.instanceId ||
+        !Number.isFinite(Date.parse(start.attemptedAt)) ||
+        Date.parse(start.attemptedAt) < Date.parse(p.createdAt) ||
+        Date.parse(start.attemptedAt) >= p.expiresAt
+      )
+        fail();
+      if (
+        start.stage === 'completed' &&
+        (start.pool?.uid !== before.uid ||
+          start.pool.revision !== before.revision ||
+          start.pool.revisionUid !== before.revisionUid ||
+          start.pool.desiredManualInstanceCount !== 1)
+      )
+        fail();
+      computeIntent = { startPlan: start.plan, startRequest: start.request, startAttemptedAt: start.attemptedAt };
+    }
     const attempt = op.get('mediaRecoveryJournalAttempt');
     if (
       j.releaseId !== p.releaseId ||
@@ -148,11 +179,12 @@ export async function mediaRecoveryKernelContext(
       cycle.prepared.bindingDigest !== p.bindingDigest ||
       cycle.prepared.buildId !== p.buildId ||
       cycle.prepared.image !== p.image ||
-      before.desiredManualInstanceCount !== 0 ||
-      !before.uid ||
-      !before.revisionUid ||
-      start.plan.templateSHA256 !== hash(p.diagnosticTemplate) ||
-      start.request.url !== `https://run.googleapis.com/v2/${p.name}?updateMask=scaling` ||
+      (!job &&
+        (before.desiredManualInstanceCount !== 0 ||
+          !before.uid ||
+          !before.revisionUid ||
+          start.plan.templateSHA256 !== hash(p.diagnosticTemplate) ||
+          start.request.url !== `https://run.googleapis.com/v2/${p.name}?updateMask=scaling`)) ||
       p.normalTemplate?.containers?.length !== 1 ||
       p.normalTemplate.containers[0].image !== p.image
     )
@@ -188,9 +220,7 @@ export async function mediaRecoveryKernelContext(
       operationId,
       planSHA256: hash(p),
       armingSHA256: hash(j),
-      startPlan: start.plan,
-      startRequest: start.request,
-      startAttemptedAt: start.attemptedAt,
+      ...computeIntent,
       control: stamp(c),
       state: stamp(s),
       actorUid: actor.uid,
@@ -200,7 +230,17 @@ export async function mediaRecoveryKernelContext(
     original = current;
     if (Date.now() >= p.expiresAt) fail();
   };
-  await db.runTransaction(read, { readOnly: true });
+  const began = performance.now();
+  for (;;) {
+    try {
+      await db.runTransaction(read, { readOnly: true });
+      break;
+    } catch (error) {
+      if (!(error instanceof PendingMediaRecoveryJobIdentity)) throw error;
+      if (performance.now() - began >= 25000) fail();
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+  }
   const intentSHA256 = hash(original.intent);
   const checkFresh = () => {
     if (Date.now() >= original.plan.expiresAt || Date.parse(original.plan.createdAt) > Date.now() + 5000) fail();

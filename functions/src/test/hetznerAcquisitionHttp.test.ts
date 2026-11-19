@@ -66,7 +66,9 @@ beforeAll(async () => {
   });
   const http = express();
   http.use(express.json({ limit: '16kb' }));
-  http.use(createHetznerAcquisitionRouter({ firestore: db, auth, bucket: getStorage(app).bucket() }));
+  http.use(
+    createHetznerAcquisitionRouter({ firestore: db, auth, bucket: getStorage(app).bucket(), renderEnabled: false })
+  );
   server = createServer(http);
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const address = server.address();
@@ -557,4 +559,20 @@ test('an unclaimed-closure link is never advertised as missing launchable work',
     .doc(`${YOUTUBE_ACQUISITIONS}/${youtubeAcquisitionId(ref)}`)
     .update({ unclaimedClose: { CONTROLLED_NEGATIVE_ONLY: true } });
   expect(await call()).toEqual({ status: 503, body: { error: 'Acquisition readback is unavailable.' } });
+});
+
+test('render and recovery routes deny work when staging activation is disabled', async () => {
+  const operationId = youtubeAcquisitionId(ref);
+  const attemptId = randomUUID();
+  for (const suffix of [`render/${attemptId}`, `render/authentication/${attemptId}`]) {
+    const response = await fetch(`${origin}/${operationId}/${suffix}`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer CONTROLLED_OIDC', 'content-type': 'application/json' },
+      body: JSON.stringify({ operationId, ref }),
+      signal: AbortSignal.timeout(10000),
+    });
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ error: 'Unavailable.' });
+  }
+  expect((await db.doc('temporalYouTubeRenderHosts/staging').get()).exists).toBe(false);
 });

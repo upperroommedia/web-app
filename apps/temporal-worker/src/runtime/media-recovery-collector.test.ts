@@ -131,6 +131,7 @@ function waitingFixture() {
   return {
     describe,
     db,
+    data,
     options: {
       db,
       client,
@@ -181,6 +182,71 @@ test.each(['never-settled', 'late-settlement'])(
       await promise;
     } finally {
       jest.useRealTimers();
+    }
+  }
+);
+
+test.each(['exact task', 'foreign replacement', 'foreign workflow binding'])(
+  'Job recovery wait joins Workflow START and both closed kernels / %s',
+  async (mode) => {
+    const f = waitingFixture();
+    const { data, options } = f;
+    const id = options.operationId;
+    const runner = 'tw-m-' + options.plan.buildId.slice(0, 20) + '@urm-app-staging.iam.gserviceaccount.com';
+    const imageDigest = 'sha256:' + 'e'.repeat(64);
+    const job = 'projects/urm-app-staging/locations/us-central1/jobs/urm-media-recovery-' + id.replaceAll('-', '');
+    const execution = job + '/executions/original-execution';
+    const witness = {
+      job,
+      execution,
+      executionUid: randomUUID(),
+      task: execution + '/tasks/original-task',
+      taskUid: randomUUID(),
+      serviceAccount: runner,
+      imageDigest,
+      projectId: 'urm-app-staging',
+      region: 'us-central1',
+      instanceId: 'provider-instance',
+    };
+    const plan = {
+      ...options.plan,
+      job: { name: job },
+      runner,
+      image: 'registry/worker@' + imageDigest,
+      createdAt: new Date(Date.now() - 2000).toISOString(),
+    };
+    const jobPlanSHA256 = hash(plan.job);
+    const run = {
+      stage: 'acknowledged',
+      operation: 'projects/urm-app-staging/locations/us-central1/operations/original',
+      intentSHA256: 'f'.repeat(64),
+      attemptedAt: plan.createdAt,
+    };
+    const runIdentity = { ...run, jobPlanSHA256, jobUid: randomUUID(), execution, executionUid: witness.executionUid };
+    const start = data.temporalReleaseOperation.mediaRecoveryWorkflowStart;
+    const receipt = data[`temporalMediaRecoveryStart-${id}`];
+    start.jobRunSHA256 = hash(runIdentity);
+    data.temporalReleaseOperation.mediaRecoveryJobProvider = {
+      jobPlanSHA256,
+      create: { stage: 'acknowledged' },
+      run,
+      runIdentity,
+    };
+    receipt.intentSHA256 = hash(start);
+    receipt.jobRunSHA256 = mode === 'foreign workflow binding' ? 'a'.repeat(64) : start.jobRunSHA256;
+    data[`temporalMediaRecoveryKernel-${id}`].context = { parent: { cloudRunJob: witness } };
+    data[`temporalMediaRecoveryReplacementKernel-${id}`].worker = {
+      cloudRunJob: mode === 'foreign replacement' ? { ...witness, taskUid: randomUUID() } : witness,
+    };
+    const wait = waitForMediaRecoveryEpisode({
+      ...options,
+      plan,
+      expectedRootSHA256: hash(data.temporalReleaseOperation),
+    });
+    if (mode === 'exact task') await expect(wait).resolves.toBeUndefined();
+    else {
+      await expect(wait).rejects.toThrow('MEDIA_RECOVERY_COLLECTION_UNCONFIRMED');
+      expect(f.describe).not.toHaveBeenCalled();
     }
   }
 );

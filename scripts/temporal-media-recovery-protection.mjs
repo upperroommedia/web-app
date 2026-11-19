@@ -267,7 +267,7 @@ export async function observeMediaRecoveryProtection(o) {
     };
     const first = await scan(),
       second = await scan(),
-      compute = await read(() => observeNamespaceComputeIsolation(client, namespace));
+      compute = await read(() => observeNamespaceComputeIsolation(client, namespace, { deadline: at + 5000 }));
     const lastIdle = phase === 'start' ? await read(() => o.readIdle()) : null;
     if (idle) monotonicIdle(idle, lastIdle);
     const final = await authority();

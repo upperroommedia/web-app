@@ -1,8 +1,10 @@
 import { loadRuntimeConfig, type RuntimeConfig } from './config';
+import { hasCloudRunJobBinding, mediaRecoveryJobBinding } from './media-recovery-job-witness';
 const queue = 'urm-media-kernel-recovery',
   deployment = 'urm-worker-media-recovery-staging';
 export function isMediaRecoveryConfiguration(env: NodeJS.ProcessEnv = process.env) {
   return (
+    hasCloudRunJobBinding(env) ||
     env.TEMPORAL_MEDIA_RECOVERY_OPERATION !== undefined ||
     env.TEMPORAL_TASK_QUEUES?.split(',').some((q) => q.trim() === queue) ||
     env.TEMPORAL_DEPLOYMENT_NAME === deployment
@@ -31,6 +33,7 @@ export function loadMediaRecoveryRuntimeConfig(
     TEMPORAL_TASK_QUEUES: 'urm-media',
     TEMPORAL_DEPLOYMENT_NAME: 'urm-worker-media-staging',
   });
+  if (hasCloudRunJobBinding(env)) mediaRecoveryJobBinding(base.buildId, env);
   return Object.freeze({
     ...base,
     queues: Object.freeze([queue]) as unknown as string[],

@@ -2,12 +2,14 @@ import { awaitMediaKernelLaunch, reportMediaKernelWitness } from './runtime/medi
 import { recordMediaStartupCapacity } from './runtime/media-startup-capacity';
 import { loadConsumedWorkflowBundle } from './runtime/consumed-workflow-bundle';
 import { queuePollsWorkflows } from './runtime/queue-polling';
+import { createWorkerWakeActivities } from './runtime/worker-wake';
 import { createWorkerReadinessActivities } from './runtime/readiness-probe';
 import { createServer, type Server } from 'node:http';
 import { getSharedFirebaseAppOwnership } from '@upperroom/shared/firebase/firebaseAdminOwnership';
 import { Client, Connection } from '@temporalio/client';
 import { VersioningBehavior } from '@temporalio/common';
-import { NativeConnection, Worker, type Runtime } from '@temporalio/worker';
+import { NativeConnection, Worker, type Runtime, type WorkerOptions } from '@temporalio/worker';
+import { cloudRunPollerIdentity } from './runtime/cloud-run-witness';
 import { loadWorkerWitness } from './runtime/worker-witness';
 import { assertRuntimeNamespace, loadRuntimeConfig, runtimeCredentialFingerprint } from './runtime/config';
 import { initializeWorkerObservability, reportWorkerFailure, flushWorkerObservability } from './runtime/observability';
@@ -148,7 +150,8 @@ export async function runWorkerProcess(bindShutdown?: (shutdown: () => Promise<v
     if (lifecycle.draining) return;
     const { createRuntimeActivities } = await import('./runtime/activities');
     const { db, queues } = createRuntimeActivities(config.projectId, config.queues, client, witness);
-    let restoredMediaIdentity: string | undefined;
+    let restoredMedia: { authorizePolling: () => Promise<void> } | false | undefined;
+    let restoredWorker: import('./runtime/media-recovery-polling-worker').MediaRecoveryPollingWorker | undefined;
     if (
       config.projectId === 'urm-app-staging' &&
       config.hosting === 'cloud-run' &&
@@ -157,7 +160,7 @@ export async function runWorkerProcess(bindShutdown?: (shutdown: () => Promise<v
     ) {
       const { recordRestoredMediaStartupCapacity } = await import('./runtime/restored-media-startup');
       const { getAuth } = await import('firebase-admin/auth');
-      const restored = await recordRestoredMediaStartupCapacity({
+      restoredMedia = await recordRestoredMediaStartupCapacity({
         firestore: db,
         auth: () => getAuth(ownedFirebase!.app),
         buildId: config.buildId,
@@ -165,8 +168,7 @@ export async function runWorkerProcess(bindShutdown?: (shutdown: () => Promise<v
         kernel: mediaKernel,
         isDraining: () => lifecycle.draining,
       });
-      if (restored) restoredMediaIdentity = `media-restored-${witness.instanceId}`;
-      if (!restored)
+      if (!restoredMedia)
         await recordMediaStartupCapacity({
           firestore: db,
           buildId: config.buildId,
@@ -178,13 +180,20 @@ export async function runWorkerProcess(bindShutdown?: (shutdown: () => Promise<v
     }
     providerSandbox = await verifyProviderSandboxReadiness(db, config.projectId, config.queues, true);
     if (lifecycle.draining) return;
+    let cloudRunIdentity: string | undefined;
+    if (config.hosting === 'cloud-run') {
+      if (!witness.cloudRun) throw new Error('Worker requires verified Cloud Run instance metadata');
+      cloudRunIdentity = restoredMedia
+        ? `media-restored-${witness.instanceId}`
+        : cloudRunPollerIdentity(witness.cloudRun.instanceId, witness.instanceId);
+    }
     // Retain every created worker even if a subsequent create fails.
     for (const queue of config.queues) {
-      const worker = await Worker.create({
+      const workerOptions: WorkerOptions = {
         connection: native,
         namespace: config.namespace,
         taskQueue: queue,
-        ...(restoredMediaIdentity ? { identity: restoredMediaIdentity } : {}),
+        ...(cloudRunIdentity ? { identity: cloudRunIdentity } : {}),
         workflowBundle: queuePollsWorkflows(config.hosting, queue)
           ? consumedBundle
             ? { code: consumedBundle.code }
@@ -192,6 +201,14 @@ export async function runWorkerProcess(bindShutdown?: (shutdown: () => Promise<v
           : undefined,
         activities: {
           ...queues[queue as keyof typeof queues],
+          ...(cloudRunIdentity && config.projectId === 'urm-app-staging'
+            ? createWorkerWakeActivities({
+                projectId: config.projectId,
+                buildId: config.buildId,
+                queue,
+                identity: cloudRunIdentity,
+              })
+            : {}),
           ...(config.hosting === 'cloud-run'
             ? createWorkerReadinessActivities({
                 firestore: db,
@@ -221,8 +238,14 @@ export async function runWorkerProcess(bindShutdown?: (shutdown: () => Promise<v
         maxHeartbeatThrottleInterval: '1 second',
         defaultHeartbeatThrottleInterval: '1 second',
         shutdownGraceTime: config.shutdownGraceTimeMs,
-      });
-      lifecycle.workers.push(worker);
+      };
+      if (restoredMedia) {
+        const { MediaRecoveryPollingWorker } = await import('./runtime/media-recovery-polling-worker');
+        restoredWorker = await MediaRecoveryPollingWorker.create(workerOptions);
+        lifecycle.workers.push(restoredWorker);
+      } else {
+        lifecycle.workers.push(await Worker.create(workerOptions));
+      }
       if (lifecycle.draining) return;
     }
     dispatcher = new OutboxDispatcher({ db, client, projectId: config.projectId });
@@ -305,10 +328,37 @@ export async function runWorkerProcess(bindShutdown?: (shutdown: () => Promise<v
       }, 60_000);
       certificateProbe.unref();
     }
+    if (restoredMedia) {
+      if (!restoredWorker) throw new Error('RESTORED_MEDIA_STARTUP_UNCONFIRMED');
+      await restoredMedia.authorizePolling();
+      if (lifecycle.draining) return;
+      // Once admitted, this is the normal long-lived role. Only the initial
+      // polling authorization uses the boot window of the activation intent.
+      restoredWorker.allowPolling(() => !lifecycle.draining);
+    }
     if (config.dispatcherEnabled) dispatcher.start();
     else dispatcher.healthy = true;
     lifecycle.completeStartup();
-    await lifecycle.run();
+    const running = lifecycle.run();
+    if (
+      config.projectId === 'urm-app-staging' &&
+      cloudRunIdentity &&
+      witness.cloudRun &&
+      lifecycle.workers[0]?.getStatus().runState === 'RUNNING'
+    ) {
+      console.log(
+        JSON.stringify({
+          event: 'temporal_worker_started',
+          workerIdentity: cloudRunIdentity,
+          pool: witness.cloudRun.pool,
+          revision: witness.cloudRun.revision,
+          revisionUid: witness.cloudRun.revisionUid,
+          buildId: config.buildId,
+          taskQueue: config.queues[0],
+        })
+      );
+    }
+    await running;
   } catch (error) {
     // shutdown() already retains stage-specific errors; don't nest its own result.
     if (!lifecycle.isShutdownFailure(error)) lifecycle.fail('startup', error);

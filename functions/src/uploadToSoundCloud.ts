@@ -78,7 +78,7 @@ const uploadToSoundCloudCall = onCall(
 
 export const uploadToSoundCloudDomain = async (
   data: UploadToSoundCloudInputType,
-  trustedOptions: { expectedProviderAccount?: string } = {}
+  trustedOptions: { expectedProviderAccount?: string; audioGeneration?: string } = {}
 ): Promise<UploadToSoundCloudReturnType> => {
   const bucket = firebaseAdmin.storage().bucket();
   logger.log('uploadToSoundCloud.start', {
@@ -107,7 +107,10 @@ export const uploadToSoundCloudDomain = async (
             return await executeProviderCreate({
               operationKey: data.operationKey?.trim() || `soundcloud-legacy:${randomUUID()}`,
               step: 'soundcloud-track',
-              payload: data,
+              payload:
+                trustedOptions.audioGeneration === undefined
+                  ? data
+                  : { ...data, pinnedAudioGeneration: trustedOptions.audioGeneration },
               prepare: async () => {
                 originalAccount = await getAuthenticatedSoundCloudAccountId(token);
                 if (
@@ -120,6 +123,9 @@ export const uploadToSoundCloudDomain = async (
                 prepared = await prepareMultipartUpload({
                   bucket,
                   audioStoragePath: data.audioStoragePath,
+                  ...(trustedOptions.audioGeneration === undefined
+                    ? {}
+                    : { audioGeneration: trustedOptions.audioGeneration }),
                   imageSource: data.imageSource ?? data.imageStoragePath,
                   title: data.title,
                   tags: data.tags,

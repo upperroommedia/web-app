@@ -107,16 +107,18 @@ async function activationFixture() {
   const calls=[];
   const options={...f.options,operationId:'44444444-2222-4333-8444-555555555555',artifactDirectory:'/private/tmp/controlled-activation',
     save:async value=>{saved=structuredClone(value);},
+    authorizePatch:async attempted=>assert.deepEqual(attempted,saved),
     probe:async ({savedIntent,recordIntent})=>{
       probes++;
       const intent=savedIntent??{schemaVersion:1,workflowId:'fixture-readiness',nonce:'fixture-nonce',imageWorkflowBundleSHA256:'e'.repeat(64),createdAt:new Date().toISOString(),
         bindings:p.roleBindings.map(({projectId,region,namespace,role,buildId,poolName,deploymentName,runnerServiceAccount,image})=>({projectId,region,namespace,role,buildId,poolName,deploymentName,runnerServiceAccount,image}))};
       if(!savedIntent){await recordIntent(intent);starts++;}
       assert.deepEqual(saved.workerIntent,intent);
-      return {schemaVersion:1,scope:'observed-role-execution-and-declared-pool-identity',workflowId:intent.workflowId,
+      return {schemaVersion:1,scope:'observed-role-execution-and-native-poller-identity',workflowId:intent.workflowId,
         imageWorkflowBundleSHA256:intent.imageWorkflowBundleSHA256,runId:'55555555-2222-4333-8444-555555555555',verifiedAt:new Date().toISOString(),historyDigest:'f'.repeat(64),roles:p.roleBindings.map(b=>({role:b.role}))};
     },
-    api:async (url,method='GET',body)=>{
+    api:async (url,method='GET',body,beforeSend)=>{
+      if(beforeSend)await beforeSend();
       calls.push([url,method,body]);
       if(url.startsWith('https://cloudresourcemanager.'))return {version:3,etag:'project',auditConfigs:[{service:'eventarc.googleapis.com',auditLogConfigs:[{logType:'DATA_WRITE'}]}],bindings:[
         ...['eventarc','cloudscheduler','pubsub'].map(s=>({role:`roles/${s}.serviceAgent`,members:[`serviceAccount:service-251680231116@gcp-sa-${s}.iam.gserviceaccount.com`]})),
@@ -166,7 +168,7 @@ test('unknown native probe start resumes only the same saved intent',async()=>{
 });
 for(const status of [403,409])test(`definite PATCH HTTP${status} remains rejected across resume`,async()=>{
   const f=await activationFixture(),api=f.options.api;
-  f.options.api=async(...a)=>{if(a[1]==='PATCH')throw Object.assign(new Error('rejected'),{status});return api(...a);};
+  f.options.api=async(...a)=>{if(a[1]==='PATCH'){await a[3]();throw Object.assign(new Error('rejected'),{status});}return api(...a);};
   await assert.rejects(activateCloudRunDispatchService(f.options));assert.equal(f.saved.stage,'rejected');
   const count=f.calls.length;await assert.rejects(activateCloudRunDispatchService({...f.options,saved:f.saved}));assert.equal(f.calls.length,count);
 });
@@ -302,3 +304,39 @@ for(const surface of ['outbox-trigger','commands-trigger','scheduler'])for(const
  if(observationFails)await assert.rejects(cycle({...options,saved}));else await cycle({...options,saved});
  assert.equal(creates,1);assert.equal(deletes,1);assert.equal(observations,1);
 });
+
+test('a Firestore HTTP-style error after the provider PATCH cannot become a provider rejection', async () => {
+  const f = await activationFixture();
+  const save = f.options.save;
+  f.options.save = async (value) => {
+    if (value.stage === 'acknowledged') throw Object.assign(new Error('controlled checkpoint failure'), { status: 403 });
+    return save(value);
+  };
+  await assert.rejects(activateCloudRunDispatchService(f.options));
+  assert.equal(f.patches, 1);
+  assert.equal(f.saved.stage, 'attempted');
+  f.options.save = save;
+  const recovered = await activateCloudRunDispatchService({ ...f.options, saved: f.saved });
+  assert.equal(recovered.outcome, 'enabled-config-observed-after-unconfirmed-write');
+  assert.equal(f.patches, 1);
+});
+
+for (const boundary of ['credential', 'paused authority']) {
+  test(`dispatch activation retains the attempted checkpoint when ${boundary} refuses before provider send`, async () => {
+    const f = await activationFixture();
+    const originalApi = f.options.api;
+    const refuse = () => { throw Object.assign(new Error('Controlled pre-send 403'), { status: 403 }); };
+    if (boundary === 'credential') {
+      f.options.api = (...args) => args[1] === 'PATCH' ? refuse() : originalApi(...args);
+    } else {
+      f.options.authorizePatch = async () => refuse();
+    }
+    await assert.rejects(activateCloudRunDispatchService(f.options));
+    assert.equal(f.saved.stage, 'attempted');
+    assert.equal(f.patches, 0);
+    f.options.api = originalApi;
+    await assert.rejects(activateCloudRunDispatchService({ ...f.options, saved: f.saved }));
+    assert.equal(f.patches, 0);
+    assert.equal(f.starts, 1);
+  });
+}

@@ -11,6 +11,7 @@ export { publishingEntityWorkflow, maintenanceWorkflow } from './publishing/enti
 export { WorkerRestartProbe } from './verification';
 
 export { WorkerRuntimeProbe } from './verification/runtime';
+export { WorkerWakeProbe } from './verification/worker-wake';
 
 export { DispatchWakeProbe } from './verification/dispatch';
 

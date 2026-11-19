@@ -46,21 +46,25 @@ export async function observeMediaDiskQuota({ role, body }, api) {
     container.resources.limits.memory !== '4Gi'
   )
     fail();
-  const components = [];
-  for (const [quotaId, metric] of quotas) {
-    const observedAt = new Date().toISOString();
-    let timer;
-    let value;
-    try {
-      value = await Promise.race([
-        api(`https://cloudquotas.googleapis.com/v1/${base}${quotaId}`),
-        new Promise((_, reject) => {
-          timer = setTimeout(() => reject(new Error('MEDIA_QUOTA_READ_DEADLINE')), 10000);
-        }),
-      ]);
-    } finally {
-      clearTimeout(timer);
-    }
+  const sampledAt = Date.now(),
+    sampledMonotonic = performance.now();
+  const observedAt = new Date(sampledAt).toISOString();
+  let timer;
+  const deadline = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error('MEDIA_QUOTA_READ_DEADLINE')), 5000);
+  });
+  let limits;
+  try {
+    limits = await Promise.race([
+      Promise.all(quotas.map(([quotaId]) => api(`https://cloudquotas.googleapis.com/v1/${base}${quotaId}`))),
+      deadline,
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+  if (Date.now() < sampledAt || Date.now() - sampledAt >= 5000 || performance.now() - sampledMonotonic >= 5000) fail();
+  const components = limits.map((value, index) => {
+    const [quotaId, metric] = quotas[index];
     if (
       value?.name !== base + quotaId ||
       value.quotaId !== quotaId ||
@@ -81,7 +85,7 @@ export async function observeMediaDiskQuota({ role, body }, api) {
     if (matches.length !== 1) fail();
     const row = matches[0];
     if (
-      row.dimensions.region !== 'us-central1' ||
+      row.dimensions?.region !== 'us-central1' ||
       Object.keys(row.dimensions).join(',') !== 'region' ||
       !Array.isArray(row.applicableLocations) ||
       row.applicableLocations.length !== 1 ||
@@ -93,15 +97,15 @@ export async function observeMediaDiskQuota({ role, body }, api) {
       ![undefined, false].includes(row.details.rolloutInfo?.ongoingRollout)
     )
       fail();
-    components.push({
+    return {
       name: value.name,
       quotaId,
       metric,
       region: 'us-central1',
       effectiveBytes: row.details.value,
       observedAt,
-    });
-  }
+    };
+  });
   const quotaSHA256 = proofDigest(components.map(({ observedAt: _time, ...value }) => value));
   const proof = {
     quotaSHA256,

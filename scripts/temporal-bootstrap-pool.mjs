@@ -526,6 +526,7 @@ async function runReviewedPoolOperation(o, mode, expectedRole) {
       )
         fail();
       let ack;
+      let sendAuthorized = false;
       try {
         ack = await api(request.url, request.method, request.body, async () => {
           // The controller invokes this source-owned fence after obtaining its
@@ -539,8 +540,11 @@ async function runReviewedPoolOperation(o, mode, expectedRole) {
             Math.abs(Date.now() - Date.parse(atSend.observedAt)) > 5000
           )
             fail();
+          sendAuthorized = true;
         });
       } catch (error) {
+        // A credential or protected read failure is not the scale request's response.
+        if (!sendAuthorized) return fail();
         if (
           Number.isInteger(error?.status) &&
           error.status >= 400 &&

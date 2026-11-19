@@ -4,11 +4,18 @@ import { request } from 'node:https';
 
 import type { DurableWorkerWitness } from '@upperroom/orchestration/job-store';
 import { loadCloudRunWorkerIdentity } from './cloud-run-witness';
+import { hasCloudRunJobBinding, loadMediaRecoveryJobIdentity } from './media-recovery-job-witness';
 export type WorkerWitness = DurableWorkerWitness;
+export function diagnosticComputeIdentity(witness: WorkerWitness) {
+  if (witness.cloudRun && witness.cloudRunJob) throw new Error('Mixed diagnostic compute identities');
+  return witness.cloudRunJob ?? witness.cloudRun;
+}
+
 const serviceAccountDirectory = '/var/run/secrets/kubernetes.io/serviceaccount';
 /** Kubernetes identities are private execution witnesses, never workflow arguments. */
 export async function loadWorkerWitness(buildId: string, required: boolean, env = process.env): Promise<WorkerWitness> {
   const witness: WorkerWitness = { instanceId: randomUUID(), buildId };
+  if (hasCloudRunJobBinding(env)) return { ...witness, cloudRunJob: await loadMediaRecoveryJobIdentity(buildId, env) };
   if (env.TEMPORAL_WORKER_HOSTING === 'cloud-run') {
     if (env.TEMPORAL_WORKER_POD_UID || env.TEMPORAL_CLUSTER_ID) throw new Error('Mixed worker hosting identities');
     return { ...witness, cloudRun: await loadCloudRunWorkerIdentity(buildId, env) };

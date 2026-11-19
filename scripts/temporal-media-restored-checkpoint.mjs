@@ -39,6 +39,7 @@ export async function saveRestoredMediaActivationCheckpoint(o) {
       assertNativeSnapshot(o.ownedOperation, root);
       assertNativeSnapshot(o.expectedAuthority.control, c);
       assertNativeSnapshot(o.expectedAuthority.state, s);
+      const jobMode = Boolean(completion.get('identityState.plan.job'));
       if (
         root.get('action') !== 'activate-restored-cloud-run-media' ||
         root.get('operationId') !== p.operationId ||
@@ -48,8 +49,9 @@ export async function saveRestoredMediaActivationCheckpoint(o) {
         s.get('phase') !== 'provider-usage-ready' ||
         !capsule.exists ||
         !completion.exists ||
-        capsule.get('schemaVersion') !== 1 ||
-        capsule.get('kind') !== 'completed-media-recovery-provenance-only-v1' ||
+        capsule.get('schemaVersion') !== (jobMode ? 2 : 1) ||
+        capsule.get('kind') !==
+          (jobMode ? 'completed-media-recovery-job-provenance-v2' : 'completed-media-recovery-provenance-only-v1') ||
         capsule.get('operationId') !== p.recoveryOperationId ||
         capsule.get('releaseId') !== p.releaseId ||
         capsule.get('source.buildId') !== p.buildId ||

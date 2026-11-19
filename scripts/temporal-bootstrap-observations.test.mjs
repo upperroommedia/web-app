@@ -32,22 +32,31 @@ function fixture() {
     s = snapshot({ releaseId, phase: 'provider-usage-ready' });
   const platform = { temporalNamespace: namespace, roleBindings: [{ role, buildId, deploymentName: 'candidate' }] },
     rows = [];
+  const documents = new Map([
+    ['_control/temporalReleaseOperation', p],
+    ['_control/temporalRelease', c],
+    ['_control/temporalReleaseState', s],
+  ]);
+  const query = (name, filter = () => true, limit = Infinity, count = false) => ({
+    where: (field, op, value) => query(name, (doc) =>
+      filter(doc) && (op === 'in' ? value.includes(doc.get(field)) : doc.get(field) === value), limit, count),
+    limit: (size) => query(name, filter, size, count),
+    count: () => query(name, filter, limit, true),
+    read: () => {
+      const docs = rows.filter((x) => x.collection === name && filter(x)).slice(0, limit);
+      if (count) return { data: () => ({ count: docs.length }) };
+      assert.equal(limit, 2);
+      return { docs, size: docs.length };
+    },
+  });
   const db = {
     projectId: 'urm-app-staging',
     databaseId: '(default)',
-    doc: (path) => path,
-    getAll: async () => [p, c, s],
-    collection: (name) => {
-      const q = {
-        orderBy: () => q,
-        limit: () => q,
-        startAfter: () => q,
-        get: async () => ({
-          docs: rows.filter((x) => x.collection === name),
-          size: rows.filter((x) => x.collection === name).length,
-        }),
-      };
-      return q;
+    doc: (path) => ({ path }),
+    collection: query,
+    runTransaction: (fn, options) => {
+      assert.deepEqual(options, { readOnly: true });
+      return fn({ get: async (ref) => ref.read ? ref.read() : documents.get(ref.path) ?? { exists: false } });
     },
   };
   const service = {
@@ -74,6 +83,7 @@ function fixture() {
       expectedAuthority: { control: nativeSnapshotProof(c), state: nativeSnapshotProof(s) },
     },
     service,
+    setAction: (action) => { p.data().action = action; },
     rows,
     snapshot,
   };
@@ -98,6 +108,21 @@ test('empty stable paused native inventory confirms only conservative observatio
     result = await observeBootstrapProtection(f.options);
   assert.equal(result.protectedRunCount, 0);
   assert.match(result.scope, /not cross-API exclusion/);
+});
+test('settled staging-scale historical inventory does not prevent bootstrap and candidate work still does', async () => {
+  const f = fixture();
+  for (let index = 0; index < 4204; index++) {
+    const doc = f.snapshot({ state: 'dispatched', leaseOwner: 'historical-owner', leaseExpiresAt: 0 });
+    doc.collection = 'durableJobOutbox';
+    doc.ref = { path: `durableJobOutbox/${index}` };
+    f.rows.push(doc);
+  }
+  await observeBootstrapProtection(f.options);
+  const doc = f.snapshot({ state: 'dispatched', leaseExpiresAt: 0, execution: { worker: { buildId: 'a'.repeat(40) } } });
+  doc.collection = 'durableJobCommands';
+  doc.ref = { path: 'durableJobCommands/unexpected-candidate' };
+  f.rows.push(doc);
+  await assert.rejects(observeBootstrapProtection(f.options));
 });
 for (const collection of [
   'durableJobCriticalSections',
@@ -136,7 +161,7 @@ for(const extra of [{name:'urm-media',type:2},{name:'urm-orchestration',type:1}]
 });
 test('orchestration registration requires only its Workflow+Activity pair; extra role queues deny both proof and stop protection',async()=>{
  const f=fixture();f.options.role='orchestration';f.options.platform.roleBindings[0].role='orchestration';
- const get=f.options.firestore.getAll;f.options.firestore.getAll=async()=>{const d=await get();d[0].data().action='activate-cloud-run-orchestration-pool';return d;};
+ f.setAction('activate-cloud-run-orchestration-pool');
  const queues=[{name:'urm-orchestration',type:1},{name:'urm-orchestration',type:2}];
  f.service.describeWorkerDeploymentVersion=async()=>({workerDeploymentVersionInfo:{deploymentVersion:{deploymentName:'candidate',buildId:'a'.repeat(40)},taskQueueInfos:queues}});
  assert.deepEqual((await observeBootstrapRegistration(f.options)).queues,queues);
@@ -147,7 +172,7 @@ test('orchestration registration requires only its Workflow+Activity pair; extra
 
 test('search accepts exactly its Activity queue; Workflow/shared queues deny proof and stop',async()=>{
  const f=fixture();f.options.role='search';f.options.platform.roleBindings[0].role='search';
- const get=f.options.firestore.getAll;f.options.firestore.getAll=async()=>{const d=await get();d[0].data().action='activate-cloud-run-search-pool';return d;};
+ f.setAction('activate-cloud-run-search-pool');
  const queues=[{name:'urm-search',type:2}];
  f.service.describeWorkerDeploymentVersion=async()=>({workerDeploymentVersionInfo:{deploymentVersion:{deploymentName:'candidate',buildId:'a'.repeat(40)},taskQueueInfos:queues}});
  assert.deepEqual((await observeBootstrapRegistration(f.options)).queues,queues);await observeBootstrapProtection(f.options);
@@ -156,7 +181,7 @@ test('search accepts exactly its Activity queue; Workflow/shared queues deny pro
 
 test('email requires exactly its Activity queue; an extra Workflow or foreign queue denies unused stop',async()=>{
  const f=fixture();f.options.role='email';f.options.platform.roleBindings[0].role='email';
- const get=f.options.firestore.getAll;f.options.firestore.getAll=async()=>{const d=await get();d[0].data().action='activate-cloud-run-email-pool';return d;};
+ f.setAction('activate-cloud-run-email-pool');
  const queues=[{name:'urm-email',type:2}];f.service.describeWorkerDeploymentVersion=async()=>({workerDeploymentVersionInfo:{deploymentVersion:{deploymentName:'candidate',buildId:'a'.repeat(40)},taskQueueInfos:queues}});
  assert.deepEqual((await observeBootstrapRegistration(f.options)).queues,queues);await observeBootstrapProtection(f.options);
  queues.push({name:'urm-email',type:1});await assert.rejects(observeBootstrapRegistration(f.options));await assert.rejects(observeBootstrapProtection(f.options));
@@ -164,14 +189,14 @@ test('email requires exactly its Activity queue; an extra Workflow or foreign qu
 
 test('images exact Activity queue denies extra Workflow registration and unused stop',async()=>{
  const f=fixture();f.options.role='images';f.options.platform.roleBindings[0].role='images';
- const get=f.options.firestore.getAll;f.options.firestore.getAll=async()=>{const d=await get();d[0].data().action='activate-cloud-run-images-pool';return d;};
+ f.setAction('activate-cloud-run-images-pool');
  const queues=[{name:'urm-images',type:2}];f.service.describeWorkerDeploymentVersion=async()=>({workerDeploymentVersionInfo:{deploymentVersion:{deploymentName:'candidate',buildId:'a'.repeat(40)},taskQueueInfos:queues}});
  assert.deepEqual((await observeBootstrapRegistration(f.options)).queues,queues);await observeBootstrapProtection(f.options);
  queues.push({name:'urm-images',type:1});await assert.rejects(observeBootstrapRegistration(f.options));await assert.rejects(observeBootstrapProtection(f.options));
 });
 
 test('media requires exactly its Activity queue and cannot use a Workflow poller as stop proof',async()=>{
- const f=fixture();f.options.role='media';f.options.platform.roleBindings[0].role='media';const get=f.options.firestore.getAll;f.options.firestore.getAll=async()=>{const d=await get();d[0].data().action='activate-cloud-run-media-pool';return d;};
+ const f=fixture();f.options.role='media';f.options.platform.roleBindings[0].role='media';f.setAction('activate-cloud-run-media-pool');
  const queues=[{name:'urm-media',type:2}];f.service.describeWorkerDeploymentVersion=async()=>({workerDeploymentVersionInfo:{deploymentVersion:{deploymentName:'candidate',buildId:'a'.repeat(40)},taskQueueInfos:queues}});
  assert.deepEqual((await observeBootstrapRegistration(f.options)).queues,queues);await observeBootstrapProtection(f.options);queues.push({name:'urm-media',type:1});await assert.rejects(observeBootstrapRegistration(f.options));await assert.rejects(observeBootstrapProtection(f.options));
 });

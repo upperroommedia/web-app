@@ -1,5 +1,6 @@
 import { TestWorkflowEnvironment } from '@temporalio/testing';
 import { Worker } from '@temporalio/worker';
+import { createLocalTestEnvironment } from '../../test-support/local-test-environment';
 import { ApplicationFailure, CancelledFailure } from '@temporalio/common';
 import { Context, heartbeat } from '@temporalio/activity';
 import { ImageIngest, ImageReceiptReconciliation, imageResume } from './index';
@@ -18,9 +19,9 @@ function mocks() {
     reconcileImageReceipt: jest.fn(async () => 'complete'),
   };
 }
-async function until(check: () => boolean) {
+async function until(check: () => boolean | Promise<boolean>) {
   for (let count = 0; count < 200; count++) {
-    if (check()) return;
+    if (await check()) return;
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
   throw new Error('Workflow did not reach the expected phase');
@@ -166,34 +167,47 @@ describe('native image workflow', () => {
     );
   }, 120000);
   test('independent unknown orphan cleanup survives review and resumes the selected resource cleanup', async () => {
-    const activities = mocks();
-    activities.reconcileImageReceipt.mockResolvedValueOnce('review').mockResolvedValue('complete');
-    const worker = await Worker.create({
-      connection: environment.nativeConnection,
-      taskQueue: queue,
-      workflowsPath: require.resolve('./index'),
-      activities,
-    });
-    const controls = await Worker.create({
-      connection: environment.nativeConnection,
-      taskQueue: 'urm-controls',
-      workflowsPath: require.resolve('./index'),
-      activities,
-    });
-    await controls.runUntil(() =>
-      worker.runUntil(async () => {
-        const handle = await environment.client.workflow.start(ImageReceiptReconciliation, {
-          workflowId: 'image-orphan-review',
-          taskQueue: queue,
-          args: [ref],
-        });
-        await until(() => activities.reconcileImageReceipt.mock.calls.length > 0);
-        await environment.sleep('1 hour');
-        expect(activities.reconcileImageReceipt).toHaveBeenCalledTimes(1);
-        await handle.signal(imageResume);
-        await handle.result();
-        expect(activities.reconcileImageReceipt).toHaveBeenCalledTimes(2);
-      })
-    );
+    const local = await createLocalTestEnvironment();
+    try {
+      const activities = mocks();
+      activities.reconcileImageReceipt.mockResolvedValueOnce('review').mockResolvedValue('complete');
+      const worker = await Worker.create({
+        connection: local.nativeConnection,
+        taskQueue: queue,
+        workflowsPath: require.resolve('./index'),
+        activities,
+      });
+      const controls = await Worker.create({
+        connection: local.nativeConnection,
+        taskQueue: 'urm-controls',
+        workflowsPath: require.resolve('./index'),
+        activities,
+      });
+      await controls.runUntil(() =>
+        worker.runUntil(async () => {
+          const handle = await local.client.workflow.start(ImageReceiptReconciliation, {
+            workflowId: 'image-orphan-review',
+            taskQueue: queue,
+            args: [ref],
+          });
+          // Wait for the production attention timer to be durably scheduled before resuming.
+          await until(async () => {
+            const history = await handle.fetchHistory();
+            return Boolean(
+              history.events?.some(
+                (event) => event.timerStartedEventAttributes?.startToFireTimeout?.seconds?.toString() === '300'
+              )
+            );
+          });
+          expect(activities.reconcileImageReceipt).toHaveBeenCalledTimes(1);
+          await handle.signal(imageResume);
+          await until(() => activities.reconcileImageReceipt.mock.calls.length >= 2);
+          await handle.result();
+          expect(activities.reconcileImageReceipt).toHaveBeenCalledTimes(2);
+        })
+      );
+    } finally {
+      await local.teardown();
+    }
   }, 120000);
 });

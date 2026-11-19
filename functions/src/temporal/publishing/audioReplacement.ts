@@ -2,7 +2,7 @@ import { assertSynchronousProviderMutationCompleted } from './providerMutationCo
 import { preparePublishingAllocationReplacement } from './allocationBarrier';
 import axios from '../../providerSandbox/http';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
-import { readFirebaseDownloadUrl } from '../../storageDownloadUrl';
+import { readPublishingAudioUrl } from '../../storageDownloadUrl';
 import { FieldValue, type Transaction } from 'firebase-admin/firestore';
 import { isSubsplashAudioPlayable, isSoundCloudTrackEncoded } from './providerReadiness';
 import { executeProviderCreate, providerReceiptId } from './providerReceipts';
@@ -31,7 +31,7 @@ const stop: (code: string) => never = (code) => {
 };
 export interface AudioReplacementStore {
   assertCurrent(ref: PublishingJobRef, intent: PrivatePublishingIntent): Promise<void>;
-  leaseAudio(ref: PublishingJobRef, sermonId?: string, sourcePath?: string): Promise<void>;
+  leaseAudio(ref: PublishingJobRef, sermonId?: string, sourcePath?: string, sourceGeneration?: string): Promise<void>;
   commitCurrent(ref: PublishingJobRef, mutate: (tx: Transaction) => Promise<void>): Promise<void>;
 }
 export interface AudioReplacementRecord {
@@ -72,7 +72,7 @@ const source = async (ref: PublishingJobRef, intent: PrivatePublishingIntent) =>
     sermon.audioArtifacts.requestVersion !== expected.requestVersion
   )
     stop('PUBLISHING_AUDIO_SUPERSEDED');
-  return { sermon, path: sermon.audioArtifacts.finalPath };
+  return { sermon, path: sermon.audioArtifacts.finalPath, audioGeneration: sermon.audioArtifacts.finalGeneration };
 };
 const id = (ref: PublishingJobRef, intent: PrivatePublishingIntent) => `${ref.jobId}-${intent.sermonId}`;
 const operationKey = (ref: PublishingJobRef, intent: PrivatePublishingIntent) =>
@@ -84,7 +84,7 @@ export async function replacePublishedSubsplashAudio(
   intent: PrivatePublishingIntent,
   store: AudioReplacementStore
 ): Promise<void> {
-  const { sermon, path } = await source(ref, intent);
+  const { sermon, path, audioGeneration } = await source(ref, intent);
   if (!sermon.subsplashId) return;
   const mediaId = sermon.subsplashId;
   await request(intent.actorUid, {});
@@ -107,10 +107,14 @@ export async function replacePublishedSubsplashAudio(
     await store.commitCurrent(ref, async (tx) => {
       tx.set(ledger, { oldSubsplashAudioId: previousAudioId }, { merge: true });
     });
-    await store.leaseAudio(ref, intent.sermonId, path);
-    const audioUrl = await readFirebaseDownloadUrl(firebaseAdmin.storage().bucket().file(path));
+    await store.leaseAudio(ref, intent.sermonId, path, ...(audioGeneration === undefined ? [] : [audioGeneration]));
+    const bucket = firebaseAdmin.storage().bucket();
+    const audioUrl = await readPublishingAudioUrl(bucket.file(path), audioGeneration);
     const title = (intent.payload.sermon as Sermon).title;
-    const payload = { audioTitle: title, audioUrl, sourcePath: path };
+    const payload =
+      audioGeneration === undefined
+        ? { audioTitle: title, audioUrl, sourcePath: path }
+        : { audioTitle: title, sourcePath: path, pinnedAudioGeneration: audioGeneration };
     const op = operationKey(ref, intent);
     const audioId = await executeProviderCreate({
       operationKey: op,
@@ -254,7 +258,7 @@ export async function replacePublishedSoundCloudAudio(
   const ledger = db.collection(AUDIO_REPLACEMENTS_COLLECTION).doc(id(ref, intent));
   await withSubsplashLocks([`media-item:soundcloud:${intent.sermonId}`], async () => {
     await store.assertCurrent(ref, intent);
-    const { sermon, path } = await source(ref, intent);
+    const { sermon, path, audioGeneration } = await source(ref, intent);
     const existing = (await ledger.get()).data() as AudioReplacementRecord | undefined;
     const oldId = existing?.oldSoundCloudId ?? sermon.soundCloudTrackId;
     if (!oldId) return;
@@ -328,7 +332,7 @@ export async function replacePublishedSoundCloudAudio(
     }
     const desired = intent.payload.sermon as Sermon;
     await request(intent.actorUid, {});
-    await store.leaseAudio(ref, intent.sermonId, path);
+    await store.leaseAudio(ref, intent.sermonId, path, ...(audioGeneration === undefined ? [] : [audioGeneration]));
     const result = await uploadToSoundCloudDomain(
       {
         operationKey: operationKey(ref, intent),
@@ -340,7 +344,7 @@ export async function replacePublishedSoundCloudAudio(
         imageSource: desired.images.find((image) => image.type === 'square')?.downloadLink ?? artworkUrl,
         providerMetadata,
       },
-      { expectedProviderAccount: originalAccount }
+      { expectedProviderAccount: originalAccount, ...(audioGeneration === undefined ? {} : { audioGeneration }) }
     );
     const ready = await isSoundCloudTrackEncoded(result.soundCloudTrackId, providerMetadata?.streamable !== false);
     if (!ready) stop('PUBLISHING_AUDIO_PROCESSING');

@@ -1,6 +1,7 @@
 import type { Firestore } from 'firebase-admin/firestore';
 import type { Bucket } from '@google-cloud/storage';
 import { createMediaAdmission } from './admission';
+import { mediaArtifactId } from '../../../packages/orchestration/src/media-artifacts';
 
 type RecordData = Record<string, any>;
 class TransactionDatabase {
@@ -164,4 +165,33 @@ test('same caller request ID cannot change media input', async () => {
   await expect(
     admit({ ...args, sourceUploadJobId: undefined, payload: { ...args.payload, duration: 31 } })
   ).rejects.toThrow('different media input');
+});
+
+test('re-trimming accepts only the generation recorded for the retained source', async () => {
+  const { database, admit, args } = fixture();
+  const path = 'workflow-audio/sermon/previous/source-original.bin';
+  const artifact = {
+    projectId: 'test-project',
+    path,
+    generation: '6',
+    status: 'retained',
+  };
+  database.records.set(`temporalMediaArtifacts/${mediaArtifactId(artifact.projectId, path)}`, artifact);
+  const edit = {
+    ...args,
+    requestId: 'retrim',
+    sourceUploadJobId: undefined,
+    expectedSourceGeneration: undefined,
+    payload: { ...args.payload, storageFilePath: path },
+  };
+  await expect(admit(edit)).rejects.toThrow('Retained media source generation changed');
+  expect(database.records.has('temporalMediaState/sermon')).toBe(false);
+  expect([...database.records.keys()].some((key) => key.startsWith('outbox/'))).toBe(false);
+
+  artifact.generation = '7';
+  const accepted = await admit(edit);
+  expect(database.records.get(`temporalMediaRequests/${accepted.ref.jobId}`)?.sources.storage).toEqual({
+    path,
+    generation: '7',
+  });
 });

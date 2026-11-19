@@ -37,6 +37,7 @@ const mockDeleteApp = jest.fn(async (app: unknown) => {
 });
 const mockWorkers: Array<{
   run: jest.Mock;
+  allowPolling: jest.Mock;
   shutdown: jest.Mock;
   getStatus: () => { runState: string };
   stop: () => void;
@@ -82,6 +83,7 @@ jest.mock('@temporalio/worker', () => ({
         resolve = yes;
       });
       const worker = {
+        allowPolling: jest.fn(() => mockEvents.push('restored.allow.polling')),
         run: jest.fn(() => {
           state = 'RUNNING';
           mockEvents.push('worker.run');
@@ -131,7 +133,32 @@ jest.mock('@upperroom/shared/firebase/firebaseAdminOwnership', () => ({
 }));
 jest.mock('@upperroom/shared/firebase/firebaseAdmin', () => ({}));
 jest.mock('./media-startup-capacity', () => ({ recordMediaStartupCapacity: jest.fn(async () => undefined) }));
-jest.mock('./worker-witness', () => ({ loadWorkerWitness: async () => ({ instanceId: 'test' }) }));
+const mockRestoredCapacity = jest.fn(async (): Promise<unknown> => undefined);
+jest.mock('./restored-media-startup', () => ({ recordRestoredMediaStartupCapacity: () => mockRestoredCapacity() }));
+jest.mock('./media-recovery-polling-worker', () => ({
+  MediaRecoveryPollingWorker: {
+    create: async (options: unknown) => {
+      mockEvents.push('restored.worker.created');
+      return jest.requireMock('@temporalio/worker').Worker.create(options);
+    },
+  },
+}));
+const mockCloudRunProcessId = '593eeff8-126a-4c05-8233-a394be885c2e';
+jest.mock('./worker-witness', () => ({
+  loadWorkerWitness: async () => ({
+    instanceId: mockCloudRunProcessId,
+    ...(mockHosting === 'cloud-run'
+      ? {
+          cloudRun: {
+            instanceId: 'native-instance',
+            pool: 'fixture-pool',
+            revision: 'fixture-pool.1',
+            revisionUid: 'fixture-revision-uid',
+          },
+        }
+      : {}),
+  }),
+}));
 jest.mock('./provider-sandbox-readiness', () => ({
   verifyProviderSandboxReadiness: jest.fn().mockResolvedValue(undefined),
 }));
@@ -185,6 +212,7 @@ beforeEach(() => {
   mockRequestHandler = undefined;
   mockWorkerQueue = 'urm-controls';
   mockHosting = 'traditional';
+  mockRestoredCapacity.mockReset().mockResolvedValue(undefined);
   mockEvents.length = 0;
   mockWorkers.length = 0;
   mockSignals.clear();
@@ -321,6 +349,7 @@ for (const queue of ['urm-search', 'urm-email', 'urm-images', 'urm-media'])
     test(`actual ${queue} Worker.create preserves ${hosting} queue ownership`, async () => {
       mockWorkerQueue = queue;
       mockHosting = hosting;
+      const log = jest.spyOn(console, 'log').mockImplementation(() => undefined);
       const { Worker } = await import('@temporalio/worker');
       const run = track(startWorkerProcess());
       await tick();
@@ -328,6 +357,24 @@ for (const queue of ['urm-search', 'urm-email', 'urm-images', 'urm-media'])
       expect(jest.mocked(Worker.create).mock.calls[0][0].workflowBundle).toEqual(
         hosting === 'cloud-run' || queue === 'urm-media' ? undefined : { codePath: '/fixture/workflows.js' }
       );
+      const identity = jest.mocked(Worker.create).mock.calls[0][0].identity;
+      if (hosting === 'cloud-run') {
+        expect(identity).toMatch(new RegExp(`^cloud-run-[a-f0-9]{64}-${mockCloudRunProcessId}$`));
+        expect(log).toHaveBeenCalledTimes(1);
+        expect(JSON.parse(log.mock.calls[0][0])).toEqual({
+          event: 'temporal_worker_started',
+          workerIdentity: identity,
+          pool: 'fixture-pool',
+          revision: 'fixture-pool.1',
+          revisionUid: 'fixture-revision-uid',
+          buildId: 'unit',
+          taskQueue: queue,
+        });
+      } else {
+        expect(identity).toBeUndefined();
+        expect(log).not.toHaveBeenCalled();
+      }
+      log.mockRestore();
       let status = 0;
       mockRequestHandler?.(
         { url: '/readyz' },
@@ -357,3 +404,47 @@ test('Cloud Run orchestration passes the exact held bundle string to Worker.crea
   mockWorkers[0].stop();
   await running;
 });
+
+test.each([false, true])(
+  'restored poll authority is checked after native Worker creation (accepted: %s)',
+  async (accepted) => {
+    mockHosting = 'cloud-run';
+    mockWorkerQueue = 'urm-media';
+    const log = jest.spyOn(console, 'log').mockImplementation(() => undefined);
+    let reached!: () => void;
+    const checked = new Promise<void>((resolve) => {
+      reached = resolve;
+    });
+    const authorizePolling = jest.fn(async () => {
+      mockEvents.push('restored.authorize');
+      reached();
+      if (!accepted) throw new Error('CONTROLLED_RESTORED_AUTHORITY_REVOKED');
+    });
+    mockRestoredCapacity.mockResolvedValueOnce({ authorizePolling });
+    const run = track(
+      runWorkerProcess((shutdown) => {
+        mockSignals.set('SIGTERM', () => void shutdown().catch(() => undefined));
+      })
+    );
+    await checked;
+    await tick();
+    expect(mockEvents.indexOf('restored.worker.created')).toBeLessThan(mockEvents.indexOf('restored.authorize'));
+    expect(authorizePolling).toHaveBeenCalledTimes(1);
+    expect(mockWorkers[0].allowPolling).toHaveBeenCalledTimes(accepted ? 1 : 0);
+    if (accepted) {
+      expect(mockEvents.indexOf('restored.authorize')).toBeLessThan(mockEvents.indexOf('restored.allow.polling'));
+      expect(mockEvents.indexOf('restored.allow.polling')).toBeLessThan(mockEvents.indexOf('worker.run'));
+      const startup = log.mock.calls
+        .map(([entry]) => JSON.parse(entry))
+        .find((row) => row.event === 'temporal_worker_started');
+      expect(startup.workerIdentity).toBe('media-restored-' + mockCloudRunProcessId);
+      mockSignals.get('SIGTERM')?.();
+      mockWorkers[0].stop();
+      await run;
+    } else {
+      expect(log).not.toHaveBeenCalled();
+      mockWorkers[0].stop();
+      await expect(run).rejects.toBeInstanceOf(AggregateError);
+    }
+  }
+);

@@ -1,5 +1,10 @@
+import { observeMediaRecoveryJobActive } from './temporal-media-recovery-job.mjs';
 import { randomUUID } from 'node:crypto';
-import { assertNativeSnapshot, nativeSnapshotProof, proofDigest as hash } from './temporal-release-runtime.mjs';
+import {
+  assertNativeSnapshot,
+  assertNativeSnapshotSuccessor,
+  proofDigest as hash,
+} from './temporal-release-runtime.mjs';
 const fail = () => {
   throw new Error('MEDIA_RECOVERY_START_UNCONFIRMED');
 };
@@ -17,6 +22,10 @@ export async function startMediaRecoveryWorkflow(o) {
 }
 async function start(o) {
   const { firestore: db, client, application, plan, pool, prepared } = o;
+  const job = plan?.job;
+  const run = o.jobRun;
+  const computeDigest = job ? { jobRunSHA256: hash(run ?? null) } : { poolSHA256: hash(pool) };
+  const [computeKey] = Object.keys(computeDigest);
   if (
     db.projectId !== 'urm-app-staging' ||
     db.databaseId !== '(default)' ||
@@ -24,6 +33,7 @@ async function start(o) {
     o.controlRef.path !== '_control/temporalRelease' ||
     o.stateRef.path !== '_control/temporalReleaseState' ||
     !uuid(o.operationId) ||
+    Boolean(job) !== Boolean(run) ||
     plan?.operationId !== o.operationId ||
     plan.releaseId !== o.config.releaseId ||
     plan.bindingDigest !== o.bindingDigest ||
@@ -78,18 +88,29 @@ async function start(o) {
       parent.get('releaseId') !== plan.releaseId ||
       hash(c?.plan) !== hash(plan) ||
       c.stage !== 'prepared' ||
-      c.diagnostic?.stage !== 'completed' ||
-      c.start?.stage !== 'completed' ||
       c.stop ||
       c.recovery ||
       c.recoveryFailed ||
       c.drained ||
-      hash(c.start.pool) !== hash(pool) ||
       hash(c.prepared) !== hash(prepared) ||
-      typeof pool.uid !== 'string' ||
-      typeof pool.revisionUid !== 'string' ||
-      !pool.revision?.startsWith(plan.name + '/revisions/') ||
-      pool.desiredManualInstanceCount !== 1 ||
+      (job
+        ? c.diagnostic ||
+          c.start ||
+          c.restore ||
+          parent.get('mediaRecoveryJobProvider.create.stage') !== 'acknowledged' ||
+          parent.get('mediaRecoveryJobProvider.run.stage') !== 'acknowledged' ||
+          hash(parent.get('mediaRecoveryJobProvider.runIdentity') ?? null) !== hash(run) ||
+          parent.get('mediaRecoveryJobProvider.run.operation') !== run.operation ||
+          parent.get('mediaRecoveryJobProvider.run.intentSHA256') !== run.intentSHA256 ||
+          run.jobPlanSHA256 !== hash(job) ||
+          run.stage !== 'acknowledged'
+        : c.diagnostic?.stage !== 'completed' ||
+          c.start?.stage !== 'completed' ||
+          hash(c.start.pool) !== hash(pool) ||
+          typeof pool.uid !== 'string' ||
+          typeof pool.revisionUid !== 'string' ||
+          !pool.revision?.startsWith(plan.name + '/revisions/') ||
+          pool.desiredManualInstanceCount !== 1) ||
       !j ||
       j.schemaVersion !== 1 ||
       j.scope !== 'arming-only-no-execution-authority' ||
@@ -141,7 +162,7 @@ async function start(o) {
       operationId: o.operationId,
       planSHA256: hash(plan),
       cycleSHA256: hash(cycle),
-      poolSHA256: hash(pool),
+      ...computeDigest,
       preparedSHA256: hash(prepared),
       workflowId: `media-recovery-${o.operationId}`,
       workflowType: 'MediaRecoveryProbe',
@@ -163,19 +184,20 @@ async function start(o) {
   let send = false;
   if (!existing) {
     fresh();
-    await livePool(o, plan, pool);
+    await observeCompute();
     fresh();
     // Lost intent ACK cannot authorize a START, even if readback finds our intent.
-    await db.runTransaction(
+    const proposedDigest = await db.runTransaction(
       async (tx) => {
         const parent = await authority(tx);
-        fresh();
         if (parent.get('mediaRecoveryWorkflowStart') !== undefined || (await tx.get(receiptRef)).exists) fail();
+        fresh();
         tx.update(o.lockRef, { mediaRecoveryWorkflowStart: intent });
+        return hash({ ...parent.data(), mediaRecoveryWorkflowStart: intent });
       },
       { maxAttempts: 1 }
     );
-    owned = nativeSnapshotProof(await o.lockRef.get());
+    owned = assertNativeSnapshotSuccessor(owned, proposedDigest, await o.lockRef.get());
     o.onOwnedOperation?.(owned);
     await db.runTransaction(
       async (tx) => {
@@ -186,6 +208,14 @@ async function start(o) {
     );
     send = true;
   }
+  async function observeCompute() {
+    if (!job) return livePool(o, plan, pool);
+    const started = performance.now();
+    await observeMediaRecoveryJobActive({ api: o.api, plan, run });
+    const zero = await livePool(o, plan, plan.origin, plan.normalTemplate, 0);
+    if (performance.now() - started >= 5000) fail();
+    return { ...zero, sampledMonotonic: started };
+  }
   const receipt = async () => {
     const value = (await receiptRef.get()).data();
     if (!value) return undefined;
@@ -193,7 +223,7 @@ async function start(o) {
       value.schemaVersion !== 1 ||
       value.operationId !== o.operationId ||
       value.intentSHA256 !== hash(intent) ||
-      value.poolSHA256 !== hash(pool) ||
+      value[computeKey] !== computeDigest[computeKey] ||
       (value.stage !== 'rejected' && !uuid(value.runId)) ||
       !['acknowledged', 'confirmed', 'rejected'].includes(value.stage) ||
       !Number.isFinite(Date.parse(value.recordedAt)) ||
@@ -201,7 +231,7 @@ async function start(o) {
       Date.parse(value.recordedAt) > Date.now() + 5000 ||
       Object.keys(value).sort().join(',') !==
         [
-          ...['schemaVersion', 'stage', 'operationId', 'intentSHA256', 'poolSHA256', 'runId', 'recordedAt'],
+          ...['schemaVersion', 'stage', 'operationId', 'intentSHA256', computeKey, 'runId', 'recordedAt'],
           ...(value.stage === 'rejected' ? ['status'] : ['ack']),
           ...(value.stage === 'confirmed' ? ['nativeStartSHA256', 'confirmedAt'] : []),
         ]
@@ -237,16 +267,31 @@ async function start(o) {
       if (hash((await receiptRef.get()).data() ?? null) !== hash(next)) fail();
     }
   };
+  const confirmOwnedReceipt = async (expected) => {
+    await db.runTransaction(
+      async (tx) => {
+        const parent = await authority(tx);
+        const current = await tx.get(receiptRef);
+        if (
+          hash(parent.get('mediaRecoveryWorkflowStart')) !== hash(intent) ||
+          hash(current.data() ?? null) !== hash(expected)
+        )
+          fail();
+      },
+      { readOnly: true }
+    );
+    fresh(false);
+  };
   let fact = await receipt();
   if (fact && send) fail();
   if (send) {
     // The fixed canonical client purpose disables both SDK and gRPC retries.
     // Recheck exact native authority immediately before this sole call.
-    const poolObservation = await livePool(o, plan, pool);
+    const poolObservation = await observeCompute();
     await db.runTransaction(
       async (tx) => {
         const p = await authority(tx);
-        if (hash(p.get('mediaRecoveryWorkflowStart')) !== hash(intent)) fail();
+        if (hash(p.get('mediaRecoveryWorkflowStart')) !== hash(intent) || (await tx.get(receiptRef)).exists) fail();
       },
       { readOnly: true }
     );
@@ -279,13 +324,12 @@ async function start(o) {
           stage: 'rejected',
           operationId: o.operationId,
           intentSHA256: hash(intent),
-          poolSHA256: hash(pool),
+          ...computeDigest,
           runId: null,
           recordedAt: new Date().toISOString(),
           status: Number.isInteger(code) ? code : 6,
         };
         await write(undefined, fact);
-        fail();
       }
     }
     if (handle) {
@@ -295,7 +339,7 @@ async function start(o) {
         stage: 'acknowledged',
         operationId: o.operationId,
         intentSHA256: hash(intent),
-        poolSHA256: hash(pool),
+        ...computeDigest,
         runId: handle.firstExecutionRunId,
         recordedAt: new Date().toISOString(),
         ack: 'native-start-response',
@@ -303,7 +347,30 @@ async function start(o) {
       await write(undefined, fact);
     }
   }
-  if (fact?.stage === 'rejected') fail();
+  if (fact?.stage === 'rejected') {
+    // A collision can mean another execution owns this workflow ID.
+    if (o.observeConfirmedFailure !== true || fact.status === 6) fail();
+    let absent = false;
+    try {
+      await client.connection.withDeadline(Date.now() + 5000, () =>
+        client.workflowService.describeWorkflowExecution({
+          namespace: 'urm-app-staging.qwejt',
+          execution: { workflowId: intent.workflowId },
+        })
+      );
+    } catch (error) {
+      if (error?.code !== 5) fail();
+      absent = true;
+    }
+    if (!absent) fail();
+    await confirmOwnedReceipt(fact);
+    return {
+      ownedOperation: owned,
+      start: fact,
+      authorizationExpired: Date.now() >= plan.expiresAt,
+      terminalFailure: hash({ intent, rejection: fact, nativeStatus: 'NOT_FOUND' }),
+    };
+  }
   fresh(false);
   const observeUntil = Date.now() + 10000;
   let wi, runId, vi;
@@ -319,7 +386,7 @@ async function start(o) {
       !uuid(runId) ||
       (fact && fact.runId !== runId) ||
       wi.execution.workflowId !== intent.workflowId ||
-      ![1, 2].includes(wi.status)
+      (![1, 2].includes(wi.status) && !(o.observeConfirmedFailure === true && wi.status === 3))
     )
       fail();
     if (vi?.behavior === 1 && hash(vi.deploymentVersion) === hash(intent.deploymentVersion)) {
@@ -347,6 +414,22 @@ async function start(o) {
     !/^[a-f0-9]{64}$/.test(nativeStartSHA256)
   )
     fail();
+  let terminalFailure;
+  if (wi.status === 3) {
+    const event = history.history.events.at(-1);
+    const attributes = event?.workflowExecutionFailedEventAttributes;
+    if (
+      event.eventType !== 3 ||
+      !attributes ||
+      attributes.newExecutionRunId ||
+      !wi.closeTime ||
+      !event.eventTime ||
+      String(event.eventTime.seconds) !== String(wi.closeTime.seconds) ||
+      Number(event.eventTime.nanos ?? 0) !== Number(wi.closeTime.nanos ?? 0)
+    )
+      fail();
+    terminalFailure = hash({ runId, nativeStartSHA256, event });
+  }
   if (fact?.stage === 'confirmed') {
     if (fact.nativeStartSHA256 !== nativeStartSHA256) fail();
   } else {
@@ -355,7 +438,7 @@ async function start(o) {
       stage: 'confirmed',
       operationId: o.operationId,
       intentSHA256: hash(intent),
-      poolSHA256: hash(pool),
+      ...computeDigest,
       runId,
       recordedAt: fact?.recordedAt ?? new Date().toISOString(),
       ack: fact?.ack ?? 'unknown-ack-native-get-only',
@@ -365,25 +448,18 @@ async function start(o) {
     await write(fact, confirmed);
     fact = confirmed;
   }
-  await db.runTransaction(
-    async (tx) => {
-      const parent = await authority(tx);
-      const current = await tx.get(receiptRef);
-      if (
-        hash(parent.get('mediaRecoveryWorkflowStart')) !== hash(intent) ||
-        hash(current.data() ?? null) !== hash(fact)
-      )
-        fail();
-    },
-    { readOnly: true }
-  );
-  fresh(false);
-  return { ownedOperation: owned, start: fact, authorizationExpired: Date.now() >= plan.expiresAt };
+  await confirmOwnedReceipt(fact);
+  return {
+    ownedOperation: owned,
+    start: fact,
+    authorizationExpired: Date.now() >= plan.expiresAt,
+    ...(terminalFailure ? { terminalFailure } : {}),
+  };
 }
 
 /** Native reads are mandatory for a new send, never for historical GET-only
  * reconciliation. Exact generation/etag/template/UID joins fence pool drift. */
-async function livePool(o, plan, pool) {
+async function livePool(o, plan, pool, template = plan.diagnosticTemplate, count = 1) {
   if (typeof o.api !== 'function') fail();
   const sampled = Date.now(),
     sampledMonotonic = performance.now();
@@ -405,15 +481,15 @@ async function livePool(o, plan, pool) {
     actual.etag !== pool.etag ||
     actual.deleteTime ||
     actual.reconciling === true ||
-    actual.scaling?.manualInstanceCount !== 1 ||
+    (actual.scaling?.manualInstanceCount ?? 0) !== count ||
     actual.terminalCondition?.state !== 'CONDITION_SUCCEEDED' ||
     norm(actual.latestCreatedRevision) !== pool.revision ||
     norm(actual.latestReadyRevision) !== pool.revision ||
-    !same(plan.diagnosticTemplate, actual.template) ||
+    !same(template, actual.template) ||
     norm(revision?.name) !== pool.revision ||
     revision.uid !== pool.revisionUid ||
     revision.deleteTime ||
-    !same(plan.diagnosticTemplate, revision)
+    !same(template, revision)
   )
     fail();
   return { sampledAt: sampled, deadline: sampled + 5000, sampledMonotonic };

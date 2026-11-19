@@ -9,11 +9,11 @@ export interface MediaJobRef {
 
 export type MediaStage = 'preparing' | 'downloading' | 'transcoding' | 'merging' | 'publishing';
 export type MediaOutcome =
-  | { kind: 'ready' }
+  | { kind: 'ready'; hostBound?: true }
   | { kind: 'completed' }
   | { kind: 'superseded' | 'deleted' | 'cancelled' }
-  | { kind: 'waiting_auth'; recoveryGeneration: string | null }
-  | { kind: 'waiting_archive' }
+  | { kind: 'waiting_auth'; recoveryGeneration: string | null; hostBound?: true }
+  | { kind: 'waiting_archive'; hostBound?: true }
   | { kind: 'restricted' };
 
 export const MEDIA_ARCHIVE_RETRY_DELAYS = [
@@ -31,7 +31,11 @@ export interface MediaArchiveWait {
 
 export interface MediaActivities {
   prepareMedia(ref: MediaJobRef): Promise<MediaOutcome>;
-  acquireMedia(ref: MediaJobRef, archiveResume?: MediaArchiveWait): Promise<MediaOutcome>;
+  acquireMedia(
+    ref: MediaJobRef,
+    archiveResume?: MediaArchiveWait,
+    authenticationGeneration?: string
+  ): Promise<MediaOutcome>;
   mergeMedia(ref: MediaJobRef): Promise<MediaOutcome>;
   publishMedia(ref: MediaJobRef): Promise<MediaOutcome>;
   recoverMediaAuthentication(ref: MediaJobRef): Promise<{ ready: boolean; generation: string | null }>;

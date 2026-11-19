@@ -11,6 +11,8 @@ const fail = (): never => {
 };
 const domains = ['media', 'publishing', 'images', 'emails', 'accounts', 'bundles', 'search'];
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
+const diagnosticSubject =
+  /^documents\/durableJob(Outbox|Commands)\/diagnostic-([a-f0-9-]{36})-(outbox|commands)$/;
 export interface DispatchDiagnosticManifest {
   schemaVersion: 2;
   commandsRecovery: 'scheduler';
@@ -111,7 +113,12 @@ export class DispatchDiagnostic {
     const { db, client } = this.options;
     const parentRef = db.doc('_control/temporalReleaseOperation');
     const parent = await parentRef.get();
-    if (parent.get('action') !== 'prepare-cloud-run-dispatch-diagnostic') return undefined;
+    const subject = context.delivery.kind === 'event' ? diagnosticSubject.exec(context.delivery.subject) : null;
+    const diagnosticEvent = subject && uuid.test(subject[2]) &&
+      subject[3] === (subject[1] === 'Outbox' ? 'outbox' : 'commands');
+    if (parent.get('action') !== 'prepare-cloud-run-dispatch-diagnostic')
+      return diagnosticEvent ? !signal.aborted : undefined;
+    if (diagnosticEvent && subject[2] !== parent.get('operationId')) return !signal.aborted;
     try {
       const m = manifest(parent.get('cloudDispatchDiagnostic'));
       if (
@@ -126,6 +133,7 @@ export class DispatchDiagnostic {
         token = randomUUID();
       const authRef = db.doc(`_control/temporalDispatchDiagnosticAuthorization-${m.operationId}`);
       const journalRef = db.doc(`_control/temporalDispatchDiagnostic-${m.operationId}`);
+      const finalRef = db.doc(`_control/temporalDispatchDiagnosticCompletion-${m.operationId}`);
       const controlRef = db.doc('_control/temporalRelease'),
         stateRef = db.doc('_control/temporalReleaseState');
       const surfaces =
@@ -144,7 +152,7 @@ export class DispatchDiagnostic {
       for (const surface of surfaces) {
         const recordRef = db.doc(diagnosticRecordPath(m.operationId, surface));
         const authority = async (tx: FirebaseFirestore.Transaction) => {
-          const [p, c, s, a, j, r, creation, schedulerCreation] = await Promise.all(
+          const [p, c, s, a, j, r, creation, schedulerCreation, final] = await Promise.all(
             [
               parentRef,
               controlRef,
@@ -154,9 +162,11 @@ export class DispatchDiagnostic {
               recordRef,
               db.doc(`_control/temporalDispatchDiagnosticWakeCreation-${m.operationId}-${surface}`),
               db.doc(`_control/temporalDispatchDiagnosticWakeCreation-${m.operationId}-scheduler`),
+              finalRef,
             ].map((ref) => tx.get(ref))
           );
           if (
+            final.exists ||
             p.get('operationId') !== m.operationId ||
             p.get('releaseId') !== m.releaseId ||
             p.get('bindingDigest') !== m.bindingDigest ||

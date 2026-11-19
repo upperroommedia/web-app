@@ -999,13 +999,17 @@ for (const mode of [
                   }
                   return value;
                 };
+                let polling;
                 try {
                   if (mode === 'restored-startup-drain')
                     await assert.rejects(
                       startup.recordRestoredMediaStartupCapacity(input),
                       /RESTORED_MEDIA_STARTUP_UNCONFIRMED/
                     );
-                  else assert.equal(await startup.recordRestoredMediaStartupCapacity(input), true);
+                  else {
+                    polling = await startup.recordRestoredMediaStartupCapacity(input);
+                    assert.equal(typeof polling.authorizePolling, 'function');
+                  }
                 } finally {
                   db.runTransaction = nativeTx;
                 }
@@ -1014,7 +1018,9 @@ for (const mode of [
                 assert.equal((await db.doc(`temporalMediaStartupCapacity/${newId}`).get()).exists, false);
                 assert.equal((await db.doc(`_control/temporalMediaKernel-${newId}`).get()).exists, false);
                 assert.equal((await db.doc(`_control/temporalMediaRecoveryKernel-${newId}`).get()).exists, false);
+                await polling?.authorizePolling();
                 await auth.updateUser(idleActor.uid, { disabled: true });
+                if (polling) await assert.rejects(polling.authorizePolling(), /RESTORED_MEDIA_STARTUP_UNCONFIRMED/);
                 await assert.rejects(startup.restoredMediaKernelContext(db, () => auth, parent));
                 await auth.updateUser(idleActor.uid, { disabled: false });
                 await assert.rejects(
@@ -1023,6 +1029,7 @@ for (const mode of [
                     cloudRun: { ...parent.cloudRun, revisionUid: 'foreign' },
                   })
                 );
+                if (mode === 'restored-startup-readback') idleRuntime.pollAuthority = polling;
                 assert.equal(calls, 1);
                 if (mode === 'restored-startup-phase') {
                   const { collect, args } = idleRuntime.phaseStartup;
@@ -1718,10 +1725,13 @@ for (const mode of [
                   },
                 })
               );
+              await idleRuntime.pollAuthority?.authorizePolling();
               const receipt = await r.capacityRef.get();
               await r.capacityRef.update({ digest: '0'.repeat(64) });
               await r.capacityRef.update({ digest: receipt.get('digest') });
               await assert.rejects(r.collect(op));
+              if (idleRuntime.pollAuthority)
+                await assert.rejects(idleRuntime.pollAuthority.authorizePolling(), /RESTORED_MEDIA_STARTUP_UNCONFIRMED/);
             }
             if (mode === 'restored-promotion-resources') {
               const promotionId = randomUUID(),

@@ -107,3 +107,23 @@ test('parallel branches preserve input order on success without cancelling the s
   expect(await settleMediaBranches([async () => 7, async () => 'audio'] as const, token)).toEqual([7, 'audio']);
   expect(token.isCancellationRequested).toBe(false);
 });
+
+test.each([
+  { label: 'excess', bytes: 6, accepted: false },
+  { label: 'truncated', bytes: 4, accepted: false },
+  { label: 'exact', bytes: 5, accepted: true },
+])('the pinned byte budget handles an $label stream before it can enter the merge', async ({ bytes, accepted }) => {
+  const input = new PassThrough();
+  const closed = once(input, 'close');
+  const destination = join(root, 'pinned-audio');
+  const writing = writeOwnedMediaStream(() => input, destination, undefined, 5);
+  input.end(Buffer.alloc(bytes));
+  if (accepted) {
+    await writing;
+    expect((await stat(destination)).size).toBe(5);
+  } else {
+    await expect(writing).rejects.toThrow('Pinned media length differs');
+    expect((await stat(destination)).size).toBeLessThanOrEqual(5);
+  }
+  await closed;
+});

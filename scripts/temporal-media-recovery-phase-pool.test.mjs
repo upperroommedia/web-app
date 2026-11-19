@@ -126,7 +126,7 @@ test('known pending start LRO may observe exact predecessor without granting a s
   };
   f.options.observeProtection = async (scope) => {
     const o = nativeOptions(f, scope);
-    if (scope.phase === 'start' && f.saved.start?.stage === 'acknowledged') {
+    if (scope.phase === 'start' && f.saved.start?.stage === 'acknowledged' && !pendingRead) {
       o.api = async (url, ...args) =>
         url.includes('/operations/')
           ? { name: f.saved.start.nativeOperation, done: false }

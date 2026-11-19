@@ -57,7 +57,7 @@ function validateBinding(config) {
  * The invoker is Temporal's scaler identity, never the workload runner identity.
  */
 export function serverlessComputeArguments(config) {
-  validateBinding(config);
+  const { provider, scaler } = serverlessComputeSettings(config);
   return [
     'worker',
     'deployment',
@@ -69,22 +69,49 @@ export function serverlessComputeArguments(config) {
     '--build-id',
     config.buildId,
     '--gcp-cloud-run-project',
-    config.projectId,
+    provider.details.project,
     '--gcp-cloud-run-region',
-    config.region,
+    provider.details.region,
     '--gcp-cloud-run-worker-pool',
-    config.poolName,
+    provider.details.worker_pool,
     '--gcp-cloud-run-service-account',
-    config.invokerServiceAccount,
+    provider.details.service_account,
     '--gcp-cloud-run-min-instances',
-    '0',
+    String(scaler.details.min_count),
     '--gcp-cloud-run-max-instances',
-    String(config.maxInstances),
+    String(scaler.details.max_count),
     '--gcp-cloud-run-initial-instances',
-    '0',
+    String(scaler.details.initial_count),
     '--gcp-cloud-run-utilization-target',
-    '0.8',
+    String(scaler.details.utilization_target),
     '--gcp-cloud-run-scale-down-stabilization-duration',
-    `${config.stabilizationSeconds}s`,
+    `${scaler.details.no_sync_quiet_ms / 1000}s`,
   ];
+}
+
+// Temporal CLI v1.9.1 uses the SDK JSON payload encoding for both details maps.
+// See internal/temporalcli/commands.worker.deployment.go at that tag.
+export function serverlessComputeSettings(config) {
+  validateBinding(config);
+  return {
+    provider: {
+      type: 'gcp-cloud-run',
+      details: {
+        project: config.projectId,
+        region: config.region,
+        worker_pool: config.poolName,
+        service_account: config.invokerServiceAccount,
+      },
+    },
+    scaler: {
+      type: 'rate-based',
+      details: {
+        min_count: 0,
+        max_count: config.maxInstances,
+        initial_count: 1,
+        utilization_target: 0.8,
+        no_sync_quiet_ms: config.stabilizationSeconds * 1000,
+      },
+    },
+  };
 }

@@ -1,4 +1,4 @@
-import { verifyCloudRunWorkerIdentity } from './cloud-run-witness';
+import { cloudRunPollerIdentity, verifyCloudRunWorkerIdentity } from './cloud-run-witness';
 
 const binding = {
   projectId: 'urm-app-staging',
@@ -56,3 +56,24 @@ test.each(['CLOUD_RUN_WORKER_POOL', 'CLOUD_RUN_REVISION'])(
     );
   }
 );
+
+test('poller identities distinguish separate instances and separate process births', () => {
+  const processId = '593eeff8-126a-4c05-8233-a394be885c2e';
+  const original = cloudRunPollerIdentity('cloud-instance', processId);
+  expect(cloudRunPollerIdentity('cloud-instance', processId)).toBe(original);
+  expect(cloudRunPollerIdentity('other-instance', processId)).not.toBe(original);
+  expect(cloudRunPollerIdentity('cloud-instance', '30f3d81c-664e-4d85-b797-a5fc70dc31d0')).not.toBe(original);
+  expect(() => cloudRunPollerIdentity('cloud-instance', '1@localhost')).toThrow('CLOUD_RUN_WORKER_IDENTITY_MISMATCH');
+});
+
+test('accepts the documented numbered worker-pool revision only under its exact pool', () => {
+  const dotted = { ...binding, revision: `${binding.pool}.1` };
+  const observed = { ...revision(), name: revision().name.replace(binding.revision, dotted.revision) };
+  expect(verifyCloudRunWorkerIdentity(dotted, metadata, observed).revision).toBe(dotted.revision);
+  expect(() =>
+    verifyCloudRunWorkerIdentity(dotted, metadata, {
+      ...observed,
+      name: observed.name.replace(`/workerPools/${binding.pool}/`, '/workerPools/foreign-pool/'),
+    })
+  ).toThrow('CLOUD_RUN_WORKER_IDENTITY_MISMATCH');
+});

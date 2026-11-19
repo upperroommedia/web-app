@@ -5,6 +5,7 @@ import { hostResourceRequest } from '../../../apps/process-audio/src/host/resour
 import {
   prepareNativeYouTubeEpisode,
   readPreparedYouTubeEpisode,
+  readPreparedYouTubeEpisodeInTransaction,
   recordYouTubeEpisodeResource,
   assertReleasedYouTubeEpisode,
   readAcquisitionExecution,
@@ -16,6 +17,11 @@ import {
   YOUTUBE_ACQUISITIONS,
 } from '../../../apps/process-audio/src/temporal/hetzner-acquisition-store';
 import { youtubeAcquisitionId } from '../../../apps/process-audio/src/temporal/hetzner-acquisition';
+import {
+  reserveYouTubeRenderDispatch,
+  youtubeRenderSlot,
+} from '../../../apps/process-audio/src/temporal/hetzner-render-slot';
+import { waitForYouTubeRender } from '../../../apps/process-audio/src/temporal/hetzner-render-client';
 import type { MediaJobRef } from '../../../apps/process-audio/src/temporal/types';
 jest.mock('../../../apps/process-audio/src/host/resources', () => ({ hostResourceRequest: jest.fn() }));
 // Actual dedicated Firestore transactions and immutable native timestamps.
@@ -505,5 +511,98 @@ test.each(['rewrite', 'recreate'])(
       await outcome.create(original);
     }
     await expect(read()).rejects.toThrow('YOUTUBE_EPISODE_UNCONFIRMED');
+  }
+);
+
+test.each(['accepted', 'stopped', 'slot-rewritten'] as const)(
+  'a lost reservation commit acknowledgement permits only the original unsent POST (%s)',
+  async (mode) => {
+    const episodeId = await prepareNativeYouTubeEpisode({
+      firestore: db,
+      ref,
+      caller,
+      invocation: nativeInvocation,
+      assertCurrent: current,
+      render: true,
+    });
+    const slotRef = db.collection('temporalYouTubeRenderHosts').doc('staging');
+    if ((await slotRef.get()).exists) throw Error('Isolated emulator render slot is occupied');
+    const selectedSlot = youtubeRenderSlot(ref, episodeId);
+    let loseAck = true;
+    const firestore = new Proxy(db, {
+      get(target, key) {
+        if (key === 'runTransaction') {
+          return async <T>(...parameters: Parameters<Firestore['runTransaction']>) => {
+            const result = await target.runTransaction(...parameters);
+            if (loseAck && result === true && parameters[1] && !('readOnly' in parameters[1])) {
+              loseAck = false;
+              if (mode === 'stopped') await root().update({ renderStopped: true });
+              if (mode === 'slot-rewritten') {
+                await slotRef.update({ controlledMutation: true });
+                await slotRef.set(selectedSlot);
+              }
+              throw Error('CONTROLLED_FIRESTORE_COMMIT_ACK_LOST');
+            }
+            return result as T;
+          };
+        }
+        const value = Reflect.get(target, key);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    const signal = new AbortController().signal;
+    const authorizeDispatch = () =>
+      reserveYouTubeRenderDispatch({
+        firestore,
+        signal,
+        assertCurrent: current,
+        read: async (tx) => {
+          const { root, episode, execution } = await readPreparedYouTubeEpisodeInTransaction(tx, {
+            firestore: db,
+            ref,
+            verifiedCallerEmail: caller.serviceAccount,
+            render: true,
+          });
+          return {
+            dispatch: await tx.get(execution.ref.collection('render').doc('dispatch')),
+            body: { schemaVersion: 1, ref, episodeId },
+            slot: selectedSlot,
+            active:
+              root.get('renderStopped') !== true &&
+              episode.id === episodeId &&
+              execution.get('renderClaim') === undefined,
+          };
+        },
+      });
+    const operationId = youtubeAcquisitionId(ref);
+    const request = jest
+      .fn()
+      .mockResolvedValueOnce({ operationId, status: 'missing' })
+      .mockRejectedValueOnce(new Error('CONTROLLED_HTTP_ACK_LOST'))
+      .mockResolvedValueOnce({ operationId, status: 'rendered' });
+    try {
+      const observed = waitForYouTubeRender({
+        ref,
+        signal,
+        request,
+        authorizeDispatch,
+        heartbeat: () => undefined,
+        wait: async () => undefined,
+        maxPolls: 3,
+      });
+      if (mode !== 'accepted') {
+        await expect(observed).rejects.toThrow('CONTROLLED_FIRESTORE_COMMIT_ACK_LOST');
+        expect(request.mock.calls.map(([method]) => method)).toEqual(['GET']);
+      } else {
+        await expect(observed).resolves.toBe('rendered');
+        expect(request.mock.calls.map(([method]) => method)).toEqual(['GET', 'POST', 'GET']);
+      }
+      expect(loseAck).toBe(false);
+      expect((await slotRef.get()).data()).toEqual(selectedSlot);
+      await expect(authorizeDispatch()).resolves.toBe(false);
+    } finally {
+      const slot = await slotRef.get();
+      if (slot.get('operationId') === selectedSlot.operationId) await slotRef.delete();
+    }
   }
 );

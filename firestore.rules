@@ -105,6 +105,7 @@ service cloud.firestore {
     match /temporalImageReceipts/{document=**} { allow read, write: if false; }
     match /temporalImageResolutionAudits/{document=**} { allow read, write: if false; }
     match /temporalYouTubeAcquisitions/{document=**} { allow read, write: if false; }
+    match /temporalYouTubeRenderHosts/{document=**} { allow read, write: if false; }
     match /temporalMediaArtifacts/{document=**} { allow read, write: if false; }
     match /temporalMediaCanonicalRefs/{document=**} { allow read, write: if false; }
     match /temporalMediaJobArtifacts/{document=**} { allow read, write: if false; }

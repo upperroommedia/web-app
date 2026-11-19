@@ -2,6 +2,7 @@ import { fork, type ChildProcess } from 'node:child_process';
 import { setTimeout as pause } from 'node:timers/promises';
 import { isAbsolute } from 'node:path';
 import type { MediaJobRef } from './types';
+import { YOUTUBE_RENDER_MAX_FILE_BYTES } from './hetzner-render-limits';
 import { youtubeAcquisitionId } from './hetzner-acquisition';
 
 export interface YouTubeNativeClose {
@@ -59,6 +60,9 @@ export async function runYouTubeAcquisitionProcess(options: {
   ref: MediaJobRef;
   signal: AbortSignal;
   episodeId?: string;
+  renderCallerEmail?: string;
+  authenticationId?: string;
+  onStarted?: () => void;
   assertStartFresh?: () => void;
   /** Host-internal native PID inspection + durable ownership/resource claim.
    * The helper must remain inert until this resolves true. Implementations must
@@ -77,10 +81,17 @@ export async function runYouTubeAcquisitionProcess(options: {
   options.assertStartFresh?.();
   // A fresh POSIX group also contains yt-dlp's ffmpeg/browser descendants. Killing
   // only the direct child is insufficient for safe resource release.
+  const render = options.renderCallerEmail !== undefined && options.authenticationId === undefined;
+  if (render && process.platform !== 'linux') throw failure();
+  const limit = String(YOUTUBE_RENDER_MAX_FILE_BYTES);
   const child = fork(options.helperPath, [], {
     detached: true,
     silent: true,
-    execArgv: [],
+    // prlimit execs the same Node binary in the original IPC child and
+    // caps every descendant file even when yt-dlp delegates the download.
+    ...(render
+      ? { execPath: '/usr/bin/prlimit', execArgv: [`--fsize=${limit}:${limit}`, '--', process.execPath] }
+      : { execArgv: [] }),
     stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
     serialization: 'json',
     ...(options.episodeId ? { env: { ...process.env, TMPDIR: options.directory } } : {}),
@@ -158,11 +169,15 @@ export async function runYouTubeAcquisitionProcess(options: {
             ref,
             directory: options.directory,
             ...(options.episodeId ? { episodeId: options.episodeId } : {}),
+            ...(options.renderCallerEmail ? { renderCallerEmail: options.renderCallerEmail } : {}),
+            ...(options.authenticationId ? { authenticationId: options.authenticationId } : {}),
           },
           (error) => {
             if (error) {
               spawnFailed = true;
               stop('failed');
+            } else if (!stopped && closedAt === undefined) {
+              options.onStarted?.();
             }
           }
         );

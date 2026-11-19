@@ -53,6 +53,28 @@ test('two exact effective quotas preserve original component timestamps and stab
   forged.components[0].effectiveBytes = '214748364800';
   assert.throws(() => assertMediaDiskQuotaProof(forged));
 });
+test('both native limits share one freshness window even when regional allocation returns first', async () => {
+  const f = fixture();
+  let release;
+  const held = new Promise((resolve) => {
+    release = resolve;
+  });
+  const read = observeMediaDiskQuota(plan, async (url) => {
+    const response = await f.api(url);
+    if (url.endsWith('MaxPerInstanceEphemeralDiskSizePerProjectRegion')) await held;
+    return response;
+  });
+  try {
+    assert.equal(f.calls.length, 2);
+  } finally {
+    release();
+  }
+  const proof = await read;
+  assert.equal(proof.components[0].observedAt, proof.components[1].observedAt);
+  assert.equal(proof.components[0].quotaId, 'MaxPerInstanceEphemeralDiskSizePerProjectRegion');
+  assert.equal(proof.components[1].quotaId, 'EphemeralDiskAllocPerProjectRegion');
+});
+
 for (const bad of [
   'name',
   'metric',

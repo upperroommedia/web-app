@@ -90,19 +90,20 @@ export function createCanonicalYouTubeHostStore(options: {
 
 /** Read-only native/actor observation. Late settlement cannot grant bytes or a
  * durable claim, even if the event loop delays the timeout callback. */
-async function boundedNativeEligibility(run: () => Promise<void>): Promise<void> {
+export async function boundedNativeEligibility<T>(run: () => Promise<T>): Promise<T> {
   const wall = Date.now(),
     mono = performance.now();
   let timer: ReturnType<typeof setTimeout> | undefined;
   const deny = () => new Error('YOUTUBE_ACQUISITION_AUTHORITY_UNAVAILABLE');
   try {
-    await Promise.race([
+    const result = await Promise.race([
       run(),
       new Promise<never>((_, reject) => {
         timer = setTimeout(() => reject(deny()), 5000);
       }),
     ]);
     if (Date.now() < wall || Date.now() - wall >= 5000 || performance.now() - mono >= 5000) throw deny();
+    return result;
   } finally {
     if (timer) clearTimeout(timer);
   }

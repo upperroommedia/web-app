@@ -1,3 +1,4 @@
+import { renderMediaRecoveryJob } from './temporal-media-recovery-job.mjs';
 import {assertStoredMediaDiagnosticDrain} from './temporal-media-diagnostic-drain.mjs';
 import { isDeepStrictEqual as equal } from 'node:util';
 import { proofDigest as hash } from './temporal-release-runtime.mjs';
@@ -122,7 +123,9 @@ export async function runMediaRecoveryCycle(o) {
   let state = o.saved,
     startCheckpointIssued = false;
   const createdAt = state?.plan?.createdAt ?? new Date().toISOString();
-  const plan = freeze({
+  const jobMode = typeof runtime.launchJob === 'function';
+  if (jobMode && typeof runtime.drainJob !== 'function') fail();
+  const proposed = {
     schemaVersion: 1,
     operationId: o.operationId,
     releaseId: o.releaseId,
@@ -140,7 +143,8 @@ export async function runMediaRecoveryCycle(o) {
     contract,
     createdAt,
     expiresAt: Date.parse(createdAt) + 300000,
-  });
+  };
+  const plan = freeze(jobMode ? { ...proposed, job: renderMediaRecoveryJob(proposed) } : proposed);
   if (!Number.isFinite(plan.expiresAt) || (state && !equal(state.plan, plan))) fail();
   const put = async (next) => {
     const immutable = structuredClone(next);
@@ -247,11 +251,16 @@ export async function runMediaRecoveryCycle(o) {
         if (Math.abs(Date.now() - Date.parse(atSend.observedAt)) > 5000) fail();
       };
       let ack;
+      let sendAuthorized = false;
       try {
         await fence();
-        ack = await api(request.url, 'PATCH', request.body, fence);
+        ack = await api(request.url, 'PATCH', request.body, async () => {
+          await fence();
+          sendAuthorized = true;
+        });
       } catch (error) {
         if (
+          sendAuthorized &&
           Number.isInteger(error?.status) &&
           error.status >= 400 &&
           error.status < 500 &&
@@ -307,13 +316,18 @@ export async function runMediaRecoveryCycle(o) {
           : current.revision !== before.revision || current.revisionUid !== before.revisionUid)
       )
         fail();
+      // An acknowledged operation can take several seconds to settle. Refresh the
+      // phase protections before accepting its successor or starting downstream work.
+      const completionProtection = await guard(key, before);
+      if (!equal(await read(template, target), current) ||
+        Math.abs(Date.now() - Date.parse(completionProtection.observedAt)) > 5000) fail();
       await write({ ...x, stage: 'completed', pool: current, verifiedAt: new Date().toISOString() });
     }
     const current = await read(template, target);
     if (!equal(current, x.pool)) fail();
     return current;
   };
-  if (state.stage === 'completed') {
+  if (!jobMode && state.stage === 'completed') {
     if (state.neverStarted) proof(state.neverStarted, plan, 'never-started');
     else proof(state.stopped, plan, 'stopped');
     if (!state.restore || !equal(await read(plan.normalTemplate, 0), state.restore.pool)) fail();
@@ -328,6 +342,55 @@ export async function runMediaRecoveryCycle(o) {
     await put({ ...state, stage: 'prepared', prepared });
   }
   proof(state.prepared, plan, 'prepared');
+  if (jobMode) {
+    const checkNormalZero = async () => {
+      await authorizeMutation();
+      if (!equal(await read(plan.normalTemplate, 0), plan.origin)) fail();
+    };
+    if (state.stage === 'completed') {
+      if (
+        state.disposition !== 'normal-zero-after-job' ||
+        state.jobTermination?.kind !== 'job-task-terminated' ||
+        !sha(state.jobTermination.proofSHA256) ||
+        state.jobDrain?.kind !== 'job-queues-drained' ||
+        state.jobDrain.terminationSHA256 !== state.jobTermination.proofSHA256 ||
+        !sha(state.jobDrain.proofSHA256)
+      ) fail();
+      proof(state.recovery, plan, 'recovery');
+      await checkNormalZero();
+      return state;
+    }
+    const protect = async () => {
+      await checkNormalZero();
+      await guard('diagnostic', plan.origin);
+      const quota = await observeMediaDiskQuota(ancestors.zeroPlan, api);
+      await checkNormalZero();
+      assertMediaDiskQuotaFresh(quota);
+    };
+    const provider = await runtime.launchJob({ plan, protect });
+    const jobRun = provider?.runIdentity;
+    if (!jobRun || jobRun.stage !== 'acknowledged' || jobRun.jobPlanSHA256 !== hash(plan.job)) fail();
+    await checkNormalZero();
+    const episode = await runtime.execute({ plan, pool: plan.origin, prepared: state.prepared, jobRun });
+    const recovery = proof(episode?.recovery, plan, 'recovery');
+    const jobTermination = episode?.jobTermination;
+    if (
+      jobTermination?.kind !== 'job-task-terminated' || jobTermination.operationId !== plan.operationId ||
+      jobTermination.job !== plan.job.name || jobTermination.jobUid !== jobRun.jobUid ||
+      jobTermination.execution !== jobRun.execution || jobTermination.executionUid !== jobRun.executionUid ||
+      !sha(jobTermination.proofSHA256)
+    ) fail();
+    const jobDrain = await runtime.drainJob({ plan, jobRun, jobTermination });
+    if (
+      jobDrain?.kind !== 'job-queues-drained' || jobDrain.operationId !== plan.operationId ||
+      jobDrain.terminationSHA256 !== jobTermination.proofSHA256 || !sha(jobDrain.proofSHA256) ||
+      !Number.isFinite(Date.parse(jobDrain.observedAt)) || Math.abs(Date.now() - Date.parse(jobDrain.observedAt)) > 5000
+    ) fail();
+    await checkNormalZero();
+    if (Math.abs(Date.now() - Date.parse(jobDrain.observedAt)) > 5000) fail();
+    await put({ ...state, stage: 'completed', disposition: 'normal-zero-after-job', recovery, jobTermination, jobDrain });
+    return state;
+  }
   const diagnostic = await transition('diagnostic', plan.origin, plan.diagnosticTemplate, 0);
   // No automatic restoration is inferred from a failed/unknown scale request.
   let started;
@@ -372,20 +435,22 @@ export async function runMediaRecoveryCycle(o) {
     fail();
   }
   if (!state.recovery && !state.recoveryFailed) {
-    let recovery;
-    try {
-      fresh();
-      recovery = proof(await runtime.execute({ plan, pool: started, prepared: state.prepared }), plan, 'recovery');
-      fresh();
-    } catch {
-      await put({ ...state, stage: 'recovery-failed', recoveryFailed: true });
+    // Its first START still requires unexpired authority. A lost observation must
+    // leave the saved START intent eligible for same-run readback on resume.
+    const outcome = await runtime.execute({ plan, pool: started, prepared: state.prepared });
+    if (outcome?.kind === 'recovery-failed') {
+      const recoveryFailed = proof(outcome, plan, 'recovery-failed');
+      await put({ ...state, stage: 'recovery-failed', recoveryFailed });
+    } else {
+      const recovery = proof(outcome, plan, 'recovery');
+      await put({ ...state, stage: 'recovered', recovery });
     }
-    // Unknown recovered-checkpoint ACK must propagate, not be reclassified as
-    // execution failure or authorize a different checkpoint/cleanup sequence.
-    if (recovery) await put({ ...state, stage: 'recovered', recovery });
   }
   if (state.recovery) proof(state.recovery, plan, 'recovery');
-  if (state.recoveryFailed !== undefined && state.recoveryFailed !== true) fail();
+  if (state.recoveryFailed !== undefined) {
+    if (state.recovery) fail();
+    proof(state.recoveryFailed, plan, 'recovery-failed');
+  }
   if (!state.drained) {
     const drained = proof(
       await runtime.drain({ plan, pool: started, prepared: state.prepared, recovery: state.recovery ?? null }),

@@ -1,10 +1,10 @@
 import {denyUnprovedMediaPromotion} from './temporal-promotion-roles.mjs';
 import {independentPromotionPredecessor,independentPromotionRoles} from './temporal-promotion-roles.mjs';
 import {validateCompletedRolePromotionReceipt} from './temporal-promotion-receipt.mjs';
-import {verifySearchPromotionPredecessor,verifyEmailPromotionPredecessor,verifyImagesPromotionPredecessor,verifyMediaPromotionPredecessor} from './temporal-promotion-predecessor.mjs';
+import {verifySearchPromotionPredecessor,verifyEmailPromotionPredecessor,verifyImagesPromotionPredecessor} from './temporal-promotion-predecessor.mjs';
 import { isDeepStrictEqual } from 'node:util';
 import { proofDigest } from './temporal-release-runtime.mjs';
-import { verifyControlsPromotionResources,verifySearchPromotionResources,verifyEmailPromotionResources,verifyImagesPromotionResources,verifyMediaPromotionResources } from './temporal-bootstrap-pool.mjs';
+import { verifyControlsPromotionResources,verifySearchPromotionResources,verifyEmailPromotionResources,verifyImagesPromotionResources } from './temporal-bootstrap-pool.mjs';
 
 const fail=()=>{throw new Error('CLOUD_RUN_CONTROLS_PROMOTION_UNCONFIRMED');};
 const uuid=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
@@ -15,13 +15,13 @@ function fresh(p,role){
     !Number.isFinite(Date.parse(p.observedAt??''))||Math.abs(Date.now()-Date.parse(p.observedAt))>5000)fail();
 }
 /** Fixed controls-first promotion; never scales, retires, rolls back or opens admission. */
-async function promote(o,expectedRole){
+async function promote(o,expectedRole,observeMedia){
   const {platform,role,operationId,releaseId,evidenceDigest,bindingDigest,receipts,settings,client,
     before,after,save,authorizeMutation}=o;
   const b=platform.roleBindings.find(x=>x.role===expectedRole),namespace=platform.temporalNamespace;
   if(role!==expectedRole||!independentPromotionRoles.includes(expectedRole)||!uuid.test(operationId??'')||!uuid.test(releaseId??'')||!digest.test(evidenceDigest??'')||!digest.test(bindingDigest??'')||
     client.options.namespace!==namespace||!Array.isArray(client.connection.options?.interceptors)||client.connection.options.interceptors.length||
-    client.connection.options?.channelArgs?.['grpc.enable_retries']!==0||[before,after,save,authorizeMutation].some(x=>typeof x!=='function'))fail();
+    client.connection.options?.channelArgs?.['grpc.enable_retries']!==0||[save,authorizeMutation,...(observeMedia?[observeMedia]:[before,after])].some(x=>typeof x!=='function'))fail();
   const previous=independentPromotionPredecessor[role],key=previous?`${previous}Promotion`:undefined;
   const ownReceipts=Object.fromEntries(Object.entries(receipts).filter(([name])=>name!==key));
   const plan={schemaVersion:1,operationId,operationBindingDigest:bindingDigest,releaseId,evidenceDigest,role,namespace,
@@ -30,10 +30,18 @@ async function promote(o,expectedRole){
   let state=o.saved;
   const put=async next=>{await save(next);state=next;};
   const resources=async()=>{
-    const inspect={controls:verifyControlsPromotionResources,search:verifySearchPromotionResources,email:verifyEmailPromotionResources,images:verifyImagesPromotionResources,media:verifyMediaPromotionResources}[role];
+    const inspect={controls:verifyControlsPromotionResources,search:verifySearchPromotionResources,email:verifyEmailPromotionResources,images:verifyImagesPromotionResources}[role];
     const owned=await inspect({...o,receipts:ownReceipts,saved:undefined,observeProtection:before,observeRegistration:async()=>fail()});
-    const verify={search:verifySearchPromotionPredecessor,email:verifyEmailPromotionPredecessor,images:verifyImagesPromotionPredecessor,media:verifyMediaPromotionPredecessor}[role];
+    const verify={search:verifySearchPromotionPredecessor,email:verifyEmailPromotionPredecessor,images:verifyImagesPromotionPredecessor}[role];
     return previous?{...owned,predecessor:await verify(o)}:owned;
+  };
+  const observe=async stage=>{
+    if(!observeMedia) return {resources:await resources(),proof:await (stage==='before'?before:after)()};
+    const sample=await observeMedia(stage);
+    if(!digest.test(sample?.proof?.lineageSHA256??'') || !digest.test(sample?.resources?.diagnosticJobTerminationSHA256??'') ||
+       sample.proof.queueRouting?.current?.deploymentName!==(stage==='before'?platform.roleBindings.find(x=>x.role==='orchestration').deploymentName:b.deploymentName) ||
+       (stage==='before'?sample.proof.queueRouting.current.buildId===b.buildId:sample.proof.queueRouting.current.buildId!==b.buildId))fail();
+    return sample;
   };
   const readTarget=()=>client.connection.withDeadline(Date.now()+5000,()=>client.connection.workflowService
     .describeWorkerDeployment({namespace,deploymentName:b.deploymentName}));
@@ -42,7 +50,7 @@ async function promote(o,expectedRole){
     if(!state)await put({plan,stage:'planned'});
     if(state.stage==='rejected')fail();
     if(state.stage==='planned'){
-      const owned=await resources(),proof=await before(),target=await readTarget();fresh(proof,role);
+      const {resources:owned,proof}=await observe('before'),target=await readTarget();fresh(proof,role);
       const token=target.conflictToken;
       const routing=target.workerDeploymentInfo?.routingConfig;
       if(!(token instanceof Uint8Array)||!token.length||token.length>4096||
@@ -50,12 +58,16 @@ async function promote(o,expectedRole){
       const request={namespace,deploymentName:b.deploymentName,buildId:b.buildId,
         conflictTokenBase64:Buffer.from(token).toString('base64'),identity:`urm-${role}-promotion-${operationId}`};
       await put({plan,stage:'attempted',attemptedAt:new Date().toISOString(),request,proof,resources:owned});
-      const repeated=await resources(),atSend=await before(),current=await readTarget();
-      fresh(proof,role);fresh(atSend,role);
+      const {resources:repeated,proof:atSend}=await observe('before'),current=await readTarget();
+      if(!observeMedia)fresh(proof,role);
+      fresh(atSend,role);
       if(!isDeepStrictEqual(repeated,owned)||atSend.protectionSHA256!==proof.protectionSHA256||
         atSend.computeInventorySHA256!==proof.computeInventorySHA256||
+        (observeMedia&&atSend.lineageSHA256!==proof.lineageSHA256)||
         Buffer.from(current.conflictToken??[]).toString('base64')!==request.conflictTokenBase64)fail();
-      await authorizeMutation();fresh(proof,role);fresh(atSend,role);
+      await authorizeMutation();
+      if(!observeMedia)fresh(proof,role);
+      fresh(atSend,role);
       // Source-owned connection disables SDK/gRPC retry layers. Exactly one call;
       // an unknown result is retained for GET-only reconciliation, never resent.
       let ack;
@@ -77,14 +89,19 @@ async function promote(o,expectedRole){
         conflictTokenBase64:state.request?.conflictTokenBase64,identity:`urm-${role}-promotion-${operationId}`})||
       typeof state.request.conflictTokenBase64!=='string'||!state.request.conflictTokenBase64||
       Buffer.from(state.request.conflictTokenBase64,'base64').toString('base64')!==state.request.conflictTokenBase64)fail();
-    if(!isDeepStrictEqual(await resources(),state.resources))fail();
-    const observed=await after();fresh(observed,role);
+    const {resources:currentResources,proof:observed}=await observe('after');
+    if(!isDeepStrictEqual(currentResources,state.resources))fail();
+    fresh(observed,role);
     if(observed.protectedWorkSHA256!==state.proof.protectedWorkSHA256||
-      observed.peerRoutingSHA256!==state.proof.peerRoutingSHA256||observed.bundleSHA256!==state.proof.bundleSHA256)fail();
+      observed.peerRoutingSHA256!==state.proof.peerRoutingSHA256||observed.bundleSHA256!==state.proof.bundleSHA256||
+      (observeMedia&&(observed.lineageSHA256!==state.proof.lineageSHA256||
+        observed.computeInventorySHA256!==state.proof.computeInventorySHA256)))fail();
     const target=await readTarget(),routing=target.workerDeploymentInfo?.routingConfig;
     if(routing?.currentDeploymentVersion?.deploymentName!==b.deploymentName||routing.currentDeploymentVersion.buildId!==b.buildId||
       routing.rampingDeploymentVersion||Number(routing.rampingVersionPercentage??0)!==0)fail();
-    if(state.acknowledgement&&Buffer.from(target.conflictToken??[]).toString('base64')!==state.acknowledgement.conflictTokenBase64)fail();
+    const targetToken=Buffer.from(target.conflictToken??[]).toString('base64');
+    if(observeMedia&&(!targetToken||targetToken===state.request.conflictTokenBase64))fail();
+    if(state.acknowledgement&&targetToken!==state.acknowledgement.conflictTokenBase64)fail();
     if(state.stage==='completed'){
       if(proofDigest(state.observed.queueRouting)!==proofDigest(observed.queueRouting))fail();
       return state;
@@ -106,4 +123,7 @@ export const promoteCloudRunEmail=o=>promote(o,'email');
 
 export const promoteCloudRunImages=o=>promote(o,'images');
 
-export const promoteCloudRunMedia=async()=>denyUnprovedMediaPromotion();
+export const promoteCloudRunMedia=async(o,observeMedia)=>{
+ if(typeof observeMedia!=='function')return denyUnprovedMediaPromotion();
+ return promote(o,'media',observeMedia);
+};

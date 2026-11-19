@@ -240,3 +240,26 @@ test('enabled native readback rejects recreated or disabled callers and audience
   }));
  }
 });
+
+test('Scheduler attempts can advance while the exact enabled job configuration stays pinned', async () => {
+  const f = fixture();
+  Object.assign(f.scheduler, {
+    userUpdateTime: '2026-11-17T00:00:00Z',
+    lastAttemptTime: '2026-11-17T00:01:00Z',
+    scheduleTime: '2026-11-17T00:02:00Z',
+    status: { code: 0 },
+  });
+  const first = await verifyCloudRunDispatchConfiguration(f.platform, f.api);
+  Object.assign(f.scheduler, {
+    lastAttemptTime: '2026-11-17T00:02:00Z',
+    scheduleTime: '2026-11-17T00:03:00Z',
+    status: { code: 14 },
+  });
+  const second = await verifyCloudRunDispatchConfiguration(f.platform, f.api);
+  const withoutObservationTime = ({ observedAt, ...configuration }) => configuration;
+  assert.deepEqual(withoutObservationTime(first), withoutObservationTime(second));
+  assert.equal(second.scheduler.configurationDigestVersion, 2);
+  f.scheduler.description = 'A different ownership annotation';
+  const changed = await verifyCloudRunDispatchConfiguration(f.platform, f.api);
+  assert.notEqual(changed.scheduler.configurationSHA256, second.scheduler.configurationSHA256);
+});

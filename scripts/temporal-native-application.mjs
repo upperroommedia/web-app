@@ -20,6 +20,8 @@ export function loadNativeReleaseApplication(runtimeRoot) {
       ...workerRequire(resolve(runtimeRoot, 'apps/temporal-worker/src/runtime/media-recovery-idle-startup.ts')),
       ...workerRequire(resolve(runtimeRoot, 'apps/temporal-worker/src/runtime/restored-media-collector.ts')),
       ...workerRequire(resolve(runtimeRoot, 'apps/temporal-worker/src/runtime/serverless-release-readiness.ts')),
+      ...workerRequire(resolve(runtimeRoot, 'apps/temporal-worker/src/runtime/worker-wake-history.ts')),
+      ...workerRequire(resolve(runtimeRoot, 'apps/temporal-worker/src/runtime/worker-wake-start.ts')),
     };
   } finally {
     service.enabled(false);

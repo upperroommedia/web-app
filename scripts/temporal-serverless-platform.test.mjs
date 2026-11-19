@@ -22,7 +22,7 @@ test('pins immutable version resources and all native scaler flags without execu
     Array.from({ length: (args.length - 3) / 2 }, (_, i) => [args[3 + i * 2], args[4 + i * 2]])
   );
   assert.equal(flags['--gcp-cloud-run-min-instances'], '0');
-  assert.equal(flags['--gcp-cloud-run-initial-instances'], '0');
+  assert.equal(flags['--gcp-cloud-run-initial-instances'], '1');
   assert.equal(flags['--gcp-cloud-run-max-instances'], '1');
   assert.equal(flags['--gcp-cloud-run-scale-down-stabilization-duration'], '180s');
   assert.equal(flags['--gcp-cloud-run-utilization-target'], '0.8');

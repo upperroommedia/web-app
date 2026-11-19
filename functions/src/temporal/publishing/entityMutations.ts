@@ -113,7 +113,7 @@ export interface PublishingEntityExecutionOptions {
     reasonCode: string,
     prepare?: (tx: Transaction) => Promise<() => void>
   ) => Promise<void>;
-  leaseAudio?: (ref: DurableJobRef, sermonId?: string, sourcePath?: string) => Promise<void>;
+  leaseAudio?: (ref: DurableJobRef, sermonId?: string, sourcePath?: string, sourceGeneration?: string) => Promise<void>;
   releaseAudio?: (ref: DurableJobRef) => Promise<{ released: boolean }>;
 }
 const invalid = (message: string): never => {
@@ -1053,9 +1053,9 @@ async function executeMembershipAndPublication(
         await options.markCritical(ref, reasonCode, prepare);
       },
       commitCurrent: (_ref, mutate) => commit(mutate),
-      leaseAudio: async (current, selected, sourcePath) => {
+      leaseAudio: async (...args) => {
         if (!options.leaseAudio) throw new HttpsError('failed-precondition', 'Audio admission lease is required.');
-        await options.leaseAudio(current, selected, sourcePath);
+        await options.leaseAudio(...args);
       },
       releaseAudio: async (current) => {
         if (!options.releaseAudio) throw new HttpsError('failed-precondition', 'Audio admission lease is required.');

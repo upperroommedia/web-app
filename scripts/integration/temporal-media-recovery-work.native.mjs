@@ -142,6 +142,7 @@ test(
         'start-pool-drift',
         'intent-ack-loss',
         'start-control-drift',
+        'start-parent-drift',
         'start-state-drift',
         'start-definite-rejection',
         'start-unknown-unaccepted',
@@ -154,7 +155,11 @@ test(
         'auth-private-error',
         'storage-private-error',
         'firestore-private-error',
-      ].filter((mode) => process.env.URM_MEDIA_HISTORY_ONLY !== '1' || mode === 'joint-supervised-recovery')) {
+      ].filter((mode) =>
+        (process.env.URM_MEDIA_HISTORY_ONLY !== '1' || mode === 'joint-supervised-recovery') &&
+        (process.env.URM_MEDIA_TERMINAL_FAILURE_ONLY !== '1' ||
+          ['source-collision', 'start-definite-rejection', 'start-unknown-unaccepted', 'start-parent-drift'].includes(mode))
+      )) {
         stage = `${mode}/setup`;
         const f = await mediaRecoveryFixture();
         let cycle;
@@ -555,6 +560,7 @@ test(
               ) {
                 checkpointFault = true;
                 if (mode === 'intent-ack-loss') throw new Error('CONTROLLED_NATIVE_INTENT_ACK_LOST');
+                if (mode === 'start-parent-drift') await bounded(lockRef.update({ controlledUnrelatedWrite: true }));
                 if (mode === 'start-control-drift') await bounded(controlRef.update({ admission: 'open' }));
                 if (mode === 'start-state-drift') await bounded(stateRef.update({ phase: 'opened' }));
               }
@@ -666,6 +672,7 @@ test(
             const noSend = [
               'intent-ack-loss',
               'start-control-drift',
+              'start-parent-drift',
               'start-state-drift',
               'start-pool-drift',
               'start-late-authority',
@@ -677,11 +684,34 @@ test(
             if (mode.startsWith('start-') || mode === 'intent-ack-loss') {
               assert.equal(acquireCalls, 0);
               assert.equal((await bounded(db.doc(`durableJobs/${id}`).get())).exists, false);
-              if (mode === 'start-definite-rejection')
-                assert.equal(
-                  (await bounded(db.doc(`_control/temporalMediaRecoveryStart-${op}`).get())).get('stage'),
-                  'rejected'
-                );
+              if (mode === 'start-parent-drift') {
+                const parent = await bounded(lockRef.get());
+                assert.equal(parent.get('controlledUnrelatedWrite'), true);
+                assert.equal(parent.get('mediaRecoveryWorkflowStart.stage'), 'attempted');
+                assert.equal((await bounded(db.doc(`_control/temporalMediaRecoveryStart-${op}`).get())).exists, false);
+              }
+              if (mode === 'start-definite-rejection') {
+                const ref = db.doc(`_control/temporalMediaRecoveryStart-${op}`);
+                const rejection = await bounded(ref.get());
+                assert.equal(rejection.get('stage'), 'rejected');
+                const options = { ...updated, observeConfirmedFailure: true };
+                const failure = await bounded(startMediaRecoveryWorkflow(options));
+                assert.equal(failure.start.runId, null);
+                assert.match(failure.terminalFailure, /^[a-f0-9]{64}$/);
+                assert.equal(startCalls, 1);
+                assert.deepEqual((await bounded(ref.get())).data(), rejection.data());
+                await assert.rejects(bounded(startMediaRecoveryWorkflow({
+                  ...options,
+                  client: {
+                    ...options.client,
+                    workflowService: { describeWorkflowExecution: async () => ({ workflowExecutionInfo: {} }) },
+                  },
+                })));
+                assert.equal(startCalls, 1);
+              } else if (mode === 'start-unknown-unaccepted') {
+                await assert.rejects(bounded(startMediaRecoveryWorkflow({ ...updated, observeConfirmedFailure: true })));
+                assert.equal(startCalls, 1);
+              }
               continue;
             }
           } else {
@@ -1163,6 +1193,18 @@ test(
           assert.equal((await bounded(db.doc(`durableJobOutbox/${id}`).get())).exists, false);
         } else {
           await assert.rejects(bounded(handle.result(), 30000));
+          if (mode === 'source-collision') {
+            const originalParent = await bounded(lockRef.get());
+            const failure = await bounded(startMediaRecoveryWorkflow({
+              ...startOptions,
+              ownedOperation: nativeSnapshotProof(originalParent),
+              observeConfirmedFailure: true,
+            }));
+            assert.equal(failure.start.runId, handle.firstExecutionRunId);
+            assert.match(failure.terminalFailure, /^[a-f0-9]{64}$/);
+            assert.equal(startCalls, 1);
+            assert.deepEqual((await bounded(lockRef.get())).data(), originalParent.data());
+          }
           if (mode.endsWith('private-error')) {
             const h = await bounded(handle.fetchHistory());
             assert(!JSON.stringify(h).includes('PRIVATE-NATIVE-SENTINEL-DO-NOT-EXPORT'));

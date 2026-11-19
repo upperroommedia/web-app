@@ -22,12 +22,12 @@ export function mediaPrivateInventoryFixture() {
       runner: 'owned@urm-app-staging.iam.gserviceaccount.com',
       contract: { deploymentName, queue },
     },
-    pool = { desiredManualInstanceCount: 1, revision: `${plan.name}/revisions/owned`, revisionUid: 'owned-uid' };
+    pool = { desiredManualInstanceCount: 1, revision: `${plan.name}/revisions/owned.2`, revisionUid: 'owned-uid' };
   const cloudRun = {
       projectId: 'urm-app-staging',
       region: 'us-central1',
       pool: 'owned',
-      revision: 'owned',
+      revision: 'owned.2',
       revisionUid: 'owned-uid',
       imageDigest: plan.image.split('@')[1],
       serviceAccount: plan.runner,

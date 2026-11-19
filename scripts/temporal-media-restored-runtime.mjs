@@ -3,25 +3,27 @@ import {
   readRestoredMediaActivationQuota,
 } from './temporal-restored-media-resources.mjs';
 import {
+  assertCloudRunRestoredMediaSupported,
   readRestoredMediaActivationOrigin,
   readRestoredMediaStartupWitness,
   readRestoredMediaRegistration,
   readRestoredMediaPhaseProtection,
   readRestoredMediaUnused,
 } from './temporal-release-cloud-run.mjs';
-const unavailable = async () => {
-  throw new Error('RESTORED_MEDIA_NORMAL_RUNTIME_UNAVAILABLE');
-};
-/** Source-owned origin, resources, startup, registration and phase/unused
- * readers are connected. The canonical execution preflight still denies.
- * No descriptor or receipt enables the canonical preflight. */
+/** Guard the restored normal lifecycle with the source-owned completed recovery and paused release. */
 export function restoredMediaActivationRuntime(o) {
   return Object.freeze({
-    assertSupported: unavailable,
+    assertSupported: async () => {
+      try {
+        await assertCloudRunRestoredMediaSupported(o.options());
+      } catch (error) {
+        throw new Error('RESTORED_MEDIA_NORMAL_RUNTIME_UNAVAILABLE', { cause: error });
+      }
+    },
     readOrigin: () => {
       const options = o.options(),
         { recovery: _recovery, ...receipts } = options.receipts;
-      return readRestoredMediaActivationOrigin({ ...options, receipts, observeProtection: unavailable });
+      return readRestoredMediaActivationOrigin({ ...options, receipts });
     },
     readPool: (scope) => readRestoredMediaActivationPool({ ...o.options(), ...scope }),
     readStartup: (scope) => readRestoredMediaStartupWitness({ ...o.options(), ...scope }),

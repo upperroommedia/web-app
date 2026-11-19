@@ -345,6 +345,19 @@ export function assertNativeSnapshot(expected, snapshot) {
   if (proofDigest(expected) !== proofDigest(nativeSnapshotProof(snapshot)))
     throw fail('RELEASE_NATIVE_AUTHORITY_CHANGED');
 }
+export function assertNativeSnapshotSuccessor(previous, proposedDigest, snapshot) {
+  const observed = nativeSnapshotProof(snapshot);
+  const old = previous.updateTime;
+  const next = observed.updateTime;
+  if (
+    proofDigest(observed.createTime) !== proofDigest(previous.createTime) ||
+    observed.dataDigest !== proposedDigest ||
+    next.seconds < old.seconds ||
+    (next.seconds === old.seconds && next.nanoseconds <= old.nanoseconds)
+  )
+    throw fail('RELEASE_NATIVE_AUTHORITY_CHANGED');
+  return observed;
+}
 export async function confirmBundleProofInTransaction(tx, db, proof, projectId) {
   const types = ['topics', 'subtitles', 'bible-chapters', 'sunday-homilies', 'holy-week', 'latest-list'];
   if (

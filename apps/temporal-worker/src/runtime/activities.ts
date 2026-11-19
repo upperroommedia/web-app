@@ -1,4 +1,9 @@
-import { createRuntimeYouTubeAcquisition, createRuntimeYouTubeArchiveWaitRecorder } from './hetzner-media';
+import {
+  createRuntimeYouTubeAcquisition,
+  createRuntimeYouTubeArchiveWaitRecorder,
+  createRuntimeYouTubeRender,
+  createRuntimeYouTubeRenderAuthentication,
+} from './hetzner-media';
 import { createReviewedCreateActivities } from './reviewed-create';
 import { beginClaimedPublishingStep } from './activity-step-start';
 import { readAuthoritativeCriticalRepairStepIds } from '../../../../functions/src/temporal/publishing/criticalRepairStepAuthority';
@@ -398,8 +403,8 @@ export function createRuntimeActivities(
           await withProviderIndexedTransaction(tx, db, projectId, mutate);
         });
       },
-      leaseAudio: async (ref, sermonId, sourcePath) => {
-        await publishingMedia.leasePublishingAudio(ref, sermonId, sourcePath);
+      leaseAudio: async (ref, sermonId, sourcePath, sourceGeneration) => {
+        await publishingMedia.leasePublishingAudio(ref, sermonId, sourcePath, sourceGeneration);
       },
       releaseAudio: publishingMedia.releasePublishingAudio,
       recordStep: domainStep,
@@ -422,8 +427,8 @@ export function createRuntimeActivities(
         return withProviderIndexedTransaction(tx, db, projectId, mutate);
       });
     },
-    leaseAudio: async (ref, sermonId, sourcePath) => {
-      await publishingMedia.leasePublishingAudio(ref, sermonId, sourcePath);
+    leaseAudio: async (ref, sermonId, sourcePath, sourceGeneration) => {
+      await publishingMedia.leasePublishingAudio(ref, sermonId, sourcePath, sourceGeneration);
     },
     releaseAudio: publishingMedia.releasePublishingAudio,
     recordResult: async (ref, result) => {
@@ -445,6 +450,7 @@ export function createRuntimeActivities(
     assertCurrent: assertMediaActorInTransaction,
   });
   const media = createMediaActivities({
+    requireRemoteYouTube: witness?.cloudRun !== undefined,
     recordYouTubeArchiveWait: createRuntimeYouTubeArchiveWaitRecorder({
       projectId,
       firestore: db,
@@ -452,6 +458,19 @@ export function createRuntimeActivities(
       assertCurrent: assertMediaActorInTransaction,
     }),
     acquireYouTubeSource,
+    renderYouTube: createRuntimeYouTubeRender({
+      projectId,
+      firestore: db,
+      witness,
+      bucket: firebaseAdmin.storage().bucket(),
+      assertCurrent: assertMediaActorInTransaction,
+    }),
+    recoverYouTubeRenderAuthentication: createRuntimeYouTubeRenderAuthentication({
+      projectId,
+      firestore: db,
+      witness,
+      assertCurrent: assertMediaActorInTransaction,
+    }),
     assertAuthorizedInTransaction: assertMediaActorInTransaction,
     assertAuthorized: assertCurrent,
     projectId,

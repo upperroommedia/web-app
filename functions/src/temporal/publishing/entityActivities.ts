@@ -54,7 +54,7 @@ export interface PublishingEntityActivityStore {
     prepare?: (tx: Transaction) => Promise<() => void>
   ): Promise<void>;
   recordResult(ref: DurableJobRef, result: PublishingStepResult): Promise<void>;
-  leaseAudio(ref: DurableJobRef, sermonId?: string, sourcePath?: string): Promise<void>;
+  leaseAudio(ref: DurableJobRef, sermonId?: string, sourcePath?: string, sourceGeneration?: string): Promise<void>;
   releaseAudio(ref: DurableJobRef): Promise<{ released: boolean }>;
 }
 export interface EntityActivityResult extends PublishingStepResult {
@@ -288,7 +288,7 @@ export function createPublishingEntityActivities(store: PublishingEntityActivity
           prepareProviderMutationPlanCommit: store.prepareProviderMutationPlanCommit,
           assertCurrent: (current) => store.assertCurrent(current),
           commitCurrent: (current, mutate) => store.commitCurrent(current, mutate),
-          leaseAudio: (current, sermonId, sourcePath) => store.leaseAudio(current, sermonId, sourcePath),
+          leaseAudio: (...args) => store.leaseAudio(...args),
           releaseAudio: (current) => store.releaseAudio(current),
           markCritical: (current, reasonCode, prepare) => store.markCritical(current, reasonCode, prepare),
         };
@@ -325,7 +325,7 @@ export function createPublishingEntityActivities(store: PublishingEntityActivity
           prepareProviderMutationPlanCommit: store.prepareProviderMutationPlanCommit,
           assertCurrent: (current) => store.assertCurrent(current),
           commitCurrent: (current, mutate) => store.commitCurrent(current, mutate),
-          leaseAudio: (current, sermonId, sourcePath) => store.leaseAudio(current, sermonId, sourcePath),
+          leaseAudio: (...args) => store.leaseAudio(...args),
           releaseAudio: (current) => store.releaseAudio(current),
           markCritical: (current, reasonCode, prepare) => store.markCritical(current, reasonCode, prepare),
         });

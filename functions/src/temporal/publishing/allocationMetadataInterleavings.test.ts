@@ -145,13 +145,14 @@ jest.mock('./updateMembership', () => ({
 
 import { createFirebasePublishingDependencies } from './firebaseDependencies';
 import { capturePublishingAllocationSource } from './allocationBarrier';
+import { readPublishingAudioUrl } from '../../storageDownloadUrl';
 import { uploadToSubsplashDomain } from '../../uploadToSubsplash';
 import { editSubsplashSermonDomain } from '../../editSubsplashSermon';
 import { editSoundCloudSermonDomain } from '../../editSoundCloudSermon';
 import { beginProviderMutationPlan, prepareAcknowledgedProjectionPlan } from './durableOperationContext';
 import { providerReceiptId } from './providerReceipts';
 jest.mock('../../storageDownloadUrl', () => ({
-  readFirebaseDownloadUrl: jest.fn(async () => 'https://synthetic.invalid/audio'),
+  readPublishingAudioUrl: jest.fn(async () => 'https://synthetic.invalid/audio'),
 }));
 const ref = { projectId: 'project', jobId: 'list-job' },
   editRef = { projectId: 'project', jobId: 'edit-job' };
@@ -241,6 +242,13 @@ function originalAck(operationKey: string) {
   mockRecords.set('durableActivityExecutions/original-create', head);
   return { receiptId, head };
 }
+test('does not start Subsplash allocation when the source transport cannot be opened', async () => {
+  const f = factory();
+  jest.mocked(readPublishingAudioUrl).mockRejectedValueOnce(new Error('The retained audio generation changed.'));
+  await expect(f.deps.ensureSubsplashMedia(ref, intent())).rejects.toThrow('The retained audio generation changed.');
+  expect(uploadToSubsplashDomain).not.toHaveBeenCalled();
+  expect([...mockRecords.keys()].some((path) => path.startsWith('temporalPublishingAllocations/'))).toBe(false);
+});
 test('factory cannot bind an original positive create result after the captured sermon source changes', async () => {
   const f = factory(),
     originalIntent = intent();

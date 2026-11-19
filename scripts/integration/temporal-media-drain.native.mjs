@@ -7,9 +7,11 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import {
   observeMediaDiagnosticDrain,
+  waitForMediaDiagnosticDrain,
   observeMediaDiagnosticStopped,
   observeMediaDiagnosticNeverStarted,
 } from '../temporal-media-diagnostic-drain.mjs';
+import { mediaDiagnosticNeverStartedProof } from '../temporal-media-stop-confirmation.mjs';
 import { nativeSnapshotProof, proofDigest as hash } from '../temporal-release-runtime.mjs';
 import { bounded } from './fixtures/owned-media-process.mjs';
 const require = createRequire(new URL('../../package.json', import.meta.url));
@@ -94,12 +96,17 @@ test(
     };
     try {
       env = await createLocalTestEnvironment({
-        server: { executable: { type: 'cached-download', version: 'v1.9.1' } },
+        server: {
+          executable: { type: 'cached-download', version: 'v1.9.1' },
+          extraArgs: ['--dynamic-config-value', 'nexusoperation.enableStandalone=true'],
+        },
       });
       const client = new Client({ connection: env.connection, namespace });
       await rpc(() =>
         client.workflowService.registerNamespace({ namespace, workflowExecutionRetentionPeriod: { seconds: 86400 } })
       );
+      stage = 'native-nexus-inventory';
+      await rpc(() => client.workflowService.listNexusOperationExecutions({ namespace, pageSize: 1 }));
       app = initializeApp({ projectId: 'urm-app-staging' }, `drain-${op}`);
       db = getFirestore(app);
       const lockRef = db.doc('_control/temporalReleaseOperation'),
@@ -230,18 +237,7 @@ test(
       await assert.rejects(bounded(h.result()));
       handles.length = 0;
       stage = 'native-empty-after-owned-shutdown';
-      const until = Date.now() + 310000;
-      let observed;
-      while (Date.now() < until) {
-        try {
-          observed = await bounded(observeMediaDiagnosticDrain(options), 35000);
-          break;
-        } catch (e) {
-          if (!/POLLERS_PRESENT/.test(e.message)) throw e;
-          await new Promise((r) => setTimeout(r, 500));
-        }
-      }
-      assert(observed, 'Native pollers did not disappear within bounded fixture window');
+      const observed = await bounded(waitForMediaDiagnosticDrain(options), 335000);
       assert.equal(observed.versionCount, 2);
       assert(observed.partitionCount >= 2);
       const lock = db.doc(`temporalProviderMutationLocks/${op}`);
@@ -301,7 +297,7 @@ test(
       // A DISTINCT operation has no source execution intent or private facts.
       // Historical closed runs/receipts belonging to the earlier op stay intact.
       const neverId = randomUUID(),
-        neverPlan = { ...plan, operationId: neverId };
+        neverPlan = { ...plan, operationId: neverId, ancestorsSHA256: 'a'.repeat(64) };
       await bounded(
         lockRef.update({
           operationId: neverId,
@@ -315,7 +311,18 @@ test(
         pool: zero,
         ownedOperation: nativeSnapshotProof(await bounded(lockRef.get())),
       };
-      assert.equal((await bounded(observeMediaDiagnosticNeverStarted(neverOptions), 35000)).poolSHA256, hash(zero));
+      // Pool responses remain controlled. The proof must consume the original
+      // native Temporal and Firestore observation within the two zero reads.
+      const zeroSample = () => ({
+        pool: zero,
+        ancestorsSHA256: neverPlan.ancestorsSHA256,
+        sampledAt: Date.now(),
+        sampledMonotonic: performance.now(),
+      });
+      const before = zeroSample();
+      const observation = await bounded(observeMediaDiagnosticNeverStarted(neverOptions), 35000);
+      const after = zeroSample();
+      assert.equal(mediaDiagnosticNeverStartedProof(neverOptions, observation, before, after).kind, 'never-started');
       const attempted = db.doc(`_control/temporalMediaRecoveryStartup-${neverId}`);
       refs.push(attempted);
       await bounded(attempted.create({ stage: 'attempted' }));

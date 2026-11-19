@@ -60,12 +60,12 @@ test('native bootstrap protection recognizes original old pinned wait and reject
     lock = db.doc(`temporalProviderMutationLocks/${operationId}`);
   const handles = [];
   const rpc = (fn) => bounded(environment.connection.withDeadline(Date.now() + 5000, fn), 6000);
-  const launch = async (queue, workflow, version) => {
+  const launch = async (queue, workflow, version, identity = `owned-bootstrap-${operationId}-${workers.length}`) => {
     const worker = await Worker.create({
       connection: environment.nativeConnection,
       namespace,
       taskQueue: queue,
-      identity: `owned-bootstrap-${operationId}-${workers.length}`,
+      identity,
       ...(workflow
         ? {
             workflowsPath: fileURLToPath(
@@ -156,7 +156,17 @@ test('native bootstrap protection recognizes original old pinned wait and reject
     await launch('urm-search',queuePollsWorkflows('cloud-run','urm-search'),{deploymentName:'urm-worker-search-staging',buildId});
     await launch('urm-email',queuePollsWorkflows('cloud-run','urm-email'),{deploymentName:'urm-worker-email-staging',buildId});
     await launch('urm-images',queuePollsWorkflows('cloud-run','urm-images'),{deploymentName:'urm-worker-images-staging',buildId});
-    await launch('urm-media',queuePollsWorkflows('cloud-run','urm-media'),{deploymentName:'urm-worker-media-staging',buildId});
+    const mediaIdentity = `cloud-run-${'a'.repeat(64)}-${randomUUID()}`;
+    await launch('urm-media', queuePollsWorkflows('cloud-run', 'urm-media'), {
+      deploymentName: 'urm-worker-media-staging', buildId,
+    }, mediaIdentity);
+    assert.match((await observeBootstrapRegistration({
+      ...options, role: 'media', expectedPoller: mediaIdentity,
+    })).pollerSHA256, /^[a-f0-9]{64}$/);
+    await assert.rejects(
+      observeBootstrapRegistration({ ...options, role: 'media', expectedPoller: `cloud-run-${'b'.repeat(64)}-${randomUUID()}` }),
+      /CLOUD_RUN_BOOTSTRAP_PROTECTION_UNCONFIRMED/
+    );
     const selectRole=async role=>{options.role=role;await operation.update({action:`stop-cloud-run-${role}-activation`});};
     for(const role of ['controls','orchestration','search','email','images','media']){
       const actions=[`bootstrap-stop-cloud-run-${role}`,`activate-cloud-run-${role}-pool`,`stop-cloud-run-${role}-activation`];

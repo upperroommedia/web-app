@@ -34,6 +34,7 @@ type Resume = {
   authAttempts: number;
   archiveAttempts: number;
   recoveryGeneration: string | null;
+  verifiedRecoveryGeneration?: string | null;
   archiveDueAt?: number;
   archiveScheduledAt?: number;
 };
@@ -48,6 +49,7 @@ const ARCHIVE_DELAYS = MEDIA_ARCHIVE_RETRY_DELAYS;
 /** Per-sermon serialization, durable waits and latest-request coalescing. No source data enters history. */
 export async function SermonAudioCoordinator(input: MediaCoordinatorInput): Promise<void> {
   const archiveProtocol = patched('media-archive-resume-v1');
+  const authenticationProtocol = patched('media-host-authentication-resume-v1');
   const operations = proxyActivities<
     Pick<MediaActivities, 'acquireMedia' | 'mergeMedia' | 'recoverMediaAuthentication'>
   >({
@@ -78,7 +80,10 @@ export async function SermonAudioCoordinator(input: MediaCoordinatorInput): Prom
   let desired = input.initial;
   let current: MediaJobRef | null = null;
   let phase = 'queued';
-  let recoveryGeneration = input.resume?.recoveryGeneration ?? null;
+  let recoveryGeneration = authenticationProtocol
+    ? input.resume?.verifiedRecoveryGeneration ?? null
+    : input.resume?.recoveryGeneration ?? null;
+  let recoveryWake = 0;
   let cancellationJob: string | null = null;
   let activeScope: CancellationScope | undefined;
   let completedRevision = 0;
@@ -94,7 +99,8 @@ export async function SermonAudioCoordinator(input: MediaCoordinatorInput): Prom
     if (jobId === current?.jobId) activeScope?.cancel();
   });
   setHandler(mediaAuthRecovered, (generation) => {
-    recoveryGeneration = generation;
+    if (authenticationProtocol) recoveryWake += 1;
+    else recoveryGeneration = generation;
   });
   setHandler(mediaState, () => ({ current, desired, phase }));
 
@@ -109,13 +115,18 @@ export async function SermonAudioCoordinator(input: MediaCoordinatorInput): Prom
     let authAttempts = input.resume && processedCount === 0 ? input.resume.authAttempts : 0;
     let archiveAttempts = input.resume && processedCount === 0 ? input.resume.archiveAttempts : 0;
     let waitCycles = 0;
+    let hostBound = false;
     let archiveDueAt = input.resume && processedCount === 0 ? input.resume.archiveDueAt : undefined;
     let archiveScheduledAt = input.resume && processedCount === 0 ? input.resume.archiveScheduledAt : undefined;
     let continuation: Resume | undefined;
+    // A recovery signal is only a wake hint. Only the actual recovery Activity
+    // result may supply this argument for the next scheduled acquisition.
+    let authenticatedGeneration: string | undefined;
     const resume = () => ({
       authAttempts,
       archiveAttempts,
       recoveryGeneration,
+      ...(authenticationProtocol ? { verifiedRecoveryGeneration: recoveryGeneration } : {}),
       ...(archiveDueAt ? { archiveDueAt } : {}),
       ...(archiveScheduledAt !== undefined ? { archiveScheduledAt } : {}),
     });
@@ -139,7 +150,7 @@ export async function SermonAudioCoordinator(input: MediaCoordinatorInput): Prom
           await obsolete(outcome);
           return;
         }
-        if (workflowInfo().targetWorkerDeploymentVersionChanged) {
+        if (!hostBound && workflowInfo().targetWorkerDeploymentVersionChanged) {
           continuation = resume();
           return;
         }
@@ -151,14 +162,14 @@ export async function SermonAudioCoordinator(input: MediaCoordinatorInput): Prom
           while (archiveDueAt && Date.now() < archiveDueAt) {
             phase = 'waiting_archive';
             await condition(
-              () => superseded(ref) || workflowInfo().targetWorkerDeploymentVersionChanged,
+              () => superseded(ref) || (!hostBound && workflowInfo().targetWorkerDeploymentVersionChanged),
               Math.min(5 * 60_000, archiveDueAt - Date.now())
             );
             if (superseded(ref)) {
               await obsolete();
               return;
             }
-            if (workflowInfo().targetWorkerDeploymentVersionChanged) {
+            if (!hostBound && workflowInfo().targetWorkerDeploymentVersionChanged) {
               continuation = resume();
               return;
             }
@@ -170,9 +181,16 @@ export async function SermonAudioCoordinator(input: MediaCoordinatorInput): Prom
           archiveDueAt = undefined;
           archiveScheduledAt = undefined;
           phase = 'acquiring';
-          outcome = archiveResume
-            ? await operations.acquireMedia(ref, archiveResume)
-            : await operations.acquireMedia(ref);
+          outcome =
+            authenticationProtocol && authenticatedGeneration !== undefined
+              ? await operations.acquireMedia(ref, archiveResume, authenticatedGeneration)
+              : archiveResume
+              ? await operations.acquireMedia(ref, archiveResume)
+              : await operations.acquireMedia(ref);
+          authenticatedGeneration = undefined;
+          // The durable native episode binds recovery to this workflow run.
+          // Only remote Activity results carry this field in recorded history.
+          if ('hostBound' in outcome && outcome.hostBound) hostBound = true;
           if (outcome.kind === 'ready') break;
           if (outcome.kind === 'completed') return;
           if (outcome.kind === 'superseded' || outcome.kind === 'deleted' || outcome.kind === 'cancelled') {
@@ -206,6 +224,7 @@ export async function SermonAudioCoordinator(input: MediaCoordinatorInput): Prom
             continue;
           }
           phase = 'waiting_auth';
+          let observedWake = recoveryWake;
           await projections.projectMediaWaiting(ref, 'authentication', authAttempts);
           let observedGeneration = recoveryGeneration;
           while (true) {
@@ -213,14 +232,24 @@ export async function SermonAudioCoordinator(input: MediaCoordinatorInput): Prom
               await obsolete();
               return;
             }
-            await condition(() => superseded(ref) || recoveryGeneration !== observedGeneration, '5 minutes');
+            await condition(
+              () =>
+                superseded(ref) ||
+                (authenticationProtocol ? recoveryWake !== observedWake : recoveryGeneration !== observedGeneration),
+              '5 minutes'
+            );
             if (superseded(ref)) {
               await obsolete();
               return;
             }
             const recovery = await operations.recoverMediaAuthentication(ref);
-            if (recovery.ready && recovery.generation && recovery.generation !== observedGeneration) {
+            if (
+              recovery.ready &&
+              recovery.generation &&
+              recovery.generation !== (authenticationProtocol ? recoveryGeneration : observedGeneration)
+            ) {
               recoveryGeneration = recovery.generation;
+              if (authenticationProtocol) authenticatedGeneration = recovery.generation;
               authAttempts += 1;
               if (authAttempts > 6) {
                 await projections.projectMediaFailure(ref, 'YOUTUBE_AUTH_RETRY_EXHAUSTED');
@@ -230,10 +259,16 @@ export async function SermonAudioCoordinator(input: MediaCoordinatorInput): Prom
             }
             waitCycles += 1;
             observedGeneration = recoveryGeneration;
+            observedWake = recoveryWake;
+            if (hostBound && waitCycles >= 72) {
+              await projections.projectMediaFailure(ref, 'YOUTUBE_AUTH_RETRY_EXHAUSTED');
+              return;
+            }
             if (
-              waitCycles >= 100 ||
-              workflowInfo().continueAsNewSuggested ||
-              workflowInfo().targetWorkerDeploymentVersionChanged
+              !hostBound &&
+              (waitCycles >= 100 ||
+                workflowInfo().continueAsNewSuggested ||
+                workflowInfo().targetWorkerDeploymentVersionChanged)
             ) {
               continuation = resume();
               return;
@@ -244,7 +279,7 @@ export async function SermonAudioCoordinator(input: MediaCoordinatorInput): Prom
           await obsolete();
           return;
         }
-        if (workflowInfo().targetWorkerDeploymentVersionChanged) {
+        if (!hostBound && workflowInfo().targetWorkerDeploymentVersionChanged) {
           continuation = resume();
           return;
         }
@@ -258,7 +293,7 @@ export async function SermonAudioCoordinator(input: MediaCoordinatorInput): Prom
           await obsolete();
           return;
         }
-        if (workflowInfo().targetWorkerDeploymentVersionChanged) {
+        if (!hostBound && workflowInfo().targetWorkerDeploymentVersionChanged) {
           continuation = resume();
           return;
         }

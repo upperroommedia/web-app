@@ -1,6 +1,8 @@
 import { scanPrivateMediaInventory } from './temporal-media-private-inventory.mjs';
 import { proofDigest as hash, assertNativeSnapshot } from './temporal-release-runtime.mjs';
 import { observeNamespaceComputeIsolation } from './temporal-compute-isolation.mjs';
+import { readCloudRunRevisionInstanceCount } from './temporal-cloud-run-worker-count.mjs';
+import { readCloudRunWorkerStart, readCloudRunWorkerSystemEvents } from './temporal-cloud-run-worker-start.mjs';
 const fail = () => {
   throw new Error('MEDIA_DIAGNOSTIC_DRAIN_UNCONFIRMED');
 };
@@ -12,12 +14,54 @@ const stamp = (s) => {
   if (!s.exists || !s.createTime || !s.updateTime) fail();
   return hash({ data: s.data(), created: s.createTime, updated: s.updateTime });
 };
+function originalStopScope(cycle, kernel, startup) {
+  const worker = kernel.get('worker'),
+    record = startup.data(),
+    { context, intent, birth } = kernel.data(),
+    bornAt = Date.parse(record?.observedAt),
+    startAttempt = Date.parse(cycle.start.attemptedAt),
+    stopAttempt = Date.parse(cycle.stop.attemptedAt);
+  if (
+    !record ||
+    !startup.createTime?.isEqual(startup.updateTime) ||
+    record.schemaVersion !== 1 ||
+    record.kind !== 'private-diagnostic-startup-only-no-recovery-proof' ||
+    record.operationId !== cycle.plan.operationId ||
+    record.intentSHA256 !== context.intentSHA256 ||
+    hash(record.worker) !== hash(worker) ||
+    hash(record.kernel) !==
+      hash({
+        operationId: context.operationId,
+        birthDigest: hash({ context, intent, birth, worker }),
+      }) ||
+    !/^projects\/(?:urm-app-staging|251680231116)\/locations\/us-central1\/operations\/[A-Za-z0-9_-]{1,200}$/.test(
+      cycle.stop.nativeOperation ?? ''
+    ) ||
+    ![bornAt, startAttempt, stopAttempt].every(Number.isSafeInteger) ||
+    bornAt < startAttempt ||
+    stopAttempt <= bornAt ||
+    stopAttempt >= Date.now()
+  )
+    fail();
+  return {
+    pool: worker.cloudRun.pool,
+    revision: worker.cloudRun.revision,
+    revisionUid: worker.cloudRun.revisionUid,
+    workerIdentity: `media-recovery-${worker.instanceId}`,
+    startupSHA256: hash(record),
+    bornAt,
+    startAttempt,
+    stopAttempt,
+  };
+}
+
 /** Separate diagnostic policy. No normal role queue/action validator is widened.
  * Legacy DescribeTaskQueue aggregates all loaded versions of ONE partition;
  * enumerate and repeat the complete partition set for BOTH queue types.
  * Native v1.32 matching sources linked in SERVERLESS_BOOTSTRAP_HANDOFF.md. */
 async function observe(o, mode = 'drained') {
   const { client, firestore: db, plan, pool } = o;
+  const captureStopEvents = mode === 'stopped-origin';
   if (
     db.projectId !== 'urm-app-staging' ||
     db.databaseId !== '(default)' ||
@@ -69,28 +113,29 @@ async function observe(o, mode = 'drained') {
       db.runTransaction(
         async (tx) => {
           if (!live || o.signal?.aborted || Date.now() >= end) fail();
-          const [parent, c, s, old, newborn, intent, ready, drain, ...executionFacts] = await Promise.all(
-            [
-              o.lockRef,
-              o.controlRef,
-              o.stateRef,
-              ...['Kernel', 'ReplacementKernel', 'ReplacementIntent', 'OriginalReady'].map((k) =>
-                db.doc(`_control/temporalMediaRecovery${k}-${o.operationId}`)
-              ),
-              db.doc(`_control/temporalMediaRecoveryDrain-${o.operationId}`),
-              ...[
-                'Start',
-                'Startup',
-                'OriginalSignal',
-                'OriginalDeath',
-                'Work',
-                'ReplacementStartup',
-                'ReplacementAdoption',
-                'ReplacementCompleted',
-                'ReplacementStop',
-              ].map((k) => db.doc(`_control/temporalMediaRecovery${k}-${o.operationId}`)),
-            ].map((r) => tx.get(r))
-          );
+          const [parent, c, s, old, newborn, intent, ready, drain, start, originalStartup, ...otherExecutionFacts] =
+            await Promise.all(
+              [
+                o.lockRef,
+                o.controlRef,
+                o.stateRef,
+                ...['Kernel', 'ReplacementKernel', 'ReplacementIntent', 'OriginalReady'].map((k) =>
+                  db.doc(`_control/temporalMediaRecovery${k}-${o.operationId}`)
+                ),
+                db.doc(`_control/temporalMediaRecoveryDrain-${o.operationId}`),
+                ...[
+                  'Start',
+                  'Startup',
+                  'OriginalSignal',
+                  'OriginalDeath',
+                  'Work',
+                  'ReplacementStartup',
+                  'ReplacementAdoption',
+                  'ReplacementCompleted',
+                  'ReplacementStop',
+                ].map((k) => db.doc(`_control/temporalMediaRecovery${k}-${o.operationId}`)),
+              ].map((r) => tx.get(r))
+            );
           assertNativeSnapshot(o.ownedOperation, parent);
           assertNativeSnapshot(o.expectedAuthority.control, c);
           assertNativeSnapshot(o.expectedAuthority.state, s);
@@ -129,7 +174,7 @@ async function observe(o, mode = 'drained') {
                   rejection.status < 400 ||
                   rejection.status >= 500 ||
                   [408, 429].includes(rejection.status))) ||
-              [old, newborn, intent, ready, drain, ...executionFacts].some((x) => x.exists)
+              [old, newborn, intent, ready, drain, start, originalStartup, ...otherExecutionFacts].some((x) => x.exists)
             )
               fail();
             return {
@@ -139,7 +184,7 @@ async function observe(o, mode = 'drained') {
           }
           if (cycle.start?.stage !== 'completed' || Boolean(cycle.recovery) === Boolean(cycle.recoveryFailed)) fail();
           const startedPool = cycle.start.pool;
-          if (mode === 'stopped') {
+          if (mode === 'stopped' || captureStopEvents) {
             if (
               !['drained', 'stopped'].includes(cycle.stage) ||
               cycle.stop?.stage !== 'completed' ||
@@ -238,6 +283,7 @@ async function observe(o, mode = 'drained') {
             ]),
             ready: ready.data(),
             worker: newborn.get('worker'),
+            ...(captureStopEvents ? { stopScope: originalStopScope(cycle, old, originalStartup) } : {}),
             authoritySHA256: hash([stamp(parent), stamp(c), stamp(s)]),
           };
         },
@@ -260,6 +306,7 @@ async function observe(o, mode = 'drained') {
     return {
       closureSHA256: auth.closureSHA256,
       authoritySHA256: auth.authoritySHA256,
+      ...(captureStopEvents ? { stopScope: auth.stopScope } : {}),
       versions: inventory.versions,
       partitions: inventory.partitions,
       workflows: inventory.workflows,
@@ -271,9 +318,42 @@ async function observe(o, mode = 'drained') {
     first = await scan(),
     second = await scan(),
     compute = await read(() => observeNamespaceComputeIsolation(client, namespace));
+  if (hash(first) !== hash(second)) fail();
+  let stopObservation;
+  if (captureStopEvents) {
+    const scope = second.stopScope;
+    const api = (...args) => read(() => o.api(...args));
+    const startup = await readCloudRunWorkerStart({
+      ...scope,
+      api,
+      buildId: plan.buildId,
+      taskQueue: queue,
+      recovery: { operationId: o.operationId, child: 'original', startupSHA256: scope.startupSHA256 },
+      from: Math.max(scope.startAttempt, scope.bornAt - 5000),
+      to: Math.min(scope.stopAttempt - 1, scope.bornAt + 90000),
+    });
+    if (!startup) fail();
+    const end = Date.now();
+    const [events, instanceCounts] = await Promise.all([
+      readCloudRunWorkerSystemEvents({
+        ...scope,
+        api,
+        instanceId: startup.instanceId,
+        from: scope.stopAttempt,
+        to: end,
+      }),
+      readCloudRunRevisionInstanceCount({
+        ...scope,
+        api,
+        from: scope.startAttempt,
+        to: end,
+      }),
+    ]);
+    stopObservation = { startup, events, instanceCounts, stopAttempt: scope.stopAttempt };
+  }
   const final = await authority();
   if (
-    hash(first) !== hash(second) ||
+    (captureStopEvents && hash(final.stopScope) !== hash(second.stopScope)) ||
     final.closureSHA256 !== first.closureSHA256 ||
     final.authoritySHA256 !== first.authoritySHA256 ||
     Date.now() - began > 5000 ||
@@ -293,6 +373,7 @@ async function observe(o, mode = 'drained') {
     computeInventorySHA256: compute.inventorySHA256,
     versionCount: first.versions.length,
     partitionCount: first.partitions.length,
+    ...(stopObservation ? { stopObservation } : {}),
   };
 }
 export async function observeMediaDiagnosticDrain(o) {
@@ -304,8 +385,7 @@ export async function observeMediaDiagnosticDrain(o) {
   }
 }
 
-/** Immutable checkpoint validator; timestamps are never refreshed on resume. */
-export function assertStoredMediaDiagnosticDrain(value, plan, pool) {
+function assertDiagnosticObservation(value, plan, pool, minVersions) {
   if (
     !value ||
     Object.keys(value).sort().join(',') !==
@@ -321,7 +401,7 @@ export function assertStoredMediaDiagnosticDrain(value, plan, pool) {
     !Number.isFinite(Date.parse(value.observedAt)) ||
     Date.parse(value.observedAt) > Date.now() + 5000 ||
     !Number.isInteger(value.versionCount) ||
-    value.versionCount < 1 ||
+    value.versionCount < minVersions ||
     value.versionCount > 100 ||
     !Number.isInteger(value.partitionCount) ||
     value.partitionCount < 2 ||
@@ -330,6 +410,16 @@ export function assertStoredMediaDiagnosticDrain(value, plan, pool) {
     fail();
   return value;
 }
+/** Immutable checkpoint validator; timestamps are never refreshed on resume. */
+export function assertStoredMediaDiagnosticDrain(value, plan, pool) {
+  return assertDiagnosticObservation(value, plan, pool, 1);
+}
+
+export function assertMediaDiagnosticNeverStartedObservation(value, plan, pool) {
+  assertDiagnosticObservation(value, plan, pool, 0);
+  if (value.closureSHA256 !== hash({ kind: 'no-execution-facts', operationId: plan.operationId })) fail();
+}
+
 export function assertFreshMediaDiagnosticDrain(value, plan, pool) {
   assertStoredMediaDiagnosticDrain(value, plan, pool);
   if (Math.abs(Date.now() - Date.parse(value.observedAt)) > 5000) fail();
@@ -339,17 +429,21 @@ export function assertFreshMediaDiagnosticDrain(value, plan, pool) {
 /** Only native pollers-present is pending. No work, signal, scale or authorization
  * renewal occurs while waiting; ambiguity and authority drift stop immediately. */
 export async function waitForMediaDiagnosticDrain(o) {
+  // Temporal Matching's default poller history window is five minutes.
+  const waitMs = 330000;
   const controller = new AbortController(),
-    end = Date.now() + 45000;
-  const timer = setTimeout(() => controller.abort(), 45000);
+    end = Date.now() + waitMs;
+  const timer = setTimeout(() => controller.abort(), waitMs);
   try {
     while (!controller.signal.aborted && Date.now() < end) {
       try {
-        return await observeMediaDiagnosticDrain({ ...o, signal: controller.signal });
+        const observation = await observeMediaDiagnosticDrain({ ...o, signal: controller.signal });
+        if (controller.signal.aborted || Date.now() >= end) fail();
+        return observation;
       } catch (error) {
         if (error?.message !== 'MEDIA_DIAGNOSTIC_POLLERS_PRESENT') throw error;
       }
-      await new Promise((r) => setTimeout(r, Math.min(500, Math.max(0, end - Date.now()))));
+      await new Promise((r) => setTimeout(r, Math.min(2000, Math.max(0, end - Date.now()))));
     }
     return fail();
   } finally {
@@ -367,6 +461,12 @@ export async function observeMediaDiagnosticStopped(o) {
     throw new Error('MEDIA_DIAGNOSTIC_STOP_UNCONFIRMED');
   }
 }
+/** Read the original provider instance while the owned stop still fences
+ * restoration. System log text never authorizes the next transition. */
+export async function observeMediaDiagnosticStopEvents(o) {
+  return observe(o, 'stopped-origin');
+}
+
 export async function observeMediaDiagnosticNeverStarted(o) {
   try {
     return await observe(o, 'never-started');

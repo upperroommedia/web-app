@@ -19,6 +19,7 @@ import { withNativeMediaHttpExecution, pinOriginalLegacySourceBucket } from './l
 import { createProviderRelayRouter } from './providerRelay';
 import { rateLimit } from 'express-rate-limit';
 import { spawnSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import * as Sentry from '@sentry/node';
 import { executeWithTimeout, getAudioSource, getFFmpegPath, logMemoryUsage, validateAddIntroOutroData } from './utils';
 import { ProcessAudioInputType, sermonStatusType, uploadStatus, sermonStatus } from './types';
@@ -259,9 +260,24 @@ logger.info('Loading storage, realtimeDB and firestore');
 const bucket = firebaseAdmin.storage().bucket();
 const realtimeDB = firebaseAdmin.database();
 const db = firebaseAdmin.firestore();
+const temporalYouTubeRenderMode = process.env.PROCESS_AUDIO_TEMPORAL_YOUTUBE_RENDER || 'off';
+if (
+  !['off', 'verify', 'enabled'].includes(temporalYouTubeRenderMode) ||
+  (temporalYouTubeRenderMode !== 'off' &&
+    (runtimeProfile !== 'hetzner' || firebaseAdmin.app().options.projectId !== 'urm-app-staging'))
+)
+  throw new Error('Temporal YouTube rendering is restricted to the staging Hetzner runtime.');
+const temporalYouTubeRenderEnabled = temporalYouTubeRenderMode === 'enabled';
+const temporalYouTubeRuntimeId = temporalYouTubeRenderEnabled ? randomUUID() : undefined;
+const legacyYouTubeWorkEnabled = temporalYouTubeRenderMode === 'off';
 app.use(
   '/internal/temporal/youtube/acquisitions',
-  createHetznerAcquisitionRouter({ firestore: db, auth: firebaseAdmin.auth(), bucket })
+  createHetznerAcquisitionRouter({
+    firestore: db,
+    auth: firebaseAdmin.auth(),
+    bucket,
+    renderEnabled: temporalYouTubeRenderEnabled,
+  })
 );
 
 async function readPersistedYouTubeMediaByteCanaries(): Promise<{
@@ -304,6 +320,7 @@ async function reconcileFromFreshAuthenticatedCanary(
   report: YouTubeMediaByteCanaryReport,
   operation: string
 ): Promise<void> {
+  if (!legacyYouTubeWorkEnabled) return;
   await recoverDeferredYouTubeAfterCanary(
     report,
     (generation) =>
@@ -322,7 +339,7 @@ async function executeYouTubeMediaByteCanary(
   scope: YouTubeMediaByteCanaryReport['scope']
 ): Promise<{ report: YouTubeMediaByteCanaryReport; committed: boolean }> {
   return youtubeMediaByteCanaryExecution.run(async () => {
-    if (!youtubeProcessingEnabled || runtimeProfile !== 'hetzner' || !ytdlpPath) {
+    if (temporalYouTubeRenderEnabled || !youtubeProcessingEnabled || runtimeProfile !== 'hetzner' || !ytdlpPath) {
       throw new Error('YouTube media-byte canaries are available only on the Hetzner YouTube worker.');
     }
     const operation = scope === 'guest' ? 'youtube-guest-media-canary' : 'youtube-auth-media-canary';
@@ -337,7 +354,12 @@ async function executeYouTubeMediaByteCanary(
         })
       : scope === 'guest'
       ? await runGuestYouTubeMediaByteCanary(ytdlpPath, realtimeDB, createContext(undefined, operation))
-      : await runAuthenticatedYouTubeMediaByteCanary(ytdlpPath, realtimeDB, createContext(undefined, operation));
+      : await runAuthenticatedYouTubeMediaByteCanary(
+          ytdlpPath,
+          realtimeDB,
+          createContext(undefined, operation),
+          temporalYouTubeRenderMode === 'verify'
+        );
     if (report.scope !== scope) {
       throw new Error(`YouTube media-byte canary returned scope ${report.scope}; expected ${scope}.`);
     }
@@ -526,8 +548,10 @@ const startupRecoveryPromise = recoverOrphanedHetznerProcessAudioStateOnStartup(
   })
   .finally(() => {
     startupRecoverySettled = true;
-    startDeferredYouTubeAuthReconciler();
-    startYouTubeMediaByteCanaryScheduler();
+    if (legacyYouTubeWorkEnabled) {
+      startDeferredYouTubeAuthReconciler();
+      startYouTubeMediaByteCanaryScheduler();
+    }
   });
 void startupRecoveryPromise;
 
@@ -548,6 +572,30 @@ app.get('/', (req, res) => {
 });
 
 app.get('/healthz', async (req, res) => {
+  const releaseChallenge = req.query.releaseChallenge;
+  if (releaseChallenge !== undefined) {
+    res.set('Cache-Control', 'no-store');
+    if (!temporalYouTubeRenderEnabled) {
+      res.sendStatus(404);
+      return;
+    }
+    if (typeof releaseChallenge !== 'string' || !/^[a-f0-9]{64}$/.test(releaseChallenge)) {
+      res.sendStatus(400);
+      return;
+    }
+    res.status(200).json({
+      ok: true,
+      service: 'process-audio',
+      releaseChallenge,
+      temporalYouTubeRenderMode,
+      temporalYouTubeRuntimeId,
+      sentryEnabled,
+      sentryEnvironment,
+      sentryRelease,
+    });
+    return;
+  }
+
   const youtubeBrowserAuthHealth = youtubeProcessingEnabled ? await getYouTubeBrowserAuthHealth() : null;
 
   res.status(200).json({
@@ -555,6 +603,8 @@ app.get('/healthz', async (req, res) => {
     service: 'process-audio',
     revision: process.env.K_REVISION || 'local',
     runtimeProfile,
+    temporalYouTubeRenderMode,
+    temporalYouTubeRuntimeId,
     youtubeProcessingEnabled,
     sentryEnabled,
     sentryEnvironment,
@@ -1420,6 +1470,10 @@ app.post('/process-audio', processAudioRateLimit, async (request, res) => {
     res.status(401).json({ error: 'An authorized server identity is required.' });
     return;
   }
+  if (!legacyYouTubeWorkEnabled) {
+    res.status(503).json({ error: 'This staging worker requires Temporal dispatch.' });
+    return;
+  }
   try {
     await legacyProcessAudioHandler(request, res);
   } catch (error) {
@@ -1440,6 +1494,7 @@ const attachYouTubeDesktop =
         socketPath: process.env.PROCESS_AUDIO_NOVNC_SOCKET,
         audit: (event, uid) => logger.info(event, { uid }),
         recover: () => {
+          if (!legacyYouTubeWorkEnabled) return;
           void startupRecoveryPromise
             .then(() => youtubeAuthRecovery.run(true))
             .catch((error) => {

@@ -9,6 +9,7 @@ import type { MediaJobRef, MediaOutcome } from '../../../process-audio/src/tempo
 import type { mediaRecoveryKernelContext } from './media-recovery-capability';
 import { workerReadinessDigest as hash } from './readiness-probe';
 import { mediaRecoveryPinnedVersion } from './media-recovery-pin';
+import { diagnosticComputeIdentity } from './worker-witness';
 import { originalMediaArtifacts, superviseOriginalMediaFault } from './media-recovery-original-fault';
 import { readMediaRecoveryReplacementKernelBirth, superviseMediaRecoveryReplacement } from './media-kernel-supervisor';
 type Cap = Awaited<ReturnType<typeof mediaRecoveryKernelContext>>;
@@ -392,7 +393,8 @@ export async function superviseMediaRecoveryReplacementCycle(
             state.birth.pid === cap.replacement.kernel.birth.pid ||
             state.worker.instanceId === cap.replacement.kernel.worker.instanceId ||
             state.birth.nonce === cap.replacement.kernel.birth.nonce ||
-            hash(state.worker.cloudRun) !== hash(cap.replacement.kernel.worker.cloudRun)
+            hash(diagnosticComputeIdentity(state.worker)) !==
+              hash(diagnosticComputeIdentity(cap.replacement.kernel.worker))
           )
             fail();
           while (!control.exited()) {
@@ -539,7 +541,7 @@ export async function readReplacementBirth(
     birth.value.birth.pid === old.birth.pid ||
     birth.value.birth.nonce === old.birth.nonce ||
     witness.instanceId === old.worker.instanceId ||
-    hash(witness.cloudRun) !== hash(old.worker.cloudRun)
+    hash(diagnosticComputeIdentity(witness)) !== hash(diagnosticComputeIdentity(old.worker))
   )
     fail();
   return birth;

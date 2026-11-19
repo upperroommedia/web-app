@@ -217,18 +217,26 @@ describe('durable media coordinator', () => {
     });
   }, 120_000);
 
-  test('human auth recovery survives waiting and requires a successful canary', async () => {
+  test('native auth resume forwards only successful canary generation and replays the patched arguments', async () => {
     let acquireAttempts = 0;
     let canaries = 0;
+    const acquisitionInvocations: Array<{ activityId: string; runId: string; generation?: string }> = [];
     const worker = await createWorker({
       connection: environment.nativeConnection,
       taskQueue: queue,
       workflowsPath: workflowPath,
       activities: activities({
-        acquireMedia: async () => ({
-          kind: ++acquireAttempts === 1 ? 'waiting_auth' : 'ready',
-          recoveryGeneration: null,
-        }),
+        acquireMedia: async (_ref, _archive, generation) => {
+          const info = Context.current().info;
+          acquisitionInvocations.push({
+            activityId: info.activityId,
+            runId: info.workflowExecution!.runId,
+            generation,
+          });
+          return ++acquireAttempts === 1
+            ? { kind: 'waiting_auth', recoveryGeneration: null, hostBound: true }
+            : { kind: 'ready', hostBound: true };
+        },
         recoverMediaAuthentication: async () => ({
           ready: ++canaries > 1,
           generation: canaries > 1 ? 'verified-generation' : null,
@@ -242,15 +250,26 @@ describe('durable media coordinator', () => {
         args: [{ initial: ref(1), mediaTaskQueue: queue, controlTaskQueue: queue }],
       });
       await waitFor(handle, (state) => state.phase === 'waiting_auth');
-      await handle.signal('media.authRecovered', 'cookies-saved');
+      // A wake payload may equal the later genuine generation; it must not
+      // poison verified-generation comparison or authorize the next acquisition.
+      await handle.signal('media.authRecovered', 'verified-generation');
       await environment.sleep('1 minute');
       expect(acquireAttempts).toBe(1);
+      expect(canaries).toBe(1);
       await handle.signal('media.authRecovered', 'canary-ready');
       await waitFor(handle, (state) => state.phase === 'idle');
       expect(acquireAttempts).toBe(2);
       expect(canaries).toBe(2);
+      expect(acquisitionInvocations).toHaveLength(2);
+      expect(acquisitionInvocations[0].generation).toBeUndefined();
+      expect(acquisitionInvocations[1].generation).toBe('verified-generation');
+      expect(acquisitionInvocations[1].generation).not.toBe('cookies-saved');
+      expect(acquisitionInvocations[1].generation).not.toBe('canary-ready');
+      expect(acquisitionInvocations[1].runId).toBe(acquisitionInvocations[0].runId);
+      expect(acquisitionInvocations[1].activityId).not.toBe(acquisitionInvocations[0].activityId);
       await handle.cancel();
       await expect(handle.result()).rejects.toThrow();
+      await Worker.runReplayHistory({ workflowsPath: workflowPath }, await handle.fetchHistory());
     });
   }, 120_000);
 

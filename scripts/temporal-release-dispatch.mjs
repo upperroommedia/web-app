@@ -1,5 +1,6 @@
 import { verifyDispatchManagedAgents } from './temporal-dispatch-managed-agents.mjs';
 import { createHash } from 'node:crypto';
+import { proofDigest } from './temporal-release-runtime.mjs';
 import { isDeepStrictEqual } from 'node:util';
 import { validateCloudRunReleasePlatform } from './temporal-release-cloud-run.mjs';
 import {
@@ -187,7 +188,11 @@ export async function verifyCloudRunDispatchConfiguration(platform, api) {
       triggers.push({ name: wanted.name, uid: observed.uid, configurationSHA256: digest(nativeTrigger) });
     }
     const nativeScheduler = await api(`https://cloudscheduler.googleapis.com/v1/${wakeups.scheduler.name}`);
-    const scheduler = { ...nativeScheduler, name: canonicalName(nativeScheduler.name) };
+    // These fields advance on normal scheduled delivery and retry attempts.
+    // Job identity, enabled state and settings remain part of the proof.
+    const { status: _status, scheduleTime: _scheduleTime, lastAttemptTime: _lastAttempt, ...schedulerConfig } =
+      nativeScheduler;
+    const scheduler = { ...schedulerConfig, name: canonicalName(nativeScheduler.name) };
     if (
       scheduler.name !== wakeups.scheduler.name ||
       scheduler.state !== 'ENABLED' ||
@@ -237,7 +242,12 @@ export async function verifyCloudRunDispatchConfiguration(platform, api) {
         configurationSHA256: digest(nativeService),
       },
       triggers,
-      scheduler: { name: scheduler.name, configurationSHA256: digest(nativeScheduler) },
+      scheduler: {
+        name: scheduler.name,
+        ...(scheduler.userUpdateTime ? { userUpdateTime: scheduler.userUpdateTime } : {}),
+        configurationDigestVersion: 2,
+        configurationSHA256: proofDigest(scheduler),
+      },
       directInvokerPolicySHA256: digest(policy),
       managedAgents,
       scope: 'native configuration and direct invocation policy only; delivery and effective access unproved',

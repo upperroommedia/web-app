@@ -65,6 +65,17 @@ case "$TARGET_ENV" in
     ;;
 esac
 
+TEMPORAL_HETZNER_DEPLOY_OPERATION_ID="${TEMPORAL_HETZNER_DEPLOY_OPERATION_ID:-}"
+TEMPORAL_HETZNER_DEPLOY_RELEASE_ID="${TEMPORAL_HETZNER_DEPLOY_RELEASE_ID:-}"
+if [[ -n "$TEMPORAL_HETZNER_DEPLOY_OPERATION_ID" || -n "$TEMPORAL_HETZNER_DEPLOY_RELEASE_ID" ]]; then
+  uuid='^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$'
+  [[ "$TARGET_ENV" == staging && "$SMOKE_PROFILE" == youtube &&
+    "$TEMPORAL_HETZNER_DEPLOY_OPERATION_ID" =~ $uuid && "$TEMPORAL_HETZNER_DEPLOY_RELEASE_ID" =~ $uuid ]] || {
+    echo "Temporal YouTube activation requires the staging release guard and YouTube smoke" >&2
+    exit 64
+  }
+fi
+
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
     echo "Missing required command: $1" >&2
@@ -320,6 +331,10 @@ PROCESS_AUDIO_YOUTUBE_AUTH_CANARY_URL=${auth_canary_url}
 PROCESS_AUDIO_YOUTUBE_AUTH_CANARY_INTERVAL_MS=600000
 PROCESS_AUDIO_YOUTUBE_MEDIA_CANARY_MAX_AGE_MS=900000
 EOF
+  if [[ "$env_name" == staging && -n "$TEMPORAL_HETZNER_DEPLOY_OPERATION_ID" ]]; then
+    printf '%s\n' 'PROCESS_AUDIO_TEMPORAL_YOUTUBE_RENDER=verify' \
+      'PROCESS_AUDIO_RENDER_BROWSER_POT_CONTROL_DIR=/tmp/temporal-youtube-po' >>"$WORK_DIR/env/$env_file_name"
+  fi
   chmod 600 "$WORK_DIR/env/$env_file_name"
 }
 
@@ -361,6 +376,12 @@ lock_dir="${remote_dir}/.deploy-lock"
 lock_owner_file="${lock_dir}/deployment-id"
 now_epoch="$(date +%s)"
 lease_seconds=3600
+
+if [[ "$target_env" != production && -f "${remote_dir}/env/process-audio-staging.env" ]] &&
+  grep -Fxq 'PROCESS_AUDIO_TEMPORAL_YOUTUBE_RENDER=enabled' "${remote_dir}/env/process-audio-staging.env"; then
+  echo "Existing Temporal YouTube activation requires its native drain and release handoff" >&2
+  exit 1
+fi
 
 if ! mkdir "$lock_dir" 2>/dev/null; then
   existing_owner="$(cat "$lock_owner_file" 2>/dev/null || true)"
@@ -592,6 +613,82 @@ echo "Atomically activated staged release configuration for ${deployment_id}"
 REMOTE_ACTIVATE_EOF
 }
 
+prepare_staging_render_broker() {
+  ssh "$SSH_TARGET" "bash -s -- '${REMOTE_DIR}' '${DEPLOYMENT_ID}'" <<'REMOTE_RENDER_BROKER_EOF'
+set -euo pipefail
+
+remote_dir="$1"
+deployment_id="$2"
+lock_dir="$remote_dir/.deploy-lock"
+[[ "$(cat "$lock_dir/deployment-id")" == "$deployment_id" && "$(cat "$lock_dir/target-env")" == staging ]]
+grep -Fxq 'PROCESS_AUDIO_TEMPORAL_YOUTUBE_RENDER=verify' "$remote_dir/env/process-audio-staging.env"
+grep -Fxq 'PROCESS_AUDIO_RENDER_BROWSER_POT_CONTROL_DIR=/tmp/temporal-youtube-po' "$remote_dir/env/process-audio-staging.env"
+[[ "$(id -u ytauth):$(id -g ytauth)" == 1000:1000 ]]
+
+mailbox="$remote_dir/state/staging/tmp/temporal-youtube-po"
+[[ "$(realpath -e "$(dirname "$mailbox")")" == "$(dirname "$mailbox")" ]]
+if [[ ! -e "$mailbox" && ! -L "$mailbox" ]]; then
+  install -d -m 0700 -o ytauth -g ytauth "$mailbox"
+fi
+[[ -d "$mailbox" && ! -L "$mailbox" && "$(stat -c '%u:%g:%a' "$mailbox")" == 1000:1000:700 ]]
+
+unit=process-audio-staging-render-po.service
+worker=/usr/local/libexec/process-audio-staging-render-po
+unit_file="/etc/systemd/system/$unit"
+incoming="$remote_dir/state/deploy-incoming/$deployment_id/staging-browser-po-broker.py"
+[[ -f "$incoming" && ! -L "$incoming" ]]
+expected_digest="$(sha256sum "$incoming" | cut -d' ' -f1)"
+new_unit="$(mktemp)"
+trap 'rm -f "$new_unit"' EXIT
+cat >"$new_unit" <<UNIT
+[Unit]
+Description=Staging Temporal YouTube render browser broker
+After=network-online.target
+
+[Service]
+Type=notify
+TimeoutStartSec=20
+ExecStart=/usr/bin/python3 $worker --source-digest=$expected_digest
+User=ytauth
+Group=ytauth
+PrivateTmp=yes
+ProtectSystem=strict
+ReadWritePaths=$mailbox
+InaccessiblePaths=$remote_dir/state/browser-refresh-control
+KillMode=control-group
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+if ! cmp -s "$incoming" "$worker" || ! cmp -s "$new_unit" "$unit_file"; then
+  install -d -m 0755 "$(dirname "$worker")"
+  install -m 0755 "$incoming" "$worker.new"
+  install -m 0644 "$new_unit" "$unit_file.new"
+  mv -T "$worker.new" "$worker"
+  mv -T "$unit_file.new" "$unit_file"
+fi
+current_broker() {
+  local pid
+  systemctl is-active --quiet "$unit" || return 1
+  pid="$(systemctl show "$unit" --property=MainPID --value)" || return 1
+  [[ "$pid" -gt 1 ]] || return 1
+  tr '\0' '\n' <"/proc/$pid/cmdline" | grep -Fxq "$worker" || return 1
+  tr '\0' '\n' <"/proc/$pid/cmdline" | grep -Fxq -- "--source-digest=$expected_digest"
+}
+if ! current_broker; then
+  systemctl daemon-reload
+  systemctl restart "$unit"
+fi
+systemctl enable "$unit"
+current_broker
+[[ "$(stat -c '%u:%g:%a' "$worker")" == 0:0:755 ]]
+cmp -s "$incoming" "$worker"
+echo "Dedicated staging YouTube browser broker installed and active"
+REMOTE_RENDER_BROKER_EOF
+}
+
 deploy_remote_worker() {
   local deploy_env="$1"
   ssh "$SSH_TARGET" "bash -s -- '${REMOTE_DIR}' '${deploy_env}' '${DEPLOYMENT_ID}' '${CANDIDATE_ID}' '${RELEASE_SHA}' '${SMOKE_PROFILE}'" <<'REMOTE_DEPLOY_EOF'
@@ -738,11 +835,213 @@ if [[ "$deployed_image_id" != "$candidate_image_id" ]]; then
   exit 1
 fi
 wait_for_worker_health "$worker_service"
+if [[ "$deploy_env" == staging ]] && grep -Fxq 'PROCESS_AUDIO_TEMPORAL_YOUTUBE_RENDER=verify' env/process-audio-staging.env; then
+  docker exec "$deployed_container_id" curl -fsS --max-time 10 http://127.0.0.1:8080/healthz |
+    python3 -c 'import json,sys; sys.exit(json.load(sys.stdin).get("temporalYouTubeRenderMode") != "verify")'
+fi
 if [[ "$(cat "${rollback_root}/target-env")" == all ]]; then
   mark_runtime_mutation_attempted caddy
   docker compose up -d --no-deps caddy
 fi
 REMOTE_DEPLOY_EOF
+}
+
+activate_staging_temporal_youtube() {
+  # A child may claim work after activation. Unknown acknowledgement keeps the
+  # original container and both release locks available for reconciliation.
+  local mode="${1:-activate}" broker_digest
+  broker_digest="$(python3 -c 'import hashlib, pathlib, sys; print(hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest())' "$WORK_DIR/staging-browser-po-broker.py")" || return
+  [[ "$broker_digest" =~ ^[a-f0-9]{64}$ ]] || return 1
+  if [[ "$mode" == activate ]]; then
+    : >"$WORK_DIR/temporal-youtube-activation-attempted" || return
+  fi
+  ssh "$SSH_TARGET" "bash -s -- '${REMOTE_DIR}' '${DEPLOYMENT_ID}' '${CANDIDATE_ID}' '${RELEASE_SHA}' '${TEMPORAL_HETZNER_DEPLOY_OPERATION_ID}' '${TEMPORAL_HETZNER_DEPLOY_RELEASE_ID}' '${mode}' '${broker_digest}'" <<'REMOTE_TEMPORAL_YOUTUBE_EOF'
+set -euo pipefail
+cd "$1"
+deployment_id="$2"
+candidate_id="$3"
+candidate_dir="state/deploy-candidates/$candidate_id"
+release_sha="$4"
+guard_operation="$5"
+release_id="$6"
+mode="${7:-activate}"
+broker_digest="$8"
+[[ "$mode" == activate || "$mode" == reconcile ]]
+[[ "$broker_digest" =~ ^[a-f0-9]{64}$ ]]
+service=process-audio-staging
+env_file=env/process-audio-staging.env
+[[ "$(cat .deploy-lock/deployment-id)" == "$deployment_id" && "$(cat .deploy-lock/target-env)" == staging ]]
+[[ "$(cat "${candidate_dir}/source-release-sha")" == "$release_sha" ]]
+expected_image="$(cat "${candidate_dir}/image-id")"
+container="$(docker compose ps -q "$service")"
+container="$(docker inspect --format '{{.Id}}' "$container")"
+[[ -n "$container" && "$(docker inspect --format '{{.Image}}' "$container")" == "$expected_image" ]]
+[[ "$(grep -c '^PROCESS_AUDIO_TEMPORAL_YOUTUBE_RENDER=' "$env_file")" == 1 ]]
+[[ "$(grep -c '^PROCESS_AUDIO_RENDER_BROWSER_POT_CONTROL_DIR=' "$env_file")" == 1 ]]
+grep -Fxq 'PROCESS_AUDIO_RENDER_BROWSER_POT_CONTROL_DIR=/tmp/temporal-youtube-po' "$env_file"
+
+read_broker_invocation() {
+  local unit=process-audio-staging-render-po.service worker=/usr/local/libexec/process-audio-staging-render-po
+  local mailbox="$PWD/state/staging/tmp/temporal-youtube-po"
+  local invocation pid host_mount container_mount
+  systemctl is-active --quiet "$unit" || return 1
+  invocation="$(systemctl show "$unit" --property=InvocationID --value)" || return 1
+  [[ "$invocation" =~ ^[a-f0-9]{32}$ && "$invocation" != 00000000000000000000000000000000 ]] || return 1
+  pid="$(systemctl show "$unit" --property=MainPID --value)" || return 1
+  [[ "$pid" =~ ^[1-9][0-9]+$ ]] || return 1
+  [[ "$(ps -p "$pid" -o args=)" == "/usr/bin/python3 $worker --source-digest=$broker_digest" ]] || return 1
+  [[ "$(sha256sum "$worker" | cut -d' ' -f1)" == "$broker_digest" ]] || return 1
+  [[ -d "$mailbox" && ! -L "$mailbox" && "$(stat -c '%u:%g:%a' "$mailbox")" == 1000:1000:700 ]] || return 1
+  host_mount="$(stat -c '%d:%i' "$mailbox")" || return 1
+  container_mount="$(docker exec "$container" sh -ec '
+    test "$PROCESS_AUDIO_RENDER_BROWSER_POT_CONTROL_DIR" = /tmp/temporal-youtube-po
+    test -d /tmp/temporal-youtube-po && test ! -L /tmp/temporal-youtube-po
+    stat -c "%d:%i" /tmp/temporal-youtube-po
+  ')" || return 1
+  [[ "$host_mount" == "$container_mount" && "$host_mount" =~ ^[0-9]+:[0-9]+$ ]] || return 1
+  systemctl is-active --quiet "$unit" || return 1
+  [[ "$(systemctl show "$unit" --property=InvocationID --value)" == "$invocation" ]] || return 1
+  printf '%s\n' "$invocation"
+}
+broker_invocation="$(read_broker_invocation)"
+confirm_deploy_authority() {
+docker exec -i -w /workspace/apps/process-audio "$container" node - "$guard_operation" "$release_id" "$release_sha" "$deployment_id" "$candidate_id" "$expected_image" "$container" "$broker_digest" "$broker_invocation" "${1:-}" "${2:-activate}" <<'NODE_EOF'
+const { isDeepStrictEqual } = require('node:util');
+const { initializeApp, applicationDefault } = require('firebase-admin/app');
+const { getFirestore } = require('firebase-admin/firestore');
+const [operationId, releaseId, commit, deploymentId, candidateId, imageId, containerId, brokerDigest, brokerInvocation, runtimeId, mode = 'activate'] =
+  process.argv.slice(2);
+if (!['activate', 'reconcile'].includes(mode) || (mode === 'reconcile' && !runtimeId))
+  throw new Error('Exact staging activation action required');
+if (!/^[a-f0-9]{64}$/.test(brokerDigest) || !/^[a-f0-9]{32}$/.test(brokerInvocation) || /^0+$/.test(brokerInvocation))
+  throw new Error('Exact staging browser broker required');
+if (runtimeId && !(
+  /^[0-9a-f-]{36}$/.test(runtimeId) && /^[a-f0-9]{64}$/.test(candidateId) &&
+  /^sha256:[a-f0-9]{64}$/.test(imageId) && /^[a-f0-9]{64}$/.test(containerId)
+)) throw new Error('Exact staging activation identity required');
+if (process.env.FIREBASE_PROJECT_ID !== 'urm-app-staging' || process.env.FIRESTORE_EMULATOR_HOST)
+  throw new Error('Staging default Firestore is required');
+process.env.GOOGLE_APPLICATION_CREDENTIALS = '/workspace/logs/firebase-service-account.json';
+const db = getFirestore(initializeApp({ credential: applicationDefault(), projectId: 'urm-app-staging' }));
+const receipt = db.doc(`_control/temporalHetznerYouTubeActivation-${releaseId}`);
+const paths = [
+  '_control/temporalReleaseOperation',
+  '_control/temporalReleaseState',
+  '_control/temporalRelease',
+  'temporalYouTubeRenderHosts/staging',
+];
+async function readAuthority(tx) {
+  const [lock, state, control, slot, previous] = await tx.getAll(...paths.map((path) => db.doc(path)), receipt);
+  if (
+    lock.get('operationId') !== operationId || lock.get('releaseId') !== releaseId ||
+    lock.get('commit') !== commit || lock.get('action') !== 'controlled-backend-deploy' ||
+    lock.get('hetznerYoutubeRender') !== true || state.get('releaseId') !== releaseId ||
+    state.get('phase') !== 'ownership-changed' || state.get('compatibilityCommit') !== commit ||
+    state.get('controlRevision') !== control.get('revision') || control.get('releaseId') !== releaseId ||
+    control.get('admission') !== 'paused' || control.get('domains.media.owner') !== 'temporal' ||
+    control.get('domains.media.admission') !== 'paused' || slot.exists
+  ) throw new Error('Staging media deployment authority or empty host slot could not be confirmed');
+  return { previous, controlRevision: control.get('revision') };
+}
+function expectedReceipt(controlRevision) {
+  return {
+    schemaVersion: 2, releaseId, commit, operationId, deploymentId, candidateId, imageId, containerId, runtimeId,
+    brokerDigest, brokerInvocation, controlRevision, mode: 'enabled',
+  };
+}
+async function confirmReceipt(proposed) {
+  await db.runTransaction(async (tx) => {
+    const { previous, controlRevision } = await readAuthority(tx);
+    if (
+      !previous.exists ||
+      !previous.createTime?.isEqual(previous.updateTime) ||
+      !isDeepStrictEqual(previous.data(), proposed ?? expectedReceipt(controlRevision)) ||
+      (proposed && controlRevision !== proposed.controlRevision)
+    ) throw new Error('Original staging media activation receipt is unconfirmed');
+  }, { readOnly: true });
+}
+async function confirm() {
+  if (mode === 'reconcile') return confirmReceipt();
+  let proposed;
+  try {
+    await db.runTransaction(async (tx) => {
+      const { previous, controlRevision } = await readAuthority(tx);
+      if (previous.exists) throw new Error('Staging media activation already has a receipt');
+      if (!runtimeId) return;
+      proposed = expectedReceipt(controlRevision);
+      tx.create(receipt, proposed);
+    }, runtimeId ? { maxAttempts: 1 } : { readOnly: true });
+  } catch (error) {
+    // A lost commit response can only reconcile this invocation's one create.
+    if (!proposed || ![2, 4, 13, 14].includes(error?.code)) throw error;
+  }
+  if (proposed) await confirmReceipt(proposed);
+}
+confirm().catch(() => {
+  console.error('Staging media deployment authority or activation receipt could not be confirmed');
+  process.exitCode = 1;
+});
+NODE_EOF
+}
+read_enabled_runtime() {
+  docker exec "$container" curl -fsS --max-time 10 http://127.0.0.1:8080/healthz 2>/dev/null |
+    python3 -c 'import json,re,sys; body=json.load(sys.stdin); runtime=body.get("temporalYouTubeRuntimeId", ""); assert body.get("ok") is True and body.get("temporalYouTubeRenderMode") == "enabled" and body.get("sentryEnabled") is True and body.get("sentryEnvironment") == "staging" and body.get("sentryRelease") == "process-audio-hetzner@staging-" + sys.argv[1] and re.fullmatch("[0-9a-f-]{36}", runtime); print(runtime)' "$release_sha" 2>/dev/null
+}
+assert_activation_container() {
+  [[ "$(cat .deploy-lock/deployment-id)" == "$deployment_id" && "$(cat .deploy-lock/target-env)" == staging ]]
+  [[ "$(docker inspect --format '{{.Id}}' "$(docker compose ps -q "$service")")" == "$container" ]]
+  [[ "$(docker inspect --format '{{.Image}}' "$container")" == "$expected_image" ]]
+}
+confirm_original_enabled_runtime() {
+  local original_runtime_id="$1"
+  assert_activation_container
+  [[ "$(read_enabled_runtime)" == "$original_runtime_id" ]]
+  [[ "$(read_broker_invocation)" == "$broker_invocation" ]]
+  assert_activation_container
+}
+if [[ "$mode" == reconcile ]]; then
+  [[ -f "state/deploy-rollback/${deployment_id}/temporal-youtube-activation-attempted" ]]
+  grep -Fxq 'PROCESS_AUDIO_TEMPORAL_YOUTUBE_RENDER=enabled' "$env_file"
+  runtime_id="$(read_enabled_runtime)"
+  confirm_deploy_authority "$runtime_id" reconcile
+  confirm_original_enabled_runtime "$runtime_id"
+  echo "Original staging activation receipt and enabled runtime verified after SSH disconnect"
+  exit 0
+fi
+grep -Fxq 'PROCESS_AUDIO_TEMPORAL_YOUTUBE_RENDER=verify' "$env_file"
+docker exec "$container" curl -fsS --max-time 10 http://127.0.0.1:8080/healthz |
+  python3 -c 'import json,sys; sys.exit(json.load(sys.stdin).get("temporalYouTubeRenderMode") != "verify")'
+replacement="$(mktemp "${env_file}.XXXXXX")"
+trap 'rm -f "$replacement"' EXIT
+sed 's/^PROCESS_AUDIO_TEMPORAL_YOUTUBE_RENDER=verify$/PROCESS_AUDIO_TEMPORAL_YOUTUBE_RENDER=enabled/' "$env_file" >"$replacement"
+chmod 600 "$replacement"
+confirm_deploy_authority
+assert_activation_container
+[[ "$(read_broker_invocation)" == "$broker_invocation" ]]
+grep -Fxq 'PROCESS_AUDIO_TEMPORAL_YOUTUBE_RENDER=verify' "$env_file"
+: >"state/deploy-rollback/${deployment_id}/temporal-youtube-activation-attempted"
+mv "$replacement" "$env_file"
+docker compose up -d --no-deps --no-build --force-recreate "$service"
+container="$(docker compose ps -q "$service")"
+container="$(docker inspect --format '{{.Id}}' "$container")"
+[[ -n "$container" && "$(docker inspect --format '{{.Image}}' "$container")" == "$expected_image" ]]
+deadline=$((SECONDS + 120))
+while (( SECONDS < deadline )); do
+  if runtime_id="$(read_enabled_runtime)"; then
+    status="$(docker exec "$container" curl --max-time 10 -sS -o /dev/null -w '%{http_code}' \
+      http://127.0.0.1:8080/internal/temporal/youtube/acquisitions/invalid/render/invalid)"
+    [[ "$status" == 400 ]]
+    [[ "$(read_broker_invocation)" == "$broker_invocation" ]]
+    confirm_deploy_authority "$runtime_id"
+    confirm_original_enabled_runtime "$runtime_id"
+    echo "Exact staging image is serving the Temporal YouTube route; native workflow smoke remains required"
+    exit 0
+  fi
+  sleep 2
+done
+echo "Temporal YouTube activation health could not be confirmed" >&2
+exit 1
+REMOTE_TEMPORAL_YOUTUBE_EOF
 }
 
 mark_staging_candidate_validated() {
@@ -845,6 +1144,11 @@ elif [[ ! -e "$lock_dir" ]]; then
   exit 0
 else
   echo "Automatic rollback refused: rollout lock exists without this deployment's rollback metadata" >&2
+  exit 1
+fi
+
+if [[ -f "${rollback_root}/temporal-youtube-activation-attempted" ]]; then
+  echo "Automatic rollback refused: Temporal YouTube activation may have live work" >&2
   exit 1
 fi
 
@@ -1173,14 +1477,28 @@ set +e
   else
     ensure_browser_auth_stack
   fi
+  if [[ -n "$TEMPORAL_HETZNER_DEPLOY_OPERATION_ID" ]]; then
+    "$ROOT_DIR/scripts/setup-process-audio-hetzner-host-browser-auth.sh" --render-staging-broker >"$WORK_DIR/staging-browser-po-broker.py"
+  fi
   upload_remote_release
   activate_remote_release
+  if [[ -n "$TEMPORAL_HETZNER_DEPLOY_OPERATION_ID" ]]; then
+    prepare_staging_render_broker
+  fi
   case "$TARGET_ENV" in
     staging)
       deploy_remote_worker staging
       ensure_browser_auth_stack
       verify_deployment_smoke staging
-      mark_staging_candidate_validated
+      if [[ -n "$TEMPORAL_HETZNER_DEPLOY_OPERATION_ID" ]]; then
+        activate_staging_temporal_youtube || {
+          activation_status=$?
+          [[ "$activation_status" == 255 ]] || exit "$activation_status"
+          activate_staging_temporal_youtube reconcile
+        }
+      else
+        mark_staging_candidate_validated
+      fi
       ;;
     production)
       deploy_remote_worker production
@@ -1202,6 +1520,10 @@ deployment_status=$?
 set -e
 
 if (( deployment_status != 0 )); then
+  if [[ -f "$WORK_DIR/temporal-youtube-activation-attempted" ]]; then
+    echo "Temporal YouTube activation is unresolved; deployment guards retained for original host and claim inspection" >&2
+    exit "$deployment_status"
+  fi
   echo "Post-replacement deployment verification failed with status ${deployment_status}; starting automatic rollback" >&2
   set +e
   rollback_remote_workers

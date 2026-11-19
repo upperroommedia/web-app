@@ -300,7 +300,13 @@ export function createYouTubeAcquisitionHostStore(options: {
           const current = operation(snapshot.data(), ref);
           await options.assertEligible(tx, ref);
           if (current.preparedBy.serviceAccount !== verifiedCallerEmail) return fail();
-          if (current.unclaimedClose !== undefined || current.status !== 'prepared') return { launch: false };
+          if (
+            root.get('renderProtocol') !== undefined ||
+            snapshot.get('renderClaim') !== undefined ||
+            current.unclaimedClose !== undefined ||
+            current.status !== 'prepared'
+          )
+            return { launch: false };
           if (!Number.isSafeInteger(startedAt) || startedAt < current.createdAt || startedAt > mediaWallTime())
             return fail();
           if (current.preparedEpisode !== undefined)

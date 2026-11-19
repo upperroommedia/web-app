@@ -1,4 +1,9 @@
 import { proofDigest as hash } from './temporal-release-runtime.mjs';
+import {
+  assertTraditionalRetirementWorkIdle,
+  readReleaseCandidateWork,
+  readTraditionalRetirementWork,
+} from './temporal-retirement-work.mjs';
 const namespace = 'urm-app-staging.qwejt',
   deploymentName = 'urm-worker-media-recovery-staging',
   queue = 'urm-media-kernel-recovery';
@@ -32,6 +37,52 @@ const token = (v, seen) => {
   seen.add(k);
   return v;
 };
+const durableCollections = [
+  'durableJobOutbox',
+  'durableJobCommands',
+  'durableJobCriticalSections',
+  'durableActivityExecutions',
+  'temporalProviderMutationSessions',
+  'temporalProviderMutationLocks',
+];
+
+function assertOwnedDiagnosticActivity(doc, operationId, auth) {
+  const ready = auth.ready;
+  const worker = auth.worker;
+  if (
+    !ready ||
+    !worker ||
+    doc.get('projectId') !== 'urm-app-staging' ||
+    doc.get('jobId') !== `media-recovery-${operationId}` ||
+    doc.get('workflowId') !== ready.workflowId ||
+    doc.get('runId') !== ready.runId ||
+    doc.get('activityId') !== ready.activityId ||
+    doc.get('activityType') !== 'acquireMedia' ||
+    doc.get('attempt') !== 2 ||
+    hash(doc.get('worker')) !== hash(worker)
+  )
+    fail();
+}
+
+/** The finite Job can retain arbitrarily many terminal receipts. Exhaustive
+ * idle counts and candidate-build filters run in one read-only transaction. */
+async function readJobDurableInventory(db, plan, operationId, auth) {
+  return db.runTransaction(
+    async (tx) => {
+      const work = await readTraditionalRetirementWork(db, tx);
+      const idleSHA256 = assertTraditionalRetirementWorkIdle(work);
+      const matches = await readReleaseCandidateWork(db, tx, plan.buildId);
+      const candidateRows = matches.map(({ collection, doc }) => {
+        if (collection !== 'durableActivityExecutions') fail();
+        assertOwnedDiagnosticActivity(doc, operationId, auth);
+        return { pathSHA256: hash(doc.ref.path), stamp: stamp(doc) };
+      });
+      return { idleSHA256, candidateRows };
+    },
+    { readOnly: true }
+  );
+}
+
 /** Private diagnostic inventory mechanics only. Canonical callers authenticate
  * ownership before providing an exact idle identity. No ordinary role policy,
  * descriptor or CLI accepts callbacks/identity overrides for this module. */
@@ -233,60 +284,43 @@ export async function scanPrivateMediaInventory({
     }
     cursor = token(page.nextPageToken, tokens);
   } while (cursor);
+  const jobWork = plan.job ? await read(() => readJobDurableInventory(db, plan, o.operationId, auth)) : undefined;
   const rows = [];
-  for (const collection of [
-    'durableJobOutbox',
-    'durableJobCommands',
-    'durableJobCriticalSections',
-    'durableActivityExecutions',
-    'temporalProviderMutationSessions',
-    'temporalProviderMutationLocks',
-  ]) {
-    let after;
-    do {
-      let q = db.collection(collection).orderBy('__name__').limit(100);
-      if (after) q = q.startAfter(after);
-      const page = await read(() => q.get());
-      for (const doc of page.docs) {
-        if (
-          rows.length >= 3000 ||
-          collection === 'durableJobCriticalSections' ||
-          collection === 'temporalProviderMutationLocks' ||
-          (collection === 'temporalProviderMutationSessions' && !['committed', 'aborted'].includes(doc.get('state'))) ||
-          (['durableJobOutbox', 'durableJobCommands'].includes(collection) &&
-            (!['dispatched', 'failed'].includes(doc.get('state')) ||
-              doc.get('leaseOwner') ||
-              doc.get('leaseExpiresAt') > 0))
-        )
-          fail();
-        if (doc.get('worker.buildId') === plan.buildId || doc.get('execution.worker.buildId') === plan.buildId) {
-          const a = auth.ready,
-            w = auth.worker;
+  if (!jobWork)
+    for (const collection of durableCollections) {
+      let after;
+      do {
+        let q = db.collection(collection).orderBy('__name__').limit(100);
+        if (after) q = q.startAfter(after);
+        const page = await read(() => q.get());
+        for (const doc of page.docs) {
           if (
-            collection !== 'durableActivityExecutions' ||
-            !a ||
-            !w ||
-            doc.get('projectId') !== 'urm-app-staging' ||
-            doc.get('jobId') !== `media-recovery-${o.operationId}` ||
-            doc.get('workflowId') !== a.workflowId ||
-            doc.get('runId') !== a.runId ||
-            doc.get('activityId') !== a.activityId ||
-            doc.get('activityType') !== 'acquireMedia' ||
-            doc.get('attempt') !== 2 ||
-            hash(doc.get('worker')) !== hash(w)
+            rows.length >= 3000 ||
+            collection === 'durableJobCriticalSections' ||
+            collection === 'temporalProviderMutationLocks' ||
+            (collection === 'temporalProviderMutationSessions' &&
+              !['committed', 'aborted'].includes(doc.get('state'))) ||
+            (['durableJobOutbox', 'durableJobCommands'].includes(collection) &&
+              (!['dispatched', 'failed'].includes(doc.get('state')) ||
+                doc.get('leaseOwner') ||
+                doc.get('leaseExpiresAt') > 0))
           )
             fail();
+          if (doc.get('worker.buildId') === plan.buildId || doc.get('execution.worker.buildId') === plan.buildId) {
+            if (collection !== 'durableActivityExecutions') fail();
+            assertOwnedDiagnosticActivity(doc, o.operationId, auth);
+          }
+          rows.push({ pathSHA256: hash(doc.ref.path), stamp: stamp(doc) });
         }
-        rows.push({ pathSHA256: hash(doc.ref.path), stamp: stamp(doc) });
-      }
-      after = page.size === 100 ? page.docs.at(-1) : undefined;
-    } while (after);
-  }
+        after = page.size === 100 ? page.docs.at(-1) : undefined;
+      } while (after);
+    }
   return {
     versions: versions.sort((a, b) => a.buildId.localeCompare(b.buildId)),
     partitions: partitionRows.sort((a, b) => a.type - b.type || a.key.localeCompare(b.key)),
     workflows: workflows.sort((a, b) => a.runId.localeCompare(b.runId)),
     rows: rows.sort((a, b) => a.pathSHA256.localeCompare(b.pathSHA256)),
+    ...(jobWork && { jobWork }),
     ownedPollers,
   };
 }

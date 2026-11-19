@@ -12,6 +12,7 @@ import { computeProcessAudioRequestVersion } from '../../../../packages/contract
 import { createActorAuthorization } from './authorization';
 import { workerReadinessDigest as hash } from './readiness-probe';
 import type { WorkerWitness } from './worker-witness';
+import { matchMediaRecoveryJobRun } from './media-recovery-job-witness';
 const projectId = 'urm-app-staging';
 export const MEDIA_RECOVERY_QUEUE = 'urm-media-kernel-recovery';
 export const MEDIA_RECOVERY_DEPLOYMENT = 'urm-worker-media-recovery-staging';
@@ -196,6 +197,27 @@ export function createMediaRecoveryWorkActivities(o: {
             a = arming.data(),
             cloud = witness.cloudRun;
           const start = parent.get('mediaRecoveryWorkflowStart');
+          const job = witness.cloudRunJob;
+          const provider = parent.get('mediaRecoveryJobProvider');
+          const ownedCompute = job
+            ? !cloud &&
+              !cycle?.start &&
+              !cycle?.diagnostic &&
+              !cycle?.restore &&
+              matchMediaRecoveryJobRun(job, p, provider) &&
+              start?.jobRunSHA256 === hash(provider.runIdentity)
+            : !p?.job &&
+              cycle?.start?.stage === 'completed' &&
+              cycle?.diagnostic?.stage === 'completed' &&
+              cloud &&
+              cloud.projectId === projectId &&
+              cloud.region === 'us-central1' &&
+              cloud.pool === p?.name.split('/').at(-1) &&
+              cloud.revision === cycle.start.pool?.revision.split('/').at(-1) &&
+              cloud.revisionUid === cycle.start.pool?.revisionUid &&
+              cloud.serviceAccount === p.runner &&
+              cloud.imageDigest === p.image.split('@')[1] &&
+              cloud.instanceId;
           if (
             parent.get('action') !== 'diagnose-cloud-run-media-recovery' ||
             parent.get('operationId') !== operationId ||
@@ -204,8 +226,6 @@ export function createMediaRecoveryWorkActivities(o: {
             p?.operationId !== operationId ||
             p?.role !== 'media' ||
             cycle.stage !== 'prepared' ||
-            cycle.start?.stage !== 'completed' ||
-            cycle.diagnostic?.stage !== 'completed' ||
             cycle.stop ||
             cycle.recovery ||
             cycle.recoveryFailed ||
@@ -227,16 +247,8 @@ export function createMediaRecoveryWorkActivities(o: {
             p.contract?.queue !== MEDIA_RECOVERY_QUEUE ||
             p.contract?.workflowType !== 'MediaRecoveryProbe' ||
             p.contract?.protocol !== 'owned-media-recovery-v1' ||
-            !cloud ||
-            cloud.projectId !== projectId ||
-            cloud.region !== 'us-central1' ||
-            cloud.pool !== p.name.split('/').at(-1) ||
-            cloud.revision !== cycle.start.pool?.revision.split('/').at(-1) ||
-            cloud.revisionUid !== cycle.start.pool?.revisionUid ||
-            cloud.serviceAccount !== p.runner ||
-            cloud.imageDigest !== p.image.split('@')[1] ||
+            !ownedCompute ||
             witness.buildId !== p.buildId ||
-            !cloud.instanceId ||
             start?.stage !== 'attempted' ||
             start.operationId !== operationId ||
             start.planSHA256 !== hash(p) ||

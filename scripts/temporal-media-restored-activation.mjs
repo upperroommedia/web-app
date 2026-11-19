@@ -170,7 +170,7 @@ export async function activateRestoredCloudRunMedia(o) {
     ].some((f) => typeof f !== 'function')
   )
     fail();
-  await r.assertSupported(); // Canonical unavailable before checkpoint/HTTP.
+  await r.assertSupported();
   let state = o.saved ? copy(o.saved) : undefined;
   const put = async (next) => {
     assertRestoredActivationState(next);

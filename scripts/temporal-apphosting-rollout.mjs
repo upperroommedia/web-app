@@ -316,3 +316,127 @@ export async function restoreReviewedUiRecovery({
   checkBuild(await api(buildName));
   return { buildName, uiCommit, rolloutPolicy: traffic.rolloutPolicy };
 }
+
+/** Send at most one policy PATCH. A retained attempt can only observe the
+ * reviewed backend's desired policy and never authorizes a fresh request. */
+export async function restoreAutomaticRollouts(o) {
+  const resource = `${o.parent}/traffic`;
+  const { disabled = false, disabledTime: _disabledTime, ...policy } = o.savedRolloutPolicy;
+  const fail = () => {
+    throw new Error('App Hosting automatic rollout restoration is unconfirmed');
+  };
+  const read = async () => {
+    const live = await o.api(resource);
+    const { disabled: liveDisabled = false, disabledTime: _time, ...livePolicy } = live.rolloutPolicy ?? {};
+    const splits = live.current?.splits;
+    if (
+      live.reconciling ||
+      typeof live.etag !== 'string' ||
+      !live.etag ||
+      typeof liveDisabled !== 'boolean' ||
+      !same(policy, livePolicy) ||
+      splits?.length !== 1 ||
+      splits[0].percent !== 100 ||
+      !sameAppHostingResource(splits[0].build, o.uiBuild, o.projectNumber)
+    )
+      fail();
+    return { etag: live.etag, disabled: liveDisabled };
+  };
+  if (typeof disabled !== 'boolean' || typeof policy.codebaseBranch !== 'string' || !policy.codebaseBranch) fail();
+  const first = await read();
+  const plan = (etag) => ({
+    schemaVersion: 1,
+    resource,
+    requestId: o.operationId,
+    controlRevision: o.controlRevision,
+    uiBuild: o.uiBuild,
+    etag,
+    disabled,
+    policy,
+  });
+  let attempted = o.saved;
+  if (attempted !== undefined) {
+    if (!attempted?.etag || !same(attempted, plan(attempted.etag)) || disabled) fail();
+  } else if (!first.disabled) {
+    fail();
+  } else if (!disabled) {
+    attempted = plan(first.etag);
+    await o.save(attempted);
+    let authorized = false;
+    let response;
+    try {
+      response = await o.api(
+        `${resource}?updateMask=rollout_policy.disabled&requestId=${attempted.requestId}`,
+        'PATCH',
+        { name: resource, etag: attempted.etag, rolloutPolicy: { disabled } },
+        async () => {
+          await o.assertCurrent();
+          const current = await read();
+          if (!same(current, first)) fail();
+          await o.assertCurrent();
+          authorized = true;
+        }
+      );
+    } catch (error) {
+      if (!authorized || (error.status >= 400 && error.status < 500 && ![408, 429].includes(error.status))) throw error;
+    }
+    if (!authorized) fail();
+    if (response !== undefined) await o.settle(response);
+  }
+  const observed = await read();
+  if (observed.disabled !== disabled || (attempted && observed.etag === attempted.etag)) fail();
+  await o.assertCurrent();
+  return { attempted: attempted ?? null, observed };
+}
+
+/** Initial release freeze preserves the captured policy and serving traffic.
+ * Only the invocation that recorded the original attempt can send it. */
+export async function freezeAutomaticRollouts(o) {
+  const resource = `${o.parent}/traffic`;
+  const { disabled = false, disabledTime: _disabledTime, ...policy } = o.checkpoint.savedRolloutPolicy;
+  const fail = () => {
+    throw new Error('App Hosting automatic rollout freeze is unconfirmed');
+  };
+  const read = async () => {
+    const live = await o.api(resource);
+    const { disabled: frozen = false, disabledTime: _time, ...currentPolicy } = live.rolloutPolicy ?? {};
+    if (
+      live.reconciling ||
+      !live.etag ||
+      !same(currentPolicy, policy) ||
+      !same(live.current, o.checkpoint.savedUiTraffic)
+    )
+      fail();
+    return { etag: live.etag, frozen };
+  };
+  if (typeof disabled !== 'boolean' || typeof policy.codebaseBranch !== 'string' || !policy.codebaseBranch) fail();
+  const before = await read();
+  const { appHostingFreezeETag: etag, appHostingFreezeRequestId: requestId } = o.checkpoint;
+  if (o.send && !disabled) {
+    if (before.frozen !== false || before.etag !== etag || !/^[a-f0-9-]{36}$/.test(requestId ?? '')) fail();
+    let authorized = false;
+    let response;
+    try {
+      response = await o.api(
+        `${resource}?updateMask=rollout_policy.disabled&requestId=${requestId}`,
+        'PATCH',
+        { name: resource, etag, rolloutPolicy: { disabled: true } },
+        async () => {
+          await o.assertCurrent();
+          await o.assertNoActiveRollout();
+          if (!same(await read(), before)) fail();
+          await o.assertCurrent();
+          authorized = true;
+        }
+      );
+    } catch (error) {
+      if (!authorized || (error.status >= 400 && error.status < 500 && ![408, 429].includes(error.status))) throw error;
+    }
+    if (!authorized) fail();
+    if (response !== undefined) await o.settle(response);
+  }
+  const observed = await read();
+  if (observed.frozen !== true || (!disabled && etag && observed.etag === etag)) fail();
+  await o.assertCurrent();
+  return observed;
+}

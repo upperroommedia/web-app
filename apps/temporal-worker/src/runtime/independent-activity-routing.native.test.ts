@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { Worker } from '@temporalio/worker';
+import { cloudRunPollerIdentity } from './cloud-run-witness';
 import { createLocalTestEnvironment } from '../test-support/local-test-environment';
 
 /** Actual local Temporal routing; no Firebase, provider calls or Cloud Run proof.
@@ -27,6 +28,7 @@ test('a pinned workflow calls an independent activity on a separately versioned 
   const activityDeployment = `activity-${id}`;
   const workflowBuild = 'workflow-release-one';
   const activityBuild = 'activity-release-two';
+  const activityIdentity = cloudRunPollerIdentity('controlled-provider-instance', randomUUID());
   const oldBuild = 'original-shared-release';
   const activityCalls: Array<{ deploymentName: string; buildId: string }> = [];
   const until = async (read: () => Promise<boolean>) => {
@@ -42,7 +44,7 @@ test('a pinned workflow calls an independent activity on a separately versioned 
       connection: environment.nativeConnection,
       namespace,
       taskQueue,
-      identity: `local-${deploymentName}`,
+      identity: deploymentName === activityDeployment ? activityIdentity : `local-${deploymentName}`,
       ...(workflow ? { workflowsPath: require.resolve('../test-support/independent-activity-workflow') } : {}),
       activities: workflow
         ? {}
@@ -114,6 +116,15 @@ test('a pinned workflow calls an independent activity on a separately versioned 
       workflowExecutionTimeout: '45 seconds',
     });
     expect(await handle.result()).toBe(activityBuild);
+    const history = await handle.fetchHistory();
+    const started = history.events?.find((event) => event.activityTaskStartedEventAttributes);
+    const startedActivity = started?.activityTaskStartedEventAttributes;
+    const completed = history.events?.find((event) => event.activityTaskCompletedEventAttributes)
+      ?.activityTaskCompletedEventAttributes;
+    expect(startedActivity).toMatchObject({ identity: activityIdentity, attempt: 1 });
+    expect(completed?.identity).toBe(activityIdentity);
+    expect(String(completed?.startedEventId)).toBe(String(started?.eventId));
+    expect(String(completed?.scheduledEventId)).toBe(String(startedActivity?.scheduledEventId));
     await original.signal('releaseIndependentProbe');
     expect(await original.result()).toBe(oldBuild);
     expect(activityCalls).toEqual(
@@ -123,7 +134,6 @@ test('a pinned workflow calls an independent activity on a separately versioned 
       ])
     );
     expect(activityCalls).toHaveLength(2);
-    const history = await handle.fetchHistory();
     expect(history.events?.some((e) => e.activityTaskScheduledEventAttributes?.taskQueue?.name === activityQueue)).toBe(
       true
     );

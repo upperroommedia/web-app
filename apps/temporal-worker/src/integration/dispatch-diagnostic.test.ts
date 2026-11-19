@@ -392,6 +392,19 @@ test('separate paused diagnostic starts only the fixed pinned original and recon
     expect((await db.doc(diagnosticRecordPath(delayedId, 'outbox')).get()).get('startAttemptedAt')).toEqual(
       expect.any(Number)
     );
+    const lateEvent = {
+      caller: caller('event'),
+      delivery: {
+        kind: 'event' as const,
+        id: 'after-diagnostic-close',
+        subject: `documents/${diagnosticRecordPath(delayedId, 'outbox')}`,
+      },
+    };
+    const originalRecord = await db.doc(diagnosticRecordPath(delayedId, 'outbox')).get();
+    await db.doc(`_control/temporalDispatchDiagnosticCompletion-${delayedId}`).create({ operationId: delayedId });
+    expect(await delayed.tick(signal, lateEvent)).toBe(false);
+    expect((await originalRecord.ref.get()).updateTime?.isEqual(originalRecord.updateTime!)).toBe(true);
+    expect(starts).toBe(0);
     await control.update({ admission: 'open' });
     expect(
       await delayed.tick(signal, {
@@ -403,6 +416,12 @@ test('separate paused diagnostic starts only the fixed pinned original and recon
         },
       })
     ).toBe(false);
+    await parent.delete();
+    expect(await delayed.tick(signal, lateEvent)).toBe(true);
+    expect(await delayed.tick(signal, {
+      ...lateEvent, delivery: { ...lateEvent.delivery, subject: 'documents/durableJobOutbox/business-record' },
+    })).toBeUndefined();
+    expect(starts).toBe(0);
   } catch (error) {
     primary = error;
   } finally {

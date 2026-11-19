@@ -65,13 +65,16 @@ test('first episode sends the exact native-prepared ID and scratch root only aft
         events.push('enrolled-and-claimed');
         return true;
       },
+      onStarted: () => {
+        events.push('ipc-ack');
+      },
       onNativeClose: async (fact) => {
         expect(() => process.kill(-fact.processId, 0)).toThrow(expect.objectContaining({ code: 'ESRCH' }));
         events.push('original-close');
       },
     })
   ).resolves.toBe('completed');
-  expect(events).toEqual(['enrolled-and-claimed', 'original-close']);
+  expect(events).toEqual(['enrolled-and-claimed', 'ipc-ack', 'original-close']);
 });
 test('first episode cannot send IPC after a final authorization starves the original absolute observation deadline', async () => {
   const helperPath = await helper(

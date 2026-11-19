@@ -1,3 +1,6 @@
+import { readRenderProfileSeal } from './hetzner-render-profile';
+import { readReadyRenderAuthentication } from './hetzner-render-authentication';
+import { readBoundYouTubeRenderReceipt } from './hetzner-render-receipt';
 import { mediaWallTime } from './system-time';
 import type { YouTubeNativeClose } from './hetzner-acquisition-process';
 import { createHash, randomUUID } from 'node:crypto';
@@ -30,6 +33,8 @@ export interface AcquisitionEpisode {
     closeHash: string;
     releaseHash: string;
     providerHash: string;
+    authenticationGeneration?: string;
+    authenticationHash?: string;
     archiveWaitHash?: string;
     archiveAuthorizationHash?: string;
   };
@@ -76,7 +81,8 @@ function providerOutcome(snapshot: DocumentSnapshot, id: string): void {
     value.episodeId !== id ||
     !(
       (value.kind === 'retryable' && value.action === 'task_retry') ||
-      (value.kind === 'waiting_archive' && value.action === 'post_live_retry')
+      (value.kind === 'waiting_archive' && value.action === 'post_live_retry') ||
+      (value.kind === 'waiting_auth' && value.action === 'defer')
     ) ||
     !Array.isArray(value.attemptedModes) ||
     value.attemptedModes.length < 1 ||
@@ -145,7 +151,10 @@ async function episodeOriginal(
       previous.ordinal + 1 !== parsed.ordinal ||
       previous.invocation.workflowId !== parsed.invocation.workflowId ||
       previous.invocation.runId !== parsed.invocation.runId ||
-      (parsed.predecessor.archiveWaitHash === undefined
+      (parsed.predecessor.authenticationGeneration !== undefined
+        ? previous.invocation.activityId === parsed.invocation.activityId ||
+          parsed.archiveAttempt !== previous.archiveAttempt
+        : parsed.predecessor.archiveWaitHash === undefined
         ? previous.invocation.activityId !== parsed.invocation.activityId ||
           parsed.invocation.attempt <= previous.invocation.attempt ||
           parsed.archiveAttempt !== previous.archiveAttempt
@@ -158,6 +167,33 @@ async function episodeOriginal(
         ? await tx.get(rootRef)
         : await tx.get(previousIntent.ref.collection('runtime').doc('current'));
     await episodeOriginal(tx, predecessorExecution, previousIntent, previous);
+    const root = await tx.get(rootRef);
+    if (root.get('renderProtocol') === 1) {
+      if (parsed.predecessor.authenticationGeneration !== undefined) {
+        const proof = await readBoundRenderAuthentication(tx, predecessorExecution, previous);
+        if (
+          proof.ready.generation !== parsed.predecessor.authenticationGeneration ||
+          proof.ready.proofHash !== parsed.predecessor.authenticationHash ||
+          parsed.predecessor.providerHash !== proof.candidateHash ||
+          parsed.predecessor.closeHash !== proof.closeHash ||
+          parsed.predecessor.releaseHash !== proof.closeHash ||
+          proof.ready.closedAt > parsed.createdAt ||
+          proof.ready.invocation.activityId === parsed.invocation.activityId
+        )
+          return fail();
+        return;
+      }
+      const proof = await readRenderArchiveProof(tx, predecessorExecution, previous);
+      if (
+        parsed.predecessor.archiveWaitHash !== nativeHash(proof.wait) ||
+        parsed.predecessor.archiveAuthorizationHash !== nativeHash(proof.authorized) ||
+        parsed.predecessor.providerHash !== proof.providerHash ||
+        parsed.predecessor.closeHash !== proof.closeHash ||
+        parsed.predecessor.releaseHash !== proof.closeHash
+      )
+        return fail();
+      return;
+    }
     const [close, released, uploads, provider] = await Promise.all([
       tx.get(predecessorExecution.ref.collection('nativeClose').doc('original')),
       tx.get(previousIntent.ref.collection('facts').doc('released')),
@@ -220,12 +256,16 @@ function intent(raw: unknown, ref: MediaJobRef): AcquisitionEpisode {
       : !value.predecessor ||
         ![
           'closeHash,id,providerHash,releaseHash',
+          'authenticationGeneration,authenticationHash,closeHash,id,providerHash,releaseHash',
           'archiveAuthorizationHash,archiveWaitHash,closeHash,id,providerHash,releaseHash',
         ].includes(Object.keys(value.predecessor).sort().join(',')) ||
         !uuid(value.predecessor.id) ||
         !/^[a-f0-9]{64}$/.test(value.predecessor.closeHash) ||
         !/^[a-f0-9]{64}$/.test(value.predecessor.releaseHash) ||
         !/^[a-f0-9]{64}$/.test(value.predecessor.providerHash) ||
+        (value.predecessor.authenticationGeneration !== undefined &&
+          (!uuid(value.predecessor.authenticationGeneration) ||
+            !/^[a-f0-9]{64}$/.test(value.predecessor.authenticationHash ?? ''))) ||
         (value.predecessor.archiveWaitHash !== undefined &&
           (!/^[a-f0-9]{64}$/.test(value.predecessor.archiveWaitHash) ||
             !/^[a-f0-9]{64}$/.test(value.predecessor.archiveAuthorizationHash ?? '')))) ||
@@ -245,9 +285,13 @@ export async function prepareNativeYouTubeEpisode(o: {
   caller: AcquisitionPreparer;
   invocation: AcquisitionInvocation;
   archiveResume?: MediaArchiveWait;
+  render?: true;
+  authenticationGeneration?: string;
   assertCurrent: (tx: Transaction, ref: MediaJobRef) => Promise<void>;
-}): Promise<void> {
+}): Promise<string> {
   assertStagingAcquisitionDatabase(o.firestore);
+  if (o.authenticationGeneration !== undefined && (!o.render || o.archiveResume || !uuid(o.authenticationGeneration)))
+    return fail();
   const ref = Object.freeze({ ...o.ref }),
     caller = validateAcquisitionPreparer(o.caller);
   const parent = o.firestore.collection(YOUTUBE_ACQUISITIONS).doc(youtubeAcquisitionId(ref));
@@ -266,93 +310,114 @@ export async function prepareNativeYouTubeEpisode(o: {
   const doc = parent.collection('episodes').doc(episode.id);
   let executionRef = parent;
   let created = false;
-  // An unknown first intent ACK never becomes a new birth. Only the source
-  // producer after a KNOWN commit may create the separate permission receipt.
-  await o.firestore.runTransaction(
-    async (tx) => {
-      const existing = await tx.get(parent);
-      if (existing.exists) {
-        const execution = await readAcquisitionExecution(tx, existing);
-        const current = readYouTubeAcquisitionOperation(execution.data(), ref);
-        const saved = execution.get('preparedEpisode');
+  let selectedEpisodeId = episode.id;
+  // An unacknowledged render proposal is never published. Publishing writes
+  // the head and its authorization together, only after the proposal's known
+  // commit. Any later Activity can proceed from the last authorized head.
+  const proposal = parent.collection('renderProposals').doc(episode.id);
+  const prepare = async (tx: Transaction, publishRender = false) => {
+    const proposed = publishRender ? await tx.get(proposal) : undefined;
+    const admitRender = () => {
+      if (!proposed) {
+        tx.create(proposal, episode);
+        created = true;
+        return false;
+      }
+      immutable(proposed);
+      if (!isDeepStrictEqual(proposed.data(), episode)) return fail();
+      tx.create(doc.collection('facts').doc('authorized'), { schemaVersion: 1, episode });
+      return true;
+    };
+    const existing = await tx.get(parent);
+    if (existing.exists) {
+      const execution = await readAcquisitionExecution(tx, existing);
+      const current = readYouTubeAcquisitionOperation(execution.data(), ref);
+      if ((existing.get('renderProtocol') === 1) !== (o.render === true) || existing.get('renderStopped') === true)
+        return fail();
+      const saved = execution.get('preparedEpisode');
+      if (
+        !uuid(saved) ||
+        current.preparedBy.buildId !== caller.buildId ||
+        current.preparedBy.serviceAccount !== caller.serviceAccount
+      )
+        return fail();
+      const original = await tx.get(parent.collection('episodes').doc(saved));
+      const allowed = await tx.get(original.ref.collection('facts').doc('authorized'));
+      immutable(allowed);
+      const parsed = intent(original.data(), ref);
+      await episodeOriginal(tx, execution, original, parsed);
+      if (parsed.id !== saved || !isDeepStrictEqual(allowed.data(), { schemaVersion: 1, episode: parsed }))
+        return fail();
+      await o.assertCurrent(tx, ref);
+      if (execution.get('unclaimedClose') !== undefined) return fail();
+      if (isDeepStrictEqual(parsed.invocation, episode.invocation)) {
+        selectedEpisodeId = parsed.id;
+        return;
+      }
+      const sameScheduled =
+        parsed.invocation.workflowId === episode.invocation.workflowId &&
+        parsed.invocation.runId === episode.invocation.runId &&
+        parsed.invocation.activityId === episode.invocation.activityId;
+      // Later SDK attempts may observe an already running/settled original
+      // operation. Monotonic states never become a new HTTP start permission.
+      if (
+        sameScheduled &&
+        episode.invocation.attempt > parsed.invocation.attempt &&
+        (o.render === true || !['prepared', 'retryable'].includes(current.status))
+      ) {
+        selectedEpisodeId = parsed.id;
+        return;
+      }
+      if (o.render) {
         if (
-          !uuid(saved) ||
-          current.preparedBy.buildId !== caller.buildId ||
-          current.preparedBy.serviceAccount !== caller.serviceAccount
-        )
-          return fail();
-        const original = await tx.get(parent.collection('episodes').doc(saved));
-        const allowed = await tx.get(original.ref.collection('facts').doc('authorized'));
-        immutable(allowed);
-        const parsed = intent(original.data(), ref);
-        await episodeOriginal(tx, execution, original, parsed);
-        if (parsed.id !== saved || !isDeepStrictEqual(allowed.data(), { schemaVersion: 1, episode: parsed }))
-          return fail();
-        await o.assertCurrent(tx, ref);
-        if (execution.get('unclaimedClose') !== undefined) return fail();
-        if (isDeepStrictEqual(parsed.invocation, episode.invocation)) return;
-        const sameScheduled =
-          parsed.invocation.workflowId === episode.invocation.workflowId &&
-          parsed.invocation.runId === episode.invocation.runId &&
-          parsed.invocation.activityId === episode.invocation.activityId;
-        // Later SDK attempts may observe an already running/settled original
-        // operation. Monotonic states never become a new HTTP start permission.
-        if (
-          sameScheduled &&
-          episode.invocation.attempt > parsed.invocation.attempt &&
-          !['prepared', 'retryable'].includes(current.status)
-        )
-          return;
-        const archive = !sameScheduled && o.archiveResume !== undefined;
-        if (
-          current.status !== (archive ? 'waiting_archive' : 'retryable') ||
-          current.result?.kind !== current.status ||
-          current.nativeClose?.outcome !== 'completed' ||
+          (!o.archiveResume && !o.authenticationGeneration) ||
+          sameScheduled ||
           parsed.ordinal >= 64 ||
           parsed.invocation.workflowId !== episode.invocation.workflowId ||
           parsed.invocation.runId !== episode.invocation.runId ||
-          (archive
-            ? parsed.invocation.activityId === episode.invocation.activityId
-            : parsed.invocation.activityId !== episode.invocation.activityId ||
-              episode.invocation.attempt <= parsed.invocation.attempt)
+          parsed.invocation.activityId === episode.invocation.activityId
         )
           return fail();
-        await assertReleasedYouTubeEpisode(tx, execution);
-        const provider = await tx.get(original.ref.collection('facts').doc('providerOutcome'));
-        providerOutcome(provider, parsed.id);
-        if (
-          provider.get('kind') !== (archive ? 'waiting_archive' : 'retryable') ||
-          provider.get('action') !== (archive ? 'post_live_retry' : 'task_retry')
-        )
-          return fail();
-        const uploads = await tx.get(execution.ref.collection('uploads').limit(1));
-        if (!uploads.empty || execution.get('activeUpload') !== undefined) return fail();
-        const closed = await tx.get(execution.ref.collection('nativeClose').doc('original'));
-        const released = await tx.get(original.ref.collection('facts').doc('released'));
-        immutable(closed);
-        immutable(released);
         episode.ordinal = parsed.ordinal + 1;
-        episode.archiveAttempt = parsed.archiveAttempt;
-        episode.predecessor = {
-          id: parsed.id,
-          closeHash: nativeHash(closed),
-          releaseHash: nativeHash(released),
-          providerHash: nativeHash(provider),
-        };
-        if (archive) {
-          validateArchiveWait(o.archiveResume!);
-          const saved = await readArchiveWait(tx, original.ref, parsed, provider, closed, released);
+        if (o.authenticationGeneration) {
+          const proof = await readBoundRenderAuthentication(tx, execution, parsed);
           if (
-            !isDeepStrictEqual(saved.wait.get('wait'), o.archiveResume) ||
+            !proof.ready.retainedSlot ||
+            proof.ready.generation !== o.authenticationGeneration ||
+            proof.ready.invocation.activityId === episode.invocation.activityId ||
+            episode.createdAt < proof.ready.closedAt
+          )
+            return fail();
+          episode.archiveAttempt = parsed.archiveAttempt;
+          episode.predecessor = {
+            id: parsed.id,
+            closeHash: proof.closeHash,
+            releaseHash: proof.closeHash,
+            providerHash: proof.candidateHash,
+            authenticationGeneration: proof.ready.generation,
+            authenticationHash: proof.ready.proofHash,
+          };
+        } else {
+          validateArchiveWait(o.archiveResume!);
+          const proof = await readRenderArchiveProof(tx, execution, parsed);
+          if (
+            !isDeepStrictEqual(proof.wait.get('wait'), o.archiveResume!) ||
             mediaWallTime() < o.archiveResume!.dueAt ||
             o.archiveResume!.attempt !== parsed.archiveAttempt + 1
           )
             return fail();
+          episode.ordinal = parsed.ordinal + 1;
           episode.archiveAttempt = o.archiveResume!.attempt;
-          episode.predecessor.archiveWaitHash = nativeHash(saved.wait);
-          episode.predecessor.archiveAuthorizationHash = nativeHash(saved.authorized);
+          episode.predecessor = {
+            id: parsed.id,
+            closeHash: proof.closeHash,
+            releaseHash: proof.closeHash,
+            providerHash: proof.providerHash,
+            archiveWaitHash: nativeHash(proof.wait),
+            archiveAuthorizationHash: nativeHash(proof.authorized),
+          };
         }
-
+        if (!admitRender()) return;
         executionRef = doc.collection('runtime').doc('current');
         tx.create(original.ref.collection('facts').doc('successor'), { schemaVersion: 1, episode });
         tx.create(doc, episode);
@@ -369,9 +434,60 @@ export async function prepareNativeYouTubeEpisode(o: {
         created = true;
         return;
       }
-      if (o.archiveResume !== undefined) return fail();
-      await o.assertCurrent(tx, ref);
-      tx.create(parent, {
+      const archive = !sameScheduled && o.archiveResume !== undefined;
+      if (
+        current.status !== (archive ? 'waiting_archive' : 'retryable') ||
+        current.result?.kind !== current.status ||
+        current.nativeClose?.outcome !== 'completed' ||
+        parsed.ordinal >= 64 ||
+        parsed.invocation.workflowId !== episode.invocation.workflowId ||
+        parsed.invocation.runId !== episode.invocation.runId ||
+        (archive
+          ? parsed.invocation.activityId === episode.invocation.activityId
+          : parsed.invocation.activityId !== episode.invocation.activityId ||
+            episode.invocation.attempt <= parsed.invocation.attempt)
+      )
+        return fail();
+      await assertReleasedYouTubeEpisode(tx, execution);
+      const provider = await tx.get(original.ref.collection('facts').doc('providerOutcome'));
+      providerOutcome(provider, parsed.id);
+      if (
+        provider.get('kind') !== (archive ? 'waiting_archive' : 'retryable') ||
+        provider.get('action') !== (archive ? 'post_live_retry' : 'task_retry')
+      )
+        return fail();
+      const uploads = await tx.get(execution.ref.collection('uploads').limit(1));
+      if (!uploads.empty || execution.get('activeUpload') !== undefined) return fail();
+      const closed = await tx.get(execution.ref.collection('nativeClose').doc('original'));
+      const released = await tx.get(original.ref.collection('facts').doc('released'));
+      immutable(closed);
+      immutable(released);
+      episode.ordinal = parsed.ordinal + 1;
+      episode.archiveAttempt = parsed.archiveAttempt;
+      episode.predecessor = {
+        id: parsed.id,
+        closeHash: nativeHash(closed),
+        releaseHash: nativeHash(released),
+        providerHash: nativeHash(provider),
+      };
+      if (archive) {
+        validateArchiveWait(o.archiveResume!);
+        const saved = await readArchiveWait(tx, original.ref, parsed, provider, closed, released);
+        if (
+          !isDeepStrictEqual(saved.wait.get('wait'), o.archiveResume) ||
+          mediaWallTime() < o.archiveResume!.dueAt ||
+          o.archiveResume!.attempt !== parsed.archiveAttempt + 1
+        )
+          return fail();
+        episode.archiveAttempt = o.archiveResume!.attempt;
+        episode.predecessor.archiveWaitHash = nativeHash(saved.wait);
+        episode.predecessor.archiveAuthorizationHash = nativeHash(saved.authorized);
+      }
+
+      executionRef = doc.collection('runtime').doc('current');
+      tx.create(original.ref.collection('facts').doc('successor'), { schemaVersion: 1, episode });
+      tx.create(doc, episode);
+      tx.create(executionRef, {
         schemaVersion: 1,
         operationId: parent.id,
         ref,
@@ -380,12 +496,32 @@ export async function prepareNativeYouTubeEpisode(o: {
         createdAt: episode.createdAt,
         preparedEpisode: episode.id,
       });
-      tx.create(doc, episode);
+      tx.update(parent, { headEpisode: episode.id });
       created = true;
-    },
-    { maxAttempts: 1 }
-  );
-  if (!created) return;
+      return;
+    }
+    if (o.archiveResume !== undefined || o.authenticationGeneration !== undefined) return fail();
+    await o.assertCurrent(tx, ref);
+    if (o.render && !admitRender()) return;
+    tx.create(parent, {
+      schemaVersion: 1,
+      operationId: parent.id,
+      ref,
+      preparedBy: caller,
+      status: 'prepared',
+      createdAt: episode.createdAt,
+      preparedEpisode: episode.id,
+      ...(o.render ? { renderProtocol: 1 } : {}),
+    });
+    tx.create(doc, episode);
+    created = true;
+  };
+  await o.firestore.runTransaction((tx) => prepare(tx), { maxAttempts: 1 });
+  if (!created) return selectedEpisodeId;
+  if (o.render) {
+    await o.firestore.runTransaction((tx) => prepare(tx, true), { maxAttempts: 1 });
+    return selectedEpisodeId;
+  }
   await o.firestore.runTransaction(
     async (tx) => {
       const [current, original] = await Promise.all([tx.get(executionRef), tx.get(doc)]);
@@ -401,6 +537,7 @@ export async function prepareNativeYouTubeEpisode(o: {
     },
     { maxAttempts: 1 }
   );
+  return selectedEpisodeId;
 }
 /** GET-only input for the actual fixed host driver. No transaction/ACK repair,
  * episode creation, retry decision, or authority renewal is available here. */
@@ -412,30 +549,40 @@ export async function readPreparedYouTubeEpisode(o: {
   assertStagingAcquisitionDatabase(o.firestore);
   return o.firestore.runTransaction(
     async (tx) => {
-      const parent = o.firestore.collection(YOUTUBE_ACQUISITIONS).doc(youtubeAcquisitionId(o.ref));
-      const root = await tx.get(parent);
-      const snapshot = await readAcquisitionExecution(tx, root),
-        current = readYouTubeAcquisitionOperation(snapshot.data(), o.ref);
-      if (snapshot.get('unclaimedClose') !== undefined) return fail();
-      const id = snapshot.get('preparedEpisode');
-      if (!uuid(id) || current.status !== 'prepared' || current.preparedBy.serviceAccount !== o.verifiedCallerEmail)
-        return fail();
-      const original = await tx.get(parent.collection('episodes').doc(id));
-      const allowed = await tx.get(original.ref.collection('facts').doc('authorized'));
-      immutable(original);
-      immutable(allowed);
-      const value = intent(original.data(), o.ref);
-      await episodeOriginal(tx, snapshot, original, value);
-      if (
-        value.id !== id ||
-        !isDeepStrictEqual(value.preparedBy, current.preparedBy) ||
-        !isDeepStrictEqual(allowed.data(), { schemaVersion: 1, episode: value })
-      )
-        return fail();
-      return value;
+      const { episode } = await readPreparedYouTubeEpisodeInTransaction(tx, o);
+      return episode;
     },
     { maxAttempts: 1 }
   );
+}
+
+/** A host claim and its durable delegation must be checked in the same transaction. */
+export async function readPreparedYouTubeEpisodeInTransaction(
+  tx: Transaction,
+  o: { firestore: Firestore; ref: MediaJobRef; verifiedCallerEmail: string; render?: true }
+) {
+  const parent = o.firestore.collection(YOUTUBE_ACQUISITIONS).doc(youtubeAcquisitionId(o.ref));
+  const root = await tx.get(parent);
+  if ((root.get('renderProtocol') === 1) !== (o.render === true)) return fail();
+  const execution = await readAcquisitionExecution(tx, root);
+  const current = readYouTubeAcquisitionOperation(execution.data(), o.ref);
+  if (execution.get('unclaimedClose') !== undefined) return fail();
+  const id = execution.get('preparedEpisode');
+  if (!uuid(id) || current.status !== 'prepared' || current.preparedBy.serviceAccount !== o.verifiedCallerEmail)
+    return fail();
+  const original = await tx.get(parent.collection('episodes').doc(id));
+  const allowed = await tx.get(original.ref.collection('facts').doc('authorized'));
+  immutable(original);
+  immutable(allowed);
+  const episode = intent(original.data(), o.ref);
+  await episodeOriginal(tx, execution, original, episode);
+  if (
+    episode.id !== id ||
+    !isDeepStrictEqual(episode.preparedBy, current.preparedBy) ||
+    !isDeepStrictEqual(allowed.data(), { schemaVersion: 1, episode })
+  )
+    return fail();
+  return { episode, execution, root };
 }
 
 function resource(proof: HostResourceReply, id: string, state: 'reserved' | 'enrolled'): void {
@@ -661,6 +808,216 @@ async function readArchiveWait(
     return fail();
   return { wait, authorized };
 }
+export async function readRenderAuthenticationPredecessor(
+  tx: Transaction,
+  o: { firestore: Firestore; ref: MediaJobRef; verifiedCallerEmail: string }
+) {
+  const { episode, execution } = await readPreparedYouTubeEpisodeInTransaction(tx, { ...o, render: true });
+  return readBoundRenderAuthenticationPredecessor(tx, execution, episode);
+}
+
+async function readBoundRenderAuthenticationPredecessor(
+  tx: Transaction,
+  execution: DocumentSnapshot,
+  episode: AcquisitionEpisode
+) {
+  const receipt = await readBoundYouTubeRenderReceipt(tx, episode.ref, episode, execution);
+  if (receipt.kind !== 'waiting_auth') return fail();
+  const render = execution.ref.collection('render');
+  const [candidate, close] = await Promise.all([tx.get(render.doc('candidate')), tx.get(render.doc('close'))]);
+  return { episode, execution, candidateHash: nativeHash(candidate), closeHash: nativeHash(close) };
+}
+
+async function readBoundRenderAuthentication(
+  tx: Transaction,
+  execution: DocumentSnapshot,
+  episode: AcquisitionEpisode
+) {
+  const original = await readBoundRenderAuthenticationPredecessor(tx, execution, episode);
+  const ready = await readReadyRenderAuthentication(
+    tx,
+    {
+      firestore: execution.ref.firestore,
+      ref: episode.ref,
+      verifiedCallerEmail: episode.preparedBy.serviceAccount,
+    },
+    original
+  );
+  if (!ready) return fail();
+  return { ...original, ready };
+}
+
+export async function readCurrentRenderAuthenticationSeal(
+  tx: Transaction,
+  execution: DocumentSnapshot,
+  episode: AcquisitionEpisode,
+  owner: AcquisitionHostProcess,
+  signal: AbortSignal
+) {
+  signal.throwIfAborted();
+  const reference = episode.predecessor?.authenticationGeneration;
+  if (reference === undefined) return undefined;
+  const root = acquisitionDelegationRef(execution);
+  const previousIntent = await tx.get(root.collection('episodes').doc(episode.predecessor!.id));
+  const previous = intent(previousIntent.data(), episode.ref);
+  const previousExecution = await tx.get(
+    previous.ordinal === 1 ? root : previousIntent.ref.collection('runtime').doc('current')
+  );
+  const { ready } = await readBoundRenderAuthentication(tx, previousExecution, previous);
+  if (ready.generation !== reference || ready.proofHash !== episode.predecessor!.authenticationHash) return fail();
+  const now = mediaWallTime();
+  return ready.owner.bootId === owner.bootId &&
+    ready.owner.pidNamespace === owner.pidNamespace &&
+    ready.owner.buildId === owner.buildId &&
+    now >= ready.closedAt &&
+    ready.profileSeal ===
+      (await readRenderProfileSeal(AbortSignal.any([signal, AbortSignal.timeout(1000)])).catch(() => undefined))
+    ? ready.profileSeal
+    : null;
+}
+
+async function renderArchiveFacts(tx: Transaction, execution: DocumentSnapshot, episode: AcquisitionEpisode) {
+  const receipt = await readBoundYouTubeRenderReceipt(tx, episode.ref, episode, execution);
+  if (receipt.kind !== 'waiting_archive') return fail();
+  const render = execution.ref.collection('render');
+  const [provider, close] = await Promise.all([tx.get(render.doc('candidate')), tx.get(render.doc('close'))]);
+  return { providerHash: nativeHash(provider), closeHash: nativeHash(close) };
+}
+
+async function readRenderArchiveProof(tx: Transaction, execution: DocumentSnapshot, episode: AcquisitionEpisode) {
+  const facts = await renderArchiveFacts(tx, execution, episode);
+  const render = execution.ref.collection('render');
+  const [wait, authorized] = await Promise.all([
+    tx.get(render.doc('archiveWait')),
+    tx.get(render.doc('archiveWaitAuthorized')),
+  ]);
+  immutable(wait);
+  immutable(authorized);
+  const projection = invocation(wait.get('projection'));
+  const timer = wait.get('wait') as MediaArchiveWait;
+  validateArchiveWait(timer);
+  if (
+    !isDeepStrictEqual(wait.data(), {
+      schemaVersion: 1,
+      episodeId: episode.id,
+      ref: episode.ref,
+      projection,
+      wait: timer,
+      ...facts,
+    }) ||
+    timer.attempt !== episode.archiveAttempt + 1 ||
+    projection.workflowId !== episode.invocation.workflowId ||
+    projection.runId !== episode.invocation.runId ||
+    projection.activityId === episode.invocation.activityId
+  )
+    return fail();
+  if (authorized.get('schemaVersion') === 2) {
+    const proposalId = authorized.get('proposalId');
+    if (!uuid(proposalId) || !authorized.createTime!.isEqual(wait.createTime!)) return fail();
+    const proposal = await tx.get(wait.ref.collection('proposals').doc(proposalId));
+    if (
+      !isDeepStrictEqual(proposal.data(), wait.data()) ||
+      !isDeepStrictEqual(authorized.data(), { schemaVersion: 2, proposalId, proposalHash: nativeHash(proposal) })
+    )
+      return fail();
+  } else if (!isDeepStrictEqual(authorized.data(), { schemaVersion: 1, waitHash: nativeHash(wait) })) return fail();
+  return { wait, authorized, ...facts };
+}
+
+export async function recordNativeYouTubeRenderArchiveWait(o: {
+  firestore: Firestore;
+  ref: MediaJobRef;
+  wait: MediaArchiveWait;
+  invocation: AcquisitionInvocation;
+  sourceBuildId: string;
+  assertCurrent: (tx: Transaction, ref: MediaJobRef) => Promise<void>;
+}) {
+  assertStagingAcquisitionDatabase(o.firestore);
+  validateArchiveWait(o.wait);
+  const proposalId = randomUUID(),
+    projection = invocation(o.invocation),
+    wall = mediaWallTime(),
+    mono = performance.now();
+  const fresh = () => {
+    if (mediaWallTime() < wall || mediaWallTime() - wall >= 5000 || performance.now() - mono >= 5000) fail();
+  };
+  const verify = async (tx: Transaction) => {
+    const root = await tx.get(o.firestore.collection(YOUTUBE_ACQUISITIONS).doc(youtubeAcquisitionId(o.ref)));
+    if (root.get('renderProtocol') !== 1) return fail();
+    const execution = await readAcquisitionExecution(tx, root);
+    const { episode } = await readPreparedYouTubeEpisodeInTransaction(tx, {
+      ...o,
+      verifiedCallerEmail: execution.get('preparedBy.serviceAccount'),
+      render: true,
+    });
+    if (
+      o.sourceBuildId !== episode.preparedBy.buildId ||
+      o.wait.attempt !== episode.archiveAttempt + 1 ||
+      projection.workflowId !== episode.invocation.workflowId ||
+      projection.runId !== episode.invocation.runId ||
+      projection.activityId === episode.invocation.activityId
+    )
+      return fail();
+    const facts = await renderArchiveFacts(tx, execution, episode);
+    const render = execution.ref.collection('render');
+    const [wait, authorized] = await Promise.all([
+      tx.get(render.doc('archiveWait')),
+      tx.get(render.doc('archiveWaitAuthorized')),
+    ]);
+    await o.assertCurrent(tx, o.ref);
+    fresh();
+    return {
+      execution,
+      episode,
+      wait,
+      authorized,
+      expected: { schemaVersion: 1, episodeId: episode.id, ref: o.ref, projection, wait: o.wait, ...facts },
+    };
+  };
+  const created = await o.firestore.runTransaction(
+    async (tx) => {
+      const x = await verify(tx);
+      if (x.wait.exists) {
+        const prior = invocation(x.wait.get('projection'));
+        if (
+          !isDeepStrictEqual(x.wait.data(), { ...x.expected, projection: prior }) ||
+          prior.activityId !== projection.activityId ||
+          prior.attempt > projection.attempt
+        )
+          return fail();
+        await readRenderArchiveProof(tx, x.execution, x.episode);
+        fresh();
+        return undefined;
+      }
+      if (x.authorized.exists || wall < o.wait.scheduledAt || wall - o.wait.scheduledAt > 5 * 60_000) return fail();
+      const proposal = x.wait.ref.collection('proposals').doc(proposalId);
+      tx.create(proposal, x.expected);
+      return proposal;
+    },
+    { maxAttempts: 1 }
+  );
+  if (!created) return;
+  await o.firestore.runTransaction(
+    async (tx) => {
+      const x = await verify(tx);
+      const proposal = await tx.get(created);
+      if (
+        x.wait.exists ||
+        x.authorized.exists ||
+        created.path !== x.wait.ref.collection('proposals').doc(proposalId).path ||
+        !isDeepStrictEqual(proposal.data(), x.expected)
+      )
+        return fail();
+      const proposalHash = nativeHash(proposal);
+      fresh();
+      tx.create(x.wait.ref, x.expected);
+      tx.create(x.authorized.ref, { schemaVersion: 2, proposalId, proposalHash });
+    },
+    { maxAttempts: 1 }
+  );
+  fresh();
+}
+
 /** Fixed native projection entrypoint, BEFORE the Workflow's durable archive
  * timer. No HTTP endpoint, elapsed timer or observer can create/repair it. */
 export async function recordNativeYouTubeArchiveWait(o: {

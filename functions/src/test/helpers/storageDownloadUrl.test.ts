@@ -1,5 +1,8 @@
 import type { File } from '@google-cloud/storage';
-import { readFirebaseDownloadUrl } from '../../storageDownloadUrl';
+import { readFirebaseDownloadUrl, readPublishingAudioUrl } from '../../storageDownloadUrl';
+import { currentSandboxProfile } from '../../providerSandbox/http';
+
+jest.mock('../../providerSandbox/http', () => ({ currentSandboxProfile: jest.fn() }));
 
 describe('readFirebaseDownloadUrl', () => {
   const originalEmulatorHost = process.env.FIREBASE_STORAGE_EMULATOR_HOST;
@@ -59,6 +62,53 @@ describe('readFirebaseDownloadUrl', () => {
     process.env.FIREBASE_STORAGE_EMULATOR_HOST = '127.0.0.1:19199';
     await expect(readFirebaseDownloadUrl(source('existing-token').file)).resolves.toBe(
       'http://127.0.0.1:19199/v0/b/urm-app-staging.firebasestorage.app/o/workflow-audio%2Fowned%2Ffinal%20audio.mp3?alt=media&token=existing-token'
+    );
+  });
+});
+
+describe('readPublishingAudioUrl', () => {
+  const generation = '90071992547409931';
+  function pinnedSource(metadata = { generation, size: '128' }) {
+    const getMetadata = jest.fn().mockResolvedValue([metadata]);
+    const getSignedUrl = jest.fn().mockResolvedValue(['https://signed.example.invalid/']);
+    const file = {
+      bucket: { name: 'urm-app-staging.firebasestorage.app' },
+      name: 'workflow-audio/owned/final audio.mp3',
+      getMetadata,
+      getSignedUrl,
+    } as unknown as File;
+    return { file, getMetadata, getSignedUrl };
+  }
+
+  beforeEach(() => jest.mocked(currentSandboxProfile).mockReset());
+
+  it('verifies the exact nonempty generation before exposing a sandbox source', async () => {
+    jest.mocked(currentSandboxProfile).mockReturnValue({ mode: 'sandbox' } as ReturnType<typeof currentSandboxProfile>);
+    const fixture = pinnedSource();
+    await expect(readPublishingAudioUrl(fixture.file, generation)).resolves.toBe(
+      `gs://urm-app-staging.firebasestorage.app/workflow-audio/owned/final%20audio.mp3?generation=${generation}`
+    );
+    expect(fixture.getMetadata).toHaveBeenCalledTimes(1);
+    expect(fixture.getSignedUrl).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { generation: '90071992547409932', size: '128' },
+    { generation, size: '0' },
+  ])('does not expose an invalid sandbox source (%j)', async (metadata) => {
+    jest.mocked(currentSandboxProfile).mockReturnValue({ mode: 'sandbox' } as ReturnType<typeof currentSandboxProfile>);
+    const fixture = pinnedSource(metadata);
+    await expect(readPublishingAudioUrl(fixture.file, generation)).rejects.toThrow('The retained audio');
+    expect(fixture.getMetadata).toHaveBeenCalledTimes(1);
+    expect(fixture.getSignedUrl).not.toHaveBeenCalled();
+  });
+
+  it('signs the verified generation without rounding it', async () => {
+    const fixture = pinnedSource();
+    await expect(readPublishingAudioUrl(fixture.file, generation)).resolves.toBe('https://signed.example.invalid/');
+    expect(fixture.getMetadata).toHaveBeenCalledTimes(1);
+    expect(fixture.getSignedUrl).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'read', version: 'v4', queryParams: { generation } })
     );
   });
 });

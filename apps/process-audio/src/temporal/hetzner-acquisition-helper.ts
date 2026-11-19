@@ -19,6 +19,10 @@ async function execute(message: unknown, cancellation: CancelToken): Promise<voi
     ].some((key) => Boolean(process.env[key]))
   )
     throw denied();
+  if (Object.hasOwn(message, 'renderCallerEmail')) {
+    await executeRender(message, cancellation);
+    return;
+  }
   const input = message as { operationId: string; ref: MediaJobRef; directory: string; episodeId: string };
   if (
     Object.keys(input).sort().join(',') !== 'directory,episodeId,operationId,ref' ||
@@ -145,6 +149,114 @@ async function execute(message: unknown, cancellation: CancelToken): Promise<voi
     }
   });
 }
+async function executeRender(message: object, cancellation: CancelToken): Promise<void> {
+  const input = message as {
+    operationId: string;
+    ref: MediaJobRef;
+    directory: string;
+    episodeId: string;
+    renderCallerEmail: string;
+    authenticationId?: string;
+  };
+  if (
+    Object.keys(input).sort().join(',') !==
+      (input.authenticationId === undefined
+        ? 'directory,episodeId,operationId,ref,renderCallerEmail'
+        : 'authenticationId,directory,episodeId,operationId,ref,renderCallerEmail') ||
+    (input.authenticationId !== undefined &&
+      !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(input.authenticationId)) ||
+    process.env.PROCESS_AUDIO_RUNTIME_PROFILE !== 'hetzner' ||
+    typeof input.directory !== 'string' ||
+    !input.directory.startsWith('/') ||
+    !/^youtube-render-[A-Za-z0-9]+$/.test(basename(input.directory)) ||
+    input.directory !== process.env.TMPDIR ||
+    !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(input.episodeId) ||
+    !/^tw-m-[a-f0-9]{20}@urm-app-staging\.iam\.gserviceaccount\.com$/.test(input.renderCallerEmail)
+  )
+    throw denied();
+  const [path, native] = await Promise.all([realpath(input.directory), lstat(input.directory)]);
+  if (
+    path !== input.directory ||
+    !native.isDirectory() ||
+    native.uid !== process.getuid?.() ||
+    (native.mode & 0o777) !== 0o700
+  )
+    throw denied();
+  const { youtubeAcquisitionId } = await import('./hetzner-acquisition');
+  const ref = Object.freeze({ ...input.ref });
+  if (youtubeAcquisitionId(ref) !== input.operationId) throw denied();
+  cancellation.signal.throwIfAborted();
+  if (input.authenticationId === undefined) {
+    const { assertNativeYouTubeRenderFileLimit } = await import('./hetzner-render-limits');
+    await assertNativeYouTubeRenderFileLimit();
+  }
+  cancellation.signal.throwIfAborted();
+  const { acquisitionHostBuildId } = await import('./hetzner-acquisition-driver');
+  const { withOwnedAcquisitionFirebase } = await import('./hetzner-acquisition-firebase');
+  await withOwnedAcquisitionFirebase(async (sdk) => {
+    if (sdk.app().options.projectId !== ref.projectId) throw denied();
+    if (input.authenticationId !== undefined) {
+      const { recordRenderAuthenticationProbe } = await import('./hetzner-render-authentication');
+      const { readEligibleYouTubeAcquisition } = await import('./hetzner-acquisition-policy');
+      const { refreshRenderAuthenticationBrowser, runAuthenticatedYouTubeMediaByteCanary, withYouTubeCancellation } =
+        await import('../processYouTubeUrl');
+      const { createContext } = await import('../context');
+      const { drainNativeYouTubeSession } = await import('./hetzner-acquisition-producer');
+      const firestore = sdk.firestore(),
+        auth = sdk.auth();
+      try {
+        await recordRenderAuthenticationProbe({
+          firestore,
+          ref,
+          id: input.authenticationId,
+          buildId: acquisitionHostBuildId(),
+          verifiedCallerEmail: input.renderCallerEmail,
+          signal: cancellation.signal,
+          directory: input.directory,
+          assertCurrent: async (transaction, bound) => {
+            const result = await readEligibleYouTubeAcquisition({ firestore, auth, transaction, ref: bound });
+            if (result.kind !== 'ready') throw denied();
+          },
+          refresh: (watcherRequestId) =>
+            withYouTubeCancellation(cancellation, () =>
+              refreshRenderAuthenticationBrowser(
+                createContext(ref.sermonId, 'temporal-youtube-authentication'),
+                watcherRequestId
+              )
+            ),
+          probe: () =>
+            withYouTubeCancellation(cancellation, () =>
+              runAuthenticatedYouTubeMediaByteCanary(
+                'yt-dlp',
+                sdk.database(),
+                createContext(ref.sermonId, 'temporal-youtube-authentication'),
+                true
+              )
+            ),
+        });
+      } finally {
+        await cancellation.waitForProcesses();
+        if (await drainNativeYouTubeSession(input.directory)) throw denied();
+      }
+      return;
+    }
+    const { runOwnedYouTubeRender } = await import('./hetzner-render-work');
+    await runOwnedYouTubeRender({
+      firestore: sdk.firestore(),
+      auth: sdk.auth(),
+      bucket: sdk.storage().bucket(),
+      realtimeDB: sdk.database(),
+      ref,
+      episodeId: input.episodeId,
+      directory: input.directory,
+      verifiedCallerEmail: input.renderCallerEmail,
+      buildId: acquisitionHostBuildId(),
+      ytdlpPath: 'yt-dlp',
+      cancellation,
+    });
+  });
+}
+
 if (require.main === module) {
   const cancellation = new CancelToken();
   let received = false,

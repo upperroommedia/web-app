@@ -1,5 +1,6 @@
 import { TestWorkflowEnvironment } from '@temporalio/testing';
 import { Worker } from '@temporalio/worker';
+import { createLocalTestEnvironment } from '../../test-support/local-test-environment';
 import { ApplicationFailure } from '@temporalio/common';
 import { SearchDocument, SearchBackfill, searchResume } from './index';
 const ref = { jobId: 'search-job', projectId: 'test-project' };
@@ -16,9 +17,9 @@ function mocks() {
     finishSearchBackfill: jest.fn(async () => undefined),
   };
 }
-async function until(check: () => boolean) {
+async function until(check: () => boolean | Promise<boolean>) {
   for (let i = 0; i < 200; i++) {
-    if (check()) return;
+    if (await check()) return;
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
   throw new Error('Expected search state not reached');
@@ -32,38 +33,51 @@ describe('native search workflow', () => {
     await environment?.teardown();
   });
   test('exhausted document failure waits for recovery signal and replays', async () => {
-    const activities = mocks();
-    activities.syncSearchDocument.mockRejectedValueOnce(
-      ApplicationFailure.nonRetryable('Unavailable', 'SearchProviderFailure')
-    );
-    const worker = await Worker.create({
-      connection: environment.nativeConnection,
-      taskQueue: 'urm-search',
-      workflowsPath: require.resolve('./index'),
-      activities,
-    });
-    const controls = await Worker.create({
-      connection: environment.nativeConnection,
-      taskQueue: 'urm-controls',
-      workflowsPath: require.resolve('./index'),
-      activities,
-    });
-    await controls.runUntil(() =>
-      worker.runUntil(async () => {
-        const handle = await environment.client.workflow.start(SearchDocument, {
-          workflowId: 'search-recovery',
-          taskQueue: 'urm-search',
-          args: [ref],
-        });
-        await until(() => activities.finishSearch.mock.calls.length > 0);
-        await environment.sleep('1 hour');
-        expect(activities.syncSearchDocument).toHaveBeenCalledTimes(1);
-        await handle.signal(searchResume);
-        await handle.result();
-        expect(activities.syncSearchDocument).toHaveBeenCalledTimes(2);
-        await Worker.runReplayHistory({ workflowsPath: require.resolve('./index') }, await handle.fetchHistory());
-      })
-    );
+    const local = await createLocalTestEnvironment();
+    try {
+      const activities = mocks();
+      activities.syncSearchDocument.mockRejectedValueOnce(
+        ApplicationFailure.nonRetryable('Unavailable', 'SearchProviderFailure')
+      );
+      const worker = await Worker.create({
+        connection: local.nativeConnection,
+        taskQueue: 'urm-search',
+        workflowsPath: require.resolve('./index'),
+        activities,
+      });
+      const controls = await Worker.create({
+        connection: local.nativeConnection,
+        taskQueue: 'urm-controls',
+        workflowsPath: require.resolve('./index'),
+        activities,
+      });
+      await controls.runUntil(() =>
+        worker.runUntil(async () => {
+          const handle = await local.client.workflow.start(SearchDocument, {
+            workflowId: 'search-recovery',
+            taskQueue: 'urm-search',
+            args: [ref],
+          });
+          // Wait for the production attention timer to be durably scheduled before resuming.
+          await until(async () => {
+            const history = await handle.fetchHistory();
+            return Boolean(
+              history.events?.some(
+                (event) => event.timerStartedEventAttributes?.startToFireTimeout?.seconds?.toString() === '300'
+              )
+            );
+          });
+          expect(activities.syncSearchDocument).toHaveBeenCalledTimes(1);
+          await handle.signal(searchResume);
+          await until(() => activities.syncSearchDocument.mock.calls.length >= 2);
+          await handle.result();
+          expect(activities.syncSearchDocument).toHaveBeenCalledTimes(2);
+          await Worker.runReplayHistory({ workflowsPath: require.resolve('./index') }, await handle.fetchHistory());
+        })
+      );
+    } finally {
+      await local.teardown();
+    }
   }, 120000);
   test('backfill waits for admitted jobs before advancing cursor', async () => {
     const activities = mocks(),

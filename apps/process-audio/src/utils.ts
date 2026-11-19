@@ -1,5 +1,5 @@
 import { pipeline, finished } from 'node:stream/promises';
-import type { Readable } from 'node:stream';
+import { Transform, type Readable } from 'node:stream';
 import type { CancelToken } from './CancelToken';
 import os from 'os';
 import path from 'path';
@@ -350,7 +350,8 @@ export async function downloadFile(fileUrl: string, outputLocationPath: string, 
 export async function writeOwnedMediaStream(
   source: () => Readable,
   destination: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  expectedBytes?: number
 ): Promise<void> {
   const input = source();
   const inputClosed = finished(input, { cleanup: true }).catch(() => undefined);
@@ -360,7 +361,23 @@ export async function writeOwnedMediaStream(
     signal?.throwIfAborted();
     output = createWriteStream(destination);
     outputClosed = finished(output, { cleanup: true }).catch(() => undefined);
-    await pipeline(input, output, { signal });
+    if (expectedBytes === undefined) {
+      await pipeline(input, output, { signal });
+    } else {
+      let bytes = 0;
+      const invalid = () => new Error('Pinned media length differs from its metadata');
+      const meter = new Transform({
+        transform(chunk: Buffer, _encoding, done) {
+          bytes += chunk.length;
+          if (bytes > expectedBytes) return done(invalid());
+          done(null, chunk);
+        },
+        flush(done) {
+          done(bytes === expectedBytes ? undefined : invalid());
+        },
+      });
+      await pipeline(input, meter, output, { signal });
+    }
   } catch (error) {
     input.destroy();
     output?.destroy();

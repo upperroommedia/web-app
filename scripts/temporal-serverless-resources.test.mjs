@@ -26,6 +26,7 @@ test('a controls pool starts at zero with one queue, its own identity and no pro
   assert.equal(worker.name, 'worker');
   const env = Object.fromEntries(worker.env.map((entry) => [entry.name, entry.value]));
   assert.equal(env.TEMPORAL_TASK_QUEUES, 'urm-controls');
+  assert.equal(env.TEMPORAL_MEDIA_YOUTUBE_ACQUISITION, undefined);
   assert.equal(env.TEMPORAL_DISPATCHER_ENABLED, 'false');
   assert.equal(env.TEMPORAL_WORKER_HOSTING, 'cloud-run');
   assert.equal(env.TEMPORAL_WORKER_IMAGE, c.image);
@@ -43,6 +44,7 @@ test('media gets a disk-backed workspace and preserves the full source/output/he
   const worker = pool.template.containers[0];
   const env = Object.fromEntries(worker.env.map((entry) => [entry.name, entry.value]));
   assert.equal(env.TEMPORAL_MEDIA_CONCURRENCY, '1');
+  assert.equal(env.TEMPORAL_MEDIA_YOUTUBE_ACQUISITION, 'hetzner-render-v1');
   assert.equal(env.TEMPORAL_MEDIA_WORKSPACE_MAX_BYTES, String(64 * 2 ** 30));
   assert.equal(env.TEMPORAL_MEDIA_DISK_HEADROOM_BYTES, String(16 * 2 ** 30));
   assert.deepEqual(pool.template.volumes.find((volume) => volume.name === 'scratch').emptyDir, {

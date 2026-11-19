@@ -7,6 +7,7 @@ import * as os from 'node:os';
 import * as url from 'node:url';
 import * as continuity from '../../temporal-provider-usage-continuity.mjs';
 import { createReleaseFirebaseResources, runWithCleanup } from '../../temporal-release-resources.mjs';
+import { workerHandoffInput } from '../../temporal-worker-handoff-plan.mjs';
 const scenario = process.argv[2];
 const events = [],
   apps = [];
@@ -39,10 +40,22 @@ const records = new Map([
 ]);
 let socket,
   transactions = 0;
-const snap = (key) => ({ exists: records.has(key), data: () => structuredClone(records.get(key)) });
+const stamp = { seconds: 1, nanoseconds: 0 };
+const snap = (key) => ({
+  exists: records.has(key),
+  data: () => structuredClone(records.get(key)),
+  createTime: stamp,
+  updateTime: key === '_control/temporalReleaseOperation' && scenario === 'changed-claim'
+    ? { seconds: 2, nanoseconds: 0 }
+    : stamp,
+});
 const firestore = {
   doc: (key) => ({
     path: key,
+    create: async (data) => {
+      await firestore.runTransaction((tx) => tx.create({ path: key }, data));
+      return { writeTime: { seconds: 1, nanoseconds: 0 } };
+    },
     get: async () => {
       if (scenario.startsWith('action-failure')) throw new Error('ORIGINAL_ACTION_FAILURE');
       return snap(key);
@@ -168,6 +181,7 @@ const imports = {
     },
   },
   './temporal-release-resources.mjs': { runWithCleanup },
+  './temporal-worker-handoff-plan.mjs': { workerHandoffInput },
   './temporal-release-api.mjs': {
     createReleaseApi: () => async () => {
       throw new Error('UNEXPECTED_API_REQUEST');
@@ -194,10 +208,11 @@ const imports = {
     assertReleaseRuntimeSource: async () => {},
     hash: () => 'fixture-hash',
     proofDigest: (value) => JSON.stringify(value),
-    nativeSnapshotProof: (snapshot) => ({ data: snapshot.data() }),
+    nativeSnapshotProof: (snapshot) => ({ data: snapshot.data(), createTime: snapshot.createTime, updateTime: snapshot.updateTime }),
     assertNativeSnapshot: () => {},
   },
   './temporal-release-lib.mjs': {
+    canReleaseOwnedOperationLock: () => true,
     validateReleaseConfig: (value) => value,
     validateControl: (value) => value,
     CONTROL_PATH: '_control/temporalRelease',

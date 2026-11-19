@@ -1,6 +1,7 @@
 import { proofDigest as hash } from './temporal-release-runtime.mjs';
 const namespace = 'urm-app-staging.qwejt';
 const deploymentName = 'urm-worker-media-staging';
+const sharedDeployment = 'urm-worker-staging';
 const queue = 'urm-media';
 const fail = () => {
   throw new Error('RESTORED_MEDIA_QUEUE_PROTECTION_UNCONFIRMED');
@@ -15,24 +16,30 @@ const version = (v) =>
   typeof v.buildId === 'string' &&
   v.buildId.length > 0 &&
   v.buildId.length <= 200;
-const route = (r, buildId) => {
+const route = (routing, expectedDeployment, expectedBuild) => {
+  if (!routing || routing.rampingDeploymentVersion?.buildId || Number(routing.rampingVersionPercentage ?? 0) !== 0)
+    fail();
+  const current = routing.currentDeploymentVersion;
+  if (!current?.buildId) {
+    if (current?.deploymentName || expectedBuild) fail();
+    return null;
+  }
   if (
-    !r ||
-    r.rampingDeploymentVersion?.buildId ||
-    Number(r.rampingVersionPercentage ?? 0) !== 0 ||
-    r.currentDeploymentVersion?.buildId === buildId
+    !version(current) ||
+    current.deploymentName !== expectedDeployment ||
+    (expectedBuild && current.buildId !== expectedBuild)
   )
     fail();
-  const current = r.currentDeploymentVersion;
-  if (current?.buildId && (!version(current) || current.deploymentName !== 'urm-worker-staging')) fail();
-  return current?.buildId ? { deploymentName: current.deploymentName, buildId: current.buildId } : null;
+  return { deploymentName: current.deploymentName, buildId: current.buildId };
 };
 /** Fixed normal Activity-only inventory. The canonical image/source collector,
  * never CLI input, supplies a verified startup witness. Returned owned pollers
  * are deliberately excluded from the stable original routing baseline. This
  * scan alone grants neither namespace protection nor registration authority. */
-export async function scanRestoredMediaInventory({ client, plan, startup, rpc }) {
+export async function scanRestoredMediaInventory({ client, plan, startup, rpc, promotionStage }) {
   if (!/^[a-f0-9]{40}$/.test(plan?.buildId)) fail();
+  if (promotionStage !== undefined && (!['before', 'after'].includes(promotionStage) || !startup)) fail();
+  const promoted = promotionStage === 'after';
   if (
     startup &&
     (startup.kind !== 'restored-media-startup-witness-v1' ||
@@ -44,7 +51,16 @@ export async function scanRestoredMediaInventory({ client, plan, startup, rpc })
   const service = client.connection.workflowService;
   const report = await rpc(() => service.describeWorkerDeployment({ namespace, deploymentName }));
   const d = report.workerDeploymentInfo;
-  if (d?.name !== deploymentName || route(d.routingConfig, plan.buildId)) fail();
+  if (d?.name !== deploymentName) fail();
+  const ownRoute = route(d.routingConfig, deploymentName, promoted ? plan.buildId : undefined);
+  if (!promoted && ownRoute) fail();
+  let sharedReport, shared;
+  if (promotionStage) {
+    sharedReport = await rpc(() => service.describeWorkerDeployment({ namespace, deploymentName: sharedDeployment }));
+    if (sharedReport.workerDeploymentInfo?.name !== sharedDeployment) fail();
+    shared = route(sharedReport.workerDeploymentInfo.routingConfig, sharedDeployment);
+    if (!shared || shared.buildId === plan.buildId) fail();
+  }
   const versions = [],
     builds = new Set();
   for (const entry of list(d.versionSummaries, 100)) {
@@ -57,7 +73,7 @@ export async function scanRestoredMediaInventory({ client, plan, startup, rpc })
     const info = detail.workerDeploymentVersionInfo;
     if (
       hash(info?.deploymentVersion) !== hash(v) ||
-      info.currentSinceTime ||
+      Boolean(info.currentSinceTime) !== (promoted && v.buildId === plan.buildId) ||
       info.rampingSinceTime ||
       Number(info.rampPercentage ?? 0) !== 0 ||
       (info.computeConfig != null &&
@@ -115,7 +131,16 @@ export async function scanRestoredMediaInventory({ client, plan, startup, rpc })
         })
       );
       if (!p.taskQueueStatus || String(p.taskQueueStatus.backlogCountHint) !== '0') fail();
-      const current = route(p.versioningInfo, plan.buildId);
+      const current =
+        promoted && type === 2
+          ? route(p.versioningInfo, deploymentName, plan.buildId)
+          : route(p.versioningInfo, sharedDeployment);
+      if (
+        (current?.deploymentName === sharedDeployment && current.buildId === plan.buildId) ||
+        (promotionStage && type === 2 && !promoted && hash(current) !== hash(shared)) ||
+        (promotionStage && type === 1 && current && hash(current) !== hash(shared))
+      )
+        fail();
       for (const poller of list(p.pollers, 1000)) {
         const v = poller.deploymentOptions;
         if (
@@ -140,24 +165,29 @@ export async function scanRestoredMediaInventory({ client, plan, startup, rpc })
           // Retained traditional pollers are protected only on the exact native
           // current shared version. Same-build or arbitrary historical peers
           // do not receive a blanket exception.
-          if (!current || hash({ deploymentName: v.deploymentName, buildId: v.buildId }) !== hash(current)) fail();
+          const protectedVersion = shared ?? current;
+          if (
+            !protectedVersion ||
+            hash({ deploymentName: v.deploymentName, buildId: v.buildId }) !== hash(protectedVersion)
+          )
+            fail();
           if (!peerVersions.has(v.buildId)) {
-            const peer = await rpc(() =>
-              service.describeWorkerDeployment({ namespace, deploymentName: 'urm-worker-staging' })
-            );
+            const peer =
+              sharedReport ??
+              (await rpc(() => service.describeWorkerDeployment({ namespace, deploymentName: sharedDeployment })));
             if (
-              peer.workerDeploymentInfo?.name !== 'urm-worker-staging' ||
-              hash(route(peer.workerDeploymentInfo.routingConfig, plan.buildId)) !== hash(current)
+              peer.workerDeploymentInfo?.name !== sharedDeployment ||
+              hash(route(peer.workerDeploymentInfo.routingConfig, sharedDeployment)) !== hash(protectedVersion)
             )
               fail();
             const detail = await rpc(() =>
               service.describeWorkerDeploymentVersion({
                 namespace,
-                deploymentVersion: current,
+                deploymentVersion: protectedVersion,
                 reportTaskQueueStats: true,
               })
             );
-            if (hash(detail.workerDeploymentVersionInfo?.deploymentVersion) !== hash(current)) fail();
+            if (hash(detail.workerDeploymentVersionInfo?.deploymentVersion) !== hash(protectedVersion)) fail();
             peerVersions.set(v.buildId, hash({ deployment: peer.workerDeploymentInfo, version: detail }));
           }
           protectedPollers.push(item);
@@ -171,11 +201,18 @@ export async function scanRestoredMediaInventory({ client, plan, startup, rpc })
   return {
     protected: {
       versions: sort(versions.filter((v) => v.buildId !== plan.buildId)),
-      partitions: sort(partitions),
+      partitions: partitions.sort((a, b) => a.type - b.type || a.key.localeCompare(b.key)),
       pollers: sort(protectedPollers),
       peers: [...peerVersions].sort(([a], [b]) => a.localeCompare(b)),
     },
     ownVersion: versions.find((v) => v.buildId === plan.buildId) ?? null,
     ownedPollers: sort(ownedPollers),
+    ...(promotionStage && {
+      promotionRouting: {
+        stage: promotionStage,
+        current: partitions.find(({ type, key }) => type === 2 && key === queue).current,
+        peerRoutingSHA256: hash(sharedReport.workerDeploymentInfo.routingConfig),
+      },
+    }),
   };
 }

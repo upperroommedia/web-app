@@ -42,7 +42,12 @@ test('cleanup attempts every owned resource and preserves primary plus cleanup f
   expect((caught as AggregateError).cause).toBe(primary);
 });
 
-test('native accepted start survives interrupted HTTP shutdown and expired-lease reconciliation without another execution', async () => {
+test.each(['start', 'signal-with-start'] as const)(
+  'native accepted %s survives interrupted HTTP shutdown and expired-lease reconciliation without another delivery',
+  runDispatchRecovery
+);
+
+async function runDispatchRecovery(operation: 'start' | 'signal-with-start') {
   const harness = JSON.parse(readFileSync(resolve(__dirname, '../../../../firebase.test.json'), 'utf8'));
   if (process.env.FIRESTORE_EMULATOR_HOST !== `127.0.0.1:${harness.emulators.firestore.port}`)
     throw new Error('Dedicated emulator required');
@@ -57,23 +62,35 @@ test('native accepted start survives interrupted HTTP shutdown and expired-lease
   const projectId = 'urm-app-staging', jobId = `dispatch-recovery-${randomUUID()}`;
   const workflowId = `dispatch:${projectId}:${jobId}`;
   const outbox = db.collection('durableJobOutbox').doc(jobId), job = db.collection('durableJobs').doc(jobId);
+  const nextJobId = `${jobId}-next`;
+  const nextOutbox = db.collection('durableJobOutbox').doc(nextJobId);
   const accepted = deferred(), releaseAck = deferred();
   let starts = 0, clock = Date.now();
+  async function loseAcknowledgement(send: () => Promise<unknown>) {
+    starts++;
+    await send();
+    accepted.resolve();
+    await releaseAck.promise;
+    throw new Error('controlled lost acknowledgement');
+  }
   const workflow = new Proxy(environment.client.workflow, {
     get(target, property) {
-      if (property === 'start') return async (...args: Parameters<typeof target.start>) => {
-        starts++;
-        await target.start(...args);
-        accepted.resolve();
-        await releaseAck.promise;
-        // Simulate loss after the real native server accepted the original start.
-        throw new Error('controlled lost acknowledgement');
-      };
+      if (property === 'start' && operation === 'start')
+        return (...args: Parameters<typeof target.start>) => loseAcknowledgement(() => target.start(...args));
       const value = Reflect.get(target, property);
       return typeof value === 'function' ? value.bind(target) : value;
     },
   });
-  const first = new OutboxDispatcher({ db, client: { workflow }, projectId, requireOpenAdmission: true, now: () => clock, leaseMs: 1000 });
+  const workflowService = new Proxy(environment.client.workflowService, {
+    get(target, property) {
+      if (property === 'signalWithStartWorkflowExecution' && operation === 'signal-with-start')
+        return (...args: Parameters<typeof target.signalWithStartWorkflowExecution>) =>
+          loseAcknowledgement(() => target.signalWithStartWorkflowExecution(...args));
+      const value = Reflect.get(target, property);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+  const first = new OutboxDispatcher({ db, client: { workflow, workflowService }, projectId, requireOpenAdmission: true, now: () => clock, leaseMs: 1000 });
   const passContexts: Readonly<DispatchPassContext>[] = [];
   const handler = createServerlessDispatchHandler({ projectId, authorization: { verify: async (_headers, kind) => ({ kind, subject: `controlled-local-${kind}` }), drain: async () => undefined }, admission: 'enabled',
     reconcileJob: `projects/${projectId}/locations/us-central1/jobs/local-reconcile`,
@@ -88,7 +105,9 @@ test('native accepted start survives interrupted HTTP shutdown and expired-lease
         .map(domain => [domain, { owner: 'temporal', admission: 'open' }])) });
     await job.create({ projectId, state: 'running' });
     await outbox.create({ state: 'pending', nextAttemptAt: 0,
-      dispatch: { ref: { projectId, jobId }, workflowId, workflowType: 'inertLocalDispatchFixture', taskQueue: jobId } });
+      dispatch: { ref: { projectId, jobId }, workflowId, workflowType: 'inertLocalDispatchFixture', taskQueue: jobId,
+        ...(operation === 'signal-with-start' ? { signal: { name: 'media.request', args: { projectId, jobId } } } : {}),
+      } });
     await new Promise<void>(yes => { server.listen(0, '127.0.0.1', yes); });
     const address = server.address();
     if (!address || typeof address === 'string') throw new Error('Local fixture address required');
@@ -161,6 +180,19 @@ test('native accepted start survives interrupted HTTP shutdown and expired-lease
       expect((await recovered.describe()).runId).toBe(original.runId);
       const history = await recovered.fetchHistory();
       expect(history.events?.filter(event => event.workflowExecutionStartedEventAttributes)).toHaveLength(1);
+      expect(history.events?.filter(event => event.workflowExecutionSignaledEventAttributes))
+        .toHaveLength(operation === 'signal-with-start' ? 1 : 0);
+      if (operation === 'signal-with-start') {
+        const nextRef = { projectId, jobId: nextJobId };
+        await nextOutbox.create({ state: 'pending', nextAttemptAt: 0,
+          dispatch: { ref: nextRef, workflowId, workflowType: 'inertLocalDispatchFixture', taskQueue: jobId,
+            signal: { name: 'media.request', args: nextRef } } });
+        await replacement.tick();
+        expect((await nextOutbox.get()).get('state')).toBe('dispatched');
+        expect((await recovered.describe()).runId).toBe(original.runId);
+        expect((await recovered.fetchHistory()).events?.filter(event => event.workflowExecutionSignaledEventAttributes))
+          .toHaveLength(2);
+      }
     } finally { await replacement.stop(); }
   } catch (error) { primary = { error }; }
   finally {
@@ -168,10 +200,10 @@ test('native accepted start survives interrupted HTTP shutdown and expired-lease
     await cleanupOwned([
       () => bounded(Promise.all([handler.drain(), first.stop(), closing])),
       () => bounded(new Promise<void>((yes, no) => server.listening ? server.close(error => error ? no(error) : yes()) : yes())),
-      () => bounded(Promise.all([outbox.delete(), job.delete()])),
+      () => bounded(Promise.all([outbox.delete(), job.delete(), ...(operation === 'signal-with-start' ? [nextOutbox.delete()] : [])])),
       () => bounded(db.terminate()),
       () => bounded(deleteApp(app)),
       () => environment.teardown(),
     ], primary);
   }
-});
+}

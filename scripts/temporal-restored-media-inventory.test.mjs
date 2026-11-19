@@ -76,6 +76,79 @@ test('normal exact Activity-only identity across every partition; retained origi
   assert.deepEqual(without.protected, r.protected);
   assert.equal(without.ownedPollers.length, 0);
 });
+function promoteFixture(f) {
+  const candidate = f.detail.workerDeploymentVersionInfo.deploymentVersion;
+  f.report.workerDeploymentInfo.routingConfig = { currentDeploymentVersion: candidate };
+  f.detail.workerDeploymentVersionInfo.currentSinceTime = { seconds: 1, nanos: 0 };
+  f.queues.get(2).versioningInfo = { currentDeploymentVersion: candidate };
+  f.options.promotionStage = 'after';
+  return candidate;
+}
+
+test('both promotion samples pin the shared deployment and only media Activity routing changes', async () => {
+  const f = fixture();
+  f.options.promotionStage = 'before';
+  const before = await scanRestoredMediaInventory(f.options);
+  const candidate = promoteFixture(f);
+  const after = await scanRestoredMediaInventory(f.options);
+  assert.equal(before.promotionRouting.current.deploymentName, old);
+  assert.deepEqual(after.promotionRouting.current, candidate);
+  assert.equal(after.promotionRouting.peerRoutingSHA256, before.promotionRouting.peerRoutingSHA256);
+  assert.deepEqual(after.ownedPollers, before.ownedPollers);
+  assert.deepEqual(after.protected.pollers, before.protected.pollers);
+  const stablePartitions = (result) =>
+    result.protected.partitions.map(({ type, key, owner, current }) => ({
+      type,
+      key,
+      owner,
+      ...(type === 1 && { current }),
+    }));
+  assert.deepEqual(stablePartitions(after), stablePartitions(before));
+  assert.equal(after.protected.partitions.filter(({ type }) => type === 2).length, 2);
+});
+
+for (const [name, mutate] of [
+  [
+    'partial Activity routing propagation',
+    (f) => {
+      const read = f.service.describeTaskQueue;
+      f.service.describeTaskQueue = async (q) => {
+        const reply = await read(q);
+        if (q.taskQueue.name !== '/_sys/urm-media/1') return reply;
+        return { ...reply, versioningInfo: f.queues.get(1).versioningInfo };
+      };
+    },
+  ],
+  [
+    'changed shared deployment',
+    (f) => {
+      const read = f.service.describeWorkerDeployment;
+      f.service.describeWorkerDeployment = (q) =>
+        q.deploymentName === normal
+          ? read(q)
+          : {
+              workerDeploymentInfo: {
+                name: old,
+                routingConfig: { currentDeploymentVersion: { deploymentName: old, buildId: 'changed' } },
+              },
+            };
+    },
+  ],
+  [
+    'unknown startup',
+    (f) => {
+      f.options.startup = null;
+    },
+  ],
+]) {
+  test('post-promotion readback rejects ' + name, async () => {
+    const f = fixture();
+    promoteFixture(f);
+    mutate(f);
+    await assert.rejects(scanRestoredMediaInventory(f.options), /RESTORED_MEDIA_QUEUE_PROTECTION_UNCONFIRMED/);
+  });
+}
+
 for (const [name, mutate] of [
   [
     'wrong startup operation',

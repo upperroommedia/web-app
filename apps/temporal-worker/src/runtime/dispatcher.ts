@@ -1,7 +1,13 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { TEMPORAL_RELEASE_CONTROL_PATH } from '@upperroom/orchestration/release-admission';
 import type { Firestore, DocumentReference } from 'firebase-admin/firestore';
-import { WorkflowIdConflictPolicy, WorkflowIdReusePolicy } from '@temporalio/common';
+import {
+  encodeWorkflowIdConflictPolicy,
+  encodeWorkflowIdReusePolicy,
+  WorkflowIdConflictPolicy,
+  WorkflowIdReusePolicy,
+} from '@temporalio/common';
+import { encodeToPayloadsWithContext } from '@temporalio/common/lib/internal-non-workflow';
 import type { Client } from '@temporalio/client';
 import { durableEntityKey } from '@upperroom/orchestration/job-store';
 import { providerMutationFingerprint } from '../../../../functions/src/temporal/publishing/providerMutationGuard';
@@ -19,6 +25,7 @@ interface OutboxRecord {
   generation?: number;
   evidenceVersion?: number;
   signal?: { name: string; args: unknown[] | Record<string, unknown> };
+  leaseOwner?: string;
   leaseToken?: string;
   leaseExpiresAt?: number;
   nextAttemptAt?: number;
@@ -28,10 +35,12 @@ interface Lease {
   ref: DocumentReference;
   value: OutboxRecord;
   token: string;
+  expiresAt: number;
+  authority?: { releaseId: string; revision: number };
 }
 export interface DispatcherOptions {
   db: Firestore;
-  client: Pick<Client, 'workflow'>;
+  client: Pick<Client, 'workflow' | 'workflowService'>;
   projectId: string;
   owner?: string;
   now?: () => number;
@@ -45,16 +54,28 @@ export interface DispatcherOptions {
 function record(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
-function admissionOpen(value: unknown): boolean {
-  if (!record(value) || value.schemaVersion !== 1 || !Number.isSafeInteger(value.revision) ||
-    Number(value.revision) < 1 || typeof value.releaseId !== 'string' || !value.releaseId.trim() ||
-    value.admission !== 'open' || !record(value.domains)) return false;
+function openAuthority(value: unknown): Lease['authority'] {
+  if (
+    !record(value) ||
+    value.schemaVersion !== 1 ||
+    !Number.isSafeInteger(value.revision) ||
+    Number(value.revision) < 1 ||
+    typeof value.releaseId !== 'string' ||
+    !value.releaseId.trim() ||
+    value.admission !== 'open' ||
+    !record(value.domains)
+  )
+    return undefined;
   const domains = value.domains;
-  return ['media', 'publishing', 'images', 'emails', 'accounts', 'bundles', 'search'].every(domain => {
+  const validDomains = ['media', 'publishing', 'images', 'emails', 'accounts', 'bundles', 'search'].every((domain) => {
     const state = domains[domain];
-    return record(state) && (state.owner === 'temporal' || state.owner === 'legacy') &&
-      (state.admission === 'open' || state.admission === 'paused');
+    return (
+      record(state) &&
+      (state.owner === 'temporal' || state.owner === 'legacy') &&
+      (state.admission === 'open' || state.admission === 'paused')
+    );
   });
+  if (validDomains) return { releaseId: value.releaseId, revision: Number(value.revision) };
 }
 const args = (value: unknown): unknown[] => (value === undefined ? [] : Array.isArray(value) ? value : [value]);
 /** Outbox ownership is a lease, never a process-local flag. A lost Temporal acknowledgement
@@ -72,9 +93,10 @@ export class OutboxDispatcher {
   }
   private async claim(ref: DocumentReference, signal?: AbortSignal): Promise<Lease | undefined | null> {
     return this.options.db.runTransaction(async (tx) => {
-      if (this.options.requireOpenAdmission && !admissionOpen((await tx.get(
-        this.options.db.doc(TEMPORAL_RELEASE_CONTROL_PATH)
-      )).data())) return null;
+      const authority = this.options.requireOpenAdmission
+        ? openAuthority((await tx.get(this.options.db.doc(TEMPORAL_RELEASE_CONTROL_PATH))).data())
+        : undefined;
+      if (this.options.requireOpenAdmission && !authority) return null;
       const snapshot = await tx.get(ref);
       const value = snapshot.data() as OutboxRecord | undefined;
       const now = this.now();
@@ -82,7 +104,7 @@ export class OutboxDispatcher {
         this.stopped ||
         signal?.aborted ||
         !value ||
-        value.state === 'dispatched' ||
+        !['pending', 'dispatching'].includes(value.state) ||
         (value.nextAttemptAt ?? 0) > now ||
         (value.leaseExpiresAt ?? 0) > now
       )
@@ -90,20 +112,45 @@ export class OutboxDispatcher {
       const project = value.dispatch?.ref.projectId ?? value.ref?.projectId ?? value.projectId;
       if (project !== this.options.projectId) throw new Error('OUTBOX_PROJECT_MISMATCH');
       const token = randomUUID();
+      const expiresAt = now + (this.options.leaseMs ?? 60_000);
       tx.update(ref, {
         state: 'dispatching',
         leaseOwner: this.owner,
         leaseToken: token,
-        leaseExpiresAt: now + (this.options.leaseMs ?? 60_000),
+        leaseExpiresAt: expiresAt,
         attempt: (value.attempt ?? 0) + 1,
       });
-      return { ref, value, token };
+      return { ref, value, token, expiresAt, authority };
     });
   }
-  private async settle(lease: Lease, error?: unknown): Promise<void> {
-    await this.options.db.runTransaction(async (tx) => {
+  private ownsLease(lease: Lease, current: OutboxRecord | undefined): boolean {
+    return (
+      current?.state === 'dispatching' &&
+      current.leaseOwner === this.owner &&
+      current.leaseToken === lease.token &&
+      current.leaseExpiresAt === lease.expiresAt &&
+      this.now() < lease.expiresAt
+    );
+  }
+  private async assertSendAuthority(lease: Lease, signal?: AbortSignal): Promise<void> {
+    await this.options.db.runTransaction(
+      async (tx) => {
+        const current = (await tx.get(lease.ref)).data() as OutboxRecord | undefined;
+        if (!this.ownsLease(lease, current)) throw new Error('OUTBOX_LEASE_EXPIRED');
+        if (lease.authority) {
+          const authority = openAuthority((await tx.get(this.options.db.doc(TEMPORAL_RELEASE_CONTROL_PATH))).data());
+          if (authority?.releaseId !== lease.authority.releaseId || authority.revision !== lease.authority.revision)
+            throw new Error('OUTBOX_ADMISSION_CHANGED');
+        }
+      },
+      { readOnly: true }
+    );
+    if (this.stopped || signal?.aborted || this.now() >= lease.expiresAt) throw new Error('DISPATCH_INTERRUPTED');
+  }
+  private async settle(lease: Lease, error?: unknown): Promise<boolean> {
+    return this.options.db.runTransaction(async (tx) => {
       const current = (await tx.get(lease.ref)).data() as OutboxRecord | undefined;
-      if (current?.leaseToken !== lease.token) return;
+      if (!current || !this.ownsLease(lease, current)) return false;
       tx.update(
         lease.ref,
         error
@@ -123,9 +170,11 @@ export class OutboxDispatcher {
             }
           : { state: 'dispatched', leaseExpiresAt: 0, acknowledgedAt: this.now() }
       );
+      return true;
     });
   }
-  private async send(value: OutboxRecord, signal?: AbortSignal): Promise<void> {
+  private async send(lease: Lease, signal?: AbortSignal): Promise<void> {
+    const { value } = lease;
     const dispatch = value.dispatch;
     if (dispatch) {
       if (
@@ -136,25 +185,44 @@ export class OutboxDispatcher {
       const job = (await this.options.db.collection('durableJobs').doc(dispatch.ref.jobId).get()).data();
       if (job && job.projectId !== this.options.projectId) throw new Error('INVALID_JOB_SCOPE');
       if (job && isDurableJobTerminal(job.state)) return;
-      const options = {
-        workflowId: dispatch.workflowId,
-        taskQueue: dispatch.taskQueue,
-        args: args(dispatch.startArgs ?? dispatch.ref),
-        workflowIdReusePolicy: dispatch.signal
-          ? WorkflowIdReusePolicy.ALLOW_DUPLICATE
-          : WorkflowIdReusePolicy.REJECT_DUPLICATE,
-        workflowIdConflictPolicy: WorkflowIdConflictPolicy.USE_EXISTING,
-      };
-      if (this.stopped || signal?.aborted) throw new Error('DISPATCH_INTERRUPTED');
+      const startArgs = args(dispatch.startArgs ?? dispatch.ref);
       if (dispatch.signal) {
-        await this.options.client.workflow.signalWithStart(dispatch.workflowType, {
-          ...options,
-          signal: dispatch.signal.name,
-          signalArgs: args(dispatch.signal.args),
+        // The SDK's high-level SignalWithStart chooses a new ID per invocation.
+        // Native retries of one outbox record must reuse its original request ID.
+        const { workflow, workflowService } = this.options.client;
+        const { namespace, identity, loadedDataConverter } = workflow.options;
+        const context = { type: 'workflow' as const, namespace, workflowId: dispatch.workflowId };
+        const [input, signalInput] = await Promise.all([
+          encodeToPayloadsWithContext(loadedDataConverter, context, startArgs),
+          encodeToPayloadsWithContext(loadedDataConverter, context, args(dispatch.signal.args)),
+        ]);
+        const requestId = createHash('sha256')
+          .update(JSON.stringify([namespace, this.options.projectId, lease.ref.path]))
+          .digest('hex');
+        await this.assertSendAuthority(lease, signal);
+        await workflowService.signalWithStartWorkflowExecution({
+          namespace,
+          identity,
+          requestId,
+          workflowId: dispatch.workflowId,
+          workflowType: { name: dispatch.workflowType },
+          taskQueue: { name: dispatch.taskQueue },
+          workflowIdReusePolicy: encodeWorkflowIdReusePolicy(WorkflowIdReusePolicy.ALLOW_DUPLICATE),
+          workflowIdConflictPolicy: encodeWorkflowIdConflictPolicy(WorkflowIdConflictPolicy.USE_EXISTING),
+          input: { payloads: input },
+          signalName: dispatch.signal.name,
+          signalInput: { payloads: signalInput },
         });
       } else {
+        await this.assertSendAuthority(lease, signal);
         try {
-          await this.options.client.workflow.start(dispatch.workflowType, options);
+          await this.options.client.workflow.start(dispatch.workflowType, {
+            workflowId: dispatch.workflowId,
+            taskQueue: dispatch.taskQueue,
+            args: startArgs,
+            workflowIdReusePolicy: WorkflowIdReusePolicy.REJECT_DUPLICATE,
+            workflowIdConflictPolicy: WorkflowIdConflictPolicy.USE_EXISTING,
+          });
         } catch (error) {
           if ((error as { name?: string }).name !== 'WorkflowExecutionAlreadyStartedError') throw error;
         }
@@ -239,7 +307,7 @@ export class OutboxDispatcher {
       )
         return;
     }
-    if (this.stopped || signal?.aborted) throw new Error('DISPATCH_INTERRUPTED');
+    await this.assertSendAuthority(lease, signal);
     const handle = this.options.client.workflow.getHandle(value.workflowId);
     if (value.signal) await handle.signal(value.signal.name, ...args(value.signal.args));
     else if (value.action === 'cancel') await handle.cancel();
@@ -247,9 +315,11 @@ export class OutboxDispatcher {
   }
   async tick(signal?: AbortSignal): Promise<void> {
     this.healthy = false;
-    if (this.options.requireOpenAdmission && !admissionOpen((await this.options.db.doc(
-      TEMPORAL_RELEASE_CONTROL_PATH
-    ).get()).data())) return;
+    if (
+      this.options.requireOpenAdmission &&
+      !openAuthority((await this.options.db.doc(TEMPORAL_RELEASE_CONTROL_PATH).get()).data())
+    )
+      return;
     let successful = true;
     for (const collection of ['durableJobOutbox', 'durableJobCommands']) {
       if (this.stopped || signal?.aborted) return;
@@ -277,9 +347,9 @@ export class OutboxDispatcher {
         if (lease === null) return;
         if (!lease) continue;
         try {
-          await this.send(lease.value, signal);
+          await this.send(lease, signal);
           if (this.stopped || signal?.aborted) return;
-          await this.settle(lease);
+          if (!(await this.settle(lease))) successful = false;
         } catch (error) {
           if (this.stopped || signal?.aborted) return;
           await this.settle(lease, error);

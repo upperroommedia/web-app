@@ -138,3 +138,37 @@ for(const finalAwait of [2,4])test(`media final awaited authorizer ${finalAwait}
  try{await assert.rejects(prepareCloudRunZeroPool(f.options));assert.equal(f.posts,0);}
  finally{Date.now=now;}
 });
+
+for (const change of ['association', 'inventory', 'stale after authority check']) {
+  test(`pool creation rejects ${change} at send and leaves the original attempt fenced`, async () => {
+    const f = fixture(), api = f.options.api, observe = f.options.observeComputeIsolation;
+    const now = Date.now;
+    let credentialsReady = false, scans = 0;
+    f.options.api = async (...args) => {
+      if (args[1] === 'POST') credentialsReady = true;
+      return api(...args);
+    };
+    f.options.observeComputeIsolation = async () => {
+      scans++;
+      assert.equal(credentialsReady, scans > 1);
+      const evidence = await observe();
+      if (scans === 1) return evidence;
+      if (change === 'association') throw new Error('compute attached');
+      if (change === 'inventory') return { ...evidence, inventorySHA256: 'e'.repeat(64) };
+      return evidence;
+    };
+    f.options.authorizeCreate = async () => {
+      if (credentialsReady && change === 'stale after authority check') Date.now = () => now() + 6000;
+    };
+    try {
+      await assert.rejects(prepareCloudRunZeroPool(f.options), /CLOUD_RUN_ZERO_POOL_PREPARATION_UNCONFIRMED/);
+      assert.equal(f.saved.stage, 'attempted');
+      assert.equal(f.posts, 0);
+      await assert.rejects(prepareCloudRunZeroPool({ ...f.options, saved: f.saved }));
+      assert.equal(scans, 2);
+      assert.equal(f.posts, 0);
+    } finally {
+      Date.now = now;
+    }
+  });
+}

@@ -1,11 +1,15 @@
 import { Context } from '@temporalio/activity';
 import type { Firestore } from 'firebase-admin/firestore';
-import { recordNativeYouTubeArchiveWait } from '../../../process-audio/src/temporal/hetzner-acquisition-episode';
+import {
+  recordNativeYouTubeArchiveWait,
+  recordNativeYouTubeRenderArchiveWait,
+} from '../../../process-audio/src/temporal/hetzner-acquisition-episode';
 import { createRuntimeYouTubeArchiveWaitRecorder } from './hetzner-media';
 import type { WorkerWitness } from './worker-witness';
 jest.mock('../../../process-audio/src/temporal/hetzner-acquisition-episode', () => ({
   prepareNativeYouTubeEpisode: jest.fn(),
   recordNativeYouTubeArchiveWait: jest.fn(),
+  recordNativeYouTubeRenderArchiveWait: jest.fn(),
 }));
 const ref = {
   projectId: 'urm-app-staging',
@@ -17,12 +21,12 @@ const ref = {
 const value = { attempt: 1, scheduledAt: 1, dueAt: 1800001 };
 // Controlled Context/witness/transport; this tests the real source boundary,
 // not actual SDK identity, Cloud Run image or native archive acceptance.
-const lookup = jest.fn(async () => ({ exists: true }));
+const lookup = jest.fn(async () => ({ exists: true, get: (_key: string): unknown => undefined }));
 const actor = jest.fn(async () => undefined);
 const cancellation = new AbortController();
 beforeEach(() => {
   jest.clearAllMocks();
-  lookup.mockResolvedValue({ exists: true });
+  lookup.mockResolvedValue({ exists: true, get: () => undefined });
   actor.mockResolvedValue(undefined);
   jest.mocked(recordNativeYouTubeArchiveWait).mockResolvedValue(undefined);
   jest.spyOn(Context, 'current').mockReturnValue({
@@ -75,7 +79,7 @@ test('original archive lookup deadline survives real event-loop starvation befor
     while (performance.now() - start < 5100) {
       /* real blocked event loop */
     }
-    return { exists: true };
+    return { exists: true, get: () => undefined };
   });
   await expect(setup()(ref, value)).rejects.toMatchObject({ type: 'YOUTUBE_ARCHIVE_WAIT_UNCONFIRMED' });
   expect(recordNativeYouTubeArchiveWait).not.toHaveBeenCalled();
@@ -129,5 +133,13 @@ test('native cancellation during stalled initial lookup retains its original rea
   await jest.advanceTimersByTimeAsync(4901);
   await observed;
   expect(actor).not.toHaveBeenCalled();
+  expect(recordNativeYouTubeArchiveWait).not.toHaveBeenCalled();
+});
+
+test('a render delegation records its timer against the render close path', async () => {
+  lookup.mockResolvedValueOnce({ exists: true, get: (key) => (key === 'renderProtocol' ? 1 : undefined) });
+  jest.mocked(recordNativeYouTubeRenderArchiveWait).mockResolvedValueOnce(undefined);
+  await setup()(ref, value);
+  expect(recordNativeYouTubeRenderArchiveWait).toHaveBeenCalledWith(expect.objectContaining({ ref, wait: value }));
   expect(recordNativeYouTubeArchiveWait).not.toHaveBeenCalled();
 });

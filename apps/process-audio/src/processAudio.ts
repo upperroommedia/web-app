@@ -1,5 +1,5 @@
 import path from 'path';
-import { Bucket } from '@google-cloud/storage';
+import { Bucket, type File } from '@google-cloud/storage';
 import { Sermon, sermonStatus, sermonStatusType } from './types';
 import { Database } from 'firebase-admin/database';
 import { DocumentReference, Firestore } from 'firebase-admin/firestore';
@@ -22,8 +22,22 @@ import trim from './trim';
 import { createLoggerWithContext } from './WinstonLogger';
 import { LogContext, createChildContext, createContext } from './context';
 import { markProcessAudioRequestRunning } from './processAudioQueueStore';
-import { setProcessAudioProgress } from './processAudioProgress';
+import { setProcessAudioProgress, type ProcessAudioProgressTarget } from './processAudioProgress';
 import { Sentry } from './instrument';
+import { YOUTUBE_RENDER_MAX_FILE_BYTES } from './temporal/hetzner-render-limits';
+
+async function pinnedInputLength(file: File, generation: string): Promise<number> {
+  const [metadata] = await file.getMetadata();
+  const bytes = Number(metadata.size);
+  if (
+    metadata.generation !== generation ||
+    !Number.isSafeInteger(bytes) ||
+    bytes <= 0 ||
+    bytes > YOUTUBE_RENDER_MAX_FILE_BYTES
+  )
+    throw new Error('Pinned media metadata is outside the supported render budget');
+  return bytes;
+}
 
 const DEFAULT_PROCESS_AUDIO_LOCK_TTL_MS = 5 * 60 * 1000;
 const DEFAULT_PROCESS_AUDIO_LOCK_HEARTBEAT_INTERVAL_MS = 30 * 1000;
@@ -429,180 +443,27 @@ export const processAudio = async (
             message: 'Getting Data',
           },
         });
-        const processedStoragePath = `${PROCESSED_SERMONS_BUCKET}/${fileName}`;
-        const audioFilesToMerge: FilePaths = { INTRO: undefined, OUTRO: undefined };
-        const customMetadata: CustomMetadata = { duration, title };
-        if (introUrl) {
-          audioFilesToMerge.INTRO = introUrl;
-          customMetadata.introUrl = introUrl;
-        }
-        if (outroUrl) {
-          audioFilesToMerge.OUTRO = outroUrl;
-          customMetadata.outroUrl = outroUrl;
-        }
-        if (cancelToken.isCancellationRequested) throw new ProcessAudioCancelledError();
-
-        const trimMessage = skipTranscode
-          ? 'Trimming'
-          : audioSource.type === 'StorageFilePath'
-          ? 'Trimming and Transcoding'
-          : 'Downloading YouTube Audio';
-
-        log.info('Starting audio processing step', { step: trimMessage });
-
-        await docRef.update({
-          status: {
-            ...sermonStatus,
-            audioStatus: sermonStatusType.PROCESSING,
-            message: trimMessage,
-          },
+        const { durationSeconds } = await renderProcessAudio({
+          ytdlpPath,
+          cancelToken,
+          bucket,
+          sourceBucket,
+          audioSource,
+          realtimeDB,
+          progressRef: realtimeDB.ref(`addIntroOutro/${fileName}`),
+          updateSermon: (change) => docRef.update(change),
+          sermonStatus,
+          tempFiles,
+          contextWithSermonId,
+          processedStoragePath: `${PROCESSED_SERMONS_BUCKET}/${fileName}`,
+          outputFilePath: `intro-outro-sermons/${path.basename(fileName)}`,
+          title,
+          startTime,
+          duration,
+          skipTranscode,
+          introUrl,
+          outroUrl,
         });
-
-        // Ensure sermonId is always included in context
-        // Ensure sermonId is preserved in child context
-        const trimCtx = createChildContext(contextWithSermonId, 'trim');
-
-        await Sentry.startSpan(
-          {
-            name: trimMessage,
-            op: skipTranscode
-              ? 'media.trim'
-              : audioSource.type === 'StorageFilePath'
-              ? 'media.transcode'
-              : 'media.download',
-            attributes: {
-              'process_audio.sermon_id': fileName,
-              'process_audio.audio_source_type': audioSource.type,
-            },
-          },
-          async () => {
-            if (skipTranscode) {
-              if (audioSource.type !== 'StorageFilePath') {
-                log.error('Invalid audio source for skipTranscode', { sourceType: audioSource.type });
-                throw new Error(
-                  'Audio source must be a file from processed-sermons in order to trim without transcoding'
-                );
-              }
-              await trim(
-                cancelToken,
-                bucket,
-                audioSource.source,
-                processedStoragePath,
-                tempFiles,
-                realtimeDB.ref(`addIntroOutro/${fileName}`),
-                customMetadata,
-                startTime,
-                duration,
-                trimCtx,
-                sourceBucket
-              );
-              return;
-            }
-
-            await trimAndTranscode(
-              ytdlpPath,
-              cancelToken,
-              bucket,
-              audioSource,
-              processedStoragePath,
-              tempFiles,
-              realtimeDB.ref(`addIntroOutro/${fileName}`),
-              realtimeDB,
-              docRef,
-              sermonStatus,
-              customMetadata,
-              startTime,
-              duration,
-              trimCtx,
-              sourceBucket
-            );
-          }
-        );
-
-        if (trimCtx.youtubeSuccessfulAcquisitionAuthority) {
-          contextWithSermonId.youtubeSuccessfulAcquisitionAuthority = trimCtx.youtubeSuccessfulAcquisitionAuthority;
-        }
-
-        log.info('Audio processing step completed', { step: trimMessage });
-
-        // download processed audio for merging
-        const processedFilePath = createTempFile(`processed-${fileName}`, tempFiles);
-        log.debug('Downloading processed audio and intro/outro files');
-        const [tempFilePaths] = await settleMediaBranches(
-          [
-            () => downloadFiles(bucket, audioFilesToMerge, tempFiles, cancelToken),
-            () =>
-              writeOwnedMediaStream(
-                () => bucket.file(processedStoragePath).createReadStream(),
-                processedFilePath,
-                cancelToken.signal
-              ),
-          ] as const,
-          cancelToken
-        );
-
-        //create merge array in order INTRO, CONTENT, OUTRO
-        const filePathsArray: string[] = [];
-        if (tempFilePaths.INTRO) filePathsArray.push(tempFilePaths.INTRO);
-        filePathsArray.push(processedFilePath);
-        if (tempFilePaths.OUTRO) filePathsArray.push(tempFilePaths.OUTRO);
-
-        // use reduce to sum up all the durations of the files from filepaths
-        const durationSeconds = (
-          await settleMediaBranches(
-            [tempFilePaths.INTRO, tempFilePaths.OUTRO].map(
-              (path) => async () => path ? await getDurationSeconds(path, cancelToken) : 0
-            ),
-            cancelToken
-          )
-        ).reduce((accumulator, currentValue) => accumulator + currentValue, duration);
-
-        customMetadata.duration = durationSeconds;
-        log.info('Calculated total duration', { durationSeconds, formatted: secondsToTimeFormat(durationSeconds) });
-
-        // if there is an intro or outro, merge the files
-        if (filePathsArray.length > 1) {
-          log.info('Merging files with intro/outro', { fileCount: filePathsArray.length });
-          await docRef.update({
-            status: {
-              ...sermonStatus,
-              audioStatus: sermonStatusType.PROCESSING,
-              message: 'Adding Intro and Outro',
-            },
-          });
-          const outputFilePath = `intro-outro-sermons/${path.basename(fileName)}`;
-
-          // Ensure sermonId is preserved in child context
-          const mergeCtx = createChildContext(contextWithSermonId, 'merge');
-          const mergedOutputFile = await Sentry.startSpan(
-            {
-              name: 'process-audio.merge-intro-outro',
-              op: 'media.merge',
-              attributes: {
-                'process_audio.sermon_id': fileName,
-                'process_audio.merge_file_count': filePathsArray.length,
-              },
-            },
-            () =>
-              mergeFiles(
-                cancelToken,
-                bucket,
-                filePathsArray,
-                outputFilePath,
-                durationSeconds,
-                tempFiles,
-                realtimeDB.ref(`addIntroOutro/${fileName}`),
-                customMetadata,
-                mergeCtx
-              )
-          );
-          log.info('Files merged successfully', { outputPath: mergedOutputFile.name });
-          await logMemoryUsage('Memory Usage after merge', contextWithSermonId, tempFiles);
-        } else {
-          log.debug('No intro or outro, skipping merge');
-        }
-
-        if (cancelToken.isCancellationRequested) throw new ProcessAudioCancelledError();
 
         log.info('Updating status to PROCESSED');
         await docRef.update({
@@ -667,3 +528,313 @@ export const processAudio = async (
     }
   );
 };
+
+type RenderStatusUpdate = (change: { status: sermonStatus }) => Promise<unknown>;
+
+/** Render into the supplied destinations while the caller owns authorization,
+ * job state, and temporary-file cleanup. The output is not job completion. */
+export async function renderProcessAudio(options: {
+  ytdlpPath: string;
+  cancelToken: CancelToken;
+  bucket: Bucket;
+  sourceBucket: Bucket;
+  audioSource: AudioSource;
+  realtimeDB: Database;
+  progressRef: ProcessAudioProgressTarget;
+  updateSermon: RenderStatusUpdate;
+  sermonStatus: sermonStatus;
+  tempFiles: Set<string>;
+  contextWithSermonId: LogContext;
+  processedStoragePath: string;
+  outputFilePath: string;
+  outputIdentity?: Readonly<Record<string, string>>;
+  onYouTubeProviderFailure?: (error: unknown) => void;
+  retainYouTubeSource?: (path: string) => Promise<void>;
+  authorizeOutputUpload?: () => Promise<void>;
+  pinnedMergeSources?: Partial<Record<keyof FilePaths, { path: string; generation: string }>>;
+  title: string | undefined;
+  startTime: number;
+  duration: number;
+  skipTranscode?: boolean;
+  introUrl?: string;
+  outroUrl?: string;
+}): Promise<{
+  path: string;
+  durationSeconds: number;
+  processedDuration: number;
+  generations?: { processed: string; merged?: string };
+}> {
+  const {
+    ytdlpPath,
+    cancelToken,
+    bucket,
+    sourceBucket,
+    audioSource,
+    realtimeDB,
+    progressRef,
+    updateSermon,
+    sermonStatus,
+    tempFiles,
+    contextWithSermonId,
+    processedStoragePath,
+    outputFilePath,
+    outputIdentity,
+    onYouTubeProviderFailure,
+    retainYouTubeSource,
+    authorizeOutputUpload,
+    pinnedMergeSources,
+    title,
+    startTime,
+    duration,
+    skipTranscode,
+    introUrl,
+    outroUrl,
+  } = options;
+  if (outputIdentity && (audioSource.type !== 'YouTubeUrl' || skipTranscode))
+    throw new Error('Attempt outputs require a YouTube render.');
+  if (
+    outputIdentity &&
+    (!pinnedMergeSources ||
+      Boolean(pinnedMergeSources.INTRO) !== Boolean(introUrl) ||
+      Boolean(pinnedMergeSources.OUTRO) !== Boolean(outroUrl))
+  )
+    throw new Error('Attempt outputs require pinned merge inputs.');
+  const log = createLoggerWithContext(contextWithSermonId);
+  const fileName = audioSource.id;
+  const audioFilesToMerge: FilePaths = { INTRO: undefined, OUTRO: undefined };
+  const customMetadata: CustomMetadata = { duration, title };
+  if (introUrl) {
+    audioFilesToMerge.INTRO = introUrl;
+    customMetadata.introUrl = introUrl;
+  }
+  if (outroUrl) {
+    audioFilesToMerge.OUTRO = outroUrl;
+    customMetadata.outroUrl = outroUrl;
+  }
+  if (cancelToken.isCancellationRequested) throw new ProcessAudioCancelledError();
+
+  const trimMessage = skipTranscode
+    ? 'Trimming'
+    : audioSource.type === 'StorageFilePath'
+    ? 'Trimming and Transcoding'
+    : 'Downloading YouTube Audio';
+
+  log.info('Starting audio processing step', { step: trimMessage });
+
+  await updateSermon({
+    status: {
+      ...sermonStatus,
+      audioStatus: sermonStatusType.PROCESSING,
+      message: trimMessage,
+    },
+  });
+
+  // Ensure sermonId is always included in context
+  // Ensure sermonId is preserved in child context
+  const trimCtx = createChildContext(contextWithSermonId, 'trim');
+  let processedGeneration: string | undefined;
+  let mergedGeneration: string | undefined;
+
+  await Sentry.startSpan(
+    {
+      name: trimMessage,
+      op: skipTranscode ? 'media.trim' : audioSource.type === 'StorageFilePath' ? 'media.transcode' : 'media.download',
+      attributes: {
+        'process_audio.sermon_id': fileName,
+        'process_audio.audio_source_type': audioSource.type,
+      },
+    },
+    async () => {
+      if (skipTranscode) {
+        if (audioSource.type !== 'StorageFilePath') {
+          log.error('Invalid audio source for skipTranscode', { sourceType: audioSource.type });
+          throw new Error('Audio source must be a file from processed-sermons in order to trim without transcoding');
+        }
+        await trim(
+          cancelToken,
+          bucket,
+          audioSource.source,
+          processedStoragePath,
+          tempFiles,
+          progressRef,
+          customMetadata,
+          startTime,
+          duration,
+          trimCtx,
+          sourceBucket
+        );
+        return;
+      }
+
+      await trimAndTranscode(
+        ytdlpPath,
+        cancelToken,
+        bucket,
+        audioSource,
+        processedStoragePath,
+        tempFiles,
+        progressRef,
+        realtimeDB,
+        { update: updateSermon },
+        sermonStatus,
+        customMetadata,
+        startTime,
+        duration,
+        trimCtx,
+        sourceBucket,
+        outputIdentity,
+        onYouTubeProviderFailure,
+        retainYouTubeSource,
+        authorizeOutputUpload,
+        outputIdentity
+          ? (generation) => {
+              processedGeneration = generation;
+            }
+          : undefined
+      );
+    }
+  );
+
+  if (trimCtx.youtubeSuccessfulAcquisitionAuthority) {
+    contextWithSermonId.youtubeSuccessfulAcquisitionAuthority = trimCtx.youtubeSuccessfulAcquisitionAuthority;
+  }
+
+  log.info('Audio processing step completed', { step: trimMessage });
+
+  if (outputIdentity && !processedGeneration) throw new Error('Processed output generation was not verified.');
+  const processedFile = processedGeneration
+    ? bucket.file(processedStoragePath, { generation: processedGeneration })
+    : bucket.file(processedStoragePath);
+
+  // Download the processed audio for merging.
+  const processedFilePath = createTempFile(`processed-${fileName}`, tempFiles);
+  log.debug('Downloading processed audio and intro/outro files');
+  let tempFilePaths: FilePaths;
+  if (pinnedMergeSources && processedGeneration) {
+    const signal = cancelToken.signal;
+    const pinned = (['INTRO', 'OUTRO'] as const).flatMap((key) => {
+      const source = pinnedMergeSources[key];
+      return source
+        ? [{ key, file: bucket.file(source.path, { generation: source.generation }), generation: source.generation }]
+        : [];
+    });
+    const [processedBytes, ...mergeBytes] = await Promise.all([
+      pinnedInputLength(processedFile, processedGeneration),
+      ...pinned.map(({ file, generation }) => pinnedInputLength(file, generation)),
+    ]);
+    const { assertRetainedMediaWorkspaceAvailable } = await import('./temporal/resources');
+    await assertRetainedMediaWorkspaceAvailable(path.dirname(processedFilePath), [processedBytes, ...mergeBytes]);
+    signal.throwIfAborted();
+    const inputs: FilePaths = {};
+    const download = (file: File, filePath: string, expectedBytes: number) =>
+      writeOwnedMediaStream(
+        () => file.createReadStream({ validation: 'crc32c', decompress: false }),
+        filePath,
+        signal,
+        expectedBytes
+      );
+    await settleMediaBranches(
+      [
+        () => download(processedFile, processedFilePath, processedBytes),
+        ...pinned.map(({ key, file }, index) => async () => {
+          const local = createTempFile(`render-${key}-${fileName}`, tempFiles);
+          await download(file, local, mergeBytes[index]);
+          inputs[key] = local;
+        }),
+      ],
+      cancelToken
+    );
+    tempFilePaths = inputs;
+  } else {
+    [tempFilePaths] = await settleMediaBranches(
+      [
+        () => downloadFiles(bucket, audioFilesToMerge, tempFiles, cancelToken),
+        () => writeOwnedMediaStream(() => processedFile.createReadStream(), processedFilePath, cancelToken.signal),
+      ] as const,
+      cancelToken
+    );
+  }
+
+  //create merge array in order INTRO, CONTENT, OUTRO
+  const filePathsArray: string[] = [];
+  if (tempFilePaths.INTRO) filePathsArray.push(tempFilePaths.INTRO);
+  filePathsArray.push(processedFilePath);
+  if (tempFilePaths.OUTRO) filePathsArray.push(tempFilePaths.OUTRO);
+
+  const processedDuration = outputIdentity ? await getDurationSeconds(processedFilePath, cancelToken) : duration;
+  if (outputIdentity && (!Number.isFinite(processedDuration) || processedDuration <= 0))
+    throw new Error('Invalid processed audio duration.');
+  // use reduce to sum up all the durations of the files from filepaths
+  const durationSeconds = (
+    await settleMediaBranches(
+      [tempFilePaths.INTRO, tempFilePaths.OUTRO].map(
+        (path) => async () => path ? await getDurationSeconds(path, cancelToken) : 0
+      ),
+      cancelToken
+    )
+  ).reduce((accumulator, currentValue) => accumulator + currentValue, processedDuration);
+
+  customMetadata.duration = durationSeconds;
+  log.info('Calculated total duration', { durationSeconds, formatted: secondsToTimeFormat(durationSeconds) });
+
+  // if there is an intro or outro, merge the files
+  if (filePathsArray.length > 1) {
+    log.info('Merging files with intro/outro', { fileCount: filePathsArray.length });
+    await updateSermon({
+      status: {
+        ...sermonStatus,
+        audioStatus: sermonStatusType.PROCESSING,
+        message: 'Adding Intro and Outro',
+      },
+    });
+
+    // Ensure sermonId is preserved in child context
+    const mergeCtx = createChildContext(contextWithSermonId, 'merge');
+    const mergedOutputFile = await Sentry.startSpan(
+      {
+        name: 'process-audio.merge-intro-outro',
+        op: 'media.merge',
+        attributes: {
+          'process_audio.sermon_id': fileName,
+          'process_audio.merge_file_count': filePathsArray.length,
+        },
+      },
+      () =>
+        mergeFiles(
+          cancelToken,
+          bucket,
+          filePathsArray,
+          outputFilePath,
+          durationSeconds,
+          tempFiles,
+          progressRef,
+          customMetadata,
+          mergeCtx,
+          outputIdentity,
+          authorizeOutputUpload,
+          outputIdentity
+            ? (generation) => {
+                mergedGeneration = generation;
+              }
+            : undefined
+        )
+    );
+    log.info('Files merged successfully', { outputPath: mergedOutputFile.name });
+    await logMemoryUsage('Memory Usage after merge', contextWithSermonId, tempFiles);
+  } else {
+    log.debug('No intro or outro, skipping merge');
+  }
+
+  if (cancelToken.isCancellationRequested) throw new ProcessAudioCancelledError();
+  if (outputIdentity && filePathsArray.length > 1 && !mergedGeneration)
+    throw new Error('Merged output generation was not verified.');
+
+  return {
+    ...(processedGeneration && {
+      generations: { processed: processedGeneration, ...(mergedGeneration && { merged: mergedGeneration }) },
+    }),
+    path: filePathsArray.length > 1 ? outputFilePath : processedStoragePath,
+    durationSeconds,
+    processedDuration,
+  };
+}

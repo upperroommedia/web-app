@@ -143,3 +143,19 @@ test('omitted protobuf false reconciliation fields retain all positive readiness
     verifyServerlessPool(binding, { ...pool, terminalCondition: { state: 'CONDITION_FAILED' } }, revision)
   ).toThrow();
 });
+
+test('the reconciled pool and serving revision accept the documented numbered worker-pool name', () => {
+  const { binding, pool, revision } = fixture();
+  const revisionName = `${binding.poolName}.2`;
+  const name = `${pool.name}/revisions/${revisionName}`;
+  const dotted = {
+    ...pool,
+    latestReadyRevision: name,
+    latestCreatedRevision: name,
+    instanceSplitStatuses: [{ ...pool.instanceSplitStatuses[0], revision: name }],
+  };
+  expect(verifyServerlessPool(binding, dotted, { ...revision, name }).revision).toBe(revisionName);
+  expect(() =>
+    verifyServerlessPool(binding, dotted, { ...revision, name: name.replace('/revisions/', '/foreign/') })
+  ).toThrow();
+});

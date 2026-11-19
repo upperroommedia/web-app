@@ -68,7 +68,40 @@ process.once('message', async (message) => {
     clientConnection = await Connection.connect({ address: message.address });
     const client = new Client({ connection: clientConnection, namespace: 'default' });
     const remoteMode = process.env.URM_MEDIA_REMOTE_ONLY === '1';
-    if (remoteMode) {
+    const remoteRender = process.env.URM_MEDIA_REMOTE_CASE === 'remote-render-adopt';
+    let renderAdoptionAcknowledgementLost = false;
+    if (remoteRender && message.holdAck) {
+      const run = db.runTransaction.bind(db);
+      db.runTransaction = async (callback, options) => {
+        let adoptionWrite = false;
+        const result = await run(async (tx) => {
+          const update = tx.update.bind(tx);
+          tx.update = (ref, patch, ...rest) => {
+            if (ref.path.startsWith('temporalMediaRequests/') && typeof patch?.youtubeRenderEpisode === 'string')
+              adoptionWrite = true;
+            return update(ref, patch, ...rest);
+          };
+          return callback(tx);
+        }, options);
+        if (adoptionWrite && !renderAdoptionAcknowledgementLost) {
+          renderAdoptionAcknowledgementLost = true;
+          throw new Error('Controlled render adoption commit acknowledgement loss');
+        }
+        return result;
+      };
+    }
+    if (remoteRender) {
+      process.env.TEMPORAL_MEDIA_YOUTUBE_ACQUISITION = 'hetzner-render-v1';
+      process.env.TEMPORAL_WORKER_HOSTING = 'cloud-run';
+      const acquisition = require('../../../apps/process-audio/src/temporal/hetzner-acquisition.ts');
+      const { getAuth } = rootRequire('firebase-admin/auth');
+      const { getStorage } = rootRequire('firebase-admin/storage');
+      acquisition.createHetznerAcquisitionTransport = require('./media-render-transport.cjs')({
+        db,
+        auth: getAuth(app),
+        bucket: getStorage(app).bucket(),
+      });
+    } else if (remoteMode) {
       process.env.TEMPORAL_MEDIA_YOUTUBE_ACQUISITION = 'hetzner-v1';
       process.env.TEMPORAL_WORKER_HOSTING = 'cloud-run';
       const acquisition = require('../../../apps/process-audio/src/temporal/hetzner-acquisition.ts');
@@ -209,6 +242,7 @@ process.once('message', async (message) => {
             attempt: info.attempt,
             workflowId: info.workflowExecution.workflowId,
             runId: info.workflowExecution.runId,
+            renderAdoptionAcknowledgementLost,
           });
           // Deliberately withhold only the first completion ACK after durable source work.
           if (message.holdAck) await new Promise(() => {});

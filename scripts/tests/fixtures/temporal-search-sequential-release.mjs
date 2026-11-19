@@ -237,7 +237,13 @@ const snapshot = (key, values = records) => ({
   updateTime: versions.get(key)?.updateTime ?? markerTime,
 });
 function doc(key) {
-  return { path: key, id: key.split('/').at(-1), get: async () => snapshot(key) };
+  return {
+    path: key, id: key.split('/').at(-1), get: async () => snapshot(key),
+    create: async (value) => {
+      await firestore.runTransaction((tx) => tx.create({ path: key }, value));
+      return { writeTime: snapshot(key).updateTime };
+    },
+  };
 }
 function query(collection, filters = [], limit = Infinity, cursor) {
   return {
@@ -322,7 +328,7 @@ const firestore = {
     const result = await callback(tx);
     const isBundleTransition =
       writes.some(([, key]) => key.startsWith('_control/temporalReleaseOperatorAudit-')) &&
-      ['bootstrap-bundles', 'migrate-ui-identity'].includes(currentAction);
+      ['bootstrap-bundles', 'migrate-ui-identity', 'restore-auto'].includes(currentAction);
     if (isBundleTransition && runtimeFault === 'unknown-not-applied') {
       runtimeFault = 'retained';
       throw new Error('UNKNOWN_ACK_NOT_APPLIED');
@@ -333,7 +339,11 @@ const firestore = {
         versions.delete(key);
       } else {
         records.set(key, resolveTransforms(value));
-        versions.set(key, { createTime: versions.get(key)?.createTime ?? native(clock), updateTime: native(clock) });
+        const restoreAttempt = key === '_control/temporalReleaseOperation' && Object.hasOwn(value, 'autoRolloutRestore');
+        versions.set(key, {
+          createTime: versions.get(key)?.createTime ?? native(clock),
+          updateTime: native(clock + (restoreAttempt ? 1 : 0)),
+        });
       }
     }
     if (isBundleTransition && runtimeFault === 'unknown-applied') {
@@ -372,6 +382,7 @@ let traffic = {
 };
 const remote = new Map();
 let migrationTrafficReads = 0;
+let preopenUiFault;
 async function fetchTransport(raw, options = {}) {
   const parsed = new URL(raw),
     method = options.method ?? 'GET',
@@ -384,7 +395,13 @@ async function fetchTransport(raw, options = {}) {
     if (resource === parent + '/traffic') {
       if (currentAction === 'migrate-ui-identity' && method === 'GET') migrationTrafficReads++;
       if (method === 'PATCH') {
-        traffic = { ...traffic, rolloutPolicy: { ...traffic.rolloutPolicy, ...body.rolloutPolicy } };
+        assert.equal(body.etag, traffic.etag);
+        if (
+          (currentAction === 'restore-auto' && process.argv[2] === 'restore-unknown') ||
+          (currentAction === 'freeze-ui' && process.argv[2] === 'freeze-unknown')
+        )
+          throw new Error('Original rollout policy response was lost');
+        traffic = { ...traffic, etag: traffic.etag + '-changed', rolloutPolicy: { ...traffic.rolloutPolicy, ...body.rolloutPolicy } };
         result = { done: true };
       } else result = traffic;
     } else if (resource === parent + '/rollouts' && method === 'GET')
@@ -398,7 +415,16 @@ async function fetchTransport(raw, options = {}) {
       remote.set(name, { name, build: body.build, state: 'SUCCEEDED', reconciling: false });
       traffic.current = { splits: [{ build: body.build, percent: 100 }] };
       result = { done: true };
-    } else if (remote.has(resource)) result = remote.get(resource);
+    } else if (remote.has(resource)) {
+      result = remote.get(resource);
+      if (method === 'GET' && currentAction === 'open' && resource.includes('/builds/')) {
+        if (preopenUiFault === 'traffic-race') traffic.etag = 'changed-after-first-read';
+        if (preopenUiFault === 'smoke-replaced') {
+          const smoke = JSON.parse(files.get(config.smokeEvidence));
+          files.set(config.smokeEvidence, JSON.stringify({ ...smoke, observation: 'replacement' }));
+        }
+      }
+    }
     else {
       status = 404;
       result = {};
@@ -765,6 +791,8 @@ async function run(action) {
     return mod;
   };
   const nodeModules = {
+    'node:util': await import('node:util'),
+    'node:timers/promises': await import('node:timers/promises'),
     'node:fs/promises': {
       ...fsPromises,
       readFile: read,
@@ -790,6 +818,12 @@ async function run(action) {
     'node:url': urlApi,
     'node:child_process': {
       execFileSync: childTransport,
+      execFile: () => {
+        throw new Error('UNEXPECTED_EXEC_FILE');
+      },
+      spawn: () => {
+        throw new Error('UNEXPECTED_SPAWN');
+      },
       spawnSync: () => {
         throw new Error('UNEXPECTED_SPAWN');
       },
@@ -843,6 +877,7 @@ async function run(action) {
   await controller.link((specifier, referencingModule) =>
     load(specifier.startsWith('node:') ? specifier : new URL(specifier, referencingModule.identifier).href)
   );
+  let failure;
   try {
     await controller.evaluate();
     actions.push({
@@ -850,10 +885,20 @@ async function run(action) {
       phase: records.get('_control/temporalReleaseState').phase,
       revision: records.get('_control/temporalRelease').revision,
     });
+  } catch (error) {
+    failure = error;
+    throw error;
   } finally {
-    if (runtimeFault === 'retained' || runtimeFault === 'op-replaced')
+    if (
+      runtimeFault === 'retained' ||
+      runtimeFault === 'op-replaced' ||
+      (action === 'restore-auto' && process.argv[2] === 'restore-unknown' &&
+        records.get('_control/temporalReleaseState').phase === 'open') ||
+      (action === 'freeze-ui' && process.argv[2] === 'freeze-unknown' &&
+        records.get('_control/temporalReleaseState').phase === 'freezing-ui')
+    )
       assert(records.has('_control/temporalReleaseOperation'), 'uncertain or changed operation must remain held');
-    else assert(!records.has('_control/temporalReleaseOperation'), 'operation lock must be cleaned');
+    else assert(!records.has('_control/temporalReleaseOperation'), 'operation lock must be cleaned' + (failure ? ': ' + failure.stack : ''));
     assert.equal(apps.length, 0, 'owned SDK app must be closed');
   }
 }
@@ -990,7 +1035,27 @@ if (process.argv[2] === 'ui-identity-migration') {
 } else if (process.argv[2] === 'runtime-bundle') {
   await runBundleRuntimeCases();
 } else {
-  await run('freeze-ui');
+  if (process.argv[2] === 'freeze-unknown') {
+    const patchCount = () => apiEvents.filter(({ method, path }) => method === 'PATCH' && path.endsWith('/traffic')).length;
+    await assert.rejects(run('freeze-ui'), /automatic rollout freeze is unconfirmed/);
+    const original = clone(records.get('_control/temporalReleaseState'));
+    assert.equal(original.phase, 'freezing-ui');
+    assert.equal(original.savedRolloutPolicy.disabled, false);
+    resumeOperation = records.get('_control/temporalReleaseOperation').operationId;
+    assert.equal(original.appHostingFreezeRequestId, resumeOperation);
+    await assert.rejects(run('freeze-ui'), /automatic rollout freeze is unconfirmed/);
+    assert.deepEqual(records.get('_control/temporalReleaseState'), original);
+    traffic = { ...traffic, etag: traffic.etag + '-original-applied', rolloutPolicy: { ...traffic.rolloutPolicy, disabled: true } };
+    traffic.rolloutPolicy.requiredPaths = ['foreign'];
+    await assert.rejects(run('freeze-ui'), /automatic rollout freeze is unconfirmed/);
+    delete traffic.rolloutPolicy.requiredPaths;
+    await run('freeze-ui');
+    assert.equal(patchCount(), 1);
+    assert.deepEqual(records.get('_control/temporalReleaseState').savedRolloutPolicy, original.savedRolloutPolicy);
+    resumeOperation = undefined;
+  } else {
+    await run('freeze-ui');
+  }
   checkDomains();
   assert.equal(
     records.get('_control/temporalRelease').legacyAdmissionCutoff,
@@ -1096,6 +1161,31 @@ if (process.argv[2] === 'ui-identity-migration') {
     readonlySmokePassed: true,
     claimsFreshWriteE2E: false,
   });
+  if (process.argv[2] === 'preopen-ui') {
+    const originalTraffic = clone(traffic);
+    const originalSmoke = files.get(config.smokeEvidence);
+    const originalControl = clone(records.get('_control/temporalRelease'));
+    const originalState = clone(records.get('_control/temporalReleaseState'));
+    for (const [fault, error] of [
+      ['wrong-live-build', /reviewed immutable build/],
+      ['unfrozen', /must remain frozen/],
+      ['traffic-race', /traffic changed/],
+      ['smoke-replaced', /smoke evidence changed/],
+    ]) {
+      preopenUiFault = fault;
+      if (fault === 'wrong-live-build') traffic.current.splits[0].build = parent + '/builds/foreign';
+      if (fault === 'unfrozen') traffic.rolloutPolicy.disabled = false;
+      try {
+        await assert.rejects(run('open'), error);
+        assert.deepEqual(records.get('_control/temporalRelease'), originalControl);
+        assert.deepEqual(records.get('_control/temporalReleaseState'), originalState);
+      } finally {
+        traffic = clone(originalTraffic);
+        files.set(config.smokeEvidence, originalSmoke);
+        preopenUiFault = undefined;
+      }
+    }
+  }
   if (process.argv[2] === 'callable-access') {
     await rejectsCallableAccess('open');
     await rejectsStorageRulesAccess('open');
@@ -1115,7 +1205,30 @@ if (process.argv[2] === 'ui-identity-migration') {
   for (const failure of ['cli', 'auth', 'cleanup']) await rejectsRtdbCanary('open', failure);
   await run('open');
   checkDomains(true);
-  await run('restore-auto');
+  assert.match(records.get('_control/temporalReleaseState').preopenSmokeSHA256, /^[a-f0-9]{64}$/);
+  if (process.argv[2] === 'restore-unknown') {
+    const patchCount = () => apiEvents.filter(({ method, path }) => method === 'PATCH' && path.endsWith('/traffic')).length;
+    const originalPatches = patchCount();
+    await assert.rejects(run('restore-auto'), /restoration is unconfirmed/);
+    const held = records.get('_control/temporalReleaseOperation');
+    assert.ok(held.autoRolloutRestore);
+    resumeOperation = held.operationId;
+    await assert.rejects(run('restore-auto'), /restoration is unconfirmed/);
+    assert.equal(patchCount(), originalPatches + 1);
+    assert.equal(records.get('_control/temporalReleaseState').phase, 'open');
+    // Delayed provider application is controlled. The next action only reads it.
+    traffic = { ...traffic, etag: traffic.etag + '-original-applied', rolloutPolicy: { ...traffic.rolloutPolicy, disabled: false } };
+    runtimeFault = 'unknown-applied';
+    await assert.rejects(run('restore-auto'), /UNKNOWN_ACK_APPLIED/);
+    assert.equal(records.get('_control/temporalReleaseState').phase, 'complete');
+    runtimeFault = undefined;
+    await run('restore-auto');
+    assert.equal(patchCount(), originalPatches + 1);
+    resumeOperation = undefined;
+  } else {
+    await run('restore-auto');
+  }
+  assert.match(records.get('_control/temporalReleaseState').autoRolloutRestoreSHA256, /^[a-f0-9]{64}$/);
   checkDomains(true);
   assert.equal(traffic.rolloutPolicy.disabled, false);
   if (process.argv[2] === 'ui-canonical-recovery') {
@@ -1156,6 +1269,7 @@ if (process.argv[2] === 'ui-identity-migration') {
       'workers-ready',
       'take-ownership',
       ...(process.argv[2] === 'callable-access' ? Array(10).fill('open') : []),
+      ...(process.argv[2] === 'preopen-ui' ? Array(4).fill('open') : []),
       'open',
       'open',
       'open',

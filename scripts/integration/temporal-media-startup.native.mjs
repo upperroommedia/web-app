@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { controlsBootstrapFixture } from '../tests/fixtures/controls-bootstrap.mjs';
 import { bootstrapStopCloudRunMediaPool } from '../temporal-bootstrap-pool.mjs';
 import { saveMediaBootstrapCycleCheckpoint } from '../temporal-preparation-checkpoint.mjs';
@@ -241,11 +241,26 @@ for (const drift of [
           name === parent
             ? {
                 uid: 'native-pool',
+                generation: '2',
+                etag: 'pool-etag',
                 scaling: { manualInstanceCount: 1 },
                 latestReadyRevision: `${parent}/revisions/original`,
               }
-            : { uid: 'revision-uid' };
-        const options = { firestore: db, binding: b, operationId, readResource, verifyPool: () => {} };
+            : { uid: 'revision-uid', generation: '1', etag: 'revision-etag' };
+        const options = {
+          firestore: db,
+          binding: b,
+          operationId,
+          readResource,
+          verifyPool: () => {},
+          observePoller: async ({ identity, revision, revisionUid, observedAt }) => {
+            const instanceHash = createHash('sha256').update(witness.cloudRun.instanceId).digest('hex');
+            assert.equal(identity, `cloud-run-${instanceHash}-${witness.instanceId}`);
+            assert.equal(revision, witness.cloudRun.revision);
+            assert.equal(revisionUid, witness.cloudRun.revisionUid);
+            assert.equal(observedAt, (await startup.get()).get('observedAt'));
+          },
+        };
         // Controlled Cloud metadata is deliberate; no native Cloud acceptance claim.
 
         let proof;
@@ -266,6 +281,49 @@ for (const drift of [
           /MEDIA_STARTUP_CAPACITY_UNCONFIRMED/
         );
         await collectMediaStartupCapacity(options);
+        if (drift === 'none') {
+          for (const changed of [
+            { name: parent, fields: { scaling: { manualInstanceCount: 0 } } },
+            { name: parent, fields: { generation: '3', etag: 'updated-pool-etag' } },
+            { name: `${parent}/revisions/original`, fields: { uid: 'updated-revision' } },
+          ]) {
+            let pollerObserved = false;
+            await assert.rejects(
+              collectMediaStartupCapacity({
+                ...options,
+                observePoller: async () => {
+                  pollerObserved = true;
+                },
+                readResource: async (name) => ({
+                  ...(await readResource(name)),
+                  ...(pollerObserved && name === changed.name ? changed.fields : {}),
+                }),
+              }),
+              /MEDIA_STARTUP_CAPACITY_UNCONFIRMED/
+            );
+            assert.equal(pollerObserved, true);
+          }
+          for (const recreate of [false, true]) {
+            await assert.rejects(
+              collectMediaStartupCapacity({
+                ...options,
+                observePoller: async () => {
+                  const evidence = (await startup.get()).data();
+                  if (recreate) {
+                    await startup.delete();
+                    await startup.create(evidence);
+                  } else {
+                    // Force a new version even if Firestore optimizes same-value writes.
+                    await startup.update({ digest: 'temporary-fixture-value' });
+                    await startup.update({ digest: evidence.digest });
+                  }
+                  assert.deepEqual((await startup.get()).data(), evidence);
+                },
+              }),
+              /MEDIA_STARTUP_CAPACITY_UNCONFIRMED/
+            );
+          }
+        }
         return {
           role: 'media',
           buildId: b.buildId,

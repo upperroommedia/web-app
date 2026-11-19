@@ -1,4 +1,5 @@
 import { isDeepStrictEqual as equal } from 'node:util';
+import { assertMediaDiagnosticNeverStartedObservation } from './temporal-media-diagnostic-drain.mjs';
 import { proofDigest as hash } from './temporal-release-runtime.mjs';
 import { readMediaRecoveryAncestorAccess } from './temporal-bootstrap-pool.mjs';
 import { verifyPreparedPoolMetadata } from './temporal-prepare-cloud-pool.mjs';
@@ -91,21 +92,25 @@ export function assertMediaZeroPoolSampleFresh(sample) {
   )
     fail();
 }
-export function mediaDiagnosticConfirmationProof(o, kind, observation, before, after) {
+export function mediaDiagnosticNeverStartedProof(o, observation, before, after) {
   assertMediaZeroPoolSampleFresh(before);
   assertMediaZeroPoolSampleFresh(after);
+  assertMediaDiagnosticNeverStartedObservation(observation, o.plan, o.pool);
+  const observed = Date.parse(observation.observedAt);
   if (
-    !['stopped', 'never-started'].includes(kind) ||
-    !equal(before.pool, after.pool) ||
-    before.ancestorsSHA256 !== after.ancestorsSHA256 ||
-    observation.operationId !== o.operationId ||
-    observation.planSHA256 !== hash(o.plan) ||
-    observation.poolSHA256 !== hash(o.pool) ||
-    !Number.isFinite(Date.parse(observation.observedAt)) ||
-    Date.now() - Date.parse(observation.observedAt) < 0 ||
-    Date.now() - Date.parse(observation.observedAt) >= 5000
+    o.plan.operationId !== o.operationId ||
+    o.pool.desiredManualInstanceCount !== 0 ||
+    !equal(before.pool, o.pool) ||
+    !equal(after.pool, o.pool) ||
+    before.ancestorsSHA256 !== o.plan.ancestorsSHA256 ||
+    after.ancestorsSHA256 !== o.plan.ancestorsSHA256 ||
+    observed < before.sampledAt ||
+    observed > after.sampledAt ||
+    observed > Date.now() ||
+    before.sampledMonotonic > after.sampledMonotonic
   )
     fail();
+  const kind = 'never-started';
   return {
     kind,
     operationId: o.operationId,

@@ -4,11 +4,11 @@ import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, chmod, symlink, rm, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { validateCloudRunReleasePlatform, readCloudRunOperatorKey, readCloudRunNamespaceEvidence, collectCloudRunReleaseWorkers, verifyCloudRunScalerPolicies, temporalCloudScalerPrincipals } from './temporal-release-cloud-run.mjs';
+import { prepareCloudRunTransitionFence, assertCloudRunMediaRecoverySupported, assertCloudRunRestoredMediaSupported, assertCloudRunReadinessHandoff, verifyCurrentCloudRunReadinessResources, validateCloudRunReleasePlatform, readCloudRunOperatorKey, readCloudRunNamespaceEvidence, collectCloudRunReleaseWorkers, verifyCloudRunScalerPolicies, temporalCloudScalerPrincipals } from './temporal-release-cloud-run.mjs';
 import { serverlessResourceNames } from './temporal-serverless-platform.mjs';
 import { dispatchResourceNames } from './temporal-serverless-dispatch-resources.mjs';
-import { validateWorkerCoverage } from './temporal-release-lib.mjs';
-import { loadReleaseResourceBinding } from './temporal-release-runtime.mjs';
+import { canReleaseOwnedOperationLock, validateWorkerCoverage } from './temporal-release-lib.mjs';
+import { loadReleaseResourceBinding, nativeSnapshotProof, proofDigest } from './temporal-release-runtime.mjs';
 const buildId = 'a'.repeat(40), image = `us-central1-docker.pkg.dev/urm-app-staging/urm-temporal/worker@sha256:${'b'.repeat(64)}`;
 function profile() {
   const workerRoles = ['orchestration', 'controls', 'email', 'search'];
@@ -24,6 +24,82 @@ function profile() {
       buildId, role, ...serverlessResourceNames(buildId, role), image, maxInstances: 1, stabilizationSeconds: 180 })),
   };
 }
+function mediaPreflightFixture(action) {
+  const platform = profile();
+  const media = { ...platform.roleBindings[0], role: 'media', ...serverlessResourceNames(buildId, 'media') };
+  platform.workerRoles.push('media');
+  platform.roleBindings.push(media);
+  const releaseId = 'c54df063-5dad-4278-b2ae-2641f834cb09';
+  const operationId = '0991aa73-83d5-404b-9d13-8bd7210fcfb1';
+  const recoveryOperationId = '69f30883-7818-43ad-ba6d-6e1a0ef80e05';
+  const bindingDigest = 'e'.repeat(64);
+  const root = { action, operationId, releaseId, bindingDigest, operatorPrincipal: { adcAndGcloudAccountMatch: true } };
+  const control = {
+    releaseId, admission: 'paused',
+    domains: Object.fromEntries(
+      ['media', 'publishing', 'images', 'emails', 'accounts', 'bundles', 'search']
+        .map((key) => [key, { admission: 'paused' }])
+    ),
+  };
+  const state = { releaseId, phase: 'provider-usage-ready' };
+  const stamp = { seconds: 1, nanoseconds: 2, toDate: () => new Date(1000) };
+  const snap = (data) => ({
+    exists: true, createTime: stamp, updateTime: stamp, data: () => structuredClone(data),
+    get: (path) => path.split('.').reduce((value, key) => value?.[key], data),
+  });
+  const refs = new Map([['root', root], ['control', control], ['state', state]]);
+  const firestore = {
+    projectId: 'urm-app-staging',
+    databaseId: '(default)',
+    runTransaction: (fn, settings) => {
+      assert.deepEqual(settings, { readOnly: true });
+      return fn({ get: async (ref) => snap(refs.get(ref)) });
+    },
+  };
+  return {
+    control, root,
+    options: {
+      role: 'media', config: { projectId: 'urm-app-staging', environment: 'staging', compatibilityCommit: buildId, releaseId },
+      platform, firestore, operationId, recoveryOperationId, releaseId, bindingDigest,
+      lockRef: 'root', controlRef: 'control', stateRef: 'state',
+      ownedOperation: nativeSnapshotProof(snap(root)),
+      expectedAuthority: { control: nativeSnapshotProof(snap(control)), state: nativeSnapshotProof(snap(state)) },
+      receipts: { recovery: { releaseId, operationId: recoveryOperationId, identityState: {
+        stage: 'completed', disposition: 'normal-zero-after-job',
+        plan: { operationId: recoveryOperationId, buildId, image, job: {} },
+      } } },
+      api: () => assert.fail('preflight should not reach the provider here'),
+    },
+  };
+}
+
+test('restored activation guard joins the paused release, completed Job recovery, and exact local operator key', async () => {
+  const { options, root } = mediaPreflightFixture('activate-restored-cloud-run-media');
+  const directory = await realpath(await mkdtemp(join(tmpdir(), 'restored-media-preflight-')));
+  try {
+    options.platform.operatorApiKeyFile = join(directory, 'key');
+    options.platform.operatorApiKeySHA256 = createHash('sha256').update('synthetic-only').digest('hex');
+    await writeFile(options.platform.operatorApiKeyFile, 'synthetic-only', { mode: 0o600 });
+    await assertCloudRunRestoredMediaSupported(options);
+    options.receipts.recovery.identityState.disposition = 'restored-normal-zero';
+    await assert.rejects(assertCloudRunRestoredMediaSupported(options), /RESTORED_MEDIA_NORMAL_RUNTIME_UNAVAILABLE/);
+    options.receipts.recovery.identityState.disposition = 'normal-zero-after-job';
+    root.operatorPrincipal.adcAndGcloudAccountMatch = false;
+    await assert.rejects(assertCloudRunRestoredMediaSupported(options), /RESTORED_MEDIA_NORMAL_RUNTIME_UNAVAILABLE/);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('private Job preflight denies a changed pause before reading the pool, image or quota', async () => {
+  const { options, control } = mediaPreflightFixture('diagnose-cloud-run-media-recovery');
+  control.admission = 'open';
+  let reads = 0;
+  options.api = () => { reads++; throw Error('unexpected provider read'); };
+  await assert.rejects(assertCloudRunMediaRecoverySupported(options), /CLOUD_RUN_MEDIA_DIAGNOSTIC_RUNTIME_UNAVAILABLE/);
+  assert.equal(reads, 0);
+});
+
 const peer = { environment: 'production', firebaseProjectId: 'urm-app', firebaseResources: {
   storageBucket: 'urm-app.appspot.com', imagesBucket: 'urm-app-images', databaseUrl: 'https://urm-app-default-rtdb.firebaseio.com/' } };
 test('cloud descriptor binds real hosting without fabricated cluster fields and retains release resource checks', () => {
@@ -202,4 +278,110 @@ for(const age of [-6000,121000])test(`media startup sample own time is preserved
 test('media diagnostic native START connection disables SDK and gRPC retries',async()=>{
  const {nativePromotionConnectionOptions}=await import('./temporal-release-cloud-run.mjs');
  assert.deepEqual(nativePromotionConnectionOptions('media-recovery-start'),{interceptors:[],channelArgs:{'grpc.enable_retries':0}});
+ assert.deepEqual(nativePromotionConnectionOptions('worker-wake-start'),{interceptors:[],channelArgs:{'grpc.enable_retries':0}});
+ assert.deepEqual(nativePromotionConnectionOptions('worker-readiness-start'),{interceptors:[],channelArgs:{'grpc.enable_retries':0}});
+ assert.deepEqual(nativePromotionConnectionOptions('worker-compute-attach'),{interceptors:[],channelArgs:{'grpc.enable_retries':0}});
+ assert.deepEqual(nativePromotionConnectionOptions('orchestration-handoff'),{interceptors:[],channelArgs:{'grpc.enable_retries':0}});
+});
+
+test('native worker observations must join the exact pool and revision from the managed handoff', () => {
+  const p = profile();
+  const pools = Object.fromEntries(p.roleBindings.map(({ role, poolName }) => [
+    role, { poolUid: role + '-pool', revision: poolName + '.1', revisionUid: role + '-revision' },
+  ]));
+  const proof = {
+    schemaVersion: 1,
+    scope: 'observed-role-execution-and-native-poller-identity',
+    roles: p.roleBindings.map(({ role, image }) => ({ role, declaredImage: image, ...pools[role] })),
+  };
+  assertCloudRunReadinessHandoff(proof, p, pools);
+  for (const change of [
+    { poolUid: 'replacement' },
+    { revision: 'different' },
+    { revisionUid: 'replacement' },
+    { declaredImage: image + 'different' },
+    { role: proof.roles[1].role },
+  ]) {
+    const changed = [ { ...proof.roles[0], ...change }, ...proof.roles.slice(1) ];
+    assert.throws(
+      () => assertCloudRunReadinessHandoff({ ...proof, roles: changed }, p, pools),
+      /CLOUD_RUN_READINESS_HANDOFF_MISMATCH/
+    );
+  }
+});
+
+test('final native resource reads deny drift despite the same release image and revision', async () => {
+  const platform = profile();
+  const pools = {};
+  const resources = new Map();
+  const roles = platform.roleBindings.map(({ role, poolName, image: declaredImage }) => {
+    const revision = poolName + '.1';
+    const parent = 'https://run.googleapis.com/v2/projects/urm-app-staging/locations/us-central1/workerPools/' + poolName;
+    const revisionPath = parent + '/revisions/' + revision;
+    const pool = { generation: '4', scaling: { manualInstanceCount: 0 }, uid: role + '-pool' };
+    const current = { image: declaredImage, etag: 'original', uid: role + '-revision' };
+    resources.set(parent, pool);
+    resources.set(revisionPath, current);
+    pools[role] = { poolUid: pool.uid, revision, revisionUid: current.uid };
+    return { role, declaredImage, ...pools[role], poolDigest: proofDigest(pool), revisionDigest: proofDigest(current) };
+  });
+  const proof = { schemaVersion: 1, scope: 'observed-role-execution-and-native-poller-identity', roles };
+  const seen = new Set();
+  const api = async (path) => {
+    seen.add(path);
+    const value = resources.get(path);
+    assert.ok(value, 'must only request the exact provider paths');
+    return Object.fromEntries(Object.entries(value).reverse());
+  };
+  await verifyCurrentCloudRunReadinessResources({ proof, platform, pools, api });
+  assert.equal(seen.size, platform.roleBindings.length * 2);
+  const lastPool = [...resources.keys()].at(-2);
+  const lastRevision = [...resources.keys()].at(-1);
+  for (const [path, field, value] of [
+    [lastPool, 'generation', '5'],
+    [lastPool, 'scaling', { manualInstanceCount: 1 }],
+    [lastRevision, 'etag', 'recreated'],
+  ]) {
+    const original = resources.get(path);
+    resources.set(path, { ...original, [field]: value });
+    await assert.rejects(
+      verifyCurrentCloudRunReadinessResources({ proof, platform, pools, api }),
+      /CLOUD_RUN_READINESS_RESOURCE_CHANGED/
+    );
+    resources.set(path, original);
+  }
+});
+
+test('a final provider sample expires before committing admission', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: 30000 });
+  const fence = await prepareCloudRunTransitionFence(async () => ({ service: 'exact-revision' }));
+  assert.deepEqual(fence.live, { service: 'exact-revision' });
+  assert.doesNotThrow(fence.assertFresh);
+  t.mock.timers.setTime(45000);
+  assert.throws(fence.assertFresh, /CLOUD_RUN_TRANSITION_PROVIDER_EVIDENCE_STALE/);
+  await assert.rejects(
+    prepareCloudRunTransitionFence(async () => {
+      t.mock.timers.setTime(60000);
+      return { service: 'already-stale' };
+    }),
+    /CLOUD_RUN_TRANSITION_PROVIDER_EVIDENCE_STALE/
+  );
+});
+
+test('unsuccessful resume retains any durable release checkpoint', () => {
+  const lock = {
+    operationId: 'original', releaseId: 'staging', action: 'promote-cloud-run-media', bindingDigest: 'owned',
+    operatorIdentity: {}, operatorPrincipal: {}, createdAt: 1,
+  };
+  assert.equal(canReleaseOwnedOperationLock(lock, false), true);
+  for (const checkpoint of [
+    { cloudMediaPromotion: { stage: 'attempted' } },
+    { cloudMediaRecovery: { stage: 'acknowledged' } },
+    { cloudDispatchActivation: { stage: 'attempted' } },
+    { unrecognizedFutureCheckpoint: null },
+  ]) {
+    const resumed = { ...lock, ...checkpoint };
+    assert.equal(canReleaseOwnedOperationLock(resumed, false), false);
+    assert.equal(canReleaseOwnedOperationLock(resumed, true), true);
+  }
 });

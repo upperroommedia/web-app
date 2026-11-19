@@ -111,6 +111,7 @@ export function renderServerlessWorkerPool(config, settings) {
     TMPDIR: '/tmp',
     ...(media
       ? {
+          TEMPORAL_MEDIA_YOUTUBE_ACQUISITION: 'hetzner-render-v1',
           TEMPORAL_MEDIA_MAX_SOURCE_BYTES: String(20 * 2 ** 30),
           TEMPORAL_MEDIA_MAX_OUTPUT_BYTES: String(20 * 2 ** 30),
           TEMPORAL_MEDIA_WORKSPACE_MAX_BYTES: String(64 * 2 ** 30),

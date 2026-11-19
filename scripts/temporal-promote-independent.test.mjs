@@ -4,6 +4,7 @@ import {randomUUID} from 'node:crypto';
 import {controlsBootstrapFixture} from './tests/fixtures/controls-bootstrap.mjs';
 import * as pools from './temporal-bootstrap-pool.mjs';
 import * as promotions from './temporal-promote-controls.mjs';
+import { proofDigest } from './temporal-release-runtime.mjs';
 import {independentPromotionPredecessor as previous} from './temporal-promotion-roles.mjs';
 const cap=r=>r[0].toUpperCase()+r.slice(1);
 /** Controlled producer shape only. Actual native predecessor production is tested separately. */
@@ -61,8 +62,88 @@ for(const role of ['email','images']){
  });
 }
 
-test('media core and canonical adapter deny before credentials or operations until native capacity is connected',async()=>{
+test('media core and canonical adapter require their guarded native caller before accessing credentials or issuing operations',async()=>{
  const {runCloudRunMediaPromotion}=await import('./temporal-release-cloud-run.mjs');
  const options=new Proxy({},{get(){throw new Error('No access before capacity fence');}});
  for(const run of [promotions.promoteCloudRunMedia,runCloudRunMediaPromotion])await assert.rejects(run(options),/CLOUD_RUN_MEDIA_NATIVE_CAPACITY_PROOF_REQUIRED/);
+});
+
+function mediaPromotionFixture({ loseAck = false, apply = true } = {}) {
+ const { options } = controlsBootstrapFixture('media');
+ const binding = options.platform.roleBindings.find(({role})=>role==='media');
+ const prior = { deploymentName: 'urm-worker-staging', buildId: 'original-build' };
+ const candidate = { deploymentName: binding.deploymentName, buildId: binding.buildId };
+ const mediaStartup={poolUid:'owned',revision:'owned-revision',revisionUid:'owned-revision-uid',workerIdentity:'owned',instanceId:'owned-instance',startedAt:Date.now()-1000};
+ const obs = { lineage: '1'.repeat(64), terminal: '2'.repeat(64) };
+ options.receipts.imagesPromotion = { operationId: randomUUID() };
+ const {imagesPromotion, ...ownReceipts}=options.receipts;
+ const stages=[];
+ let state, target, attempts=0, token=Buffer.from('prior');
+ const service = {
+  describeWorkerDeployment: async()=>({conflictToken:token,workerDeploymentInfo:{routingConfig:
+    target?{currentDeploymentVersion:target}:{}}}),
+  setWorkerDeploymentCurrentVersion: async request=>{
+   assert.equal(state.stage,'attempted');
+   assert.deepEqual(request.conflictToken,token);
+   attempts++;
+   if(apply){target=candidate;token=Buffer.from('successor');}
+   if(loseAck)throw Object.assign(new Error('lost acknowledgement'),{code:14});
+   return {conflictToken:token};
+  },
+ };
+ options.client={options:{namespace:binding.namespace},connection:{
+  options:{interceptors:[],channelArgs:{'grpc.enable_retries':0}},withDeadline:(_d,fn)=>fn(),workflowService:service,
+ }};
+ options.save=async next=>{state=structuredClone(next);};
+ options.authorizeMutation=async()=>{};
+ const inspect=async stage=>{
+  stages.push(stage);
+  if((stage==='before')===Boolean(target))throw new Error('wrong native phase');
+  return {
+   proof:{role:'media',buildId:binding.buildId,namespace:binding.namespace,observedAt:new Date().toISOString(),
+    protectionSHA256:'a'.repeat(64),protectedWorkSHA256:'b'.repeat(64),computeInventorySHA256:'c'.repeat(64),
+    peerRoutingSHA256:'d'.repeat(64),bundleSHA256:'e'.repeat(64),lineageSHA256:obs.lineage,mediaStartup,
+    queueRouting:{current:target??prior,pollers:[{identity:'owned',deploymentOptions:candidate}]}},
+   resources:{role:'media',buildId:binding.buildId,diagnosticJobTerminationSHA256:obs.terminal,
+    receiptsSHA256:proofDigest(ownReceipts),predecessor:{role:'images',receiptSHA256:proofDigest(imagesPromotion)},
+    pool:{name:`projects/${binding.projectId}/locations/${binding.region}/workerPools/${binding.poolName}`,uid:'owned',
+     generation:'4',revision:'owned-revision',revisionUid:'owned-revision-uid',desiredManualInstanceCount:1},
+    access:{runnerUniqueId:'11111111111111111111',scalerUniqueId:'22222222222222222222'}},
+  };
+ };
+ return {options,obs,stages,inspect,get state(){return state;},get attempts(){return attempts;}};
+}
+for(const loseAck of [false,true]){
+ test(`media issues one fenced CAS and verifies the same Job through readback (lost ACK=${loseAck})`,async()=>{
+  const f=mediaPromotionFixture({loseAck});
+  const result=await promotions.promoteCloudRunMedia(f.options,f.inspect);
+  assert.equal(result.stage,'completed');
+  assert.equal(result.outcome,loseAck?'desired-routing-observed-after-unknown-ack':'native-acknowledgement-and-readback');
+  assert.deepEqual(f.stages,['before','before','after']);
+  await promotions.promoteCloudRunMedia({...f.options,saved:result},f.inspect);
+  assert.deepEqual(f.stages,['before','before','after','after']);
+  assert.equal(f.attempts,1);
+ });
+}
+test('media unknown ACK with no routing successor never resends',async()=>{
+ const f=mediaPromotionFixture({loseAck:true,apply:false});
+ await assert.rejects(promotions.promoteCloudRunMedia(f.options,f.inspect));
+ assert.equal(f.state.stage,'attempted');
+ await assert.rejects(promotions.promoteCloudRunMedia({...f.options,saved:f.state},f.inspect));
+ assert.deepEqual(f.stages,['before','before','after','after']);
+ assert.equal(f.attempts,1);
+});
+test('media Job lineage drift between intent and final fence stops the first send',async()=>{
+ const f=mediaPromotionFixture(),save=f.options.save;
+ f.options.save=async next=>{await save(next);if(next.stage==='attempted')f.obs.terminal='f'.repeat(64);};
+ await assert.rejects(promotions.promoteCloudRunMedia(f.options,f.inspect));
+ assert.equal(f.state.stage,'attempted');
+ assert.equal(f.attempts,0);
+});
+test('media readback with another lineage cannot complete an acknowledged intent',async()=>{
+ const f=mediaPromotionFixture(),save=f.options.save;
+ f.options.save=async next=>{await save(next);if(next.stage==='acknowledged')f.obs.lineage='f'.repeat(64);};
+ await assert.rejects(promotions.promoteCloudRunMedia(f.options,f.inspect));
+ assert.equal(f.state.stage,'acknowledged');
+ assert.equal(f.attempts,1);
 });

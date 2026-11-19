@@ -1,5 +1,12 @@
+import {
+  reserveYouTubeRenderDispatch,
+  retainedYouTubeRenderSlot,
+  youtubeRenderSlot,
+} from '../../../process-audio/src/temporal/hetzner-render-slot';
+import { awaitYouTubeRenderDrain } from '../../../process-audio/src/temporal/hetzner-render-drain';
 import { Context } from '@temporalio/activity';
 import { ApplicationFailure } from '@temporalio/common';
+import type { Bucket } from '@google-cloud/storage';
 import type { Firestore, Transaction } from 'firebase-admin/firestore';
 import type { WorkerWitness } from './worker-witness';
 import type { MediaJobRef, MediaArchiveWait } from '../../../process-audio/src/temporal/types';
@@ -10,54 +17,54 @@ import {
 import {
   prepareNativeYouTubeEpisode,
   recordNativeYouTubeArchiveWait,
+  recordNativeYouTubeRenderArchiveWait,
+  readPreparedYouTubeEpisodeInTransaction,
 } from '../../../process-audio/src/temporal/hetzner-acquisition-episode';
+import { waitForYouTubeRender } from '../../../process-audio/src/temporal/hetzner-render-client';
+import { adoptYouTubeRender } from '../../../process-audio/src/temporal/hetzner-render-receipt';
+import {
+  authorizeRenderAuthenticationDispatch,
+  prepareRenderAuthentication,
+  readReadyRenderAuthentication,
+} from '../../../process-audio/src/temporal/hetzner-render-authentication';
 const fail = (): never => {
   throw ApplicationFailure.nonRetryable(
     'YouTube acquisition binding is unavailable.',
     'YOUTUBE_ACQUISITION_BINDING_REQUIRED'
   );
 };
-/** Explicit staging binding only. The rendered pools do not enable it until the
- * retained host's shared-capacity/bootstrap gates pass. No remote-to-local fallback. */
-export function createRuntimeYouTubeAcquisition(o: {
+interface RuntimeYouTubeBinding {
   projectId: string;
   firestore: Firestore;
   witness?: WorkerWitness;
   assertCurrent: (tx: Transaction, ref: MediaJobRef) => Promise<unknown>;
-}) {
+}
+
+function runtimeBinding(o: RuntimeYouTubeBinding, expected: 'hetzner-v1' | 'hetzner-render-v1') {
   const mode = process.env.TEMPORAL_MEDIA_YOUTUBE_ACQUISITION;
   if (mode === undefined) return undefined;
-  if (mode !== 'hetzner-v1' || o.projectId !== 'urm-app-staging' || process.env.TEMPORAL_WORKER_HOSTING !== 'cloud-run')
+  if (
+    (mode !== 'hetzner-v1' && mode !== 'hetzner-render-v1') ||
+    o.projectId !== 'urm-app-staging' ||
+    process.env.TEMPORAL_WORKER_HOSTING !== 'cloud-run'
+  )
     return fail();
-  let client: ReturnType<typeof createHetznerAcquisitionClient> | undefined;
-  return async (ref: MediaJobRef, signal: AbortSignal, archiveResume?: MediaArchiveWait) => {
+  if (mode !== expected) return undefined;
+  return async (
+    ref: MediaJobRef,
+    signal: AbortSignal,
+    archiveResume?: MediaArchiveWait,
+    authenticationGeneration?: string
+  ) => {
     signal.throwIfAborted();
-    const w = o.witness,
-      cloud = w?.cloudRun;
-    if (
-      !w ||
-      !cloud ||
-      cloud.projectId !== o.projectId ||
-      cloud.region !== 'us-central1' ||
-      cloud.serviceAccount !== `tw-m-${w.buildId.slice(0, 20)}@urm-app-staging.iam.gserviceaccount.com` ||
-      !/^[a-f0-9]{40}$/.test(w.buildId) ||
-      !cloud.instanceId ||
-      Context.current().info.activityType !== 'acquireMedia'
-    )
-      return fail();
-    const info = Context.current().info;
-    if (!info.workflowExecution) return fail();
-    await prepareNativeYouTubeEpisode({
+    const { caller, invocation } = invocationBinding(o, 'acquireMedia');
+    const episodeId = await prepareNativeYouTubeEpisode({
       archiveResume,
-      invocation: {
-        workflowId: info.workflowExecution.workflowId,
-        runId: info.workflowExecution.runId,
-        activityId: info.activityId,
-        attempt: info.attempt,
-      },
+      ...(expected === 'hetzner-render-v1' ? { render: true as const, authenticationGeneration } : {}),
+      invocation,
       firestore: o.firestore,
       ref,
-      caller: { buildId: w.buildId, serviceAccount: cloud.serviceAccount, instanceId: cloud.instanceId },
+      caller,
       assertCurrent: async (tx, bound) => {
         signal.throwIfAborted();
         await o.assertCurrent(tx, bound);
@@ -65,11 +72,164 @@ export function createRuntimeYouTubeAcquisition(o: {
       },
     });
     signal.throwIfAborted();
+    return { caller, episodeId };
+  };
+}
+
+function invocationBinding(o: RuntimeYouTubeBinding, type: 'acquireMedia' | 'recoverMediaAuthentication') {
+  const w = o.witness,
+    cloud = w?.cloudRun;
+  if (
+    !w ||
+    !cloud ||
+    cloud.projectId !== o.projectId ||
+    cloud.region !== 'us-central1' ||
+    cloud.serviceAccount !== `tw-m-${w.buildId.slice(0, 20)}@urm-app-staging.iam.gserviceaccount.com` ||
+    !/^[a-f0-9]{40}$/.test(w.buildId) ||
+    !cloud.instanceId
+  )
+    return fail();
+  const info = Context.current().info;
+  if (info.activityType !== type || !info.workflowExecution) return fail();
+  return {
+    caller: { buildId: w.buildId, serviceAccount: cloud.serviceAccount, instanceId: cloud.instanceId },
+    invocation: {
+      workflowId: info.workflowExecution.workflowId,
+      runId: info.workflowExecution.runId,
+      activityId: info.activityId,
+      attempt: info.attempt,
+    },
+  };
+}
+
+export function createRuntimeYouTubeAcquisition(o: RuntimeYouTubeBinding) {
+  const bind = runtimeBinding(o, 'hetzner-v1');
+  if (!bind) return undefined;
+  let client: ReturnType<typeof createHetznerAcquisitionClient> | undefined;
+  return async (ref: MediaJobRef, signal: AbortSignal, archiveResume?: MediaArchiveWait) => {
+    await bind(ref, signal, archiveResume);
     client ??= createHetznerAcquisitionClient({
       request: createHetznerAcquisitionTransport(o.projectId),
       heartbeat: () => Context.current().heartbeat({ stage: 'youtube-acquisition' }),
     });
     return client.acquire(ref, signal);
+  };
+}
+
+async function observeRenderUntilCancelled<T>(
+  o: RuntimeYouTubeBinding,
+  ref: MediaJobRef,
+  signal: AbortSignal,
+  wait: () => Promise<T>
+) {
+  try {
+    return await wait();
+  } catch (error) {
+    if (signal.aborted) {
+      const context = Context.current();
+      await awaitYouTubeRenderDrain({
+        firestore: o.firestore,
+        ref,
+        stop: true,
+        heartbeat: () => context.heartbeat({ stage: 'youtube-render-drain' }),
+      });
+      signal.throwIfAborted();
+    }
+    throw error;
+  }
+}
+export function createRuntimeYouTubeRender(o: RuntimeYouTubeBinding & { bucket: Bucket }) {
+  const bind = runtimeBinding(o, 'hetzner-render-v1');
+  if (!bind) return undefined;
+  return async (
+    ref: MediaJobRef,
+    signal: AbortSignal,
+    archiveResume?: MediaArchiveWait,
+    authenticationGeneration?: string
+  ) => {
+    const { caller, episodeId } = await bind(ref, signal, archiveResume, authenticationGeneration);
+    const verifiedCallerEmail = caller.serviceAccount;
+    const transport = createHetznerAcquisitionTransport(o.projectId, { episodeId });
+    const context = Context.current();
+    const heartbeat = () => context.heartbeat({ stage: 'youtube-render' });
+    const completed = await observeRenderUntilCancelled(o, ref, signal, () =>
+      waitForYouTubeRender({
+        ref,
+        signal,
+        request: transport,
+        heartbeat,
+        authorizeDispatch: () =>
+          reserveYouTubeRenderDispatch({
+            firestore: o.firestore,
+            signal,
+            assertCurrent: (tx) => o.assertCurrent(tx, ref),
+            read: async (tx) => {
+              const { episode, execution, root } = await readPreparedYouTubeEpisodeInTransaction(tx, {
+                ...o,
+                ref,
+                verifiedCallerEmail,
+                render: true,
+              });
+              if (episode.id !== episodeId) return fail();
+              return {
+                dispatch: await tx.get(execution.ref.collection('render').doc('dispatch')),
+                body: { schemaVersion: 1, ref, episodeId: episode.id },
+                slot: youtubeRenderSlot(ref, episode.id),
+                transferFrom: episode.predecessor?.authenticationGeneration
+                  ? retainedYouTubeRenderSlot(ref, episode.predecessor.id, episode.predecessor.authenticationGeneration)
+                  : undefined,
+                active: root.get('renderStopped') !== true && execution.get('renderClaim') === undefined,
+              };
+            },
+          }),
+      })
+    );
+    if (completed === 'cancelled') return { kind: 'cancelled' } as const;
+    const result = await adoptYouTubeRender({ ...o, ref, signal, verifiedCallerEmail, episodeId });
+    if (result.kind !== completed) return fail();
+    if (result.kind === 'waiting_auth')
+      return { kind: 'waiting_auth', recoveryGeneration: null, hostBound: true } as const;
+    if (result.kind === 'waiting_archive') return { kind: 'waiting_archive', hostBound: true } as const;
+    if (result.kind === 'restricted') return { kind: 'restricted' } as const;
+    if (result.kind !== 'rendered') return fail();
+    return { kind: 'ready', hostBound: true } as const;
+  };
+}
+
+export function createRuntimeYouTubeRenderAuthentication(o: RuntimeYouTubeBinding) {
+  if (!runtimeBinding(o, 'hetzner-render-v1')) return undefined;
+  return async (ref: MediaJobRef) => {
+    const context = Context.current(),
+      signal = context.cancellationSignal;
+    const { caller, invocation } = invocationBinding(o, 'recoverMediaAuthentication');
+    const id = await prepareRenderAuthentication({ ...o, ref, caller, invocation, signal });
+    const verifiedCallerEmail = caller.serviceAccount;
+    const request = createHetznerAcquisitionTransport(o.projectId, { authenticationId: id });
+    const completed = await observeRenderUntilCancelled(o, ref, signal, () =>
+      waitForYouTubeRender({
+        ref,
+        signal,
+        request,
+        authentication: true,
+        maxPolls: 65,
+        heartbeat: () => context.heartbeat({ stage: 'youtube-authentication' }),
+        authorizeDispatch: () => authorizeRenderAuthenticationDispatch({ ...o, ref, id, signal, verifiedCallerEmail }),
+      })
+    );
+    if (completed === 'failed' || completed === 'busy') return { ready: false, generation: null };
+    if (completed !== 'ready') return fail();
+    const result = await o.firestore.runTransaction(
+      async (tx) => {
+        const ready = await readReadyRenderAuthentication(tx, { ...o, ref, verifiedCallerEmail });
+        await o.assertCurrent(tx, ref);
+        signal.throwIfAborted();
+        return ready;
+      },
+      { maxAttempts: 1 }
+    );
+    if (!result || result.generation !== id) return fail();
+    if (!result.retainedSlot) return { ready: false, generation: null };
+    return { ready: true, generation: result.generation };
   };
 }
 
@@ -110,7 +270,9 @@ export function createRuntimeYouTubeArchiveWaitRecorder(o: {
         !/^[a-f0-9]{40}$/.test(w.buildId)
       )
         return fail();
-      await recordNativeYouTubeArchiveWait({
+      const record =
+        root.get('renderProtocol') === 1 ? recordNativeYouTubeRenderArchiveWait : recordNativeYouTubeArchiveWait;
+      await record({
         firestore: o.firestore,
         ref,
         wait,

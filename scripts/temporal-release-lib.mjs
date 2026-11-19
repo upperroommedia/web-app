@@ -420,3 +420,12 @@ export function validateProviderUsageMarker(config, marker, expectedEpoch) {
     );
   return marker;
 }
+
+/** Cleanup can abandon an untouched lock. Once any checkpoint is present,
+ * an unsuccessful invocation preserves the original operation for readback. */
+export function canReleaseOwnedOperationLock(lock, operationVerified) {
+  const initialFields = new Set([
+    'operationId', 'releaseId', 'action', 'bindingDigest', 'operatorIdentity', 'operatorPrincipal', 'createdAt',
+  ]);
+  return operationVerified === true || Object.keys(lock).every((field) => initialFields.has(field));
+}

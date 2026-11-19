@@ -66,6 +66,8 @@ export async function resolveStageAsset(
     .file(path, requestedGeneration ? { generation: requestedGeneration } : undefined)
     .getMetadata();
   const ref = { bucket, path, generation: String(metadata.generation) };
+  if (requestedGeneration !== undefined && requestedGeneration !== ref.generation)
+    throw new SandboxHttpError(409, 'Requested media generation is unavailable');
   validateStageAssetRef(ref);
   return ref;
 }

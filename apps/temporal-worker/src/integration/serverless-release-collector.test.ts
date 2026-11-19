@@ -1,3 +1,14 @@
+// Controlled Storage IAM response, with the real receipt writer and collector.
+jest.mock('../runtime/cloud-run-storage-readiness', () => {
+  const actual = jest.requireActual('../runtime/cloud-run-storage-readiness');
+  return {
+    ...actual,
+    verifyCloudRunStorageReadiness: jest.fn(async (role) => {
+      const expected = actual.expectedCloudRunStorageAccess(role);
+      return expected ? { ...expected, observedAt: new Date().toISOString() } : null;
+    }),
+  };
+});
 // Explicit no-network email fixture; local tests do not prove deployed mail authentication.
 jest.mock('@upperroom/function-kit-firestore-send-email/lib/temporal/provider', () => ({
   verifyEmailTransportNoSendBounded: jest.fn(async () => ({
@@ -20,7 +31,7 @@ jest.mock('../runtime/cloud-run-rtdb-readiness', () => ({
   })),
 }));
 import { msToTs } from '@temporalio/common/lib/time';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, rm, realpath, rename, readdir, writeFile, chmod, symlink, mkdir } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import { resolve, join } from 'node:path';
@@ -29,6 +40,7 @@ import { initializeApp, deleteApp } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import { Client, WorkflowNotFoundError } from '@temporalio/client';
 import { Worker } from '@temporalio/worker';
+import { cloudRunPollerIdentity } from '../runtime/cloud-run-witness';
 import { createLocalTestEnvironment } from '../test-support/local-test-environment';
 import {
   createWorkerReadinessActivities,
@@ -77,6 +89,7 @@ test('collector joins actual version routing, native activity history and privat
   // Official-schema fixtures isolate Cloud Run GETs only. They are NOT real cloud attestations.
   const resources = new Map<string, unknown>();
   let proof: Awaited<ReturnType<typeof collectServerlessReadinessObservations>> | undefined;
+  let lostAckReceiptIds: string[] = [];
   try {
     await environment.connection.workflowService.registerNamespace({
       namespace,
@@ -120,10 +133,13 @@ test('collector joins actual version routing, native activity history and privat
           },
         ],
       });
+      const processId = randomUUID();
+      const instanceId = `native-${binding.role}`;
       const worker = await Worker.create({
         connection: environment.nativeConnection,
         namespace,
         taskQueue: `urm-${binding.role}`,
+        identity: cloudRunPollerIdentity(instanceId, processId),
         workflowsPath:
           binding.role === 'orchestration' ? require.resolve('../workflows/verification/runtime') : undefined,
         workerDeploymentOptions: {
@@ -139,7 +155,7 @@ test('collector joins actual version routing, native activity history and privat
           queue: `urm-${binding.role}`,
           witness: {
             buildId,
-            instanceId: `process-${binding.role}`,
+            instanceId: processId,
             cloudRun: {
               projectId: binding.projectId,
               region: binding.region,
@@ -148,7 +164,7 @@ test('collector joins actual version routing, native activity history and privat
               revisionUid: `uid-${binding.role}`,
               imageDigest: `sha256:${'b'.repeat(64)}`,
               serviceAccount: binding.runnerServiceAccount,
-              instanceId: `native-${binding.role}`,
+              instanceId,
             },
           },
         }),
@@ -206,6 +222,25 @@ test('collector joins actual version routing, native activity history and privat
     expect(persistedIntentId).toBe(proof.workflowId);
     expect(proof.roles.map((r) => r.role)).toEqual(['orchestration', 'controls', 'email']);
     expect(proof.roles[0].poolGeneration).toBe('9007199254740993');
+    for (const role of proof.roles) {
+      const binding = bindings.find((item) => item.role === role.role)!;
+      const parent = `projects/${binding.projectId}/locations/${binding.region}/workerPools/${binding.poolName}`;
+      expect(role.poolDigest).toBe(workerReadinessDigest(resources.get(parent)));
+      expect(role.revisionDigest).toBe(workerReadinessDigest(resources.get(`${parent}/revisions/${role.revision}`)));
+    }
+    expect(proof.roles.map((r) => r.cloudStorage)).toEqual([
+      {
+        bucket: 'urm-app-staging.firebasestorage.app',
+        permissions: ['storage.objects.create', 'storage.objects.delete', 'storage.objects.get'],
+        observedAt: expect.any(String),
+      },
+      {
+        bucket: 'urm-app-staging.firebasestorage.app',
+        permissions: ['storage.objects.get'],
+        observedAt: expect.any(String),
+      },
+      null,
+    ]);
     for (const role of proof.roles) {
       const snapshot = await db.collection(WORKER_READINESS_COLLECTION).doc(role.receipt.id).get();
       const { digest, ...data } = snapshot.data()!;
@@ -298,6 +333,41 @@ test('collector joins actual version routing, native activity history and privat
       expect(starts).not.toHaveBeenCalled();
     }
     await receiptRef.set(receipt);
+
+    // Keep the original native run, activity receipt and start history. A mismatched
+    // completion identity in the collector's transport cannot authorize readiness.
+    const actualGetHandle = client.workflow.getHandle.bind(client.workflow);
+    const handles = jest.spyOn(client.workflow, 'getHandle').mockImplementation((...args) => {
+      const handle = actualGetHandle(...args);
+      const actualHistory = handle.fetchHistory.bind(handle);
+      handle.fetchHistory = async () => {
+        const history = await actualHistory();
+        const completion = history.events?.find(
+          (event) => event.activityTaskCompletedEventAttributes
+        )?.activityTaskCompletedEventAttributes;
+        if (completion) completion.identity = 'another-process';
+        return history;
+      };
+      return handle;
+    });
+    try {
+      await expect(
+        collectServerlessReadinessObservations({
+          client,
+          firestore: db,
+          bindings,
+          artifactDirectory: directory,
+          imageWorkflowBundleSHA256: 'f'.repeat(64),
+          savedIntent,
+          readResource: async (name) => resources.get(name),
+        })
+      ).rejects.toThrow('SERVERLESS_READINESS_PENDING_RECONCILE_SAVED_INTENT');
+      expect(starts).not.toHaveBeenCalled();
+      expect(await readdir(directory)).toEqual(priorArtifacts);
+    } finally {
+      handles.mockRestore();
+    }
+
     await expect(
       collectServerlessReadinessObservations({
         client,
@@ -408,6 +478,42 @@ test('collector joins actual version routing, native activity history and privat
     }
     starts.mockRestore();
 
+    // The original native START commits, but the caller loses its response
+    // before writing a local ACK. Reconcile that exact run without a new START.
+    const lostAckDirectory = await realpath(await mkdtemp(join(tmpdir(), 'urm-collector-lost-ack-')));
+    const autoStart = client.workflow.start.bind(client.workflow);
+    const sent = jest.spyOn(client.workflow, 'start').mockImplementationOnce(async (...args) => {
+      await autoStart(...args);
+      throw new Error('Controlled loss of the native START acknowledgement');
+    });
+    try {
+      const common = {
+        client,
+        firestore: db,
+        bindings,
+        artifactDirectory: lostAckDirectory,
+        imageWorkflowBundleSHA256: 'f'.repeat(64),
+        readResource: async (name: string) => resources.get(name),
+      };
+      await expect(collectServerlessReadinessObservations(common)).rejects.toThrow(
+        'SERVERLESS_READINESS_PENDING_RECONCILE_SAVED_INTENT'
+      );
+      const saved = JSON.parse(await readFile(join(lostAckDirectory, 'readiness-start-intent.json'), 'utf8'));
+      const originalRun = await client.workflow.getHandle(saved.workflowId).describe();
+      lostAckReceiptIds = bindings.map(({ role }) =>
+        createHash('sha256').update(`${originalRun.runId}:${role}:${saved.nonce}`).digest('hex')
+      );
+      expect(await readdir(lostAckDirectory)).toEqual(['readiness-start-intent.json']);
+      const recovery = await collectServerlessReadinessObservations({ ...common, savedIntent: saved });
+      expect(recovery.workflowId).toBe(saved.workflowId);
+      expect(recovery.runId).toBe(originalRun.runId);
+      expect(recovery.roles.map((role) => role.receipt.id)).toEqual(lostAckReceiptIds);
+      expect(sent).toHaveBeenCalledTimes(1);
+    } finally {
+      sent.mockRestore();
+      await rm(lostAckDirectory, { recursive: true, force: true });
+    }
+
     await expect(
       collectServerlessReadinessObservations({
         client,
@@ -423,8 +529,8 @@ test('collector joins actual version routing, native activity history and privat
     for (const worker of workers) if (worker.getStatus().runState === 'RUNNING') worker.shutdown();
     await Promise.allSettled(running);
     await environment.teardown();
-    if (proof)
-      for (const role of proof.roles) await db.collection(WORKER_READINESS_COLLECTION).doc(role.receipt.id).delete();
+    for (const id of [...(proof?.roles.map((role) => role.receipt.id) ?? []), ...lostAckReceiptIds])
+      await db.collection(WORKER_READINESS_COLLECTION).doc(id).delete();
     await db.terminate();
     await deleteApp(app);
     await rm(directory, { recursive: true, force: true });

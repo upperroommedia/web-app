@@ -52,6 +52,12 @@ export async function verifyPoolPreparationPrerequisites(plan,identityReceipt,ap
   const secrets=await verifyPoolPreparationSecretPrerequisites(plan,identityReceipt,api);
   return {...secrets,...(plan.role==='media'?{mediaDiskQuota:await observeMediaDiskQuota(plan,api)}:{})};
 }
+function assertFreshComputeIsolation(isolation, namespace) {
+  const observedAt = Date.parse(isolation?.observedAt);
+  if (isolation?.namespace !== namespace || !/^[a-f0-9]{64}$/.test(isolation.inventorySHA256 ?? '') ||
+    !Number.isFinite(observedAt) || Math.abs(Date.now() - observedAt) > 5000) fail();
+}
+
 /** Create at most once. A lost create ACK remains fenced: no GET/name adoption,
  * inferred LRO or retry. A saved native LRO may be polled on a later resume.
  */
@@ -78,8 +84,7 @@ export async function prepareCloudRunZeroPool({ platform, role, settings, operat
       try { await api(`https://run.googleapis.com/v2/${body.name}`); fail(); }
       catch (error) { if (error?.status !== 404) throw error; }
       const isolation = await observeComputeIsolation();
-      if (isolation?.namespace !== platform.temporalNamespace || !/^[a-f0-9]{64}$/.test(isolation.inventorySHA256 ?? '') ||
-        !Number.isFinite(Date.parse(isolation.observedAt)) || Math.abs(Date.now() - Date.parse(isolation.observedAt)) > 5000) fail();
+      assertFreshComputeIsolation(isolation, platform.temporalNamespace);
       state = { plan, stage: 'attempted', attemptedAt: new Date().toISOString(), prerequisites: prerequisitesProof, isolation };
       await save(state);
       // No automatic HTTP retry; this API has no requestId parameter.
@@ -94,8 +99,20 @@ export async function prepareCloudRunZeroPool({ platform, role, settings, operat
         assertMediaDiskQuotaFresh(prerequisitesProof.mediaDiskQuota);
         assertMediaDiskQuotaFresh(fresh);
       };
-      if(quotaFence)await quotaFence();
-      const response = await api(`https://run.googleapis.com/v2/projects/urm-app-staging/locations/us-central1/workerPools?workerPoolId=${binding.poolName}`, 'POST', body,quotaFence);
+      await quotaFence();
+      const beforeSend = async () => {
+        const latestIsolation = await observeComputeIsolation();
+        assertFreshComputeIsolation(latestIsolation, platform.temporalNamespace);
+        if (latestIsolation.inventorySHA256 !== isolation.inventorySHA256) fail();
+        await quotaFence();
+        assertFreshComputeIsolation(latestIsolation, platform.temporalNamespace);
+      };
+      const response = await api(
+        `https://run.googleapis.com/v2/projects/urm-app-staging/locations/us-central1/workerPools?workerPoolId=${binding.poolName}`,
+        'POST',
+        body,
+        beforeSend
+      );
       state = { ...state, stage: 'acknowledged', nativeOperation: operationName(response?.name) };
       await save(state);
     }

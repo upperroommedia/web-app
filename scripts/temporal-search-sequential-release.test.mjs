@@ -67,6 +67,45 @@ test('actual controller completes sequential staging search onboarding without r
   assert.equal(proof.jobCount, 5);
 });
 
+test('actual open controller rejects replaced UI traffic or smoke evidence and preserves paused admissions', async () => {
+  const { stdout } = await exec(
+    process.execPath,
+    [
+      '--experimental-vm-modules',
+      new URL('./tests/fixtures/temporal-search-sequential-release.mjs', import.meta.url).pathname,
+      'preopen-ui',
+    ],
+    { timeout: 60000, maxBuffer: 2 * 1024 * 1024 }
+  );
+  assert.equal(JSON.parse(stdout.trim()).phase, 'complete');
+});
+
+test('actual initial UI freeze preserves the original policy and reconciles without a second update', async () => {
+  const { stdout } = await exec(
+    process.execPath,
+    [
+      '--experimental-vm-modules',
+      new URL('./tests/fixtures/temporal-search-sequential-release.mjs', import.meta.url).pathname,
+      'freeze-unknown',
+    ],
+    { timeout: 60000, maxBuffer: 2 * 1024 * 1024 }
+  );
+  assert.equal(JSON.parse(stdout.trim()).phase, 'complete');
+});
+
+test('actual rollout policy restoration reconciles an ambiguous response without resending', async () => {
+  const { stdout } = await exec(
+    process.execPath,
+    [
+      '--experimental-vm-modules',
+      new URL('./tests/fixtures/temporal-search-sequential-release.mjs', import.meta.url).pathname,
+      'restore-unknown',
+    ],
+    { timeout: 60000, maxBuffer: 2 * 1024 * 1024 }
+  );
+  assert.equal(JSON.parse(stdout.trim()).phase, 'complete');
+});
+
 test('actual bundle controller rejects source/resource/current-head/native races and reconciles both unknown ACK outcomes', async () => {
   const { stdout } = await exec(
     process.execPath,

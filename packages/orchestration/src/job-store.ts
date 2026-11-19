@@ -37,6 +37,18 @@ export interface DurableCloudRunWorkerIdentity {
   serviceAccount: string;
   instanceId: string;
 }
+export interface DurableMediaRecoveryJobIdentity {
+  projectId: 'urm-app-staging';
+  region: 'us-central1';
+  job: string;
+  execution: string;
+  executionUid: string;
+  task: string;
+  taskUid: string;
+  serviceAccount: string;
+  imageDigest: string;
+  instanceId: string;
+}
 export interface DurableWorkerWitness {
   instanceId: string;
   buildId: string;
@@ -48,6 +60,7 @@ export interface DurableWorkerWitness {
   nodeName?: string;
   containerIds?: string[];
   cloudRun?: DurableCloudRunWorkerIdentity;
+  cloudRunJob?: DurableMediaRecoveryJobIdentity;
 }
 /** Trusted Temporal metadata, never caller payload or a local wall-clock epoch. */
 export interface DurableActivityExecution {
@@ -118,6 +131,57 @@ function validateExecution(value: DurableActivityExecution, projectId: string): 
         value.worker.containerIds.some((id) => typeof id !== 'string' || !id || id.length > 512))
     )
       invalid('Invalid worker container identities');
+    if (value.worker.cloudRunJob) {
+      const job = value.worker.cloudRunJob;
+      const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
+      const operation = value.workflowId.startsWith('media-recovery-')
+        ? value.workflowId.slice('media-recovery-'.length)
+        : '';
+      const expectedJob =
+        'projects/urm-app-staging/locations/us-central1/jobs/urm-media-recovery-' + operation.replaceAll('-', '');
+      const fields = [
+        'projectId',
+        'region',
+        'job',
+        'execution',
+        'executionUid',
+        'task',
+        'taskUid',
+        'serviceAccount',
+        'imageDigest',
+        'instanceId',
+      ] as const;
+      if (Object.keys(job).length !== fields.length) invalid('Unexpected recovery Job identity detail');
+      for (const key of fields) boundedString(job[key], key);
+      if (
+        !uuid.test(operation) ||
+        !uuid.test(value.worker.instanceId) ||
+        !/^[a-f0-9]{40}$/.test(value.worker.buildId) ||
+        projectId !== 'urm-app-staging' ||
+        job.projectId !== projectId ||
+        job.region !== 'us-central1' ||
+        value.temporalNamespace !== 'urm-app-staging.qwejt' ||
+        value.activityType !== 'acquireMedia' ||
+        value.activityId !== 'media-recovery-acquire' ||
+        ![1, 2].includes(value.attempt) ||
+        job.job !== expectedJob ||
+        !job.execution.startsWith(job.job + '/executions/') ||
+        !/^[a-z0-9-]{1,63}$/.test(job.execution.split('/').at(-1) ?? '') ||
+        job.execution.split('/').length !== 8 ||
+        !job.task.startsWith(job.execution + '/tasks/') ||
+        !/^[a-z0-9-]{1,63}$/.test(job.task.split('/').at(-1) ?? '') ||
+        job.task.split('/').length !== 10 ||
+        !uuid.test(job.executionUid) ||
+        !uuid.test(job.taskUid) ||
+        !/^sha256:[a-f0-9]{64}$/.test(job.imageDigest) ||
+        !/^[A-Za-z0-9_-]{1,256}$/.test(job.instanceId) ||
+        job.serviceAccount !== `tw-m-${value.worker.buildId.slice(0, 20)}@urm-app-staging.iam.gserviceaccount.com` ||
+        ['cloudRun', 'podUid', 'podName', 'namespace', 'clusterId', 'nodeUid', 'nodeName', 'containerIds'].some(
+          (key) => value.worker![key as keyof DurableWorkerWitness] !== undefined
+        )
+      )
+        invalid('Invalid or mixed private recovery Job identity');
+    }
     if (value.worker.cloudRun) {
       const cloud = value.worker.cloudRun;
       const fields = [
@@ -165,6 +229,7 @@ function validateExecution(value: DurableActivityExecution, projectId: string): 
             'nodeName',
             'containerIds',
             'cloudRun',
+            'cloudRunJob',
           ].includes(key)
       )
     )

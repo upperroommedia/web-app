@@ -115,11 +115,15 @@ async function inspect(o, kind) {
             )
               fail();
             const { capsuleSHA256, ...preimage } = cap.data();
+            const jobMode = Boolean(all.at(-1).get('identityState.plan.job'));
             if (
               capsuleSHA256 !== p.origin.capsuleSHA256 ||
               hash(preimage) !== capsuleSHA256 ||
-              cap.get('schemaVersion') !== 1 ||
-              cap.get('kind') !== 'completed-media-recovery-provenance-only-v1' ||
+              cap.get('schemaVersion') !== (jobMode ? 2 : 1) ||
+              cap.get('kind') !==
+                (jobMode
+                  ? 'completed-media-recovery-job-provenance-v2'
+                  : 'completed-media-recovery-provenance-only-v1') ||
               cap.get('operationId') !== p.recoveryOperationId ||
               cap.get('releaseId') !== p.releaseId ||
               cap.get('source.buildId') !== p.buildId ||

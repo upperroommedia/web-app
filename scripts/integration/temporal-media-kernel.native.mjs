@@ -30,6 +30,7 @@ for (const kind of ['normal', 'diagnostic', 'restored'])
     'lost-birth-ack',
     'ipc-error',
     'ipc-channel-error',
+    ...(kind === 'diagnostic' ? ['ignored-cleanup-signal'] : []),
   ]) {
     test(`actual child launch/close / ${kind} / ${mode}`, { timeout: 15000 }, async () => {
       const dir = await mkdtemp(join(tmpdir(), 'urm-kernel-'));
@@ -38,7 +39,8 @@ for (const kind of ['normal', 'diagnostic', 'restored'])
       let state,
         drift = false,
         deadline = Infinity,
-        childPid;
+        childPid,
+        bornAt;
       const snapshot = () => ({ exists: state !== undefined, data: () => state });
       const ref = { get: async () => snapshot() };
       const db = {
@@ -69,6 +71,7 @@ for (const kind of ['normal', 'diagnostic', 'restored'])
             state = next;
             if (next.stage === 'born') {
               childPid = next.birth.pid;
+              bornAt = performance.now();
               if (mode === 'expired-birth-ack') {
                 deadline = Date.now() + 20;
                 await new Promise((r) => setTimeout(r, 60));
@@ -137,6 +140,29 @@ process.on('SIGTERM',()=>process.exit(0));
               : superviseMediaRecoveryKernel)(db, cap, entry)
           );
           assert.notEqual(state.stage, 'closed');
+        } else if (mode === 'ignored-cleanup-signal') {
+          await writeFile(
+            entry,
+            `process.on('SIGTERM',()=>{});process.send({kind:'media-kernel-ready',nonce:${JSON.stringify(
+              randomUUID()
+            )},pid:process.pid});setTimeout(()=>process.exit(0),12000);`
+          );
+          // Initial authority must hold. Revoke only after the owned child is born.
+          await assert.rejects(
+            superviseMediaRecoveryKernel(
+              db,
+              {
+                ...cap,
+                authorize: async () => {
+                  if (childPid !== undefined) throw new Error('CONTROLLED_AUTHORITY_DRIFT');
+                },
+              },
+              entry
+            )
+          );
+          assert.equal(state.stage, 'born');
+          assert.ok(childPid > 0);
+          assert.ok(performance.now() - bornAt < 11500, 'Original child outlasted the Cloud Run shutdown budget');
         } else if (mode === 'ipc-error') {
           // An invalid protocol causes an owned stop; error is never a closed fact.
           await writeFile(

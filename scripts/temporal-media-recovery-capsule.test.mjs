@@ -215,3 +215,54 @@ test('capsule denies missing original source operator identity', async () => {
   delete f.root.operatorIdentity;
   await assert.rejects(f.read(), /CAPSULE_UNCONFIRMED/);
 });
+
+test('Job capsule retains owned RUN and the unchanged zero pool with both exact task witnesses', async () => {
+  const f = await fixture();
+  const { next, root, o, docs } = f;
+  const id = o.operationId;
+  const plan = next.plan;
+  const job = {
+    name: 'projects/urm-app-staging/locations/us-central1/jobs/urm-media-recovery-' + id.replaceAll('-', ''),
+  };
+  plan.job = job;
+  const execution = job.name + '/executions/original';
+  const witness = {
+    execution,
+    executionUid: 'original-uid',
+    task: execution + '/tasks/index-zero',
+    taskUid: 'exact-task-uid',
+  };
+  const provider = {
+    runIdentity: { stage: 'acknowledged', jobPlanSHA256: hash(job), execution, executionUid: witness.executionUid },
+  };
+  root.mediaRecoveryJobProvider = provider;
+  for (const key of ['start', 'diagnostic', 'restore', 'stop', 'stopped', 'drained']) delete next[key];
+  next.disposition = 'normal-zero-after-job';
+  next.jobTermination = { ...witness, proofSHA256: 'c'.repeat(64) };
+  next.jobDrain = { terminationSHA256: next.jobTermination.proofSHA256 };
+  f.drain.proof = next.jobDrain;
+  const facts = (name) => docs.get(`_control/temporalMediaRecovery${name}-${id}`);
+  const journal = facts('Journal');
+  journal.planSHA256 = hash(plan);
+  next.prepared.proofSHA256 = hash(journal);
+  root.mediaRecoveryJournalAttempt.recordSHA256 = hash(journal);
+  const intent = root.mediaRecoveryWorkflowStart;
+  intent.planSHA256 = hash(plan);
+  intent.preparedSHA256 = hash(next.prepared);
+  intent.cycleSHA256 = hash({ plan, stage: 'prepared', prepared: next.prepared });
+  delete intent.poolSHA256;
+  intent.jobRunSHA256 = hash(provider.runIdentity);
+  const start = facts('Start');
+  delete start.poolSHA256;
+  start.jobRunSHA256 = intent.jobRunSHA256;
+  start.intentSHA256 = hash(intent);
+  for (const name of ['Kernel', 'ReplacementKernel']) facts(name).worker = { cloudRunJob: structuredClone(witness) };
+  root.cloudMediaRecovery = { stage: 'prepared' };
+  const capsule = await f.read();
+  assert.equal(capsule.record.schemaVersion, 2);
+  assert.equal(capsule.record.kind, 'completed-media-recovery-job-provenance-v2');
+  assert.deepEqual(capsule.record.restoredPool, plan.origin);
+  assert.deepEqual(capsule.record.originalParent.mediaRecoveryJobProvider, provider);
+  facts('ReplacementKernel').worker.cloudRunJob.taskUid = 'foreign-task';
+  await assert.rejects(f.read(), /CAPSULE_UNCONFIRMED/);
+});

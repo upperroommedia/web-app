@@ -189,11 +189,13 @@ async function collectStartup(o: Options, scope: 'retained' | 'phase', promotion
     )
       fail();
     const { capsuleSHA256, ...cap } = capsule;
+    const jobMode = Boolean(completion.identityState?.plan?.job);
     if (
       capsuleSHA256 !== p.origin.capsuleSHA256 ||
       proof(cap) !== capsuleSHA256 ||
-      capsule.schemaVersion !== 1 ||
-      capsule.kind !== 'completed-media-recovery-provenance-only-v1' ||
+      capsule.schemaVersion !== (jobMode ? 2 : 1) ||
+      capsule.kind !==
+        (jobMode ? 'completed-media-recovery-job-provenance-v2' : 'completed-media-recovery-provenance-only-v1') ||
       capsule.operationId !== p.recoveryOperationId ||
       capsule.releaseId !== p.releaseId ||
       capsule.source?.buildId !== p.buildId ||
@@ -425,6 +427,7 @@ async function collectStartup(o: Options, scope: 'retained' | 'phase', promotion
       worker: s.worker,
       kernelBirthSHA256: birth.birthDigest,
       startupSHA256: digest,
+      registeredAt: s.observedAt,
       proofSHA256: proof(first),
       observedAt: new Date(began).toISOString(),
       scope: 'historical-startup-only-no-polling-or-registration-authority',

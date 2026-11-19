@@ -119,7 +119,11 @@ async function readSnapshot(
         v = cap.data()!,
         original = v.originalParent,
         completed = receipt.get('identityState'),
-        p = completed?.plan;
+        p = completed?.plan,
+        jobMode = Boolean(p?.job),
+        provider = original?.mediaRecoveryJobProvider,
+        compute = jobMode ? provider?.runIdentity : completed?.start?.pool,
+        computeKey = jobMode ? 'jobRunSHA256' : 'poolSHA256';
       const retained = promotion ? await readRetainedMediaPromotionAuthority(promotion, tx, fresh) : null;
       if (
         releaseProvenanceDigest(c) !== o.expectedRootSHA256 ||
@@ -159,8 +163,9 @@ async function readSnapshot(
       const { capsuleSHA256, ...preimage } = v;
       if (
         (retained && retained.activationPlan.origin.capsuleSHA256 !== v.capsuleSHA256) ||
-        v.schemaVersion !== 1 ||
-        v.kind !== 'completed-media-recovery-provenance-only-v1' ||
+        v.schemaVersion !== (jobMode ? 2 : 1) ||
+        v.kind !==
+          (jobMode ? 'completed-media-recovery-job-provenance-v2' : 'completed-media-recovery-provenance-only-v1') ||
         releaseProvenanceDigest(preimage) !== capsuleSHA256 ||
         v.operationId !== id ||
         v.releaseId !== o.releaseId ||
@@ -178,13 +183,21 @@ async function readSnapshot(
         releaseProvenanceDigest(drain.data()) !== v.drainSHA256 ||
         releaseProvenanceDigest(original?.cloudMediaRecovery) !== releaseProvenanceDigest(completed) ||
         completed.stage !== 'completed' ||
-        completed.disposition !== 'restored-normal-zero' ||
+        completed.disposition !== (jobMode ? 'normal-zero-after-job' : 'restored-normal-zero') ||
         !completed.recovery ||
         completed.recoveryFailed ||
         completed.neverStarted ||
-        !completed.drained ||
-        !completed.stopped ||
-        releaseProvenanceDigest(v.restoredPool) !== releaseProvenanceDigest(completed.restore?.pool) ||
+        !compute ||
+        (jobMode
+          ? !completed.jobDrain ||
+            !completed.jobTermination ||
+            completed.jobDrain.terminationSHA256 !== completed.jobTermination.proofSHA256 ||
+            hash(drain.get('proof')) !== hash(completed.jobDrain) ||
+            releaseProvenanceDigest(nativeTime(drain.createTime)) !==
+              releaseProvenanceDigest(nativeTime(cap.createTime))
+          : !completed.drained || !completed.stopped) ||
+        releaseProvenanceDigest(v.restoredPool) !==
+          releaseProvenanceDigest(jobMode ? p.origin : completed.restore?.pool) ||
         receipt.get('operationId') !== id ||
         receipt.get('releaseId') !== o.releaseId ||
         receipt.get('bindingDigest') !== v.bindingDigest
@@ -192,7 +205,20 @@ async function readSnapshot(
         fail();
       exact(
         original,
-        'action,bindingDigest,cloudMediaRecovery,mediaRecoveryJournalAttempt,mediaRecoveryWorkflowStart,operationId,operatorIdentity,operatorPrincipal,releaseId'
+        [
+          'action',
+          'bindingDigest',
+          'cloudMediaRecovery',
+          'mediaRecoveryJournalAttempt',
+          'mediaRecoveryWorkflowStart',
+          'operationId',
+          'operatorIdentity',
+          'operatorPrincipal',
+          'releaseId',
+          ...(jobMode ? ['mediaRecoveryJobProvider'] : []),
+        ]
+          .sort()
+          .join(',')
       );
       if (
         original.action !== 'diagnose-cloud-run-media-recovery' ||
@@ -232,8 +258,7 @@ async function readSnapshot(
           plan: p,
           stage: 'prepared',
           prepared: completed.prepared,
-          diagnostic: completed.diagnostic,
-          start: completed.start,
+          ...(jobMode ? {} : { diagnostic: completed.diagnostic, start: completed.start }),
         };
       if (
         j.planSHA256 !== hash(p) ||
@@ -248,19 +273,32 @@ async function readSnapshot(
         start.operationId !== id ||
         start.planSHA256 !== hash(p) ||
         start.cycleSHA256 !== hash(cycle) ||
-        start.poolSHA256 !== hash(completed.start?.pool) ||
+        start[computeKey] !== hash(compute) ||
         start.preparedSHA256 !== hash(completed.prepared) ||
         start.expiresAt !== p.expiresAt ||
         ack.stage !== 'confirmed' ||
         ack.operationId !== id ||
         ack.intentSHA256 !== hash(start) ||
-        ack.poolSHA256 !== hash(completed.start.pool) ||
+        ack[computeKey] !== hash(compute) ||
         !uuid(ack.runId)
       )
         fail();
       exact(
         ack,
-        'ack,confirmedAt,intentSHA256,nativeStartSHA256,operationId,poolSHA256,recordedAt,runId,schemaVersion,stage'
+        [
+          'ack',
+          'confirmedAt',
+          'intentSHA256',
+          'nativeStartSHA256',
+          'operationId',
+          computeKey,
+          'recordedAt',
+          'runId',
+          'schemaVersion',
+          'stage',
+        ]
+          .sort()
+          .join(',')
       );
       if (
         ack.schemaVersion !== 1 ||
@@ -277,9 +315,13 @@ async function readSnapshot(
           operationId: id,
           planSHA256: hash(p),
           armingSHA256: hash(j),
-          startPlan: completed.start.plan,
-          startRequest: completed.start.request,
-          startAttemptedAt: completed.start.attemptedAt,
+          ...(jobMode
+            ? { jobProviderSHA256: hash(provider), jobIdentity: kernel.context.parent.cloudRunJob }
+            : {
+                startPlan: completed.start.plan,
+                startRequest: completed.start.request,
+                startAttemptedAt: completed.start.attemptedAt,
+              }),
           control: j.authority.control,
           state: j.authority.state,
           actorUid: facts.Work.actorUid,
@@ -302,7 +344,7 @@ async function readSnapshot(
         facts,
         originals,
         start,
-        pool: completed.start.pool,
+        ...(jobMode ? { jobProvider: provider } : { pool: completed.start.pool }),
         plan: p,
         stampsSHA256: retained ? hash({ episode: stamps, retained: retained.stampsSHA256 }) : hash(stamps),
       };

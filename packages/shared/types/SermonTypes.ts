@@ -58,6 +58,7 @@ export interface Sermon {
     sourceDurationSeconds: number;
     processedPath: string;
     finalPath: string;
+    finalGeneration?: string;
     durationSeconds: number;
   };
   subsplashAudioUrl?: string;

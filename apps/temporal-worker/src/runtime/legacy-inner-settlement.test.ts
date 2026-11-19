@@ -1,15 +1,15 @@
 import { fork, type ChildProcess } from 'node:child_process';
-import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createWriteStream } from 'node:fs';
 import { PassThrough } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { downloadFiles, createTempFile } from '../../../process-audio/src/utils';
+import { downloadFiles, createTempFile, getDurationSeconds } from '../../../process-audio/src/utils';
 import { once } from 'node:events';
 import { CancelToken } from '../../../process-audio/src/CancelToken';
 import trimAndTranscode from '../../../process-audio/src/trimAndTranscode';
-import { processAudio } from '../../../process-audio/src/processAudio';
+import { processAudio, renderProcessAudio } from '../../../process-audio/src/processAudio';
 jest.mock('../../../process-audio/src/trimAndTranscode', () => ({ __esModule: true, default: jest.fn() }));
 jest.mock('../../../process-audio/src/trim', () => ({ __esModule: true, default: jest.fn() }));
 jest.mock('../../../process-audio/src/mergeFiles', () => ({ __esModule: true, default: jest.fn() }));
@@ -167,3 +167,64 @@ test('actual FULLpipeline retains lock and files when Storage construction throw
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test.each(['exact', 'wrong generation', 'insufficient workspace'])(
+  'generation-pinned render reserves the measured inputs before reading them (%s)',
+  async (scenario) => {
+    const root = await mkdtemp(join(tmpdir(), 'owned-pinned-merge-'));
+    const path = join(root, 'processed-audio');
+    const token = new CancelToken();
+    const resources = await import('../../../process-audio/src/temporal/resources');
+    const capacity = jest.spyOn(resources, 'assertRetainedMediaWorkspaceAvailable');
+    if (scenario === 'insufficient workspace') capacity.mockRejectedValueOnce(new Error('CONTROLLED_WORKSPACE_FULL'));
+    jest.mocked(createTempFile).mockReturnValue(path);
+    jest.mocked(getDurationSeconds).mockResolvedValue(1);
+    jest.mocked(trimAndTranscode).mockImplementation(async (...args) => {
+      args[19]?.('123');
+      return {} as never;
+    });
+    const read = jest.fn(() => {
+      expect(capacity).toHaveBeenCalledWith(root, [5]);
+      const input = new PassThrough();
+      input.end(Buffer.alloc(5));
+      return input;
+    });
+    const file = jest.fn(() => ({
+      getMetadata: async () => [{ size: '5', generation: scenario === 'wrong generation' ? '124' : '123' }],
+      createReadStream: read,
+    }));
+    try {
+      const result = renderProcessAudio({
+        ytdlpPath: 'CONTROLLED_NO_VENDOR',
+        cancelToken: token,
+        bucket: { file } as never,
+        audioSource: { type: 'YouTubeUrl', id: 'fixture', source: 'https://www.youtube.com/watch?v=abcdefghijk' },
+        realtimeDB: {} as never,
+        progressRef: { set: async () => undefined },
+        updateSermon: async () => undefined,
+        sermonStatus: {} as never,
+        contextWithSermonId: { sermonId: 'fixture' } as never,
+        processedStoragePath: 'owned-processed',
+        outputFilePath: 'owned-merged',
+        outputIdentity: { jobId: 'fixture' },
+        pinnedMergeSources: {},
+        tempFiles: new Set(),
+      });
+      if (scenario === 'exact') {
+        await expect(result).resolves.toMatchObject({ generations: { processed: '123' }, processedDuration: 1 });
+        expect(read).toHaveBeenCalledWith({ validation: 'crc32c', decompress: false });
+        expect((await readFile(path)).length).toBe(5);
+      } else {
+        await expect(result).rejects.toThrow(
+          scenario === 'wrong generation' ? 'Pinned media metadata' : 'CONTROLLED_WORKSPACE_FULL'
+        );
+        expect(read).not.toHaveBeenCalled();
+      }
+      expect(file).toHaveBeenCalledWith('owned-processed', { generation: '123' });
+    } finally {
+      token.cancel();
+      capacity.mockRestore();
+      await rm(root, { recursive: true, force: true });
+    }
+  }
+);

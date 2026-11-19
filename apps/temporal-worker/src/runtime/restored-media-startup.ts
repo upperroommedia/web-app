@@ -8,7 +8,7 @@ import {
   validateMediaStartupCapacityEvidence,
   mediaStartupBudget,
 } from './media-startup-capacity';
-import { readRestoredMediaKernelBirth } from './media-kernel-supervisor';
+import { readRestoredMediaKernelBirth, validateMediaKernelBirthRecord } from './media-kernel-supervisor';
 const fail = (): never => {
   throw new Error('RESTORED_MEDIA_STARTUP_UNCONFIRMED');
 };
@@ -189,10 +189,12 @@ async function kernelContext(db: Firestore, auth: () => Auth, witness: WorkerWit
     const value = cap.data() ?? fail(),
       { capsuleSHA256, ...preimage } = value,
       cloud = witness.cloudRun;
+    const jobMode = Boolean(done.get('identityState.plan.job'));
     if (
       !done.exists ||
-      value.schemaVersion !== 1 ||
-      value.kind !== 'completed-media-recovery-provenance-only-v1' ||
+      value.schemaVersion !== (jobMode ? 2 : 1) ||
+      value.kind !==
+        (jobMode ? 'completed-media-recovery-job-provenance-v2' : 'completed-media-recovery-provenance-only-v1') ||
       capsuleSHA256 !== p.origin.capsuleSHA256 ||
       releaseProvenanceDigest(preimage) !== capsuleSHA256 ||
       value.operationId !== p.recoveryOperationId ||
@@ -356,20 +358,44 @@ export async function recordRestoredMediaStartupCapacity(options: {
       );
     } catch (e) {
       if ([3, 5, 6, 7, 9, 11, 12, 16].includes(Number((e as { code?: unknown })?.code))) fail();
-      await boundedRead(() =>
+    }
+    const kernelRef = db.doc(`_control/temporalRestoredMediaKernel-${cap.context.operationId}`);
+    const readPollingAuthority = async () => {
+      const facts = await boundedRead(() =>
         db.runTransaction(
           async (tx) => {
             await authorize(tx);
-            const s = await tx.get(ref);
-            if (!s.exists || hash(s.data()) !== hash(record)) fail();
+            const [receipt, current] = await Promise.all([tx.get(ref), tx.get(kernelRef)]);
+            const nativeBirth = validateMediaKernelBirthRecord(
+              current.data(),
+              cap.context.operationId,
+              cap.context.intentSHA256,
+              options.kernel,
+              witness
+            );
+            const receiptVersion = stamp(receipt);
+            if (
+              hash(receiptVersion.createTime) !== hash(receiptVersion.updateTime) ||
+              hash(receipt.data()) !== hash(record) ||
+              nativeBirth.value.stage !== 'running' ||
+              hash(nativeBirth.value) !== hash(kernel.value)
+            )
+              fail();
+            return { receiptVersion, kernelVersion: stamp(current) };
           },
           { readOnly: true }
         )
       );
-    }
-    cap.checkFresh();
-    if (options.isDraining?.()) fail();
-    return true;
+      cap.checkFresh();
+      if (options.isDraining?.()) fail();
+      return facts;
+    };
+    const issued = await readPollingAuthority();
+    return {
+      authorizePolling: async () => {
+        if (hash(await readPollingAuthority()) !== hash(issued)) fail();
+      },
+    };
   } catch {
     return fail();
   }

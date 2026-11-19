@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readOwnedPoolOperationReceipts } from './temporal-preparation-checkpoint.mjs';
 import { bootstrapStopCloudRunControlsPool as cycle } from './temporal-bootstrap-pool.mjs';
 import { controlsBootstrapFixture as fixture } from './tests/fixtures/controls-bootstrap.mjs';
 test('one start/owned stop, original immutable activation before observation; completed resume is GET-only', async () => {
@@ -318,6 +319,7 @@ for (const mode of ['retain', 'abort'])
       f.options.api = async (...args) => {
         if (args[1] === 'PATCH') {
           attempts++;
+          await args[3]();
           throw Object.assign(new Error('denied'), { status });
         }
         return api(...args);
@@ -340,9 +342,8 @@ test('late credential acquisition cannot bypass immediate pre-send protected-wor
   let changed = false,
     writes = 0;
   f.options.observeProtection = async () => {
-    const p = await observe();
-    if (changed) p.protectionSHA256 = '1'.repeat(64);
-    return p;
+    if (changed) throw Object.assign(new Error('protected read denied'), { status: 403 });
+    return observe();
   };
   f.options.api = async (...args) => {
     if (args[1] === 'PATCH') {
@@ -356,6 +357,7 @@ test('late credential acquisition cannot bypass immediate pre-send protected-wor
   await assert.rejects(retain(f.options));
   assert.equal(writes, 0);
   assert.equal(f.pool.scaling.manualInstanceCount, 0);
+  assert.equal(f.saved.start.stage, 'attempted');
 });
 test('post-credential namespace inventory drift cannot reuse the saved compute observation', async () => {
   const f = await afterCycle(),
@@ -536,4 +538,53 @@ for(const bad of ['missing-original','quota-small','credential-drift','credentia
 });
 test('media active candidate cannot be stopped even when quota reads are unavailable',async()=>{
  const f=await mediaAfterCycle(),kept=await mediaRetain(f.options);f.options.receipts.activation={operationId:f.options.operationId,releaseId:f.options.releaseId,identityState:structuredClone(kept)};f.options.operationId=randomUUID();f.options.observeProtection=async()=>{throw new Error('working');};await assert.rejects(mediaAbort(f.options));assert.equal(f.pool.scaling.manualInstanceCount,1);
+});
+
+
+test('native pool operation ancestors must remain the same immutable records', async () => {
+  const prefixes = { pool: 'temporalCloudPoolPreparation', cycle: 'temporalCloudMediaBootstrapCycle' };
+  const ids = { pool: 'pool-id', cycle: 'cycle-id' };
+  const releaseId = 'release-id';
+  const makeStamp = (seconds) => ({
+    seconds,
+    nanoseconds: 0,
+    toDate: () => new Date(seconds * 1000),
+    isEqual: (other) => other?.seconds === seconds,
+  });
+  const poolPath = `_control/${prefixes.pool}-${ids.pool}`;
+  const cyclePath = `_control/${prefixes.cycle}-${ids.cycle}`;
+  const rows = new Map([
+    [poolPath, { data: { operationId: ids.pool, releaseId }, createdAt: 1, updatedAt: 1 }],
+    [cyclePath, { data: { operationId: ids.cycle, releaseId }, createdAt: 2, updatedAt: 2 }],
+  ]);
+  const firestore = {
+    doc: (path) => ({ path }),
+    runTransaction: (run, options) => {
+      assert.deepEqual(options, { readOnly: true });
+      return run({
+        get: async ({ path }) => {
+          const row = rows.get(path);
+          return {
+            exists: Boolean(row),
+            get: (key) => row.data[key],
+            data: () => structuredClone(row.data),
+            createTime: makeStamp(row.createdAt),
+            updateTime: makeStamp(row.updatedAt),
+          };
+        },
+      });
+    },
+  };
+  const read = () => readOwnedPoolOperationReceipts(firestore, prefixes, ids, releaseId);
+  const parent = await read();
+  assert.deepEqual(parent.receipts.cycle, { operationId: ids.cycle, releaseId });
+  await parent.assertCurrent();
+
+  const original = rows.get(cyclePath);
+  rows.set(cyclePath, { ...original, updatedAt: 3 });
+  await assert.rejects(read, /OWNED_BOOTSTRAP_RECEIPT_REQUIRED/);
+  rows.set(cyclePath, { ...original, createdAt: 4, updatedAt: 4 });
+  await assert.rejects(parent.assertCurrent, /RELEASE_NATIVE_AUTHORITY_CHANGED/);
+  rows.set(cyclePath, { ...original, data: { ...original.data, releaseId: 'another-release' } });
+  await assert.rejects(read, /OWNED_BOOTSTRAP_RECEIPT_REQUIRED/);
 });

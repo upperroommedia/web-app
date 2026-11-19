@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { fork, type ChildProcess } from 'node:child_process';
 import type { DocumentReference, Firestore } from 'firebase-admin/firestore';
-import type { WorkerWitness } from './worker-witness';
+import { diagnosticComputeIdentity, type WorkerWitness } from './worker-witness';
 import { workerReadinessDigest as digest } from './readiness-probe';
 const fail = (): never => {
   throw new Error('MEDIA_KERNEL_SUPERVISION_UNCONFIRMED');
@@ -10,20 +10,26 @@ const uuid = (x: unknown) =>
   typeof x === 'string' && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(x);
 const domains = ['media', 'publishing', 'images', 'emails', 'accounts', 'bundles', 'search'];
 export const MEDIA_KERNEL_KIND = 'owned-application-child-v1';
+// Leave room before Cloud Run's ten-second deadline while allowing the
+// worker's configured eight-second SDK shutdown grace period.
+const childShutdownGraceMs = 8500;
 const path = (id: string) => {
   if (!uuid(id)) fail();
   return `_control/temporalMediaKernel-${id}`;
 };
 const version = (s: any) => (s.updateTime ? `${s.updateTime.seconds}:${s.updateTime.nanoseconds}` : fail());
 function sameCloud(a: WorkerWitness, b: WorkerWitness) {
-  if (a.buildId !== b?.buildId || !a.cloudRun || !b.cloudRun || digest(a.cloudRun) !== digest(b.cloudRun)) fail();
+  if (a.buildId !== b?.buildId) fail();
+  const expected = diagnosticComputeIdentity(a);
+  const actual = diagnosticComputeIdentity(b);
+  if (!expected || !actual || digest(expected) !== digest(actual)) fail();
 }
 function worker(raw: unknown): WorkerWitness {
   if (
     !raw ||
     typeof raw !== 'object' ||
     Array.isArray(raw) ||
-    Object.keys(raw).sort().join(',') !== 'buildId,cloudRun,instanceId' ||
+    !['buildId,cloudRun,instanceId', 'buildId,cloudRunJob,instanceId'].includes(Object.keys(raw).sort().join(',')) ||
     Buffer.byteLength(JSON.stringify(raw)) > 8192
   )
     fail();
@@ -225,12 +231,21 @@ async function superviseKernel(
     exited = false,
     draining = false,
     forwarded = false,
-    faultAttempted = false;
+    faultAttempted = false,
+    protocolError = false;
+  let forceStopTimer: ReturnType<typeof setTimeout> | undefined;
   const stop = () => {
     draining = true;
     if (child && !exited && !forwarded) {
       forwarded = true;
       child.kill('SIGTERM');
+      forceStopTimer = setTimeout(() => {
+        if (!child || exited) return;
+        // An escalated cleanup must never qualify as the planned recovery fault
+        // or as a clean drain. Signal only the live original ChildProcess.
+        protocolError = true;
+        child.kill('SIGKILL');
+      }, childShutdownGraceMs);
     }
   };
   const signals: NodeJS.Signals[] = ['SIGTERM', 'SIGINT', 'SIGQUIT', 'SIGUSR2'];
@@ -258,8 +273,7 @@ async function superviseKernel(
           }
         : {}),
     });
-    let pending = Promise.resolve(),
-      protocolError = false;
+    let pending = Promise.resolve();
     let launchTimer: ReturnType<typeof setTimeout> | undefined;
     const put = async (next: any, authorized = true) => {
       await writeOnce(db, ref, state, next, authorized ? cap.authorize : undefined);
@@ -347,6 +361,7 @@ async function superviseKernel(
       });
       child!.once('exit', () => {
         exited = true;
+        clearTimeout(forceStopTimer);
       });
       child!.once('close', (code, signal) => resolve({ code, signal }));
     });
@@ -380,6 +395,7 @@ async function superviseKernel(
     );
     return close;
   } finally {
+    clearTimeout(forceStopTimer);
     signals.forEach((s) => process.removeListener(s, stop));
   }
 }

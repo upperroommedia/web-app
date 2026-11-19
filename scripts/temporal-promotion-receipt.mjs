@@ -27,6 +27,16 @@ export function validateCompletedRolePromotionReceipt({receipt:r,platform,releas
   pool?.name!==`projects/${b.projectId}/locations/${b.region}/workerPools/${b.poolName}`||typeof pool.uid!=='string'||!pool.uid||pool.desiredManualInstanceCount!==1||
   !/^[1-9][0-9]*$/.test(String(pool.generation??''))||typeof pool.revision!=='string'||!pool.revision||
   !/^[0-9]{6,32}$/.test(resources.access?.runnerUniqueId??'')||!/^[0-9]{6,32}$/.test(resources.access?.scalerUniqueId??''))fail();
+ if(role==='media' && (
+  !hash(resources.diagnosticJobTerminationSHA256) || !hash(pre.lineageSHA256) ||
+  pre.lineageSHA256!==post.lineageSHA256 || pre.computeInventorySHA256!==post.computeInventorySHA256 ||
+  !post.mediaStartup || !isDeepStrictEqual(pre.mediaStartup,post.mediaStartup) ||
+  post.mediaStartup.poolUid!==pool.uid || post.mediaStartup.revision!==pool.revision.split('/').at(-1) ||
+  post.mediaStartup.revisionUid!==pool.revisionUid || !post.mediaStartup.instanceId ||
+  !Number.isSafeInteger(post.mediaStartup.startedAt) || post.mediaStartup.startedAt<=1000 ||
+  post.mediaStartup.startedAt>attempt ||
+  !post.queueRouting.pollers.some(row=>row.identity===post.mediaStartup.workerIdentity)
+ ))fail();
  const previous=independentPromotionPredecessor[role];
  if(previous? !hash(p.predecessorReceiptSHA256)||resources.predecessor?.receiptSHA256!==p.predecessorReceiptSHA256||resources.predecessor.role!==previous : p.predecessorReceiptSHA256!==null||resources.predecessor!==undefined||p.ownReceiptsSHA256!==p.receiptsSHA256)fail();
  if(s.outcome==='native-acknowledgement-and-readback'?!token(s.acknowledgement?.conflictTokenBase64):s.outcome!=='desired-routing-observed-after-unknown-ack'||s.acknowledgement!==undefined)fail();

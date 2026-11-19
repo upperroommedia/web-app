@@ -61,6 +61,7 @@ export interface Sermon {
     sourceDurationSeconds?: number;
     processedPath: string;
     finalPath: string;
+    finalGeneration?: string;
     durationSeconds: number;
   };
   audioSource?: 'gcp' | 'subsplash';

@@ -1,3 +1,14 @@
+// Controlled Storage IAM response, with the real receipt writer and collector.
+jest.mock('../runtime/cloud-run-storage-readiness', () => {
+  const actual = jest.requireActual('../runtime/cloud-run-storage-readiness');
+  return {
+    ...actual,
+    verifyCloudRunStorageReadiness: jest.fn(async (role) => {
+      const expected = actual.expectedCloudRunStorageAccess(role);
+      return expected ? { ...expected, observedAt: new Date().toISOString() } : null;
+    }),
+  };
+});
 // Explicit no-network email fixture; local tests do not prove deployed mail authentication.
 jest.mock('@upperroom/function-kit-firestore-send-email/lib/temporal/provider', () => ({
   verifyEmailTransportNoSendBounded: jest.fn(async () => ({

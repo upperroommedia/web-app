@@ -446,11 +446,20 @@ The canonical frozen-runtime media registration adapter now requires this receip
 It waits boundedly by GET for the exact original operation's startup receipt while
 checking that intent and authority remain unchanged; prior registration can persist
 while desired count is zero and cannot establish that a new process has started.
-It joins the receipt to fresh native pool UID, serving revision UID/image/runner,
-then obtains actual native registration. Original registration timestamps are
-preserved and must remain within five seconds after all awaits. The filesystem
-sample retains its own timestamp and a 120-second maximum age; it is not an
-available-capacity lease or a live process-count observation.
+The controller verifies the native pool UID and the serving revision UID, image
+and runner. It derives the expected Temporal poller identity from the capacity
+receipt's runtime instance ID and worker process UUID. Cloud Logging must
+identify one startup for that process and revision. The non-current media
+deployment must report the same pinned poller on the root Activity queue.
+The provider's instance label is retained alongside the startup record for any
+later lifecycle investigation.
+
+The controller rechecks the Firestore receipt's exact create and update times
+after both observations. Identical contents at a new document version invalidate
+the join. The registration sample must stay within five seconds, and the
+filesystem sample retains its own timestamp and 120-second maximum age. These
+observations establish startup attribution for the capacity check. Shutdown of
+a particular Cloud Run instance requires separate evidence.
 
 A normal later cold start without a matching guarded media operation creates no
 such diagnostic receipt. This mechanism does not authorize business work or
@@ -917,16 +926,15 @@ rejection can. A definitive native deployment NOT_FOUND is permitted only in
 this never-started policy, while private partition poller/work and namespace
 compute reads remain mandatory. Historical unrelated closed operations remain.
 
-The canonical confirmations rederive all original ancestor receipts and read
-the exact diagnostic-zero pool and revision before and after native observation.
-Both native configuration samples and the native observation retain their
-original deadlines through the final paused-authority await. These are
-configuration and work/receipt confirmations, not process-count or platform
-instance-termination proof. Cleanup does not renew execution expiry or acquire a
-new disk quota. Canonical preflight and phase-aware mutation protection remain
-unavailable; the separate restored-origin activation consumer and actual final
-image/platform acceptance are still required. No operational gate is enabled by
-these local tests.
+The canonical never-started check rederives all original ancestor receipts and
+reads the exact diagnostic-zero pool and revision before and after the native
+observation. Both configuration samples and the native observation retain their
+original deadlines through the final paused-authority check. After an instance
+has started, the canonical stop path requires independent evidence that the exact
+Cloud Run instance exited before the controller can restore the normal template.
+Zero configuration and drained Temporal work are insufficient authority for that
+step. The preflight and restored activation gates still require native acceptance
+of the immutable candidate image and Cloud Run platform.
 
 The canonical diagnostic protection entry now runs a separate phase/resource
 sub-fence before its still-unavailable namespace policy. This sub-fence derives
@@ -965,3 +973,112 @@ capacity and image metadata. They establish identity evidence only. Native
 version/partition/namespace poller and work protection must still consume this
 identity under its fixed phase policy and preserve the separate protected
 baseline. That policy and canonical preflight remain unavailable.
+
+## Orchestration handoff and traditional retirement
+
+Both release actions run in staging during the paused `provider-usage-ready`
+phase. Pass the same private, SHA-256-bound worker handoff plan and CI/image
+preparation proof to each action. The plan identifies the release, candidate
+build and image, previous shared build, preparation-proof digest, the five
+independent promotion operation IDs, the six prepared pool witnesses, and the
+reviewed traditional cluster context, cluster UID, node UID, node name and
+builds. Each pool witness identifies its pool UID, revision and revision UID,
+SDK worker identity, provider instance ID and startup log timestamp in epoch
+milliseconds. The release reads the immutable promotion certificates and
+provider resources directly.
+
+```sh
+node scripts/temporal-release.mjs handoff-cloud-run-orchestration \
+  --release "$release" --apply \
+  --worker-handoff-plan "$handoff_plan" --worker-handoff-plan-sha256 "$handoff_digest" \
+  --preparation-proof "$preparation" --preparation-proof-sha256 "$preparation_digest"
+
+node scripts/temporal-release.mjs retire-traditional-staging-workers \
+  --release "$release" --apply \
+  --worker-handoff-plan "$handoff_plan" --worker-handoff-plan-sha256 "$handoff_digest" \
+  --preparation-proof "$preparation" --preparation-proof-sha256 "$preparation_digest"
+```
+
+The first action records the pre-handoff inventory and the native routing change
+in its immutable receipt. Allow existing workflows to finish or continue
+through their original native schedules. The second action reads that receipt,
+checks Temporal version drainage and provider work leases, and verifies the
+previous VM and the TLS-authenticated private Kubernetes context. It retains
+the deployments, budgets and histories. Completion requires clean native Pod
+exit evidence for the original containers. Resume an interrupted operation with
+the same arguments and its saved `--resume-operation` ID. A saved attempt only
+reconciles native state. Both actions keep admission paused. Autoscaling
+attachment uses the same plan and proof after retirement. Attach one role per
+release operation, in this order: controls, search, email, images, media,
+orchestration.
+
+```sh
+node scripts/temporal-release.mjs attach-cloud-run-worker-compute \
+  --release "$release" --apply --worker-compute-role "$role" \
+  --worker-handoff-plan "$handoff_plan" --worker-handoff-plan-sha256 "$handoff_digest" \
+  --preparation-proof "$preparation" --preparation-proof-sha256 "$preparation_digest"
+```
+
+The action rechecks the retired cluster, exact Temporal routing, owned worker
+identities, paused work leases and the native scaler policy. Each role records an
+immutable receipt after exact native readback. During the sequence, already
+attached roles may be dormant at zero. The release still requires worker wake,
+drain and browser verification.
+
+After all six compute receipts exist, run the wake check for each role in the
+same order. Use the original handoff plan and preparation proof.
+
+```sh
+node scripts/temporal-release.mjs verify-cloud-run-worker-wake \
+  --release "$release" --apply --worker-compute-role "$role" \
+  --worker-handoff-plan "$handoff_plan" --worker-handoff-plan-sha256 "$handoff_digest" \
+  --preparation-proof "$preparation" --preparation-proof-sha256 "$preparation_digest"
+```
+
+The command reports its operation ID and observes the original probe while
+admission is paused. On interruption, resume the same operation promptly so it
+can record the retry while Temporal still reports it scheduled. The final
+receipt joins the original run's timer and retry with Cloud Run scale audit,
+worker startup and observed drain evidence. Keep the saved operation when
+positive proof is unavailable.
+
+Pass the same handoff plan and preparation proof, with their SHA-256 values,
+to Cloud Run `workers-ready`, `take-ownership` and `open`. These checks read
+all six immutable wake receipts under the paused release lock and match the
+original runs to the reviewed pool revisions. The controller also rechecks
+the retired Kubernetes fleet, Temporal routing and compute attachment before
+starting any fleet readiness probe. Cloud Run release advancement still
+requires separate recovery and dispatch evidence.
+
+The paused dispatch diagnostic records a create-only
+`temporalDispatchDiagnosticCompletion` receipt after the original Eventarc
+outbox observation, commands retry and scheduler recovery all reconcile with
+their native resource cleanup. The retry and scheduler observations must
+identify the same original command run and completed history. This receipt is
+scoped to the diagnostic and its temporary wake resources. The release still
+requires production-path dispatch wiring and original worker recovery proof.
+
+After the receipt is durably read back, the operation relinquishes its
+temporary authority and the release controller closes its own lock. An
+interrupted close can resume with the same operation ID. Delayed diagnostic
+Eventarc deliveries stay isolated from business dispatch.
+
+Once the diagnostic is closed, run `enable-staging-dispatch-wakes` under
+the paused staging release with the same preparation evidence, settings and
+dispatch identity, service and activation receipt arguments. Include
+`--dispatch-diagnostic-operation` with the original diagnostic operation ID.
+The command creates the two business Eventarc triggers and resumes the exact
+Scheduler job previously paused by that diagnostic. It records each attempt
+before the provider call. For an uncertain result, resume the same release
+operation. The command reconciles through native readback or the original
+Eventarc creation audit and operation. Pass the completed wake activation
+operation ID as `--dispatch-wakes-operation` to Cloud Run `workers-ready`,
+`take-ownership` and `open`. Readiness checks that the recorded resources are
+still the ones serving the release.
+
+The media recovery collector now joins both original diagnostic worker startup
+records to the same provider-assigned Cloud Logging instance label. The
+retained-resource check separately requires the normal restored worker's
+startup to have a different label and a later timestamp. The two checks bind
+the provider identities to the replayed application evidence. They leave the
+exact original Cloud Run instance termination and promotion gates closed.

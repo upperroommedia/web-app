@@ -1,3 +1,7 @@
+import { executeRenderAuthentication } from './hetzner-render-auth-driver';
+import { readPreparedRenderAuthentication } from './hetzner-render-authentication';
+import { executeCanonicalYouTubeRender } from './hetzner-render-driver';
+import { readYouTubeRenderReceipt } from './hetzner-render-receipt';
 import { assertReleasedYouTubeEpisode, readAcquisitionExecution } from './hetzner-acquisition-episode';
 import { executeCanonicalYouTubeAcquisition } from './hetzner-acquisition-driver';
 import { Router } from 'express';
@@ -18,11 +22,134 @@ import type { MediaJobRef } from './types';
 
 const ORIGIN = 'https://yt-worker-staging.upperroommedia.org';
 const unavailable = () => new Error('YOUTUBE_ACQUISITION_UNAVAILABLE');
-/** Actual host readback, not a producer. The mutation endpoint stays denied until
- * shared legacy/native resource admission, helper bootstrap and drain are proven.
- * In particular GET never claims work, renews authority or launches a process. */
-export function createHetznerAcquisitionRouter(o: { firestore: Firestore; auth: Auth; bucket: Bucket }) {
+/** Render mutations require explicit staging activation. The earlier
+ * acquisition-only path retains its separate resource gate. GET only observes. */
+export function createHetznerAcquisitionRouter(o: {
+  firestore: Firestore;
+  auth: Auth;
+  bucket: Bucket;
+  renderEnabled: boolean;
+}) {
   const router = Router();
+  router.all(
+    ['/:operationId/render/:episodeId', '/:operationId/render/authentication/:authenticationId'],
+    async (request, response) => {
+      if (o.auth.app.options.projectId !== 'urm-app-staging' || !o.renderEnabled) {
+        response.status(404).json({ error: 'Unavailable.' });
+        return;
+      }
+      const { operationId } = request.params;
+      const { authenticationId, episodeId } = request.params as Record<string, string | undefined>;
+      const attemptId = authenticationId ?? episodeId;
+      if (
+        typeof operationId !== 'string' ||
+        !/^ytacq-[a-f0-9]{64}$/.test(operationId) ||
+        typeof attemptId !== 'string' ||
+        !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(attemptId) ||
+        Object.keys(request.query).length ||
+        !['GET', 'POST'].includes(request.method)
+      ) {
+        response.status(400).json({ error: 'Invalid render request.' });
+        return;
+      }
+      const birth = new AbortController();
+      const disconnect = () => birth.abort();
+      response.once('close', disconnect);
+      const wall = Date.now(),
+        mono = performance.now();
+      const fresh = () => {
+        birth.signal.throwIfAborted();
+        if (Date.now() < wall || Date.now() - wall >= 5000 || performance.now() - mono >= 5000) throw unavailable();
+      };
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const work = async () => {
+        assertStagingAcquisitionDatabase(o.firestore);
+        if (o.bucket.name !== 'urm-app-staging.firebasestorage.app') throw unavailable();
+        const original = await o.firestore.doc(`${YOUTUBE_ACQUISITIONS}/${operationId}`).get();
+        const ref = original.get('ref') as MediaJobRef;
+        if (youtubeAcquisitionId(ref) !== operationId) throw unavailable();
+        const delegation = readYouTubeAcquisitionOperation(original.data(), ref);
+        const verifiedCallerEmail = delegation.preparedBy.serviceAccount;
+        await authenticateNativeMediaCaller(request.headers.authorization, {
+          audiences: [ORIGIN],
+          serviceAccountEmails: [verifiedCallerEmail],
+        });
+        fresh();
+        if (request.method === 'POST') {
+          if (
+            !request.body ||
+            Object.keys(request.body).sort().join(',') !== 'operationId,ref' ||
+            request.body.operationId !== operationId ||
+            youtubeAcquisitionId(request.body.ref) !== operationId
+          )
+            throw unavailable();
+          let started!: (value: 'running') => void;
+          const acknowledged = new Promise<'running'>((resolve) => {
+            started = resolve;
+          });
+          const options = {
+            ...o,
+            ref,
+            verifiedCallerEmail,
+            startSignal: birth.signal,
+            assertStartFresh: fresh,
+            onStarted: () => started('running'),
+          };
+          const execution = (
+            authenticationId
+              ? executeRenderAuthentication({ ...options, id: authenticationId })
+              : executeCanonicalYouTubeRender({ ...options, episodeId: attemptId })
+          ).then((kind) => (kind === 'already-claimed' ? ('running' as const) : kind));
+          // The original parent retains the running execution after an IPC ACK.
+          // A close failure stays unresolved in the journal and never becomes a new grant.
+          const status = await Promise.race([acknowledged, execution]);
+          if (status !== 'running') throw unavailable();
+          return { status, operationId };
+        }
+        if (request.body !== undefined && Object.keys(request.body).length) throw unavailable();
+        if (authenticationId) {
+          const status = await o.firestore.runTransaction(
+            async (tx) => {
+              const { intent, completion } = await readPreparedRenderAuthentication(tx, {
+                ...o,
+                ref,
+                verifiedCallerEmail,
+                id: authenticationId,
+              });
+              if (completion.exists) return completion.get('status') as 'ready' | 'failed';
+              return (await tx.get(intent.ref.collection('facts').doc('claim'))).exists ? 'running' : 'missing';
+            },
+            { maxAttempts: 1 }
+          );
+          return { status, operationId };
+        }
+        const receipt = await o.firestore.runTransaction(
+          (tx) => readYouTubeRenderReceipt(tx, { ...o, ref, verifiedCallerEmail, episodeId: attemptId }),
+          { maxAttempts: 1 }
+        );
+        return { status: receipt.kind, operationId };
+      };
+      try {
+        const result = await Promise.race([
+          work(),
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(() => {
+              birth.abort();
+              reject(unavailable());
+            }, 5000);
+          }),
+        ]);
+        fresh();
+        response.json(result);
+      } catch {
+        if (!response.headersSent) response.status(503).json({ error: 'Render readback is unavailable.' });
+      } finally {
+        if (timer) clearTimeout(timer);
+        response.removeListener('close', disconnect);
+        birth.abort();
+      }
+    }
+  );
   router.all('/:operationId', async (request, response) => {
     if (o.auth.app.options.projectId !== 'urm-app-staging') {
       response.status(404).json({ error: 'Unavailable.' });

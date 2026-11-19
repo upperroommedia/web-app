@@ -1,3 +1,4 @@
+import { assertTraditionalRetirementWorkIdle, readReleaseCandidateWork, readTraditionalRetirementWork } from './temporal-retirement-work.mjs';
 import {assertImageReplayReceipt} from './temporal-image-replay.mjs';
 import { proofDigest, assertNativeSnapshot } from './temporal-release-runtime.mjs';
 import { observeNamespaceComputeIsolation } from './temporal-compute-isolation.mjs';
@@ -60,12 +61,20 @@ async function observeProtection(o, transition, expectedRole) {
     }
   };
   const scan = async () => {
-    const docs = await read(() =>
-      db.getAll(
-        db.doc('_control/temporalReleaseOperation'),
-        db.doc('_control/temporalRelease'),
-        db.doc('_control/temporalReleaseState')
-      )
+    const { docs, protectedWork } = await read(() =>
+      db.runTransaction(async (tx) => {
+        const [docs, work, candidateWork] = await Promise.all([
+          Promise.all([
+            '_control/temporalReleaseOperation',
+            '_control/temporalRelease',
+            '_control/temporalReleaseState',
+          ].map((path) => tx.get(db.doc(path)))),
+          readTraditionalRetirementWork(db, tx),
+          readReleaseCandidateWork(db, tx, binding.buildId),
+        ]);
+        if (candidateWork.length) fail();
+        return { docs, protectedWork: assertTraditionalRetirementWorkIdle(work) };
+      }, { readOnly: true })
     );
     const [p, c, s] = docs;
     assertNativeSnapshot(expectedAuthority.control, c);
@@ -173,38 +182,6 @@ async function observeProtection(o, transition, expectedRole) {
         tokens.add(t);
       }
     } while (nextPageToken);
-    const rows = [];
-    for (const collection of [
-      'durableJobOutbox',
-      'durableJobCommands',
-      'durableJobCriticalSections',
-      'durableActivityExecutions',
-      'temporalProviderMutationSessions',
-      'temporalProviderMutationLocks',
-    ]) {
-      let cursor;
-      do {
-        if (Date.now() >= deadline || rows.length > 3000) fail();
-        let q = db.collection(collection).orderBy('__name__').limit(100);
-        if (cursor) q = q.startAfter(cursor);
-        const page = await read(() => q.get());
-        for (const doc of page.docs) {
-          if (
-            collection === 'durableJobCriticalSections' ||
-            collection === 'temporalProviderMutationLocks' ||
-            (collection === 'temporalProviderMutationSessions' && doc.get('state') === 'active') ||
-            (['durableJobOutbox', 'durableJobCommands'].includes(collection) &&
-              (['pending', 'dispatching'].includes(doc.get('state')) ||
-                (doc.get('leaseOwner') && doc.get('leaseExpiresAt') > 0))) ||
-            doc.get('worker.buildId') === binding.buildId ||
-            doc.get('execution.worker.buildId') === binding.buildId
-          )
-            fail();
-          rows.push([doc.ref.path, version(doc)]);
-        }
-        cursor = page.size === 100 ? page.docs.at(-1) : undefined;
-      } while (cursor);
-    }
     let candidateQueues=[];
     try{
       const candidate=await rpc(()=>service.describeWorkerDeploymentVersion({namespace,deploymentVersion:{deploymentName:binding.deploymentName,buildId:binding.buildId}}));
@@ -247,7 +224,7 @@ async function observeProtection(o, transition, expectedRole) {
       controlVersion: version(c),
       stateVersion: version(s),
       workflows: workflows.sort((a, b) => a.executionSHA256.localeCompare(b.executionSHA256)),
-      rows: rows.sort((a, b) => a[0].localeCompare(b[0])),
+      protectedWork,
       routing,
       candidateQueues,...(queueRouting?{queueRouting}:{}),
     };
@@ -275,7 +252,7 @@ async function observeProtection(o, transition, expectedRole) {
       protectionSHA256: proofDigest(second),
       computeInventorySHA256: isolation.inventorySHA256,
       protectedRunCount: second.workflows.length,
-      ...(transition?{protectedWorkSHA256:proofDigest({controlVersion:second.controlVersion,stateVersion:second.stateVersion,workflows:second.workflows,rows:second.rows}),peerRoutingSHA256:second.queueRouting.peerRoutingSHA256,queueRouting:second.queueRouting,bundleSHA256:o.bundleSHA256}:{}),
+      ...(transition?{protectedWorkSHA256:proofDigest({controlVersion:second.controlVersion,stateVersion:second.stateVersion,workflows:second.workflows,protectedWork:second.protectedWork}),peerRoutingSHA256:second.queueRouting.peerRoutingSHA256,queueRouting:second.queueRouting,bundleSHA256:o.bundleSHA256}:{}),
       scope:
         'two stable paused native/Firestore observations; conservative pending-work denial; not cross-API exclusion, old-version drainage or readiness',
     };
@@ -305,14 +282,21 @@ async function observePromotionAfter(o,role){
 export const observeControlsPromotionAfter=o=>observePromotionAfter(o,'controls');
 export const observeSearchPromotionAfter=o=>observePromotionAfter(o,'search');
 
-export async function observeBootstrapRegistration({ client, platform, role }) {
+export async function observeBootstrapRegistration({ client, platform, role, expectedPoller }) {
   const b = platform.roleBindings.find((x) => x.role === role),
     namespace = platform.temporalNamespace,
     service = client.connection.workflowService;
   if (!Object.hasOwn(actions,role) || client.options.namespace !== namespace) fail();
+  if (
+    expectedPoller !== undefined &&
+    (role !== 'media' || typeof expectedPoller !== 'string' ||
+      !/^cloud-run-[a-f0-9]{64}-[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(expectedPoller))
+  )
+    fail();
   const end = Date.now() + 30000;
   while (Date.now() < end) {
     try {
+      const sampledAt = Date.now();
       const version = await client.connection.withDeadline(Math.min(end, Date.now() + 5000), () =>
         service.describeWorkerDeploymentVersion({
           namespace,
@@ -332,18 +316,48 @@ export async function observeBootstrapRegistration({ client, platform, role }) {
         r?.currentDeploymentVersion?.buildId !== b.buildId &&
         r?.rampingDeploymentVersion?.buildId !== b.buildId &&
         Number(r?.rampingVersionPercentage ?? 0) === 0
-      )
-        return {
-          schemaVersion: 1,
-          role,
-          buildId: b.buildId,
-          observedAt: new Date().toISOString(),
-          registrationSHA256: proofDigest(version),
-          queues,
-          routingSHA256: proofDigest(report),
-          scope:
-            'native non-current exact role queue inventory only; no workflow start, promotion or readiness',
-        };
+      ) {
+        let poller;
+        if (expectedPoller !== undefined) {
+          const queueReport = await client.connection.withDeadline(Math.min(end, Date.now() + 5000), () =>
+            service.describeTaskQueue({
+              namespace,
+              taskQueue: { name: 'urm-media', kind: 1 },
+              taskQueueType: 2,
+            })
+          );
+          const candidates = (queueReport.pollers ?? []).filter(
+            (p) => p.deploymentOptions?.deploymentName === b.deploymentName || p.identity === expectedPoller
+          );
+          if (candidates.length) {
+            if (Date.now() - sampledAt >= 5000) fail();
+            const [p] = candidates;
+            if (
+              candidates.length !== 1 ||
+              p.identity !== expectedPoller ||
+              p.deploymentOptions?.deploymentName !== b.deploymentName ||
+              p.deploymentOptions?.buildId !== b.buildId ||
+              p.deploymentOptions?.workerVersioningMode !== 2
+            )
+              fail();
+            poller = { identity: p.identity, deploymentName: b.deploymentName, buildId: b.buildId };
+          }
+        }
+        if (expectedPoller === undefined || poller)
+          return {
+            schemaVersion: 1,
+            role,
+            buildId: b.buildId,
+            observedAt: new Date(poller ? sampledAt : Date.now()).toISOString(),
+            registrationSHA256: proofDigest(version),
+            queues,
+            routingSHA256: proofDigest(report),
+            ...(poller ? { pollerSHA256: proofDigest(poller) } : {}),
+            scope: poller
+              ? 'native non-current role queue inventory and exact capacity process in the root Activity poller report'
+              : 'native non-current exact role queue inventory only; no workflow start, promotion or readiness',
+          };
+      }
     } catch (error) {
       if (error?.code !== 5) throw error;
     }

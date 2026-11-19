@@ -1,3 +1,5 @@
+import { matchMediaRecoveryJobRun } from './media-recovery-job-witness';
+import { diagnosticComputeIdentity } from './worker-witness';
 /** Historical GET-only recovery episode collector. It grants no polling, signal,
  * replacement, drain, restoration, promotion or platform-instance authority. */
 import type { Firestore } from 'firebase-admin/firestore';
@@ -94,7 +96,10 @@ async function collect(o: Options, deadline: number) {
         const c = op.cloudMediaRecovery,
           j = facts.Journal,
           start = op.mediaRecoveryWorkflowStart,
-          ack = facts.Start;
+          ack = facts.Start,
+          jobProvider = op.mediaRecoveryJobProvider,
+          computeKey = p.job ? 'jobRunSHA256' : 'poolSHA256',
+          compute = p.job ? jobProvider?.runIdentity : c?.start?.pool;
         if (
           releaseProvenanceDigest(op) !== o.expectedRootSHA256 ||
           releaseProvenanceDigest(control.data()) !== o.expectedControlSHA256 ||
@@ -105,8 +110,10 @@ async function collect(o: Options, deadline: number) {
           op.bindingDigest !== p.bindingDigest ||
           hash(c?.plan) !== hash(p) ||
           c.stage !== 'prepared' ||
-          c.start?.stage !== 'completed' ||
-          c.start.pool?.desiredManualInstanceCount !== 1 ||
+          !compute ||
+          (p.job
+            ? c.diagnostic || c.start || c.restore || jobProvider?.runIdentity?.stage !== 'acknowledged'
+            : c.start?.stage !== 'completed' || c.start.pool?.desiredManualInstanceCount !== 1) ||
           c.stop ||
           c.recovery ||
           c.recoveryFailed ||
@@ -122,19 +129,32 @@ async function collect(o: Options, deadline: number) {
           j.authority.state.dataDigest !== releaseProvenanceDigest(state.data()) ||
           start?.stage !== 'attempted' ||
           start.planSHA256 !== hash(p) ||
-          start.poolSHA256 !== hash(c.start.pool) ||
+          start[computeKey] !== hash(compute) ||
           start.preparedSHA256 !== hash(c.prepared) ||
           start.cycleSHA256 !== hash(c) ||
           start.expiresAt !== p.expiresAt ||
           ack.stage !== 'confirmed' ||
           ack.operationId !== id ||
           ack.intentSHA256 !== hash(start) ||
-          ack.poolSHA256 !== hash(c.start.pool)
+          ack[computeKey] !== hash(compute)
         )
           fail();
         exact(
           ack,
-          'ack,confirmedAt,intentSHA256,nativeStartSHA256,operationId,poolSHA256,recordedAt,runId,schemaVersion,stage'
+          [
+            'ack',
+            'confirmedAt',
+            'intentSHA256',
+            'nativeStartSHA256',
+            'operationId',
+            computeKey,
+            'recordedAt',
+            'runId',
+            'schemaVersion',
+            'stage',
+          ]
+            .sort()
+            .join(',')
         );
         if (
           ack.schemaVersion !== 1 ||
@@ -150,9 +170,16 @@ async function collect(o: Options, deadline: number) {
           operationId: id,
           planSHA256: hash(p),
           armingSHA256: hash(j),
-          startPlan: c.start.plan,
-          startRequest: c.start.request,
-          startAttemptedAt: c.start.attemptedAt,
+          ...(p.job
+            ? {
+                jobProviderSHA256: hash(jobProvider),
+                jobIdentity: kernel.context.parent.cloudRunJob,
+              }
+            : {
+                startPlan: c.start.plan,
+                startRequest: c.start.request,
+                startAttemptedAt: c.start.attemptedAt,
+              }),
           control: j.authority.control,
           state: j.authority.state,
           actorUid: work.actorUid,
@@ -170,7 +197,13 @@ async function collect(o: Options, deadline: number) {
           updated: s.updateTime,
           data: hash(s.data()),
         }));
-        return { facts, originals, start, pool: c.start.pool, stampsSHA256: hash(stamps) };
+        return {
+          facts,
+          originals,
+          start,
+          ...(p.job ? { jobProvider } : { pool: c.start.pool }),
+          stampsSHA256: hash(stamps),
+        };
       },
       { readOnly: true }
     );
@@ -214,7 +247,7 @@ async function collectWithEpisodeReader(
     k.birth?.pid === old.birth.pid ||
     k.birth?.nonce === old.birth.nonce ||
     k.worker?.instanceId === old.worker.instanceId ||
-    hash(k.worker?.cloudRun) !== hash(old.worker.cloudRun) ||
+    hash(diagnosticComputeIdentity(k.worker)) !== hash(diagnosticComputeIdentity(old.worker)) ||
     close?.code !== 0 ||
     close.signal !== null ||
     close.descendantsAbsent !== true ||
@@ -257,18 +290,22 @@ async function collectWithEpisodeReader(
   const pool = before.pool;
   for (const worker of [old.context.parent, old.worker, k.worker]) {
     const cloud = worker?.cloudRun;
+    const job = worker?.cloudRunJob;
     if (
-      worker.buildId !== p.buildId ||
-      !cloud ||
-      cloud.projectId !== 'urm-app-staging' ||
-      cloud.region !== 'us-central1' ||
-      cloud.pool !== p.name.split('/').at(-1) ||
-      cloud.revision !== pool.revision.split('/').at(-1) ||
-      cloud.revisionUid !== pool.revisionUid ||
-      cloud.serviceAccount !== p.runner ||
-      cloud.imageDigest !== p.image.split('@')[1] ||
-      !cloud.instanceId ||
-      hash(cloud) !== hash(old.worker.cloudRun)
+      worker?.buildId !== p.buildId ||
+      (p.job
+        ? cloud || !job || !matchMediaRecoveryJobRun(job, p, before.jobProvider)
+        : job ||
+          !cloud ||
+          cloud.projectId !== 'urm-app-staging' ||
+          cloud.region !== 'us-central1' ||
+          cloud.pool !== p.name.split('/').at(-1) ||
+          cloud.revision !== pool?.revision.split('/').at(-1) ||
+          cloud.revisionUid !== pool?.revisionUid ||
+          cloud.serviceAccount !== p.runner ||
+          cloud.imageDigest !== p.image.split('@')[1] ||
+          !cloud.instanceId) ||
+      hash(diagnosticComputeIdentity(worker)) !== hash(diagnosticComputeIdentity(old.worker))
     )
       fail();
   }
@@ -451,6 +488,27 @@ async function collectWithEpisodeReader(
     provenanceSHA256: before.stampsSHA256,
     workflowId: ready.workflowId,
     runId: ready.runId,
+    cloudOrigin: {
+      ...(p.job
+        ? {
+            job: old.worker.cloudRunJob,
+            originalClosedAt: old.close.observedAt,
+            replacementClosedAt: k.close.observedAt,
+          }
+        : {}),
+      original: {
+        workerIdentity: `media-recovery-${old.worker.instanceId}`,
+        metadataInstanceId: diagnosticComputeIdentity(old.worker)!.instanceId,
+        recordedAt: f.Startup.observedAt,
+        startupSHA256: hash(f.Startup),
+      },
+      replacement: {
+        workerIdentity: `media-recovery-${k.worker.instanceId}`,
+        metadataInstanceId: diagnosticComputeIdentity(k.worker)!.instanceId,
+        recordedAt: f.ReplacementStartup.observedAt,
+        startupSHA256: hash(f.ReplacementStartup),
+      },
+    },
     evidenceSHA256: hash({
       journals: before.stampsSHA256,
       image: o.image,
@@ -538,6 +596,24 @@ export async function waitForMediaRecoveryEpisode(o: Omit<Options, 'image'> & { 
               start.get('intentSHA256') !== hash(op.get('mediaRecoveryWorkflowStart'))
             )
               fail();
+            if (o.plan.job) {
+              const provider = op.get('mediaRecoveryJobProvider');
+              const intent = op.get('mediaRecoveryWorkflowStart');
+              const parentWitness = old.get('context.parent');
+              if (
+                !provider?.runIdentity ||
+                start.get('jobRunSHA256') !== hash(provider.runIdentity) ||
+                intent?.jobRunSHA256 !== start.get('jobRunSHA256') ||
+                (old.exists &&
+                  (parentWitness?.cloudRun ||
+                    !parentWitness?.cloudRunJob ||
+                    !matchMediaRecoveryJobRun(parentWitness.cloudRunJob, o.plan, provider))) ||
+                (kernel.get('stage') === 'closed' &&
+                  (!kernel.get('worker.cloudRunJob') ||
+                    hash(kernel.get('worker.cloudRunJob')) !== hash(parentWitness.cloudRunJob)))
+              )
+                fail();
+            }
             if (
               old.get('stage') === 'closed' &&
               (old.get('close.signal') !== 'SIGKILL' ||

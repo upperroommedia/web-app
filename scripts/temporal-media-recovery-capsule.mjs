@@ -31,17 +31,31 @@ const stamp = (s) => {
 /** Completion-transaction provenance only. This is never activation authority,
  * a substitute for historical native/image/artifact reads, or a parent overlay. */
 export async function prepareCompletedMediaRecoveryCapsule(o, tx, parent, next, completion, drainRecord) {
+  const p = next.plan,
+    id = o.operationId,
+    jobMode = Boolean(p.job);
+  const provider = jobMode ? parent.get('mediaRecoveryJobProvider') : undefined;
+  const run = provider?.runIdentity;
+  const key = jobMode ? 'jobRunSHA256' : 'poolSHA256';
+  const compute = jobMode ? run : next.start?.pool;
   if (
     next.stage !== 'completed' ||
     !next.recovery ||
     next.recoveryFailed ||
     next.neverStarted ||
-    !next.drained ||
-    !next.stopped
+    !compute ||
+    (jobMode
+      ? next.disposition !== 'normal-zero-after-job' ||
+        !next.jobTermination ||
+        !next.jobDrain ||
+        next.jobDrain.terminationSHA256 !== next.jobTermination.proofSHA256 ||
+        hash(drainRecord?.proof ?? null) !== hash(next.jobDrain) ||
+        run.stage !== 'acknowledged' ||
+        run.jobPlanSHA256 !== hash(p.job) ||
+        next.jobTermination.executionUid !== run.executionUid
+      : !next.drained || !next.stopped)
   )
     fail();
-  const p = next.plan,
-    id = o.operationId;
   if (
     p.operationId !== id ||
     parent.get('action') !== 'diagnose-cloud-run-media-recovery' ||
@@ -62,11 +76,11 @@ export async function prepareCompletedMediaRecoveryCapsule(o, tx, parent, next, 
     !intent ||
     intent.stage !== 'attempted' ||
     intent.planSHA256 !== hash(p) ||
-    intent.poolSHA256 !== hash(next.start.pool) ||
+    intent[key] !== hash(compute) ||
     ack.stage !== 'confirmed' ||
     ack.operationId !== id ||
     ack.intentSHA256 !== hash(intent) ||
-    ack.poolSHA256 !== hash(next.start.pool) ||
+    ack[key] !== hash(compute) ||
     !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(ack.runId ?? '') ||
     !/^[a-f0-9]{64}$/.test(ack.nativeStartSHA256 ?? '') ||
     attempt?.stage !== 'completed' ||
@@ -81,8 +95,7 @@ export async function prepareCompletedMediaRecoveryCapsule(o, tx, parent, next, 
     plan: p,
     stage: 'prepared',
     prepared: next.prepared,
-    diagnostic: next.diagnostic,
-    start: next.start,
+    ...(jobMode ? {} : { diagnostic: next.diagnostic, start: next.start }),
   };
   const expectedIntent = {
     schemaVersion: 1,
@@ -90,7 +103,7 @@ export async function prepareCompletedMediaRecoveryCapsule(o, tx, parent, next, 
     operationId: id,
     planSHA256: hash(p),
     cycleSHA256: hash(originalCycle),
-    poolSHA256: hash(next.start.pool),
+    [key]: hash(compute),
     preparedSHA256: hash(next.prepared),
     workflowId: `media-recovery-${id}`,
     workflowType: 'MediaRecoveryProbe',
@@ -123,6 +136,20 @@ export async function prepareCompletedMediaRecoveryCapsule(o, tx, parent, next, 
     facts.ReplacementKernel.get('close.signal') !== null
   )
     fail();
+  if (jobMode) {
+    const original = facts.Kernel.get('worker.cloudRunJob');
+    const replacement = facts.ReplacementKernel.get('worker.cloudRunJob');
+    if (
+      !original ||
+      !replacement ||
+      hash(original) !== hash(replacement) ||
+      original.execution !== run.execution ||
+      original.executionUid !== run.executionUid ||
+      original.task !== next.jobTermination.task ||
+      original.taskUid !== next.jobTermination.taskUid
+    )
+      fail();
+  }
   const operatorIdentity = parent.get('operatorIdentity');
   if (
     !operatorIdentity ||
@@ -140,10 +167,11 @@ export async function prepareCompletedMediaRecoveryCapsule(o, tx, parent, next, 
     cloudMediaRecovery: next,
     mediaRecoveryJournalAttempt: attempt,
     mediaRecoveryWorkflowStart: intent,
+    ...(jobMode ? { mediaRecoveryJobProvider: provider } : {}),
   };
   const value = {
-    schemaVersion: 1,
-    kind: 'completed-media-recovery-provenance-only-v1',
+    schemaVersion: jobMode ? 2 : 1,
+    kind: jobMode ? 'completed-media-recovery-job-provenance-v2' : 'completed-media-recovery-provenance-only-v1',
     operationId: id,
     releaseId: o.config.releaseId,
     bindingDigest: o.bindingDigest,
@@ -157,7 +185,7 @@ export async function prepareCompletedMediaRecoveryCapsule(o, tx, parent, next, 
     originalAuthority: o.expectedAuthority,
     completionSHA256: hash(completion),
     drainSHA256: hash(drainRecord),
-    restoredPool: next.restore.pool,
+    restoredPool: jobMode ? p.origin : next.restore.pool,
     facts: snapshots.map(stamp),
   };
   const record = { ...value, capsuleSHA256: hash(value) },

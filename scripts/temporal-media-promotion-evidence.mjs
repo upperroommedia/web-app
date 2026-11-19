@@ -1,6 +1,7 @@
 import { isDeepStrictEqual as equal } from 'node:util';
 import { proofDigest as hash } from './temporal-release-runtime.mjs';
 import { readRestoredMediaPromotionInput } from './temporal-restored-media-capsule.mjs';
+import { readCompletedMediaRecoveryJob } from './temporal-media-recovery-job.mjs';
 import { readMediaRecoveryAncestorAccess } from './temporal-bootstrap-pool.mjs';
 import { verifyPreparedPoolMetadata } from './temporal-prepare-cloud-pool.mjs';
 const fail = () => {
@@ -62,7 +63,8 @@ export async function readMediaPromotionRetainedResources(o) {
     const retained = cap.get('originalParent.cloudRestoredMediaActivation'),
       p = retained.plan,
       recovery = o.receipts.recovery.identityState,
-      r = recovery.plan;
+      r = recovery.plan,
+      jobMode = Boolean(r.job);
     const { recovery: _recovery, restoredActivation: _retained, imagesPromotion: _images, ...receipts } = o.receipts;
     const api = (...args) => read(() => o.api(...args));
     const ancestor = await read(() =>
@@ -76,55 +78,77 @@ export async function readMediaPromotionRetainedResources(o) {
       !equal(ancestor.zeroPlan.body.template, r.normalTemplate) ||
       r.operationId !== before.recoveryOperationId ||
       p.recoveryOperationId !== r.operationId ||
-      hash(recovery.restore.pool) !== hash(p.origin.pool) ||
+      hash(jobMode ? r.origin : recovery.restore.pool) !== hash(p.origin.pool) ||
       r.origin.uid !== p.origin.pool.uid
     )
       fail();
-    let preceding = r.origin;
-    for (const key of ['diagnostic', 'start', 'stop', 'restore']) {
-      const x = recovery[key],
-        template = key === 'restore' ? r.normalTemplate : r.diagnosticTemplate,
-        target = key === 'start' ? 1 : 0;
-      const request = {
-        url: `https://run.googleapis.com/v2/${r.name}?updateMask=${
-          ['diagnostic', 'restore'].includes(key) ? 'template' : 'scaling'
-        }`,
-        method: 'PATCH',
-        body: ['diagnostic', 'restore'].includes(key)
-          ? { name: r.name, etag: preceding.etag, template }
-          : { name: r.name, etag: preceding.etag, scaling: { manualInstanceCount: target } },
-      };
+    let diagnosticJobTermination;
+    if (jobMode) {
+      const recoveryCap = await read(() =>
+        o.firestore.doc(`_control/temporalMediaRecoveryCapsule-${r.operationId}`).get()
+      );
+      if (!recoveryCap.exists || hash(recoveryCap.createTime) !== hash(recoveryCap.updateTime)) fail();
+      const { capsuleSHA256, ...preimage } = recoveryCap.data();
       if (
-        x?.stage !== 'completed' ||
-        !equal(x.request, request) ||
-        !equal(x.plan, {
-          key,
-          operationId: r.operationId,
-          before: preceding,
-          templateSHA256: hash(template),
-          target,
-        }) ||
-        x.pool?.uid !== r.origin.uid ||
-        x.pool.name !== r.name ||
-        x.pool.desiredManualInstanceCount !== target ||
-        BigInt(x.pool.generation) !== BigInt(preceding.generation) + 1n ||
-        !x.pool.etag ||
-        !x.pool.revisionUid ||
-        (['diagnostic', 'restore'].includes(key)
-          ? x.pool.revision === preceding.revision || x.pool.revisionUid === preceding.revisionUid
-          : x.pool.revision !== preceding.revision || x.pool.revisionUid !== preceding.revisionUid)
+        capsuleSHA256 !== p.origin.capsuleSHA256 ||
+        hash(preimage) !== capsuleSHA256 ||
+        preimage.completionSHA256 !== hash(o.receipts.recovery)
       )
         fail();
-      const name = op(x.nativeOperation),
-        lro = await api(`https://run.googleapis.com/v2/${name}`);
-      if (op(lro?.name) !== name || lro.done !== true || lro.error) fail();
-      const response = verifyPreparedPoolMetadata(
-        { ...ancestor.zeroPlan, body: { ...ancestor.zeroPlan.body, template } },
-        lro.response,
-        { manualInstanceCount: target }
-      );
-      if (!equal(response, (({ etag, revisionUid, ...v }) => v)(x.pool)) || lro.response.etag !== x.pool.etag) fail();
-      preceding = x.pool;
+      diagnosticJobTermination = await readCompletedMediaRecoveryJob({
+        api,
+        firestore: o.firestore,
+        read,
+        capsule: recoveryCap.data(),
+        recovery,
+      });
+    } else {
+      let preceding = r.origin;
+      for (const key of ['diagnostic', 'start', 'stop', 'restore']) {
+        const x = recovery[key],
+          template = key === 'restore' ? r.normalTemplate : r.diagnosticTemplate,
+          target = key === 'start' ? 1 : 0;
+        const request = {
+          url: `https://run.googleapis.com/v2/${r.name}?updateMask=${
+            ['diagnostic', 'restore'].includes(key) ? 'template' : 'scaling'
+          }`,
+          method: 'PATCH',
+          body: ['diagnostic', 'restore'].includes(key)
+            ? { name: r.name, etag: preceding.etag, template }
+            : { name: r.name, etag: preceding.etag, scaling: { manualInstanceCount: target } },
+        };
+        if (
+          x?.stage !== 'completed' ||
+          !equal(x.request, request) ||
+          !equal(x.plan, {
+            key,
+            operationId: r.operationId,
+            before: preceding,
+            templateSHA256: hash(template),
+            target,
+          }) ||
+          x.pool?.uid !== r.origin.uid ||
+          x.pool.name !== r.name ||
+          x.pool.desiredManualInstanceCount !== target ||
+          BigInt(x.pool.generation) !== BigInt(preceding.generation) + 1n ||
+          !x.pool.etag ||
+          !x.pool.revisionUid ||
+          (['diagnostic', 'restore'].includes(key)
+            ? x.pool.revision === preceding.revision || x.pool.revisionUid === preceding.revisionUid
+            : x.pool.revision !== preceding.revision || x.pool.revisionUid !== preceding.revisionUid)
+        )
+          fail();
+        const name = op(x.nativeOperation),
+          lro = await api(`https://run.googleapis.com/v2/${name}`);
+        if (op(lro?.name) !== name || lro.done !== true || lro.error) fail();
+        const response = verifyPreparedPoolMetadata(
+          { ...ancestor.zeroPlan, body: { ...ancestor.zeroPlan.body, template } },
+          lro.response,
+          { manualInstanceCount: target }
+        );
+        if (!equal(response, (({ etag, revisionUid, ...v }) => v)(x.pool)) || lro.response.etag !== x.pool.etag) fail();
+        preceding = x.pool;
+      }
     }
     const start = retained.start,
       request = {
@@ -166,7 +190,7 @@ export async function readMediaPromotionRetainedResources(o) {
     if (!equal(pool, start.pool)) fail();
     for (const [saved, template] of [
       [r.origin, r.normalTemplate],
-      [recovery.diagnostic.pool, r.diagnosticTemplate],
+      ...(jobMode ? [] : [[recovery.diagnostic.pool, r.diagnosticTemplate]]),
       [p.origin.pool, r.normalTemplate],
     ]) {
       if (!saved.revision?.startsWith(`${r.name}/revisions/`)) fail();
@@ -195,8 +219,10 @@ export async function readMediaPromotionRetainedResources(o) {
       capsuleSHA256: before.capsuleSHA256,
       plan: p,
       recoveryPlan: r,
+      ...(jobMode ? { diagnosticJobTermination } : { diagnosticPool: recovery.start.pool }),
       pool,
       nativeFactsSHA256: before.nativeFactsSHA256,
+      access: ancestor.access,
       accessSHA256: hash(ancestor.access),
       observedAt: new Date(sampled).toISOString(),
       scope: 'readonly-retained-resource-input-no-mutation-or-platform-authority',

@@ -2,9 +2,11 @@ const mockEvents: string[] = [];
 const mockReceiptPaths: string[] = [];
 let mockRegistered = true,
   mockParent = true,
-  mockBundleFailure = false;
+  mockBundleFailure = false,
+  mockCloudWitness = true;
 const mockCode = 'exact-held-private-workflow-code';
 const mockWorker = {
+  allowPolling: jest.fn(() => mockEvents.push('allow.polling')),
   run: jest.fn(async () => {
     mockEvents.push('run');
   }),
@@ -50,7 +52,14 @@ jest.mock('./runtime/consumed-workflow-bundle', () => ({
     return { code: mockCode, evidence: { bundleSHA256: 'b'.repeat(64) } };
   },
 }));
-jest.mock('./runtime/worker-witness', () => ({ loadWorkerWitness: async () => ({ instanceId: 'controlled' }) }));
+jest.mock('./runtime/worker-witness', () => ({
+  loadWorkerWitness: async () => ({
+    instanceId: '11111111-1111-4111-8111-111111111111',
+    cloudRun: mockCloudWitness
+      ? { pool: 'controlled-pool', revision: 'controlled-revision', revisionUid: 'controlled-revision-uid' }
+      : undefined,
+  }),
+}));
 jest.mock('./runtime/media-kernel-supervisor', () => ({
   reportMediaKernelWitness: async () =>
     mockParent ? { operationId: 'controlled', birthDigest: 'c'.repeat(64) } : undefined,
@@ -136,7 +145,9 @@ jest.mock('@temporalio/worker', () => ({
       },
     }),
   },
-  Worker: { create: (o: any) => mockCreate(o) },
+}));
+jest.mock('./runtime/media-recovery-polling-worker', () => ({
+  MediaRecoveryPollingWorker: { create: (o: unknown) => mockCreate(o) },
 }));
 jest.mock('@temporalio/client', () => ({
   Connection: {
@@ -160,6 +171,7 @@ beforeEach(() => {
   mockRegistered = true;
   mockParent = true;
   mockBundleFailure = false;
+  mockCloudWitness = true;
   process.env.TEMPORAL_MEDIA_RECOVERY_CHILD = 'original';
   process.send = (() => true) as typeof process.send;
 });
@@ -175,10 +187,19 @@ test('private actual entrypoint retains same bundle bytes and only two Activitie
   expect(Object.keys(options.activities).sort()).toEqual(['acquireMedia', 'admitMediaRecoveryWork']);
   expect(options.maxConcurrentActivityTaskExecutions).toBe(1);
   expect(mockEvents.indexOf('capacity.validate')).toBeLessThan(mockEvents.indexOf('create'));
-  expect(mockEvents.indexOf('startup.receipt')).toBeLessThan(mockEvents.indexOf('run'));
+  expect(mockEvents.indexOf('startup.receipt')).toBeLessThan(mockEvents.indexOf('allow.polling'));
+  expect(mockEvents.indexOf('allow.polling')).toBeLessThan(mockEvents.indexOf('run'));
   expect(mockEvents).toEqual(
     expect.arrayContaining(['firestore.close', 'firebase.close', 'client.close', 'native.close', 'runtime.close'])
   );
+});
+test('missing Cloud Run identity cannot create an immutable startup receipt or poll', async () => {
+  mockCloudWitness = false;
+  await expect(runMediaRecoveryApplication()).rejects.toThrow('MEDIA_RECOVERY_CLOUD_WITNESS_REQUIRED');
+  expect(mockCreate).not.toHaveBeenCalled();
+  expect(mockReceiptPaths).toHaveLength(0);
+  expect(mockEvents).not.toContain('original.registration');
+  expect(mockEvents).toContain('firebase.close');
 });
 test('missing native parent cannot create a Worker or fall back', async () => {
   mockParent = false;
@@ -206,4 +227,15 @@ test('unrecognized child ordinal cannot initialize or poll', async () => {
   await expect(runMediaRecoveryApplication()).rejects.toThrow('MEDIA_RECOVERY_ORIGINAL_CHILD_REQUIRED');
   expect(mockEvents).toEqual([]);
   expect(mockCreate).not.toHaveBeenCalled();
+});
+
+test('revoked authority after Worker creation never opens polling during lifecycle cleanup', async () => {
+  mockCreate.mockImplementationOnce(async () => {
+    mockAuthorize.mockRejectedValueOnce(new Error('CONTROLLED_AUTHORITY_REVOKED'));
+    return mockWorker;
+  });
+  await expect(runMediaRecoveryApplication()).rejects.toThrow('CONTROLLED_AUTHORITY_REVOKED');
+  expect(mockWorker.allowPolling).not.toHaveBeenCalled();
+  expect(mockWorker.run).toHaveBeenCalledTimes(1);
+  expect(mockEvents).toContain('native.close');
 });

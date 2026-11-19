@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { verifyCloudRunRtdbReadiness } from './cloud-run-rtdb-readiness';
+import { verifyCloudRunStorageReadiness } from './cloud-run-storage-readiness';
 import { Context } from '@temporalio/activity';
 import type { Firestore } from 'firebase-admin/firestore';
 import type { WorkerWitness } from './worker-witness';
@@ -102,7 +103,10 @@ export function createWorkerReadinessActivities(options: {
           workflowBundle.bundleBytes > 64 * 1024 * 1024)
       )
         throw new Error('WORKER_READINESS_BUNDLE_UNCONFIRMED');
-      const firebaseRtdb = request.role === 'orchestration' ? await verifyCloudRunRtdbReadiness(options.witness) : null;
+      const [firebaseRtdb, cloudStorage] = await Promise.all([
+        request.role === 'orchestration' ? verifyCloudRunRtdbReadiness(options.witness) : null,
+        verifyCloudRunStorageReadiness(request.role, options.witness, context.cancellationSignal),
+      ]);
       const email =
         request.role === 'email'
           ? await (
@@ -110,10 +114,11 @@ export function createWorkerReadinessActivities(options: {
             ).verifyEmailTransportNoSendBounded(undefined, context.cancellationSignal)
           : null;
       const evidence = {
+        cloudStorage,
         email,
         firebaseRtdb,
         workflowBundle,
-        schemaVersion: 2,
+        schemaVersion: 3,
         projectId: request.projectId,
         buildId: request.buildId,
         nonce: request.nonce,

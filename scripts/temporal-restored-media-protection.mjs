@@ -24,6 +24,45 @@ export function assertRestoredMediaStartupProgress(a, b) {
   )
     fail();
 }
+/** The restored-zero parent has no authority to accept even a candidate
+ * poller. Join both native inventories and compute across two observations. */
+export async function observeRestoredMediaOriginProtection(o) {
+  const auth = () => o.read(() => assertRestoredMediaActivationAuthority(o));
+  const root = await auth();
+  if (
+    o.client.options.namespace !== 'urm-app-staging.qwejt' ||
+    Object.hasOwn(root, 'cloudRestoredMediaActivation') ||
+    o.originalPlan?.operationId !== o.recoveryOperationId
+  )
+    fail();
+  const capture = async () => {
+    const normal = await scanRestoredMediaInventory({
+      client: o.client,
+      plan: o.originalPlan,
+      startup: null,
+      rpc: o.rpc,
+    });
+    const diagnostic = await scanPrivateMediaInventory({
+      client: o.client,
+      db: o.firestore,
+      plan: o.originalPlan,
+      operationId: o.recoveryOperationId,
+      read: o.read,
+      rpc: o.rpc,
+      auth: o.originalAuth,
+    });
+    const compute = await o.read(() =>
+      observeNamespaceComputeIsolation(o.client, 'urm-app-staging.qwejt', { deadline: o.deadline })
+    );
+    age(compute);
+    return { normal, diagnostic, computeSHA256: compute.inventorySHA256 };
+  };
+  const first = await capture();
+  const second = await capture();
+  if (hash(first) !== hash(second) || hash(await auth()) !== hash(root)) fail();
+  return second;
+}
+
 /** Only fixed verified-source callers provide these readers. Neither a CLI
  * descriptor nor a receipt can supply an identity or a positive guard result. */
 export async function observeRestoredMediaPhaseProtection(o) {

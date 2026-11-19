@@ -20,6 +20,23 @@ if (
   mediaResources.headroomBytes < GiB
 )
   throw new Error('Media resource budgets are inconsistent.');
+/** The retained Hetzner workspace has its own existing allocation. Verify
+ * available blocks on that mount without imposing the Cloud Run reservation. */
+export async function assertRetainedMediaWorkspaceAvailable(directory: string, incomingFiles: readonly number[] = []) {
+  const disk = await statfs(directory, { bigint: true });
+  const unavailable = () =>
+    ApplicationFailure.retryable('Audio workspace capacity is temporarily unavailable', 'MEDIA_DISK_CAPACITY');
+  if (disk.bsize <= 0n || disk.bavail <= 0n || disk.bavail > disk.blocks) throw unavailable();
+  let requiredBlocks = 0n;
+  for (const bytes of incomingFiles) {
+    if (!Number.isSafeInteger(bytes) || bytes <= 0) throw unavailable();
+    requiredBlocks += (BigInt(bytes) + disk.bsize - 1n) / disk.bsize;
+  }
+  // The active job continues to check free blocks while writing. Account for
+  // known simultaneous inputs against the same mount before opening them.
+  if (requiredBlocks >= disk.bavail) throw unavailable();
+}
+
 let reservedBytes = 0;
 export async function reserveMediaWorkspace(directory: string): Promise<() => void> {
   const disk = await statfs(directory);

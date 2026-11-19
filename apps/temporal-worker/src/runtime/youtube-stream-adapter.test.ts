@@ -1,8 +1,12 @@
-import { mkdtemp, mkdir, writeFile, readFile, rm, readdir } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, realpath, rm, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { initializeApp, deleteApp, type App } from 'firebase-admin/app';
 import { getDatabase, type Database } from 'firebase-admin/database';
+import {
+  readRenderProfileSeal,
+  withRenderProfileSnapshot,
+} from '../../../process-audio/src/temporal/hetzner-render-profile';
 import { CancelToken } from '../../../process-audio/src/CancelToken';
 import {
   acquireYouTubeToStream,
@@ -211,4 +215,45 @@ process.stdout.write(JSON.stringify({format_id:'140',protocol:'m3u8_native',dura
   await expect(acquire({ execute })).rejects.toThrow();
   expect(execute.mock.calls.length).toBeGreaterThan(0);
   for (const [input] of execute.mock.calls) expect(input.args).toContain('--abort-on-unavailable-fragments');
+});
+
+test('the generation-bound file download ignores ambient extractor config and uses the owned database', async () => {
+  const workspace = await realpath(directory);
+  process.env.PROCESS_AUDIO_BROWSER_PROFILE_DIR = join(workspace, 'profile');
+  const target = join(directory, 'bound-source.%(ext)s');
+  await writeFile(
+    binary,
+    `#!/usr/bin/env node
+const fs = require('node:fs');
+const args = process.argv.slice(2);
+const output = args[args.indexOf('-o') + 1];
+const snapshot = ${JSON.stringify(join(workspace, 'extractor-profile'))};
+if (!args.includes('--ignore-config') || !args.includes('--cookies-from-browser')
+    || args[args.indexOf('--cookies-from-browser') + 1] !== 'chromium:' + snapshot) process.exit(3);
+if (fs.readFileSync(snapshot + '/Cookies', 'utf8') !== 'synthetic-cookie-db-fixture') process.exit(4);
+if (args.includes('-J') && args.includes('--skip-download')) {
+  process.stdout.write(JSON.stringify({ duration: 100, formats: [
+    {format_id: '140', protocol: 'https', ext: 'm4a', acodec: 'aac', vcodec: 'none'}
+  ] }));
+  process.exit(0);
+}
+if (args.indexOf('-o') < 0 || output !== ${JSON.stringify(target)}) process.exit(5);
+fs.writeFileSync(output.replace('%(ext)s', 'm4a'), 'synthetic-file', { flag: 'wx' });
+`,
+    { mode: 0o700 }
+  );
+  const cancellation = new CancelToken();
+  const seal = await readRenderProfileSeal(cancellation.signal);
+  const output = await withRenderProfileSnapshot(workspace, seal, cancellation.signal, () =>
+    downloadYouTubeAudioToFile(
+      binary,
+      'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+      join(directory, 'bound-source'),
+      cancellation,
+      () => undefined,
+      database,
+      { requestId: 'bound-fixture' }
+    )
+  );
+  expect(output).toBe(join(directory, 'bound-source.m4a'));
 });

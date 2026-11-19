@@ -1,11 +1,13 @@
-import { assertNativeSnapshot, nativeSnapshotProof, proofDigest } from './temporal-release-runtime.mjs';
+import { assertNativeSnapshot, assertNativeSnapshotSuccessor, nativeSnapshotProof, proofDigest } from './temporal-release-runtime.mjs';
 
-/** Persist under the same native operation AND release authority snapshots. No
- * callback can authorize HTTP until this transaction has acknowledged completion.
+/** Persist under the same native operation and release authority snapshots.
+ * Provider HTTP mutations require the known checkpoint acknowledgement.
+ * A new diagnostic intent can also use exact readback before its first START.
  */
 async function saveCheckpoint({ firestore, lockRef, controlRef, stateRef,
   immutableReceipt, creationReceipt, ownedOperation, expectedAuthority, config, operationId, bindingDigest, operatorPrincipal, identityState, kind }) {
   const [field, action] = { mediaPromotion:['cloudMediaPromotion','promote-cloud-run-media'], imagesPromotion:['cloudImagesPromotion','promote-cloud-run-images'], emailPromotion:['cloudEmailPromotion','promote-cloud-run-email'], searchPromotion:['cloudSearchPromotion','promote-cloud-run-search'],controlsPromotion:['cloudControlsPromotion','promote-cloud-run-controls'], mediaCycle:['cloudMediaBootstrapCycle','bootstrap-stop-cloud-run-media'],mediaActivation:['cloudMediaActivation','activate-cloud-run-media-pool'],mediaAbort:['cloudMediaActivationStop','stop-cloud-run-media-activation'], imagesCycle:['cloudImagesBootstrapCycle','bootstrap-stop-cloud-run-images'],imagesActivation:['cloudImagesActivation','activate-cloud-run-images-pool'],imagesAbort:['cloudImagesActivationStop','stop-cloud-run-images-activation'], emailCycle:['cloudEmailBootstrapCycle','bootstrap-stop-cloud-run-email'],emailActivation:['cloudEmailActivation','activate-cloud-run-email-pool'],emailAbort:['cloudEmailActivationStop','stop-cloud-run-email-activation'], searchCycle:['cloudSearchBootstrapCycle','bootstrap-stop-cloud-run-search'],searchActivation:['cloudSearchActivation','activate-cloud-run-search-pool'],searchAbort:['cloudSearchActivationStop','stop-cloud-run-search-activation'], orchestrationCycle:['cloudOrchestrationBootstrapCycle','bootstrap-stop-cloud-run-orchestration'], orchestrationActivation:['cloudOrchestrationActivation','activate-cloud-run-orchestration-pool'], orchestrationAbort:['cloudOrchestrationActivationStop','stop-cloud-run-orchestration-activation'], poolActivation: ['cloudControlsActivation','activate-cloud-run-controls-pool'], poolAbort: ['cloudControlsActivationStop','stop-cloud-run-controls-activation'], bootstrapCycle: ['cloudPoolBootstrapCycle', 'bootstrap-stop-cloud-run-controls'], dispatchActivation: ['cloudDispatchActivation', 'activate-cloud-run-dispatch-service'], identity: ['cloudIdentityPreparation', 'prepare-cloud-run-identity'],
+    dispatchWakes: ['cloudBusinessDispatchWakes', 'enable-staging-dispatch-wakes'],
     eventarcCycle: ['cloudDispatchEventarcCycle', 'prepare-stop-cloud-run-dispatch-eventarc'],
     schedulerCycle: ['cloudDispatchSchedulerCycle', 'prepare-stop-cloud-run-dispatch-scheduler'],
     eventarcAudit: ['cloudEventarcAuditPreparation', 'prepare-cloud-run-eventarc-audit'],
@@ -20,7 +22,10 @@ async function saveCheckpoint({ firestore, lockRef, controlRef, stateRef,
   if (!field) throw new Error('PREPARATION_KIND_REQUIRED');
   const expectedPoolRole={mediaPromotion:'media',imagesPromotion:'images',emailPromotion:'email',searchPromotion:'search',controlsPromotion:'controls',mediaCycle:'media',mediaActivation:'media',mediaAbort:'media',imagesCycle:'images',imagesActivation:'images',imagesAbort:'images',emailCycle:'email',emailActivation:'email',emailAbort:'email',searchCycle:'search',searchActivation:'search',searchAbort:'search',bootstrapCycle:'controls',poolActivation:'controls',poolAbort:'controls',orchestrationCycle:'orchestration',orchestrationActivation:'orchestration',orchestrationAbort:'orchestration'}[kind];
   if(expectedPoolRole&&identityState.plan?.role!==expectedPoolRole)throw new Error('BOOTSTRAP_ROLE_CHANGED');
-  await firestore.runTransaction(async tx => {
+  const armingDispatchProbe = kind === 'dispatchActivation' && identityState.stage === 'planned' &&
+    Object.hasOwn(identityState, 'workerIntent');
+  let proposedDigest;
+  const save = async tx => {
     const creationState = ['bootstrapCycle','poolActivation','orchestrationCycle','orchestrationActivation','searchCycle','searchActivation','emailCycle','emailActivation','imagesCycle','imagesActivation','mediaCycle','mediaActivation'].includes(kind) ? identityState.activationState : ['schedulerCycle', 'eventarcCycle'].includes(kind) ? identityState.creationState : undefined;
     if (['bootstrapCycle','poolActivation','orchestrationCycle','orchestrationActivation','searchCycle','searchActivation','emailCycle','emailActivation','imagesCycle','imagesActivation','mediaCycle','mediaActivation'].includes(kind) && (['started', 'stopping', 'completed'].includes(identityState.stage) && !creationState ||
       creationState && (creationState.stage !== 'completed' || creationState.plan?.operationId !== operationId || creationState.plan?.mode !== 'start' || creationState.plan?.target !== 1 ||
@@ -70,6 +75,14 @@ async function saveCheckpoint({ firestore, lockRef, controlRef, stateRef,
         if(before.stage==='completed'&&proofDigest(before)!==proofDigest(identityState))throw new Error('POOL_PREPARATION_COMPLETED_CHANGED');
       }
     }
+    if (armingDispatchProbe) {
+      const { workerIntent, ...planState } = identityState;
+      const previous = current.get(field);
+      if (!workerIntent || typeof workerIntent !== 'object' || Array.isArray(workerIntent) ||
+        previous?.stage !== 'planned' || Object.hasOwn(previous, 'workerIntent') ||
+        proofDigest(previous) !== proofDigest(planState))
+        throw new Error('DISPATCH_ACTIVATION_PROBE_INTENT_CHANGED');
+    }
     if (kind === 'dispatchActivation' && Object.hasOwn(current.get(field) ?? {}, 'workerIntent') &&
       proofDigest(current.get(field).workerIntent) !== proofDigest(identityState.workerIntent ?? null))
       throw new Error('DISPATCH_ACTIVATION_PROBE_INTENT_CHANGED');
@@ -93,6 +106,13 @@ async function saveCheckpoint({ firestore, lockRef, controlRef, stateRef,
         }
       }
     }
+    if (kind === 'dispatchWakes') {
+      const previous = current.get(field);
+      if (identityState.plan?.operationId !== operationId || identityState.plan.releaseId !== config.releaseId ||
+        identityState.plan.role !== 'dispatch' || !['planned', 'completed'].includes(identityState.stage) ||
+        (previous?.stage === 'completed' && proofDigest(previous) !== proofDigest(identityState)))
+        throw new Error('DISPATCH_WAKE_CHECKPOINT_CHANGED');
+    }
     const record = { operationId, releaseId: config.releaseId, bindingDigest, identityState, operatorPrincipal };
     if (receipt?.exists && proofDigest(receipt.data()) !== proofDigest(record))
       throw new Error('IDENTITY_PREPARATION_RECEIPT_CHANGED');
@@ -102,8 +122,21 @@ async function saveCheckpoint({ firestore, lockRef, controlRef, stateRef,
     tx.update(lockRef, { [field]: identityState });
     if (originalCreation && !originalCreation.exists) tx.create(creationReceipt, creationRecord);
     if (receipt && !receipt.exists) tx.create(immutableReceipt, record);
-  });
-  return nativeSnapshotProof(await lockRef.get());
+    proposedDigest = proofDigest({ ...current.data(), [field]: identityState });
+  };
+  try {
+    await firestore.runTransaction(save, { maxAttempts: 1 });
+  } catch (error) {
+    if (!armingDispatchProbe || proposedDigest === undefined) throw error;
+    // Only this caller knows the proposed write and has not attempted START.
+  }
+  if (proposedDigest === undefined) throw new Error('IDENTITY_PREPARATION_AUTHORITY_CHANGED');
+  return firestore.runTransaction(async tx => {
+    const [current, control, state] = await Promise.all([lockRef, controlRef, stateRef].map(ref => tx.get(ref)));
+    assertNativeSnapshot(expectedAuthority.control, control);
+    assertNativeSnapshot(expectedAuthority.state, state);
+    return assertNativeSnapshotSuccessor(ownedOperation, proposedDigest, current);
+  }, { readOnly: true });
 }
 
 export const saveIdentityPreparationCheckpoint = options => saveCheckpoint({ ...options, kind: 'identity' });
@@ -189,3 +222,42 @@ export const saveImagesPromotionCheckpoint=o=>saveCheckpoint({...o,kind:'imagesP
 
 export const assertMediaPromotionAuthority=o=>assertPromotionAuthority(o,'media');
 export const saveMediaPromotionCheckpoint=o=>saveCheckpoint({...o,kind:'mediaPromotion'});
+
+export const saveDispatchWakesCheckpoint = options => saveCheckpoint({ ...options, kind: 'dispatchWakes' });
+
+
+/** Capture the exact create-only parent receipts used by a pool operation.
+ * Recheck their native versions and content together before new effects. */
+export async function readOwnedPoolOperationReceipts(firestore, prefixes, ids, releaseId) {
+  const entries = Object.entries(prefixes).map(([key, prefix]) => ({
+    key,
+    id: ids[key],
+    ref: firestore.doc(`_control/${prefix}-${ids[key]}`),
+  }));
+  const read = (verify) =>
+    firestore.runTransaction(
+      async (tx) => {
+        const rows = await Promise.all(entries.map(({ ref }) => tx.get(ref)));
+        return rows.map((row, index) => {
+          if (
+            !row.exists ||
+            !row.createTime?.isEqual(row.updateTime) ||
+            row.get('operationId') !== entries[index].id ||
+            row.get('releaseId') !== releaseId
+          )
+            throw new Error('OWNED_BOOTSTRAP_RECEIPT_REQUIRED');
+          if (verify) assertNativeSnapshot(verify[index], row);
+          return row;
+        });
+      },
+      { readOnly: true }
+    );
+  const originals = await read();
+  const proofs = originals.map(nativeSnapshotProof);
+  return {
+    receipts: Object.fromEntries(entries.map(({ key }, index) => [key, originals[index].data()])),
+    assertCurrent: async () => {
+      await read(proofs);
+    },
+  };
+}

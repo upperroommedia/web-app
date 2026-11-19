@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-import { readCloudRunMediaPromotionEvidence } from './temporal-release-cloud-run.mjs';
 import { mediaPromotionReceiptPrefixes, confirmRestoredMediaActivationCapsule } from './temporal-restored-media-capsule.mjs';
 import {activateRestoredCloudRunMedia} from './temporal-media-restored-activation.mjs';
 import {saveRestoredMediaActivationCheckpoint} from './temporal-media-restored-checkpoint.mjs';
@@ -8,20 +7,20 @@ import {readRestoredMediaRecoveryOrigin} from './temporal-media-restored-origin.
 import {confirmCompletedMediaRecoveryCapsule} from './temporal-media-recovery-capsule.mjs';
 import {runMediaRecoveryCycle} from './temporal-media-recovery-cycle.mjs';
 import {saveMediaRecoveryCheckpoint,assertMediaRecoveryAuthority} from './temporal-media-recovery-checkpoint.mjs';
-import {canonicalMediaRecoveryRuntime,mediaRecoveryPreparation,mediaRecoveryExecution,mediaRecoveryDrainage,mediaRecoveryStoppedConfirmation,mediaRecoveryNeverStartedConfirmation,mediaRecoveryProtection} from './temporal-media-recovery-runtime.mjs';
+import {canonicalMediaRecoveryRuntime,mediaRecoveryJobPreflight,mediaRecoveryPreparation,mediaRecoveryExecution,mediaRecoveryDrainage,mediaRecoveryNeverStartedConfirmation,mediaRecoveryStoppedConfirmation,mediaRecoveryProtection,mediaRecoveryJobLauncher,mediaRecoveryJobDrainage} from './temporal-media-recovery-runtime.mjs';
 import {independentPromotionPredecessor} from './temporal-promotion-roles.mjs';
 import {runCloudRunControlsPromotion,runCloudRunSearchPromotion,runCloudRunEmailPromotion,runCloudRunImagesPromotion,runCloudRunMediaPromotion} from './temporal-release-cloud-run.mjs';
 import {saveControlsPromotionCheckpoint,assertControlsPromotionAuthority,saveSearchPromotionCheckpoint,assertSearchPromotionAuthority,saveEmailPromotionCheckpoint,assertEmailPromotionAuthority,saveImagesPromotionCheckpoint,assertImagesPromotionAuthority,saveMediaPromotionCheckpoint,assertMediaPromotionAuthority} from './temporal-preparation-checkpoint.mjs';
 import {bootstrapStopCloudRunMediaPool,activateCloudRunMediaPool,stopCloudRunMediaActivation} from './temporal-bootstrap-pool.mjs';
 import {saveMediaBootstrapCycleCheckpoint,saveMediaActivationCheckpoint,saveMediaActivationStopCheckpoint} from './temporal-preparation-checkpoint.mjs';
-import {assertPoolPreparationAuthority} from './temporal-preparation-checkpoint.mjs';
+import {assertPoolPreparationAuthority,readOwnedPoolOperationReceipts} from './temporal-preparation-checkpoint.mjs';
 import {bootstrapStopCloudRunImagesPool,activateCloudRunImagesPool,stopCloudRunImagesActivation} from './temporal-bootstrap-pool.mjs';
 import {saveImagesBootstrapCycleCheckpoint,saveImagesActivationCheckpoint,saveImagesActivationStopCheckpoint} from './temporal-preparation-checkpoint.mjs';
 import {bootstrapStopCloudRunEmailPool,activateCloudRunEmailPool,stopCloudRunEmailActivation} from './temporal-bootstrap-pool.mjs';
 import {saveEmailBootstrapCycleCheckpoint,saveEmailActivationCheckpoint,saveEmailActivationStopCheckpoint} from './temporal-preparation-checkpoint.mjs';
 import {bootstrapStopCloudRunSearchPool,activateCloudRunSearchPool,stopCloudRunSearchActivation} from './temporal-bootstrap-pool.mjs';
 import {saveSearchBootstrapCycleCheckpoint,saveSearchActivationCheckpoint,saveSearchActivationStopCheckpoint} from './temporal-preparation-checkpoint.mjs';
-import { verifyCloudRunBootstrapProtection, verifyCloudRunBootstrapRegistration, collectCloudRunDispatchDiagnostic, collectCloudRunReleaseWorkers, readCloudRunNamespaceEvidence, verifyCloudRunScalerPolicies, verifyCloudRunComputeIsolation } from './temporal-release-cloud-run.mjs';
+import { assertCloudRunReadinessHandoff, prepareCloudRunTransitionFence, verifyCurrentCloudRunReadinessResources, verifyCloudRunBootstrapProtection, verifyCloudRunBootstrapRegistration, collectCloudRunDispatchDiagnostic, collectCloudRunReleaseWorkers, readCloudRunNamespaceEvidence, verifyCloudRunScalerPolicies, verifyCloudRunComputeIsolation } from './temporal-release-cloud-run.mjs';
 import { createReleaseApi } from './temporal-release-api.mjs';
 import { verifyDispatchTemporalKeyIdentity } from './temporal-dispatch-key-identity.mjs';
 import { verifyCloudRunDispatchConfiguration } from './temporal-release-dispatch.mjs';
@@ -35,15 +34,21 @@ import { prepareCloudRunSecretAccess } from './temporal-prepare-secret-access.mj
 import { prepareCloudRunEventarcAudit } from './temporal-prepare-eventarc-audit.mjs';
 import { prepareStopCloudRunEventarc } from './temporal-prepare-stop-eventarc.mjs';
 import { prepareStopCloudRunScheduler } from './temporal-prepare-stop-scheduler.mjs';
+import { enableStagingDispatchWakes, readStagingDispatchWakeAuthority } from './temporal-enable-dispatch-wakes.mjs';
+import { saveDispatchWakesCheckpoint } from './temporal-preparation-checkpoint.mjs';
 import { stopCloudRunDispatchWake } from './temporal-stop-dispatch-wake.mjs';
 import { prepareCloudRunDispatchAccess } from './temporal-prepare-dispatch-access.mjs';
-import { saveDiagnosticWakeCheckpoint, pulseDiagnosticWake } from './temporal-diagnostic-wake.mjs';
+import { saveDiagnosticWakeCheckpoint, pulseDiagnosticWake, saveDispatchDiagnosticCompletion, dispatchDiagnosticCompletionPath } from './temporal-diagnostic-wake.mjs';
 import { armCloudRunDispatchDiagnostic } from './temporal-dispatch-diagnostic.mjs';
 import { activateCloudRunDispatchService } from './temporal-activate-dispatch-service.mjs';
 import { prepareCloudRunDispatchService } from './temporal-prepare-dispatch-service.mjs';
 import { bootstrapStopCloudRunOrchestrationPool, activateCloudRunOrchestrationPool, stopCloudRunOrchestrationActivation, activateCloudRunControlsPool, stopCloudRunControlsActivation, bootstrapStopCloudRunControlsPool } from './temporal-bootstrap-pool.mjs';
 import { prepareCloudRunZeroPool } from './temporal-prepare-cloud-pool.mjs';
 import { readPreparationReceipt } from './temporal-preparation-evidence.mjs';
+import { createTraditionalKubernetesTransport } from './temporal-traditional-kubernetes-transport.mjs';
+import { attachCloudRunWorkerCompute, runCloudRunOrchestrationHandoff, runCloudRunTraditionalRetirement, runCloudRunWorkerWake, verifyManagedWorkerHandoff } from './temporal-release-cloud-run.mjs';
+import { readOrchestrationHandoffReceipt, readWorkerWakeReadiness, saveWorkerReadinessStartIntent } from './temporal-retirement-checkpoint.mjs';
+import { verifyWorkerHandoffVm, validateWorkerHandoffPlan, workerHandoffInput } from './temporal-worker-handoff-plan.mjs';
 import { saveOrchestrationBootstrapCycleCheckpoint, saveOrchestrationActivationCheckpoint, saveOrchestrationActivationStopCheckpoint, saveControlsActivationCheckpoint, saveControlsActivationStopCheckpoint, savePoolBootstrapCycleCheckpoint, saveDispatchActivationCheckpoint, saveDispatchEventarcCycleCheckpoint, saveDispatchSchedulerCycleCheckpoint, saveEventarcAuditPreparationCheckpoint, saveDispatchWakeStopCheckpoint, saveDispatchAccessPreparationCheckpoint, saveDispatchServicePreparationCheckpoint, saveIdentityPreparationCheckpoint, savePoolPreparationCheckpoint, saveSecretAccessPreparationCheckpoint, saveScalerAccessPreparationCheckpoint, saveFirestoreAccessPreparationCheckpoint, saveRuntimeRolePreparationCheckpoint, saveRuntimeAccessPreparationCheckpoint } from './temporal-preparation-checkpoint.mjs';
 // Every step is explicit, revision-fenced, resumable, and leaves admissions paused on failure.
 import { readFile, writeFile, mkdtemp, rm, realpath } from 'node:fs/promises';
@@ -51,6 +56,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { assertHetznerActivationReceipt, confirmLiveHetznerActivation, hetznerActivationPath } from './temporal-hetzner-activation.mjs';
 import { verifyTemporalCallableTransport } from './temporal-callable-access.mjs';
 import { verifyFirebaseRtdbReadiness, validateCloudEvidence } from './temporal-platform.mjs';
 import { resolve } from 'node:path';
@@ -69,6 +75,7 @@ import {
   assertSameArtifact,
   nativeSnapshotProof,
   assertNativeSnapshot,
+  assertNativeSnapshotSuccessor,
   confirmBundleProofInTransaction,
 } from './temporal-release-runtime.mjs';
 import {
@@ -79,8 +86,11 @@ import {
   verifyAppHostingBuild,
   restoreReviewedUiRecovery,
   ensureFrozenRecoveryPolicy,
+  restoreAutomaticRollouts,
+  freezeAutomaticRollouts,
 } from './temporal-apphosting-rollout.mjs';
 import {
+  canReleaseOwnedOperationLock,
   validateReleaseConfig,
   validateControl,
   firebaseAdmin,
@@ -132,6 +142,10 @@ if (
     'compatibility-ready',
     'drain',
     'workers-ready',
+    'handoff-cloud-run-orchestration',
+    'retire-traditional-staging-workers',
+    'attach-cloud-run-worker-compute',
+    'verify-cloud-run-worker-wake',
     'prepare-cloud-run-identity',
     'prepare-cloud-run-pool',
     'promote-cloud-run-email','promote-cloud-run-images','promote-cloud-run-media','promote-cloud-run-search','promote-cloud-run-controls','bootstrap-stop-cloud-run-controls',
@@ -144,7 +158,7 @@ if (
     'stop-cloud-run-orchestration-activation',
     'activate-cloud-run-controls-pool',
     'stop-cloud-run-controls-activation',
-    'prepare-cloud-run-dispatch-diagnostic', 'activate-cloud-run-dispatch-service',
+    'prepare-cloud-run-dispatch-diagnostic', 'enable-staging-dispatch-wakes', 'activate-cloud-run-dispatch-service',
     'prepare-cloud-run-dispatch-service',
     'prepare-cloud-run-dispatch-access',
     'stop-cloud-run-dispatch-wake',
@@ -184,6 +198,18 @@ if (action === 'plan') {
 }
 if (!args.includes('--apply'))
   throw new Error('Remote release operations require explicit --apply; use plan for offline review');
+const workerHandoff = workerHandoffInput(action, args, config);
+const workerReadiness = ['workers-ready', 'take-ownership', 'open'].includes(action)
+  ? workerHandoffInput(action, args, config, JSON.parse(await readFile(config.platformConfig, 'utf8')).workerHosting)
+  : undefined;
+if (workerReadiness) {
+  const flag = '--dispatch-wakes-operation';
+  const at = args.indexOf(flag);
+  workerReadiness.dispatchWakesOperation = args[at + 1];
+  if (at < 0 || at !== args.lastIndexOf(flag) ||
+    !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(workerReadiness.dispatchWakesOperation ?? ''))
+    throw new Error('OWNED_DISPATCH_WAKE_ACTIVATION_REQUIRED');
+}
 const operatorRoot = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const runtimeRoot = args.includes('--runtime-root') ? resolve(args[args.indexOf('--runtime-root') + 1]) : operatorRoot;
 const binding = pinReleaseCheckouts(operatorRoot, runtimeRoot, config);
@@ -197,6 +223,8 @@ const operatorIdentity = {
   operatorClosureDigest: binding.operatorClosureDigest,
   runtimePins: binding.runtimePins,
   resourceBinding,
+  ...(workerHandoff ? { workerHandoff } : {}),
+  ...(workerReadiness ? { workerReadiness } : {}),
 };
 const poolOperationRoles=Object.freeze({'promote-cloud-run-email':'email','promote-cloud-run-images':'images','promote-cloud-run-media':'media','promote-cloud-run-search':'search','promote-cloud-run-controls':'controls',
  'activate-restored-cloud-run-media':'media','diagnose-cloud-run-media-recovery':'media','bootstrap-stop-cloud-run-media':'media','activate-cloud-run-media-pool':'media','stop-cloud-run-media-activation':'media',
@@ -206,7 +234,7 @@ const poolOperationRoles=Object.freeze({'promote-cloud-run-email':'email','promo
  'bootstrap-stop-cloud-run-controls':'controls','activate-cloud-run-controls-pool':'controls','stop-cloud-run-controls-activation':'controls',
  'bootstrap-stop-cloud-run-orchestration':'orchestration','activate-cloud-run-orchestration-pool':'orchestration','stop-cloud-run-orchestration-activation':'orchestration',
 });
-const preparationArguments = ['activate-restored-cloud-run-media','diagnose-cloud-run-media-recovery','bootstrap-stop-cloud-run-media','activate-cloud-run-media-pool','stop-cloud-run-media-activation','bootstrap-stop-cloud-run-images','activate-cloud-run-images-pool','stop-cloud-run-images-activation','bootstrap-stop-cloud-run-email','activate-cloud-run-email-pool','stop-cloud-run-email-activation','bootstrap-stop-cloud-run-search','activate-cloud-run-search-pool','stop-cloud-run-search-activation','activate-cloud-run-orchestration-pool','stop-cloud-run-orchestration-activation','bootstrap-stop-cloud-run-orchestration','activate-cloud-run-controls-pool','stop-cloud-run-controls-activation','promote-cloud-run-email','promote-cloud-run-images','promote-cloud-run-media','promote-cloud-run-search','promote-cloud-run-controls','bootstrap-stop-cloud-run-controls', 'prepare-cloud-run-dispatch-diagnostic', 'activate-cloud-run-dispatch-service', 'prepare-cloud-run-identity', 'prepare-cloud-run-dispatch-service', 'prepare-cloud-run-dispatch-access', 'prepare-stop-cloud-run-dispatch-scheduler', 'prepare-stop-cloud-run-dispatch-eventarc', 'stop-cloud-run-dispatch-wake', 'prepare-cloud-run-pool', 'prepare-cloud-run-secret-access', 'prepare-cloud-run-scaler-access', 'prepare-cloud-run-firestore-access', 'prepare-cloud-run-runtime-role', 'prepare-cloud-run-runtime-access', 'prepare-cloud-run-eventarc-audit'].includes(action) ? {
+const preparationArguments = ['activate-restored-cloud-run-media','diagnose-cloud-run-media-recovery','bootstrap-stop-cloud-run-media','activate-cloud-run-media-pool','stop-cloud-run-media-activation','bootstrap-stop-cloud-run-images','activate-cloud-run-images-pool','stop-cloud-run-images-activation','bootstrap-stop-cloud-run-email','activate-cloud-run-email-pool','stop-cloud-run-email-activation','bootstrap-stop-cloud-run-search','activate-cloud-run-search-pool','stop-cloud-run-search-activation','activate-cloud-run-orchestration-pool','stop-cloud-run-orchestration-activation','bootstrap-stop-cloud-run-orchestration','activate-cloud-run-controls-pool','stop-cloud-run-controls-activation','promote-cloud-run-email','promote-cloud-run-images','promote-cloud-run-media','promote-cloud-run-search','promote-cloud-run-controls','bootstrap-stop-cloud-run-controls', 'prepare-cloud-run-dispatch-diagnostic', 'enable-staging-dispatch-wakes', 'activate-cloud-run-dispatch-service', 'prepare-cloud-run-identity', 'prepare-cloud-run-dispatch-service', 'prepare-cloud-run-dispatch-access', 'prepare-stop-cloud-run-dispatch-scheduler', 'prepare-stop-cloud-run-dispatch-eventarc', 'stop-cloud-run-dispatch-wake', 'prepare-cloud-run-pool', 'prepare-cloud-run-secret-access', 'prepare-cloud-run-scaler-access', 'prepare-cloud-run-firestore-access', 'prepare-cloud-run-runtime-role', 'prepare-cloud-run-runtime-access', 'prepare-cloud-run-eventarc-audit'].includes(action) ? {
   role: args[args.indexOf('--identity-role') + 1],
   kind: args[args.indexOf('--identity-kind') + 1],
   proof: args[args.indexOf('--preparation-proof') + 1],
@@ -217,7 +245,7 @@ if (preparationArguments) {
   if (!required.every(flag => args.includes(flag)) ||
     !/^[a-f0-9]{64}$/.test(preparationArguments.digest ?? ''))
     throw new Error('Explicit immutable identity preparation inputs required');
-  if (['activate-restored-cloud-run-media','diagnose-cloud-run-media-recovery','bootstrap-stop-cloud-run-media','activate-cloud-run-media-pool','stop-cloud-run-media-activation','bootstrap-stop-cloud-run-images','activate-cloud-run-images-pool','stop-cloud-run-images-activation','bootstrap-stop-cloud-run-email','activate-cloud-run-email-pool','stop-cloud-run-email-activation','bootstrap-stop-cloud-run-search','activate-cloud-run-search-pool','stop-cloud-run-search-activation','activate-cloud-run-orchestration-pool','stop-cloud-run-orchestration-activation','bootstrap-stop-cloud-run-orchestration','activate-cloud-run-controls-pool','stop-cloud-run-controls-activation','promote-cloud-run-email','promote-cloud-run-images','promote-cloud-run-media','promote-cloud-run-search','promote-cloud-run-controls','bootstrap-stop-cloud-run-controls', 'prepare-cloud-run-dispatch-diagnostic', 'activate-cloud-run-dispatch-service', 'prepare-cloud-run-dispatch-service', 'prepare-cloud-run-dispatch-access', 'prepare-stop-cloud-run-dispatch-scheduler', 'prepare-stop-cloud-run-dispatch-eventarc', 'stop-cloud-run-dispatch-wake', 'prepare-cloud-run-pool', 'prepare-cloud-run-secret-access', 'prepare-cloud-run-scaler-access', 'prepare-cloud-run-firestore-access', 'prepare-cloud-run-runtime-role', 'prepare-cloud-run-runtime-access', 'prepare-cloud-run-eventarc-audit'].includes(action)) {
+  if (['activate-restored-cloud-run-media','diagnose-cloud-run-media-recovery','bootstrap-stop-cloud-run-media','activate-cloud-run-media-pool','stop-cloud-run-media-activation','bootstrap-stop-cloud-run-images','activate-cloud-run-images-pool','stop-cloud-run-images-activation','bootstrap-stop-cloud-run-email','activate-cloud-run-email-pool','stop-cloud-run-email-activation','bootstrap-stop-cloud-run-search','activate-cloud-run-search-pool','stop-cloud-run-search-activation','activate-cloud-run-orchestration-pool','stop-cloud-run-orchestration-activation','bootstrap-stop-cloud-run-orchestration','activate-cloud-run-controls-pool','stop-cloud-run-controls-activation','promote-cloud-run-email','promote-cloud-run-images','promote-cloud-run-media','promote-cloud-run-search','promote-cloud-run-controls','bootstrap-stop-cloud-run-controls', 'prepare-cloud-run-dispatch-diagnostic', 'enable-staging-dispatch-wakes', 'activate-cloud-run-dispatch-service', 'prepare-cloud-run-dispatch-service', 'prepare-cloud-run-dispatch-access', 'prepare-stop-cloud-run-dispatch-scheduler', 'prepare-stop-cloud-run-dispatch-eventarc', 'stop-cloud-run-dispatch-wake', 'prepare-cloud-run-pool', 'prepare-cloud-run-secret-access', 'prepare-cloud-run-scaler-access', 'prepare-cloud-run-firestore-access', 'prepare-cloud-run-runtime-role', 'prepare-cloud-run-runtime-access', 'prepare-cloud-run-eventarc-audit'].includes(action)) {
     delete preparationArguments.kind;
     preparationArguments.settings = args[args.indexOf('--pool-settings') + 1];
     preparationArguments.settingsDigest = args[args.indexOf('--pool-settings-sha256') + 1];
@@ -232,10 +260,18 @@ if (preparationArguments) {
     if(preparationArguments.role!==poolOperationRoles[action]||!args.includes('--bootstrap-receipts')||!args.includes('--bootstrap-receipts-sha256')||
       !/^[a-f0-9]{64}$/.test(preparationArguments.receiptsDigest??'')) throw new Error('FIXED_CONTROLS_BOOTSTRAP_RECEIPTS_REQUIRED');
   }
-  if (action === 'prepare-cloud-run-dispatch-diagnostic') {
+  if (['prepare-cloud-run-dispatch-diagnostic', 'enable-staging-dispatch-wakes'].includes(action)) {
     preparationArguments.activationOperationId = args[args.indexOf('--activation-preparation-operation') + 1];
     if (!args.includes('--activation-preparation-operation') || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(preparationArguments.activationOperationId ?? ''))
       throw new Error('OWNED_DISPATCH_ACTIVATION_REQUIRED');
+  }
+  if (action === 'enable-staging-dispatch-wakes') {
+    const flag = '--dispatch-diagnostic-operation';
+    const at = args.indexOf(flag);
+    preparationArguments.diagnosticOperationId = args[at + 1];
+    if (at < 0 || at !== args.lastIndexOf(flag) ||
+      !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(preparationArguments.diagnosticOperationId ?? '') ||
+      preparationArguments.role !== 'dispatch') throw new Error('OWNED_DISPATCH_DIAGNOSTIC_REQUIRED');
   }
   if (action === 'prepare-cloud-run-secret-access') {
     if (!args.includes('--secret-name')) throw new Error('Explicit source-rendered secret required');
@@ -249,7 +285,7 @@ if (preparationArguments) {
     if (![preparationArguments.serviceOperationId, preparationArguments.wakeOperationId].every(value => /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(value ?? '')))
       throw new Error('Explicit immutable wake and service receipts required');
   }
-  if (['prepare-cloud-run-dispatch-diagnostic', 'activate-cloud-run-dispatch-service', 'prepare-cloud-run-dispatch-access', 'prepare-stop-cloud-run-dispatch-scheduler', 'prepare-stop-cloud-run-dispatch-eventarc'].includes(action)) {
+  if (['prepare-cloud-run-dispatch-diagnostic', 'enable-staging-dispatch-wakes', 'activate-cloud-run-dispatch-service', 'prepare-cloud-run-dispatch-access', 'prepare-stop-cloud-run-dispatch-scheduler', 'prepare-stop-cloud-run-dispatch-eventarc'].includes(action)) {
     for (const [field, flag] of [['surface', '--dispatch-iam-surface'], ['eventOperationId', '--event-preparation-operation'], ['schedulerOperationId', '--scheduler-preparation-operation'], ['serviceOperationId', '--service-preparation-operation']]) {
       if (field === 'surface' && action !== 'prepare-cloud-run-dispatch-access') continue;
       if (!args.includes(flag)) throw new Error('Explicit dispatch caller preparation inputs required');
@@ -312,7 +348,9 @@ await runWithCleanup(
     };
     const operationId = resumeOperation ?? randomUUID();
     let operationAcquired = false,
+      operationVerified = false,
       transitionPending = false,
+      diagnosticCompletionProof,
       cloudWorkerProbePending = false,
       cloudIdentityPending = false,
       expectedAuthority,
@@ -322,39 +360,60 @@ await runWithCleanup(
     const auditPath = (revision) => `_control/temporalReleaseOperatorAudit-${operationId}-${revision}`;
     await runWithCleanup(
       async () => {
-        await firestore.runTransaction(async (tx) => {
-          const snapshot = await tx.get(lockRef);
-          if (snapshot.exists) {
-            const held = snapshot.data();
-            if (
-              !resumeOperation ||
-              held.operationId !== resumeOperation ||
-              held.releaseId !== config.releaseId ||
-              held.action !== action ||
-              held.bindingDigest !== bindingDigest
-            )
-              throw new Error('Another release operation or crash recovery lock exists; inspect it before proceeding');
-          } else {
-            if (resumeOperation)
-              throw new Error(
-                'Reviewed operation is absent; inspect its immutable audit before starting a fresh action'
-              );
-            tx.create(lockRef, {
-              operationId,
-              releaseId: config.releaseId,
-              action,
-              bindingDigest,
-              operatorIdentity,
-              operatorPrincipal,
-              createdAt: serverTimestamp(),
-            });
-          }
-        });
-        operationAcquired = true;
+        const operationEnvelope = { operationId, releaseId: config.releaseId, action, bindingDigest, operatorIdentity, operatorPrincipal };
+        const reacquired = resumeOperation
+          ? await firestore.runTransaction(async (tx) => {
+              const snapshot = await tx.get(lockRef);
+              if (snapshot.exists) {
+                const held = snapshot.data();
+                if (held.operationId !== resumeOperation || held.releaseId !== config.releaseId ||
+                    held.action !== action || held.bindingDigest !== bindingDigest)
+                  throw new Error('Another release operation or crash recovery lock exists; inspect it before proceeding');
+                return { proof: nativeSnapshotProof(snapshot) };
+              }
+              if (action === 'prepare-cloud-run-dispatch-diagnostic') {
+                const final = await tx.get(firestore.doc(dispatchDiagnosticCompletionPath(operationId)));
+                const data = final.data();
+                if (final.exists && final.createTime?.isEqual(final.updateTime) &&
+                    data.schemaVersion === 1 && data.operationId === operationId &&
+                    data.releaseId === config.releaseId && data.bindingDigest === bindingDigest &&
+                    data.buildId === resourceBinding.workerBuildId && data.image === resourceBinding.workerImage)
+                  return false;
+              }
+              throw new Error('Reviewed operation is absent; inspect its immutable audit before starting a fresh action');
+            }, { readOnly: true })
+          : await lockRef.create({ ...operationEnvelope, createdAt: serverTimestamp() });
+        if (!reacquired) {
+          console.log(`Dispatch diagnostic already completed at ${dispatchDiagnosticCompletionPath(operationId)}.`);
+          return;
+        }
         const acquiredOperation = await lockRef.get();
+        if (reacquired.proof) {
+          assertNativeSnapshot(reacquired.proof, acquiredOperation);
+          ownedOperation = reacquired.proof;
+        } else {
+          const { createdAt, ...stored } = acquiredOperation.data() ?? {};
+          ownedOperation = nativeSnapshotProof(acquiredOperation);
+          if (!acquiredOperation.exists || !createdAt || !reacquired.writeTime ||
+              proofDigest(stored) !== proofDigest(operationEnvelope) ||
+              proofDigest(acquiredOperation.createTime) !== proofDigest(reacquired.writeTime) ||
+              proofDigest(acquiredOperation.updateTime) !== proofDigest(reacquired.writeTime))
+            throw new Error('RELEASE_NATIVE_AUTHORITY_CHANGED');
+        }
+        operationAcquired = true;
         if (action === 'prepare-cloud-run-dispatch-diagnostic' && Object.hasOwn(acquiredOperation.data() ?? {}, 'cloudDispatchDiagnostic'))
           cloudIdentityPending = true;
-        ownedOperation = nativeSnapshotProof(acquiredOperation);
+        if (action === 'restore-auto' && Object.hasOwn(acquiredOperation.data() ?? {}, 'autoRolloutRestore'))
+          cloudIdentityPending = true;
+        if (action === 'freeze-ui' && resumeOperation)
+          cloudIdentityPending = true;
+        if (action === 'enable-staging-dispatch-wakes' && acquiredOperation.get('cloudBusinessDispatchWakes'))
+          cloudIdentityPending = true;
+        if (workerReadiness && Object.hasOwn(acquiredOperation.data() ?? {}, 'cloudWorkerIntent'))
+          cloudWorkerProbePending = true;
+        if (workerHandoff && (acquiredOperation.get('cloudOrchestrationHandoff') ||
+          acquiredOperation.get('traditionalWorkerRetirement') ||
+          acquiredOperation.get('cloudWorkerComputeAttachment') || acquiredOperation.get('cloudWorkerWake'))) cloudIdentityPending = true;
 
         function token() {
           return execFileSync('gcloud', ['auth', 'print-access-token'], {
@@ -364,8 +423,8 @@ await runWithCleanup(
           }).trim();
         }
         const api = createReleaseApi({getAccessToken:token});
-        const appApi = (path, method, body) =>
-          api(`https://firebaseapphosting.googleapis.com/v1beta/${path}`, method, body);
+        const appApi = (path, method, body, beforeSend) =>
+          api(`https://firebaseapphosting.googleapis.com/v1beta/${path}`, method, body, beforeSend);
         async function settleOperation(operation) {
           const deadline = Date.now() + 180_000;
           while (operation.name && !operation.done) {
@@ -388,10 +447,38 @@ await runWithCleanup(
           } while (pageToken);
           return result;
         }
-        async function verifyReleaseWorkers() {
-          const configuredPlatform = JSON.parse(await readFile(config.platformConfig, 'utf8'));
+        let cloudRunReadiness;
+        async function verifyReleaseWorkers(state) {
+          const platformBytes = await readFile(config.platformConfig);
+          if (hash(platformBytes) !== resourceBinding.platformConfigSHA256)
+            throw new Error('WORKER_READINESS_PLATFORM_CHANGED');
+          const configuredPlatform = JSON.parse(platformBytes.toString('utf8'));
           if (configuredPlatform.workerHosting === 'cloud-run') {
             validateWorkerCoverage(config, configuredPlatform);
+            if (!workerReadiness) throw new Error('CLOUD_RUN_WAKE_READINESS_INPUT_REQUIRED');
+            const plan = validateWorkerHandoffPlan(
+              await readPreparationReceipt(workerReadiness.plan, workerReadiness.planDigest),
+              config, configuredPlatform, workerReadiness.evidenceDigest
+            );
+            const readWakeReadiness = (tx) => readWorkerWakeReadiness({
+              action, operationId, bindingDigest, firestore, config, platform: configuredPlatform,
+              expectedAuthority, ownedOperation, evidenceDigest: plan.evidenceDigest, pools: plan.pools,
+            }, tx);
+            // Revalidate receipts before any native diagnostic can be started.
+            const { wakeReceiptsSHA256, retiredSHA256 } = await readWakeReadiness();
+            if ((action !== 'workers-ready' || state.phase === 'workers-ready') &&
+              state.workerWakeReceiptsSHA256 !== wakeReceiptsSHA256)
+              throw new Error('CLOUD_RUN_WAKE_READINESS_CHECKPOINT_CHANGED');
+            await verifyPreparationEvidence({ path: workerReadiness.proof, digest: workerReadiness.evidenceDigest,
+              platform: configuredPlatform, binding, google: api });
+            if (operatorPrincipal.adcAndGcloudAccountMatch !== true)
+              throw new Error('STAGING_WORKER_HANDOFF_REQUIRES_MATCHED_OPERATOR');
+            await verifyWorkerHandoffVm(api);
+            const { context, ...authority } = plan.traditionalCluster;
+            const transport = await createTraditionalKubernetesTransport(context);
+            const handoff = await readOrchestrationHandoffReceipt(firestore, config, configuredPlatform, workerReadiness.planDigest);
+            await verifyManagedWorkerHandoff({ binding, config, platform: configuredPlatform, firestore, api },
+              { authority, transport, pools: plan.pools, retiredSHA256, handoff });
             validateCloudEvidence(configuredPlatform, await readCloudRunNamespaceEvidence(configuredPlatform), { requireRecovery: false });
             const held = await lockRef.get();
             assertNativeSnapshot(ownedOperation, held);
@@ -406,20 +493,27 @@ await runWithCleanup(
             const scalerPolicies = await verifyCloudRunScalerPolicies(configuredPlatform, api);
             const dispatchKeyIdentity = await verifyDispatchTemporalKeyIdentity({ version: configuredPlatform.dispatch.apiKeyVersion, api });
             const dispatchConfiguration = await verifyCloudRunDispatchConfiguration(configuredPlatform, api);
-            await collectCloudRunReleaseWorkers({ operationId, bindingDigest, binding, config, platform: configuredPlatform, firestore,
+            const dispatchWakesOperation = workerReadiness.dispatchWakesOperation;
+            const observeDispatchWakes = (live, tx) => readStagingDispatchWakeAuthority(firestore, {
+              releaseId: config.releaseId, platform: configuredPlatform, evidenceDigest: plan.evidenceDigest,
+              operationId: dispatchWakesOperation, live,
+            }, tx);
+            const dispatchWakes = await observeDispatchWakes(dispatchConfiguration);
+            const dispatchWakeReceiptsSHA256 = proofDigest(dispatchWakes);
+            if ((action !== 'workers-ready' || state.phase === 'workers-ready') &&
+                state.dispatchWakeReceiptsSHA256 !== dispatchWakeReceiptsSHA256)
+              throw new Error('CLOUD_RUN_DISPATCH_WAKE_READINESS_CHECKPOINT_CHANGED');
+            const roleProof = await collectCloudRunReleaseWorkers({ operationId, bindingDigest, binding, config, platform: configuredPlatform, firestore,
               artifactDirectory: directory, savedIntent,
               recordIntent: async (intent) => {
-                // From this point a lost transaction acknowledgement is uncertain.
                 cloudWorkerProbePending = true;
-                await firestore.runTransaction(async (tx) => {
-                  const current = await tx.get(lockRef);
-                  assertNativeSnapshot(ownedOperation, current);
-                  if (current.get('cloudWorkerIntent')) throw new Error('CLOUD_RUN_PROBE_INTENT_ALREADY_EXISTS');
-                  tx.update(lockRef, { cloudWorkerIntent: { ...intent, artifactDirectory: directory } });
+                ownedOperation = await saveWorkerReadinessStartIntent({
+                  action, firestore, config, ownedOperation, expectedAuthority, operationId, bindingDigest,
+                  intent, artifactDirectory: directory,
                 });
-                ownedOperation = nativeSnapshotProof(await lockRef.get());
               },
             });
+            assertCloudRunReadinessHandoff(roleProof, configuredPlatform, plan.pools);
             // The native collector validates canonical private directory ownership
             // and the matching saved intent before any additional artifact write.
             await writeFile(join(directory, `scaler-policy-${randomUUID()}.json`), JSON.stringify(scalerPolicies),
@@ -428,11 +522,55 @@ await runWithCleanup(
               { flag: 'wx', mode: 0o600 });
             await writeFile(join(directory, `dispatch-key-identity-${randomUUID()}.json`), JSON.stringify(dispatchKeyIdentity),
               { flag: 'wx', mode: 0o600 });
+            const currentDispatch = await verifyCloudRunDispatchConfiguration(configuredPlatform, api);
+            const dispatchFacts = ({ observedAt: _observedAt, ...facts }) => proofDigest(facts);
+            if (dispatchFacts(currentDispatch) !== dispatchFacts(dispatchConfiguration) ||
+              proofDigest(await observeDispatchWakes(currentDispatch)) !== proofDigest(dispatchWakes))
+              throw new Error('OWNED_DISPATCH_WAKE_ACTIVATION_CHANGED');
+            const readinessToken = token();
+            await verifyCurrentCloudRunReadinessResources({
+              proof: roleProof, platform: configuredPlatform, pools: plan.pools,
+              api: createReleaseApi({ getAccessToken: () => readinessToken }),
+            });
+            const confirm = async (tx, liveDispatch = currentDispatch) => {
+              const [worker, dispatch] = await Promise.all([
+                readWakeReadiness(tx),
+                observeDispatchWakes(liveDispatch, tx),
+              ]);
+              if (worker.wakeReceiptsSHA256 !== wakeReceiptsSHA256 ||
+                  proofDigest(dispatch) !== dispatchWakeReceiptsSHA256)
+                throw new Error('CLOUD_RUN_WAKE_READINESS_CHECKPOINT_CHANGED');
+            };
+            await firestore.runTransaction(confirm, { readOnly: true });
+            const refresh = async () => {
+              const refreshToken = token();
+              const refreshApi = createReleaseApi({ getAccessToken: () => refreshToken });
+              const withoutSampleTime = ({ observedAt: _observedAt, ...facts }) => proofDigest(facts);
+              return prepareCloudRunTransitionFence(async () => {
+                const [dispatch, scaler, key] = await Promise.all([
+                  verifyCloudRunDispatchConfiguration(configuredPlatform, refreshApi),
+                  verifyCloudRunScalerPolicies(configuredPlatform, refreshApi),
+                  verifyDispatchTemporalKeyIdentity({ version: configuredPlatform.dispatch.apiKeyVersion, api: refreshApi }),
+                  verifyCurrentCloudRunReadinessResources({ proof: roleProof, platform: configuredPlatform, pools: plan.pools, api: refreshApi }),
+                  verifyManagedWorkerHandoff({ binding, config, platform: configuredPlatform, firestore, api: refreshApi },
+                    { authority, transport, pools: plan.pools, retiredSHA256, handoff }),
+                ]);
+                if (dispatchFacts(dispatch) !== dispatchFacts(currentDispatch) ||
+                    withoutSampleTime(scaler) !== withoutSampleTime(scalerPolicies) ||
+                    proofDigest(key) !== proofDigest(dispatchKeyIdentity))
+                  throw new Error('CLOUD_RUN_TRANSITION_PROVIDER_EVIDENCE_CHANGED');
+                return dispatch;
+              });
+            };
+            cloudRunReadiness = {
+              confirm, refresh, workerWakeReceiptsSHA256: wakeReceiptsSHA256, dispatchWakeReceiptsSHA256,
+            };
+            await writeFile(join(directory, `worker-wake-receipts-${randomUUID()}.json`),
+              JSON.stringify({ releaseId: config.releaseId, evidenceDigest: plan.evidenceDigest, wakeReceiptsSHA256, dispatchWakeReceiptsSHA256 }),
+              { flag: 'wx', mode: 0o600 });
+            assertNativeSnapshot(ownedOperation, await lockRef.get());
             cloudWorkerProbePending = false;
-            // Never substitute role execution for the remaining native guards.
-            // This hosting branch cannot advance a release until their actual
-            // implementations are connected; no descriptor boolean can bypass it.
-            throw new Error('CLOUD_RUN_RECOVERY_AND_DISPATCH_GATES_REQUIRED');
+            return configuredPlatform;
           }
           // Read-only preflight verifies actual host/access and original-run worker restart evidence in Cloud mode.
           // Database backup/restore evidence applies only to the separate self-hosted mode.
@@ -563,18 +701,22 @@ await runWithCleanup(
           }
           return platform;
         }
-        async function verifyUiCommit(checkpoint) {
-          const traffic = await appApi(`${parent}/traffic`);
-          const splits = traffic.current?.splits ?? [];
-          const live = splits.length === 1 && splits[0].percent === 100 ? splits[0] : undefined;
-          if (!live || traffic.reconciling) throw new Error('Reviewed UI rollout has not settled');
+        async function verifyUiCommit(checkpoint, { requireFrozen = false } = {}) {
           const expectedBuild = checkpoint.uiBuild;
-          if (!expectedBuild || !sameAppHostingResource(live.build, expectedBuild, resourceIdentity.projectNumber))
-            throw new Error('Live UI does not match the reviewed immutable build');
+          const readServingTraffic = async () => {
+            const traffic = await appApi(`${parent}/traffic`);
+            const splits = traffic.current?.splits ?? [];
+            if (traffic.reconciling || splits.length !== 1 || splits[0].percent !== 100)
+              throw new Error('Reviewed UI rollout has not settled');
+            if (!expectedBuild || !sameAppHostingResource(splits[0].build, expectedBuild, resourceIdentity.projectNumber))
+              throw new Error('Live UI does not match the reviewed immutable build');
+            if (requireFrozen && (traffic.rolloutPolicy?.disabled !== true || !traffic.etag))
+              throw new Error('Automatic UI rollout must remain frozen before opening admissions');
+            return traffic;
+          };
+          const before = await readServingTraffic();
           const build = await appApi(expectedBuild);
           if (
-            !expectedBuild ||
-            !sameAppHostingResource(live.build, expectedBuild, resourceIdentity.projectNumber) ||
             !verifyAppHostingBuild(
               build,
               { buildName: expectedBuild, uiCommit: config.uiCommit },
@@ -584,6 +726,8 @@ await runWithCleanup(
             build.reconciling
           )
             throw new Error('Live UI does not match the reviewed immutable commit');
+          if (requireFrozen && (await readServingTraffic()).etag !== before.etag)
+            throw new Error('App Hosting traffic changed while verifying the pre-open release');
         }
         async function snapshot() {
           const [control, state] = await Promise.all([controlRef.get(), stateRef.get()]);
@@ -612,7 +756,25 @@ await runWithCleanup(
           expectedAuthority = { control: nativeSnapshotProof(control), state: nativeSnapshotProof(state) };
           return { control: validatedControl, state: checkpoint, serverReadTime: control.readTime };
         }
+        let hetznerActivation;
+        async function verifyHetznerActivation(control, state) {
+          if (config.environment !== 'staging' || !config.domains.includes('media')) return;
+          const platform = JSON.parse(await readFile(config.platformConfig, 'utf8'));
+          if (platform.workerHosting !== 'cloud-run') return;
+          const ref = firestore.doc(hetznerActivationPath(config.releaseId));
+          const activation = await ref.get();
+          const receipt = assertHetznerActivationReceipt(activation, config,
+            state.phase === 'ownership-changed' ? { controlRevision: control.revision } : {});
+          if (state.phase !== 'ownership-changed') assertNativeSnapshot(state.hetznerActivation, activation);
+          await confirmLiveHetznerActivation(receipt);
+          hetznerActivation = { ref, proof: nativeSnapshotProof(activation) };
+        }
         async function transition(revision, phase, update = {}, controlUpdate) {
+          let workerFence;
+          if (workerReadiness && ['workers-ready', 'ownership-changed', 'open'].includes(phase)) {
+            if (!cloudRunReadiness) throw new Error('CLOUD_RUN_WAKE_READINESS_CHECKPOINT_REQUIRED');
+            workerFence = await cloudRunReadiness.refresh();
+          }
           await firestore.runTransaction(async (tx) => {
             transitionPending = false;
             const [current, currentState, operation] = await Promise.all([
@@ -743,11 +905,27 @@ await runWithCleanup(
               )
                 throw new Error('UI identity migration authority or fresh absence proof changed');
             }
+            if (workerFence) {
+              workerFence.assertFresh();
+              await cloudRunReadiness.confirm(tx, workerFence.live);
+              if (phase === 'workers-ready') {
+                update = {
+                  ...update,
+                  workerWakeReceiptsSHA256: cloudRunReadiness.workerWakeReceiptsSHA256,
+                  dispatchWakeReceiptsSHA256: cloudRunReadiness.dispatchWakeReceiptsSHA256,
+                };
+              }
+            }
+            if (hetznerActivation) {
+              assertNativeSnapshot(hetznerActivation.proof, await tx.get(hetznerActivation.ref));
+              if (phase === 'backend-ready') update = { ...update, hetznerActivation: hetznerActivation.proof };
+            }
             if (phase === 'bundles-ready') {
               if (currentState.data().phase !== 'backend-ready' || !update.bundleBootstrapProof)
                 throw new Error('Bundle checkpoint requires current backend-ready and complete artifact proof');
               await confirmBundleProofInTransaction(tx, firestore, update.bundleBootstrapProof, config.projectId);
             }
+            workerFence?.assertFresh();
             transitionPending = true;
             tx.create(firestore.doc(auditPath(revision + 1)), {
               schemaVersion: 1,
@@ -765,7 +943,9 @@ await runWithCleanup(
               runtimeSourceVerified: true,
               authority: expectedAuthority ?? null,
               bundleBootstrapProof: update.bundleBootstrapProof ?? null,
+              ...(hetznerActivation && { hetznerActivation: hetznerActivation.proof }),
               uiRolloutIdentityMigration: update.uiRolloutIdentityMigration ?? null,
+              ...(update.autoRolloutRestoreSHA256 && { autoRolloutRestoreSHA256: update.autoRolloutRestoreSHA256 }),
               createdAt: serverTimestamp(),
             });
             tx.update(controlRef, { ...controlUpdate, revision: revision + 1, updatedAt: Date.now() });
@@ -962,11 +1142,14 @@ await runWithCleanup(
             throw new Error('A stable automatic rollout policy and etag are required');
           if (traffic.rolloutPolicy.codebaseBranch !== (config.environment === 'production' ? 'main' : 'staging'))
             throw new Error('App Hosting live branch must retain its documented main/staging wiring');
-          const inFlight = (await list(`${parent}/rollouts?pageSize=100`, 'rollouts')).some(
-            (r) => !['SUCCEEDED', 'FAILED', 'CANCELLED', 'SKIPPED'].includes(r.state)
-          );
-          if (inFlight)
-            throw new Error('An App Hosting rollout is already active; allow it to settle before release freeze');
+          const assertNoActiveRollout = async () => {
+            const inFlight = (await list(`${parent}/rollouts?pageSize=100`, 'rollouts')).some(
+              (r) => !['SUCCEEDED', 'FAILED', 'CANCELLED', 'SKIPPED'].includes(r.state)
+            );
+            if (inFlight)
+              throw new Error('An App Hosting rollout is already active; allow it to settle before release freeze');
+          };
+          await assertNoActiveRollout();
           const existingState = await stateRef.get();
           if (existingState.exists) {
             if (existingState.data().releaseId !== config.releaseId && existingState.data().phase !== 'complete')
@@ -976,26 +1159,27 @@ await runWithCleanup(
               !['freezing-ui', 'ui-frozen'].includes(existingState.data().phase)
             )
               throw new Error('Resume the appropriate existing release phase instead of freezing again');
-            if (existingState.data().phase === 'ui-frozen') {
-              console.log('UI rollout policy is already frozen for this release.');
-              process.exitCode = 0;
-            }
           }
           // Save policy/current build BEFORE mutation. Recovery reuses the same request ID.
           const sameRelease = existingState.data()?.releaseId === config.releaseId;
-          const requestId = sameRelease ? existingState.data().appHostingFreezeRequestId : randomUUID();
+          const requestId = sameRelease ? existingState.data().appHostingFreezeRequestId : operationId;
           const previousFunctionTimeout = sameRelease
             ? existingState.data().maximumLegacyExecutionSeconds
             : Math.max(540, ...(await functionsList()).map((fn) => Number(fn.serviceConfig?.timeoutSeconds ?? 0)));
           if (!sameRelease)
             await firestore.runTransaction(async (tx) => {
-              const [previous, oldState, usage] = await Promise.all([
+              const [lock, previous, oldState, usage] = await Promise.all([
+                tx.get(lockRef),
                 tx.get(controlRef),
                 tx.get(stateRef),
                 isSearchProviderUsageContinuity(config)
                   ? tx.get(firestore.doc('_control/temporalProviderUsage'))
                   : Promise.resolve(undefined),
               ]);
+              assertNativeSnapshot(ownedOperation, lock);
+              if (oldState.exists !== existingState.exists)
+                throw new Error('Release checkpoint changed before UI freeze');
+              if (existingState.exists) assertNativeSnapshot(nativeSnapshotProof(existingState), oldState);
               const providerUsageContinuity = isSearchProviderUsageContinuity(config)
                 ? captureProviderUsageContinuity(config, previous.data(), oldState.data(), usage)
                 : undefined;
@@ -1010,6 +1194,7 @@ await runWithCleanup(
                 (!previous.exists || config.domains.some((d) => previous.data().domains?.[d]?.owner !== 'temporal'))
               )
                 throw new Error('Durable upgrade requires existing Temporal ownership for every selected domain');
+              cloudIdentityPending = true;
               if (oldState.exists) {
                 if (oldState.data().phase !== 'complete') throw new Error('Previous release is not complete');
                 tx.set(firestore.doc(`_control/temporalReleaseHistory-${oldState.data().releaseId}`), oldState.data());
@@ -1041,6 +1226,7 @@ await runWithCleanup(
                 savedRolloutPolicy: traffic.rolloutPolicy,
                 savedUiTraffic: traffic.current,
                 appHostingFreezeRequestId: requestId,
+                appHostingFreezeETag: traffic.etag,
                 maximumLegacyExecutionSeconds: previousFunctionTimeout,
                 ...(providerUsageContinuity ? { providerUsageContinuity } : {}),
                 controlRevision: revision,
@@ -1049,23 +1235,30 @@ await runWithCleanup(
                 updatedAt: Date.now(),
               });
             });
-          if (traffic.rolloutPolicy.disabled !== true)
-            await settleOperation(
-              await appApi(`${parent}/traffic?updateMask=rollout_policy.disabled&requestId=${requestId}`, 'PATCH', {
-                name: `${parent}/traffic`,
-                etag: traffic.etag,
-                rolloutPolicy: { disabled: true },
-              })
-            );
-          const frozen = await appApi(`${parent}/traffic`);
-          if (
-            frozen.rolloutPolicy?.disabled !== true ||
-            frozen.rolloutPolicy.codebaseBranch !== traffic.rolloutPolicy.codebaseBranch
-          )
-            throw new Error('Automatic rollout freeze did not preserve branch policy');
-          const { control } = await snapshot();
-          if (!sameRelease || existingState.data()?.phase !== 'ui-frozen')
-            await transition(control.revision, 'ui-frozen');
+          const { control, state } = await snapshot();
+          requirePaused(control);
+          if (!sameRelease && (state.phase !== 'freezing-ui' ||
+              state.appHostingFreezeRequestId !== operationId || state.appHostingFreezeETag !== traffic.etag ||
+              proofDigest(state.savedRolloutPolicy) !== proofDigest(traffic.rolloutPolicy) ||
+              proofDigest(state.savedUiTraffic) !== proofDigest(traffic.current)))
+            throw new Error('Original App Hosting freeze checkpoint changed before submission');
+          const observed = await freezeAutomaticRollouts({
+            parent,
+            checkpoint: state,
+            send: !sameRelease,
+            assertNoActiveRollout,
+            api: appApi,
+            settle: settleOperation,
+            assertCurrent: () => firestore.runTransaction(async (tx) => {
+              const [lock, current, checkpoint] = await Promise.all([lockRef, controlRef, stateRef].map(ref => tx.get(ref)));
+              assertNativeSnapshot(ownedOperation, lock);
+              assertNativeSnapshot(expectedAuthority.control, current);
+              assertNativeSnapshot(expectedAuthority.state, checkpoint);
+            }, { readOnly: true }),
+          });
+          if (state.phase !== 'ui-frozen')
+            await transition(control.revision, 'ui-frozen', { appHostingFrozenETag: observed.etag });
+          cloudIdentityPending = false;
         } else {
           const { control, state, serverReadTime } = await snapshot();
           if (!['pause', 'restore-auto'].includes(action)) requirePaused(control);
@@ -1228,37 +1421,56 @@ await runWithCleanup(
             if(!ids||Object.keys(ids).sort().join(',')!==Object.keys(prefixes).sort().join(',')||ids.runner!==preparationArguments.runnerOperationId||
               new Set(Object.values(ids)).size!==Object.keys(prefixes).length||Object.values(ids).some(id=>!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(id??'')))
               throw new Error('EXACT_BOOTSTRAP_RECEIPT_MANIFEST_REQUIRED');
-            const receipts={};
-            for(const [key,prefix] of Object.entries(prefixes)){
-              const snapshot=await firestore.doc(`_control/${prefix}-${ids[key]}`).get();
-              if(!snapshot.exists||snapshot.get('operationId')!==ids[key])throw new Error('OWNED_BOOTSTRAP_RECEIPT_REQUIRED');
-              receipts[key]=snapshot.data();
-            }
+            const { receipts, assertCurrent: assertPoolReceiptsCurrent } = await readOwnedPoolOperationReceipts(
+              firestore, prefixes, ids, config.releaseId
+            );
+            const guardedPoolApi = (url, method, body, beforeSend) => api(url, method, body,
+              method === 'PATCH' ? async () => {
+                await assertPoolReceiptsCurrent();
+                await beforeSend();
+              } : beforeSend
+            );
             const currentOperation=await lockRef.get();assertNativeSnapshot(ownedOperation,currentOperation);
-            if(operation.mode==='promote'&&operation.role==='media')await readCloudRunMediaPromotionEvidence({firebaseAuth:resources.auth,binding,config,platform,api,firestore,lockRef,controlRef,stateRef,ownedOperation,expectedAuthority,operationId,bindingDigest,releaseId:config.releaseId,role:'media',settings,evidenceDigest:preparationArguments.digest,receipts});
-
             const hasSaved=Object.hasOwn(currentOperation.data(),operation.field);
             if(hasSaved)cloudIdentityPending=true;
             const immutableReceipt=firestore.doc(`_control/${operation.prefix}-${operationId}`);
             const creationReceipt=operation.creationPrefix?firestore.doc(`_control/${operation.creationPrefix}-${operationId}`):undefined;
+            const mediaRecoveryStopOptions = () => ({
+              binding,config,platform,api,firestore,lockRef,controlRef,stateRef,ownedOperation,expectedAuthority,
+              operationId,bindingDigest,releaseId:config.releaseId,role:'media',settings,
+              evidenceDigest:preparationArguments.digest,receipts,
+            });
             const result=await operation.run({binding,config,firestore,bindingDigest,expectedAuthority,platform,role:operation.role,settings,operationId,releaseId:config.releaseId,
               ...(operation.mode==='restored'?{recoveryOperationId:ids.recovery,runtime:restoredMediaActivationRuntime({options:()=>({firebaseAuth:resources.auth,binding,config,platform,api,firestore,lockRef,controlRef,stateRef,ownedOperation,expectedAuthority,operationId,recoveryOperationId:ids.recovery,bindingDigest,releaseId:config.releaseId,role:'media',settings,evidenceDigest:preparationArguments.digest,receipts})})}:{}),
-              ...(operation.mode==='recovery'?{runtime:Object.freeze({...canonicalMediaRecoveryRuntime,confirmStopped:mediaRecoveryStoppedConfirmation({options:()=>({binding,config,platform,api,firestore,lockRef,controlRef,stateRef,ownedOperation,expectedAuthority,operationId,bindingDigest,releaseId:config.releaseId,role:'media',settings,evidenceDigest:preparationArguments.digest,receipts})}),confirmNeverStarted:mediaRecoveryNeverStartedConfirmation({options:()=>({binding,config,platform,api,firestore,lockRef,controlRef,stateRef,ownedOperation,expectedAuthority,operationId,bindingDigest,releaseId:config.releaseId,role:'media',settings,evidenceDigest:preparationArguments.digest,receipts})}),drain:mediaRecoveryDrainage({options:()=>({binding,config,platform,api,firestore,lockRef,controlRef,stateRef,ownedOperation,expectedAuthority,operationId,bindingDigest})}),execute:mediaRecoveryExecution({options:()=>({binding,config,platform,api,firestore,lockRef,controlRef,stateRef,ownedOperation,expectedAuthority,operationId,bindingDigest}),setOwnedOperation:value=>{ownedOperation=value;}}),prepare:mediaRecoveryPreparation({options:()=>({firestore,lockRef,controlRef,stateRef,ownedOperation,expectedAuthority,config,operationId,bindingDigest}),setOwnedOperation:value=>{ownedOperation=value;}})})}:{}),
-              authorizeMutation:()=> (operation.mode==='recovery'?assertMediaRecoveryAuthority:({controls:assertControlsPromotionAuthority,search:assertSearchPromotionAuthority,email:assertEmailPromotionAuthority,images:assertImagesPromotionAuthority,media:assertMediaPromotionAuthority}[operation.role]))({firestore,lockRef,controlRef,stateRef,ownedOperation,expectedAuthority,config,operationId,bindingDigest}),
-              evidenceDigest:preparationArguments.digest,receipts,api,saved:hasSaved?currentOperation.get(operation.field):undefined,
-              observeProtection:scope=>operation.mode==='recovery'?mediaRecoveryProtection({options:()=>({firebaseAuth:resources.auth,binding,config,platform,api,firestore,lockRef,controlRef,stateRef,ownedOperation,expectedAuthority,operationId,bindingDigest,releaseId:config.releaseId,role:'media',settings,evidenceDigest:preparationArguments.digest,receipts})})(scope):verifyCloudRunBootstrapProtection({binding,config,platform,firestore,role:operation.role,operationId,bindingDigest,expectedAuthority,releaseId:config.releaseId}),
-              observeRegistration:()=>verifyCloudRunBootstrapRegistration({binding,config,platform,firestore,role:operation.role,operationId}),
+              ...(operation.mode==='recovery'?{runtime:Object.freeze({...canonicalMediaRecoveryRuntime,assertSupported:mediaRecoveryJobPreflight({options:mediaRecoveryStopOptions}),drainJob:mediaRecoveryJobDrainage({options:mediaRecoveryStopOptions}),launchJob:mediaRecoveryJobLauncher({options:mediaRecoveryStopOptions,setOwnedOperation:value=>{ownedOperation=value;}}),confirmStopped:mediaRecoveryStoppedConfirmation({options:mediaRecoveryStopOptions}),confirmNeverStarted:mediaRecoveryNeverStartedConfirmation({options:mediaRecoveryStopOptions}),drain:mediaRecoveryDrainage({options:()=>({binding,config,platform,api,firestore,lockRef,controlRef,stateRef,ownedOperation,expectedAuthority,operationId,bindingDigest})}),execute:mediaRecoveryExecution({options:()=>({binding,config,platform,api,firestore,lockRef,controlRef,stateRef,ownedOperation,expectedAuthority,operationId,bindingDigest}),setOwnedOperation:value=>{ownedOperation=value;}}),prepare:mediaRecoveryPreparation({options:()=>({firestore,lockRef,controlRef,stateRef,ownedOperation,expectedAuthority,config,operationId,bindingDigest}),setOwnedOperation:value=>{ownedOperation=value;}})})}:{}),
+              authorizeMutation:async()=> {
+                await assertPoolReceiptsCurrent();
+                return (operation.mode==='recovery'?assertMediaRecoveryAuthority:({controls:assertControlsPromotionAuthority,search:assertSearchPromotionAuthority,email:assertEmailPromotionAuthority,images:assertImagesPromotionAuthority,media:assertMediaPromotionAuthority}[operation.role]))({firestore,lockRef,controlRef,stateRef,ownedOperation,expectedAuthority,config,operationId,bindingDigest});
+              },
+              evidenceDigest:preparationArguments.digest,receipts,api:guardedPoolApi,saved:hasSaved?currentOperation.get(operation.field):undefined,
+              observeProtection:async scope=>{
+                await assertPoolReceiptsCurrent();
+                return operation.mode==='recovery'?mediaRecoveryProtection({options:()=>({firebaseAuth:resources.auth,binding,config,platform,api,firestore,lockRef,controlRef,stateRef,ownedOperation,expectedAuthority,operationId,bindingDigest,releaseId:config.releaseId,role:'media',settings,evidenceDigest:preparationArguments.digest,receipts})})(scope):verifyCloudRunBootstrapProtection({binding,config,platform,firestore,role:operation.role,operationId,bindingDigest,expectedAuthority,releaseId:config.releaseId});
+              },
+              observeRegistration:()=>verifyCloudRunBootstrapRegistration({binding,config,platform,firestore,api:guardedPoolApi,role:operation.role,operationId}),
               save:async identityState=>{
                 cloudIdentityPending=true;
                 ownedOperation=await operation.checkpoint({firestore,lockRef,controlRef,stateRef,immutableReceipt,creationReceipt,ownedOperation,
                   expectedAuthority,config,operationId,bindingDigest,operatorPrincipal,identityState});
-              }});
+              }}, operation.mode==='promote'&&operation.role==='media'
+                ? () => {
+                    const observationToken = token();
+                    return { firebaseAuth:resources.auth, lockRef, controlRef, stateRef, ownedOperation,
+                      api:createReleaseApi({getAccessToken:()=>observationToken}) };
+                  }
+                : undefined);
+            await assertPoolReceiptsCurrent();
             const receipt=await immutableReceipt.get();
-            if(!receipt.exists||receipt.get('bindingDigest')!==bindingDigest||(['recovery','restored'].includes(operation.mode)?result.stage!=='completed'||result.disposition!==(operation.mode==='restored'?'retained':'restored-normal-zero')||proofDigest(receipt.get('identityState'))!==proofDigest(result):operation.mode==='promote'?
+            if(!receipt.exists||receipt.get('bindingDigest')!==bindingDigest||(['recovery','restored'].includes(operation.mode)?result.stage!=='completed'||result.disposition!==(operation.mode==='restored'?'retained':result.plan.job?'normal-zero-after-job':'restored-normal-zero')||proofDigest(receipt.get('identityState'))!==proofDigest(result):operation.mode==='promote'?
               result.stage!=='completed'||receipt.get('identityState.plan.buildId')!==platform.workerBuildId||proofDigest(receipt.get('identityState'))!==proofDigest(result):
               receipt.get(operation.mode==='retain'?'identityState.activationState.pool.uid':'identityState.stop.pool.uid')!==(operation.mode==='retain'?result.activationState.pool.uid:result.stop.pool.uid)||result.disposition!==(operation.mode==='retain'?'retained':'stopped')))
               throw new Error('BOOTSTRAP_CYCLE_RECEIPT_UNCONFIRMED');
-            if(operation.mode==='recovery')await readRestoredMediaRecoveryOrigin({binding,config,platform,firestore,lockRef,controlRef,stateRef,ownedOperation,expectedAuthority,operationId,bindingDigest,releaseId:config.releaseId,role:'media',settings,evidenceDigest:preparationArguments.digest,receipts,api});
+            if(operation.mode==='recovery'&&!result.plan.job)await readRestoredMediaRecoveryOrigin({binding,config,platform,firestore,lockRef,controlRef,stateRef,ownedOperation,expectedAuthority,operationId,bindingDigest,releaseId:config.releaseId,role:'media',settings,evidenceDigest:preparationArguments.digest,receipts,api});
             if(operation.mode==='restored')await confirmRestoredMediaActivationCapsule({firestore,lockRef,controlRef,stateRef,ownedOperation,expectedAuthority,config,operationId,bindingDigest});
             if(operation.mode==='recovery')await confirmCompletedMediaRecoveryCapsule({firestore,lockRef,controlRef,stateRef,ownedOperation,expectedAuthority,config,operationId,bindingDigest});
             cloudIdentityPending=false;
@@ -1353,7 +1565,84 @@ await runWithCleanup(
             });
             if(schedulerWake.stage!=='completed'||schedulerWake.stopState?.stage!=='completed'||!schedulerWake.diagnosticObservation||schedulerWake.diagnosticObservationFailed)
               throw new Error('DIAGNOSTIC_SCHEDULER_RECOVERY_OR_CLEANUP_UNCONFIRMED');
-            throw new Error('DIAGNOSTIC_WAKE_CYCLES_COMPLETE_NATIVE_PLATFORM_AND_PROCESS_RECOVERY_PENDING');
+            diagnosticCompletionProof = await saveDispatchDiagnosticCompletion({
+              diagnostic, lockRef, controlRef, stateRef, ownedOperation, expectedAuthority,
+              evidenceDigest: preparationArguments.digest,
+            });
+            cloudIdentityPending = false;
+            console.log(`Dispatch diagnostic receipt ${dispatchDiagnosticCompletionPath(operationId)} saved.`);
+          } else if (action === 'enable-staging-dispatch-wakes') {
+            requirePhase(state, ['provider-usage-ready']);
+            if (config.environment !== 'staging' || operatorPrincipal.adcAndGcloudAccountMatch !== true)
+              throw new Error('DISPATCH_WAKES_REQUIRE_MATCHED_STAGING_OPERATOR');
+            const platformBytes = await readFile(config.platformConfig);
+            if (hash(platformBytes) !== resourceBinding.platformConfigSHA256)
+              throw new Error('DISPATCH_WAKES_PLATFORM_CHANGED');
+            const platform = JSON.parse(platformBytes.toString('utf8'));
+            validateWorkerCoverage(config, platform);
+            await verifyPreparationEvidence({ path: preparationArguments.proof, digest: preparationArguments.digest,
+              platform, binding, google: api });
+            const settings = await readPreparationReceipt(preparationArguments.settings, preparationArguments.settingsDigest);
+            const id = preparationArguments.diagnosticOperationId;
+            const refs = [
+              ...[preparationArguments.runnerOperationId, preparationArguments.eventOperationId, preparationArguments.schedulerOperationId]
+                .map(id => firestore.doc(`_control/temporalCloudIdentityPreparation-${id}`)),
+              firestore.doc(`_control/temporalCloudDispatchServicePreparation-${preparationArguments.serviceOperationId}`),
+              firestore.doc(`_control/temporalCloudDispatchActivation-${preparationArguments.activationOperationId}`),
+              firestore.doc(dispatchDiagnosticCompletionPath(id)),
+              firestore.doc(`_control/temporalDispatchDiagnosticWakeCreation-${id}-scheduler`),
+            ];
+            const originals = await Promise.all(refs.map(ref => ref.get()));
+            if (originals.some(row => !row.exists || !row.createTime?.isEqual(row.updateTime)))
+              throw new Error('DISPATCH_WAKES_ORIGINAL_RECEIPTS_REQUIRED');
+            const [runnerReceipt, eventReceipt, schedulerReceipt, serviceReceipt, activation, diagnostic, schedulerCreation] =
+              originals.map(row => row.data());
+            if (diagnostic.operationId !== id || diagnostic.activationOperationId !== activation.operationId || diagnostic.scope !== 'original diagnostic delivery, retry reconciliation and resource cleanup only' ||
+              proofDigest(diagnostic.activation) !== proofDigest(nativeSnapshotProof(originals[4])))
+              throw new Error('DISPATCH_WAKES_ORIGINAL_RECEIPTS_CHANGED');
+            const originalProofs = originals.map(nativeSnapshotProof);
+            const assertAuthority = () => firestore.runTransaction(async tx => {
+              const [lock, c, s, ...rows] = await Promise.all([lockRef, controlRef, stateRef, ...refs].map(ref => tx.get(ref)));
+              assertNativeSnapshot(ownedOperation, lock);
+              assertNativeSnapshot(expectedAuthority.control, c);
+              assertNativeSnapshot(expectedAuthority.state, s);
+              if (lock.get('action') !== action || lock.get('operationId') !== operationId ||
+                lock.get('bindingDigest') !== bindingDigest || lock.get('releaseId') !== config.releaseId ||
+                c.get('releaseId') !== config.releaseId || s.get('releaseId') !== config.releaseId ||
+                c.get('admission') !== 'paused' || config.domains.some(domain => c.get(`domains.${domain}.admission`) !== 'paused') ||
+                s.get('phase') !== 'provider-usage-ready') throw new Error('DISPATCH_WAKES_AUTHORITY_CHANGED');
+              rows.forEach((row, index) => assertNativeSnapshot(originalProofs[index], row));
+            }, { readOnly: true });
+            const opts = { platform, api, settings, role: 'dispatch', releaseId: config.releaseId,
+              evidenceDigest: preparationArguments.digest, runnerReceipt, eventReceipt, schedulerReceipt, serviceReceipt };
+            const verify = async () => {
+              await assertAuthority();
+              await activateCloudRunDispatchService({ ...opts, operationId: activation.operationId,
+                artifactDirectory: activation.identityState.plan.artifactDirectory, saved: activation.identityState,
+                save: async () => { throw new Error('DISPATCH_WAKES_ACTIVATION_WRITE_DENIED'); },
+                probe: async () => { throw new Error('DISPATCH_WAKES_REPLACEMENT_PROBE_DENIED'); },
+              });
+            };
+            const held = await lockRef.get();
+            assertNativeSnapshot(ownedOperation, held);
+            const immutableReceipt = firestore.doc(`_control/temporalCloudBusinessDispatchWakes-${operationId}`);
+            const result = await enableStagingDispatchWakes({ ...opts, creator: operatorPrincipal.email, operationId,
+              diagnostic, schedulerCreation, verify, assertAuthority,
+              verifyConfiguration: () => verifyCloudRunDispatchConfiguration(platform, api),
+              saved: held.get('cloudBusinessDispatchWakes'),
+              save: async identityState => {
+                cloudIdentityPending = true;
+                ownedOperation = await saveDispatchWakesCheckpoint({ firestore, lockRef, controlRef, stateRef,
+                  immutableReceipt, ownedOperation, expectedAuthority, config, operationId, bindingDigest,
+                  operatorPrincipal, identityState });
+              },
+            });
+            const sealed = await immutableReceipt.get();
+            if (!sealed.exists || !sealed.createTime?.isEqual(sealed.updateTime) ||
+              sealed.get('bindingDigest') !== bindingDigest || proofDigest(sealed.get('identityState')) !== proofDigest(result))
+              throw new Error('DISPATCH_WAKES_TERMINAL_RECEIPT_UNCONFIRMED');
+            cloudIdentityPending = false;
+            console.log(`Staging business dispatch configuration recorded at ${immutableReceipt.path}.`);
           } else if (action === 'activate-cloud-run-dispatch-service') {
             requirePhase(state, ['provider-usage-ready']);
             if (config.environment !== 'staging' || operatorPrincipal.adcAndGcloudAccountMatch !== true)
@@ -1385,6 +1674,17 @@ await runWithCleanup(
                 ownedOperation = await saveDispatchActivationCheckpoint({ firestore, lockRef, controlRef, stateRef,
                   immutableReceipt, ownedOperation, expectedAuthority, config, operationId, bindingDigest, operatorPrincipal, identityState });
               },
+              authorizePatch: attempted => firestore.runTransaction(async tx => {
+                const [operation, release, phase] = await Promise.all([lockRef, controlRef, stateRef].map(ref => tx.get(ref)));
+                assertNativeSnapshot(ownedOperation, operation);
+                assertNativeSnapshot(expectedAuthority.control, release);
+                assertNativeSnapshot(expectedAuthority.state, phase);
+                if (attempted.stage !== 'attempted' ||
+                  proofDigest(operation.get('cloudDispatchActivation')) !== proofDigest(attempted) ||
+                  release.get('admission') !== 'paused' || phase.get('phase') !== 'provider-usage-ready' ||
+                  config.domains.some(domain => release.get(`domains.${domain}.admission`) !== 'paused'))
+                  throw new Error('DISPATCH_ACTIVATION_AUTHORITY_CHANGED');
+              }, { readOnly: true }),
               probe: async ({ savedIntent, recordIntent, artifactDirectory }) => {
                 await verifyCloudRunScalerPolicies(platform, api);
                 const keyIdentity = await verifyDispatchTemporalKeyIdentity({ version: platform.dispatch.apiKeyVersion, api });
@@ -1642,18 +1942,65 @@ await runWithCleanup(
               throw new Error('SCALER_PREPARATION_RECEIPT_UNCONFIRMED');
             cloudIdentityPending = false;
             console.log(`Scoped runner/scaler policy observation recorded at ${immutableReceipt.path}; no compute attachment or effective-access claim.`);
+          } else if (workerHandoff) {
+            requirePhase(state, ['provider-usage-ready']);
+            if (operatorPrincipal.adcAndGcloudAccountMatch !== true)
+              throw new Error('STAGING_WORKER_HANDOFF_REQUIRES_MATCHED_OPERATOR');
+            const platformBytes = await readFile(config.platformConfig);
+            if (hash(platformBytes) !== resourceBinding.platformConfigSHA256)
+              throw new Error('STAGING_WORKER_HANDOFF_PLATFORM_CHANGED');
+            const platform = JSON.parse(platformBytes.toString('utf8'));
+            validateWorkerCoverage(config, platform);
+            const plan = validateWorkerHandoffPlan(
+              await readPreparationReceipt(workerHandoff.plan, workerHandoff.planDigest),
+              config, platform, workerHandoff.evidenceDigest
+            );
+            await verifyPreparationEvidence({ path: workerHandoff.proof, digest: workerHandoff.evidenceDigest,
+              platform, binding, google: api });
+            const operation = {
+              operationId, bindingDigest, ownedOperation, expectedAuthority, pools: plan.pools,
+              handoffPlanSHA256: workerHandoff.planDigest,
+              markPending: value => { cloudIdentityPending = value; },
+              updateOwnedOperation: value => { ownedOperation = value; },
+            };
+            const options = { binding, config, platform, firestore, api };
+            if (action === 'handoff-cloud-run-orchestration') {
+              await runCloudRunOrchestrationHandoff(options, { ...operation,
+                previousBuildId: plan.previousBuildId, evidenceDigest: plan.evidenceDigest,
+                receipts: Object.fromEntries(Object.entries(plan.promotionOperationIds).map(
+                  ([role, operationId]) => [`${role}Promotion`, { operationId }]
+                )),
+              });
+            } else {
+              await verifyWorkerHandoffVm(api);
+              const { context, ...authority } = plan.traditionalCluster;
+              const handoffOperation = { ...operation, authority,
+                transport: await createTraditionalKubernetesTransport(context),
+              };
+              if (action === 'attach-cloud-run-worker-compute') {
+                await attachCloudRunWorkerCompute(options, { ...handoffOperation, role: workerHandoff.role,
+                  evidenceDigest: plan.evidenceDigest });
+              } else if (action === 'verify-cloud-run-worker-wake') {
+                console.log(`Worker wake verification operation ${operationId}`);
+                await runCloudRunWorkerWake(options, { ...handoffOperation, role: workerHandoff.role,
+                  evidenceDigest: plan.evidenceDigest });
+              } else {
+                await runCloudRunTraditionalRetirement(options, handoffOperation);
+              }
+            }
           } else if (action === 'workers-ready') {
             requirePhase(state, ['provider-usage-ready', 'workers-ready']);
-            const platform = await verifyReleaseWorkers();
+            const platform = await verifyReleaseWorkers(state);
             await transition(control.revision, 'workers-ready', {
               workerBuildId: platform.workerBuildId,
+              ...(platform.workerWakeReceiptsSHA256 ? { workerWakeReceiptsSHA256: platform.workerWakeReceiptsSHA256 } : {}),
               workersVerifiedAt: Date.now(),
             });
           } else if (action === 'take-ownership') {
             requirePhase(state, ['workers-ready']);
             await queuesEmpty();
             await legacyCounts();
-            const platform = await verifyReleaseWorkers();
+            const platform = await verifyReleaseWorkers(state);
             if (platform.workerBuildId !== state.workerBuildId)
               throw new Error('Reviewed worker changed since readiness checkpoint');
             const domains = structuredClone(control.domains);
@@ -1687,6 +2034,7 @@ await runWithCleanup(
             }
             await verifyCallableTransport(control, managed);
             await verifyStorageFirestoreRulesAccess();
+            await verifyHetznerActivation(control, state);
             await transition(control.revision, 'backend-ready', { backendVerifiedAt: Date.now() });
           } else if (action === 'bootstrap-bundles') {
             if (!config.domains.includes('bundles')) throw new Error('This release does not own bundle regeneration');
@@ -1865,6 +2213,7 @@ await runWithCleanup(
             }
           } else if (action === 'rollout-ui') {
             requirePhase(state, [requiredPreUiPhase(config), 'ui-rollout-started']);
+            await verifyHetznerActivation(control, state);
             if (state.phase === 'ui-rollout-started' && !state.uiRolloutIdentity)
               throw new Error(
                 'Old rollout checkpoint lacks immutable identity; read-only reconciliation required before adopting it'
@@ -1885,6 +2234,7 @@ await runWithCleanup(
                 'Reviewed UI build/rollout remains pending; rerun rollout-ui to reconcile the same immutable identity'
               );
             const fresh = await snapshot();
+            await verifyHetznerActivation(fresh.control, fresh.state);
             await transition(fresh.control.revision, 'ui-ready', {
               uiBuild: result.buildName,
               uiRollout: result.rolloutName,
@@ -1896,7 +2246,7 @@ await runWithCleanup(
               throw new Error('All five search indexes must converge before admissions open');
             if (config.domains.includes('bundles') && state.bundlesConverged !== true)
               throw new Error('All six bundle pointers must converge before admissions open');
-            validatePreopenSmoke(
+            const readPreopenSmoke = async () => validatePreopenSmoke(
               await evidence(config.smokeEvidence, control.revision, {
                 uiCommit: config.uiCommit,
                 backendOwnershipVerified: true,
@@ -1904,7 +2254,8 @@ await runWithCleanup(
                 oldBrowserWritesDenied: true,
               })
             );
-            const platform = await verifyReleaseWorkers();
+            const preopenSmokeSHA256 = proofDigest(await readPreopenSmoke());
+            const platform = await verifyReleaseWorkers(state);
             if (platform.workerBuildId !== state.workerBuildId)
               throw new Error('Reviewed worker changed before opening admission');
             const usage = await firestore.doc('_control/temporalProviderUsage').get();
@@ -1914,23 +2265,71 @@ await runWithCleanup(
             } else validateProviderUsageMarker(config, usage.data(), state.providerUsageEpoch);
             await verifyCallableTransport(control);
             await verifyStorageFirestoreRulesAccess();
+            await verifyHetznerActivation(control, state);
             const domains = structuredClone(control.domains);
             for (const domain of config.domains) domains[domain].admission = 'open';
-            await transition(control.revision, 'open', { openedAt: Date.now() }, { admission: 'open', domains });
+            await verifyUiCommit(state, { requireFrozen: true });
+            if (proofDigest(await readPreopenSmoke()) !== preopenSmokeSHA256)
+              throw new Error('Pre-open smoke evidence changed while verifying the release');
+            await transition(control.revision, 'open', { openedAt: Date.now(), preopenSmokeSHA256 }, { admission: 'open', domains });
           } else if (action === 'restore-auto') {
-            // Opening is the explicit smoke acceptance; saved policy is never restored on an error path.
-            requirePhase(state, ['open']);
-            const traffic = await appApi(`${parent}/traffic`);
-            if (traffic.rolloutPolicy?.codebaseBranch !== state.savedRolloutPolicy.codebaseBranch)
-              throw new Error('Automatic rollout branch policy changed during the cutover; review before restoring it');
-            await settleOperation(
-              await appApi(`${parent}/traffic?updateMask=rollout_policy.disabled&requestId=${randomUUID()}`, 'PATCH', {
-                name: `${parent}/traffic`,
-                etag: traffic.etag,
-                rolloutPolicy: { disabled: state.savedRolloutPolicy.disabled ?? false },
-              })
-            );
-            await transition(control.revision, 'complete', { completedAt: Date.now() });
+            requirePhase(state, ['open', 'complete']);
+            if (state.phase === 'complete') {
+              if (!resumeOperation || !/^[a-f0-9]{64}$/.test(state.autoRolloutRestoreSHA256 ?? ''))
+                throw new Error('No original automatic rollout restoration to reconcile');
+              await firestore.runTransaction(async (tx) => {
+                const [lock, current, checkpoint, audit] = await Promise.all(
+                  [lockRef, controlRef, stateRef, firestore.doc(auditPath(control.revision))].map(ref => tx.get(ref))
+                );
+                assertNativeSnapshot(ownedOperation, lock);
+                assertNativeSnapshot(expectedAuthority.control, current);
+                assertNativeSnapshot(expectedAuthority.state, checkpoint);
+                if (
+                  !audit.exists || !audit.createTime?.isEqual(audit.updateTime) ||
+                  audit.get('operationId') !== operationId || audit.get('releaseId') !== config.releaseId ||
+                  audit.get('action') !== action || audit.get('fromPhase') !== 'open' ||
+                  audit.get('toPhase') !== 'complete' || audit.get('toRevision') !== control.revision ||
+                  audit.get('autoRolloutRestoreSHA256') !== state.autoRolloutRestoreSHA256 ||
+                  proofDigest(audit.get('operationAuthority')) !== proofDigest(ownedOperation)
+                ) throw new Error('Original automatic rollout restoration audit changed');
+              }, { readOnly: true });
+              cloudIdentityPending = false;
+              operationVerified = true;
+              return;
+            }
+            const readRestoreAuthority = async (tx) => {
+              const [lock, current, checkpoint] = await Promise.all([lockRef, controlRef, stateRef].map(ref => tx.get(ref)));
+              assertNativeSnapshot(ownedOperation, lock);
+              assertNativeSnapshot(expectedAuthority.control, current);
+              assertNativeSnapshot(expectedAuthority.state, checkpoint);
+              if (current.get('admission') !== 'open' || checkpoint.get('phase') !== 'open')
+                throw new Error('Automatic rollout restoration requires the original open release');
+              return lock;
+            };
+            const lock = await firestore.runTransaction(readRestoreAuthority, { readOnly: true });
+            const proof = await restoreAutomaticRollouts({
+              parent, operationId, controlRevision: control.revision, uiBuild: state.uiBuild,
+              projectNumber: resourceIdentity.projectNumber,
+              savedRolloutPolicy: state.savedRolloutPolicy,
+              saved: lock.get('autoRolloutRestore'),
+              api: appApi,
+              settle: settleOperation,
+              assertCurrent: () => firestore.runTransaction(readRestoreAuthority, { readOnly: true }),
+              save: async (attempt) => {
+                cloudIdentityPending = true;
+                let proposed;
+                await firestore.runTransaction(async (tx) => {
+                  const original = await readRestoreAuthority(tx);
+                  if (Object.hasOwn(original.data(), 'autoRolloutRestore'))
+                    throw new Error('Automatic rollout restoration already attempted');
+                  proposed = { ...original.data(), autoRolloutRestore: attempt };
+                  tx.update(lockRef, { autoRolloutRestore: attempt });
+                }, { maxAttempts: 1 });
+                ownedOperation = assertNativeSnapshotSuccessor(ownedOperation, proofDigest(proposed), await lockRef.get());
+              },
+            });
+            await transition(control.revision, 'complete', { completedAt: Date.now(), autoRolloutRestoreSHA256: proofDigest(proof) });
+            cloudIdentityPending = false;
           } else if (action === 'pause') {
             const domains = structuredClone(control.domains);
             for (const domain of config.domains) domains[domain].admission = 'paused';
@@ -1988,6 +2387,7 @@ await runWithCleanup(
           const state = await snapshot();
           await writeFile(args[args.indexOf('--output') + 1], JSON.stringify(state, null, 2) + '\n', { mode: 0o600 });
         }
+        operationVerified = true;
         console.log(`Temporal release ${action} checkpoint saved. Existing jobs and worker versions are retained.`);
       },
       async () => {
@@ -2002,6 +2402,11 @@ await runWithCleanup(
               lock.data()?.releaseId !== config.releaseId
             )
               throw new Error('Owned release operation changed; retained for inspection');
+            if (!canReleaseOwnedOperationLock(lock.data(), operationVerified)) return;
+            if (action === 'prepare-cloud-run-dispatch-diagnostic' && lock.get('cloudDispatchDiagnostic')) {
+              const final = await tx.get(firestore.doc(dispatchDiagnosticCompletionPath(operationId)));
+              assertNativeSnapshot(diagnosticCompletionProof, final);
+            }
             tx.delete(lockRef);
           }
         });

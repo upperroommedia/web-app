@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { restoredMediaProtectionFixture } from './tests/fixtures/restored-media-protection.mjs';
 import { proofDigest as hash, nativeSnapshotProof } from './temporal-release-runtime.mjs';
 import {
+  observeRestoredMediaOriginProtection,
   observeRestoredMediaPhaseProtection,
   assertRestoredMediaStartupProgress,
 } from './temporal-restored-media-protection.mjs';
@@ -215,3 +216,47 @@ test('candidate Activity registration may appear with authenticated startup with
   };
   assert.equal((await observeRestoredMediaPhaseProtection(o)).key, 'start');
 });
+
+for (const scenario of ['stable', 'owned poller', 'new backlog', 'route drift', 'started activation']) {
+  test(`restored zero-origin requires fixed native inventory before an activation (${scenario})`, async () => {
+    const { f, o } = fixture();
+    const operation = f.docs.get(o.lockRef.path);
+    if (scenario !== 'started activation') delete operation.cloudRestoredMediaActivation;
+    o.ownedOperation = nativeSnapshotProof(f.snapshot(o.lockRef.path));
+    o.read = async (callback) => callback();
+    o.rpc = async (callback) => callback();
+    o.deadline = Date.now() + 5000;
+    const svc = o.client.connection.workflowService;
+    const describe = svc.describeWorkerDeploymentVersion;
+    const partitions = svc.listTaskQueuePartitions;
+    let normalReads = 0;
+    if (scenario === 'owned poller') f.normal.identity = 'media-restored-' + o.operationId;
+    svc.describeWorkerDeploymentVersion = async (request) => {
+      if (request.deploymentVersion.deploymentName === 'urm-worker-media-staging') {
+        normalReads++;
+        if (scenario === 'new backlog' && normalReads > 1) f.normal.normalBacklog = 1;
+      }
+      return describe(request);
+    };
+    let partitionsRead = 0;
+    svc.listTaskQueuePartitions = async (request) => {
+      const result = await partitions(request);
+      if (request.taskQueue.name === 'urm-media' && scenario === 'route drift') {
+        const ownerHostName = ++partitionsRead === 1 ? 'matching-original' : 'matching-changed';
+        return {
+          ...result,
+          activityTaskQueuePartitions: result.activityTaskQueuePartitions.map((part) => ({ ...part, ownerHostName })),
+        };
+      }
+      return result;
+    };
+    if (scenario === 'stable') {
+      const proof = await observeRestoredMediaOriginProtection(o);
+      assert.equal(normalReads, 2);
+      assert.equal(proof.normal.ownedPollers.length, 0);
+      assert.match(proof.computeSHA256, /^[a-f0-9]{64}$/);
+    } else {
+      await assert.rejects(observeRestoredMediaOriginProtection(o));
+    }
+  });
+}

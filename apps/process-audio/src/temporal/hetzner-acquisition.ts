@@ -198,9 +198,22 @@ export function createHetznerAcquisitionClient(options: {
  * Hetzner verifies the signed token and its exact configured audience/SA itself.
  * No caller-supplied origin, service-account key or provider secret is accepted.
  */
-export function createHetznerAcquisitionTransport(projectId: string): AcquisitionTransport {
+export function createHetznerAcquisitionTransport(
+  projectId: string,
+  protocol: 'source' | { episodeId: string } | { authenticationId: string } = 'source'
+): AcquisitionTransport {
   if (projectId !== 'urm-app-staging') throw new Error('Only staging acquisition transport is reviewed');
   if (process.env.GOOGLE_APPLICATION_CREDENTIALS) throw new Error('Acquisition requires a native service identity');
+  const attemptId =
+    protocol === 'source' ? null : 'episodeId' in protocol ? protocol.episodeId : protocol.authenticationId;
+  if (attemptId !== null && !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(attemptId))
+    throw new Error('Invalid native YouTube attempt');
+  const suffix =
+    protocol === 'source'
+      ? ''
+      : 'episodeId' in protocol
+      ? `/render/${attemptId}`
+      : `/render/authentication/${attemptId}`;
   const origin = 'https://yt-worker-staging.upperroommedia.org';
   const auth = new GoogleAuth();
   let clientPromise: ReturnType<GoogleAuth['getIdTokenClient']> | undefined;
@@ -248,13 +261,16 @@ export function createHetznerAcquisitionTransport(projectId: string): Acquisitio
           const headers = new Headers(await headersPromise);
           budget.throwIfAborted();
           if (method === 'POST') headers.set('content-type', 'application/json');
-          const response = await fetch(`${origin}/internal/temporal/youtube/acquisitions/${request.operationId}`, {
-            method,
-            headers,
-            ...(method === 'POST' ? { body: JSON.stringify(request) } : {}),
-            signal: budget,
-            redirect: 'error',
-          });
+          const response = await fetch(
+            `${origin}/internal/temporal/youtube/acquisitions/${request.operationId}${suffix}`,
+            {
+              method,
+              headers,
+              ...(method === 'POST' ? { body: JSON.stringify(request) } : {}),
+              signal: budget,
+              redirect: 'error',
+            }
+          );
           if (!response.ok || !response.body) {
             void response.body?.cancel().catch(() => undefined);
             return failure('YOUTUBE_ACQUISITION_UNAVAILABLE');

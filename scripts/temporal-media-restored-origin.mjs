@@ -1,3 +1,5 @@
+import { readCompletedMediaRecoveryJob } from './temporal-media-recovery-job.mjs';
+import { observeMediaRecoveryStartedPool } from './temporal-media-recovery-start.mjs';
 import { isDeepStrictEqual as equal } from 'node:util';
 import { proofDigest as hash, assertNativeSnapshot, nativeSnapshotProof } from './temporal-release-runtime.mjs';
 import { readMediaRecoveryAncestorAccess } from './temporal-bootstrap-pool.mjs';
@@ -310,10 +312,13 @@ export async function readRestoredMediaActivationAccess(o) {
       v = first.capsule,
       { capsuleSHA256, ...preimage } = v,
       s = first.receipt.identityState,
-      p = s?.plan;
+      p = s?.plan,
+      jobMode = Boolean(p?.job),
+      normalPool = jobMode ? p.origin : s?.restore?.pool;
     if (
-      v.schemaVersion !== 1 ||
-      v.kind !== 'completed-media-recovery-provenance-only-v1' ||
+      v.schemaVersion !== (jobMode ? 2 : 1) ||
+      v.kind !==
+        (jobMode ? 'completed-media-recovery-job-provenance-v2' : 'completed-media-recovery-provenance-only-v1') ||
       hash(preimage) !== capsuleSHA256 ||
       v.operationId !== o.recoveryOperationId ||
       v.releaseId !== o.releaseId ||
@@ -329,14 +334,14 @@ export async function readRestoredMediaActivationAccess(o) {
       hash(v.originalParent?.cloudMediaRecovery) !== hash(s) ||
       hash(first.receipt) !== v.completionSHA256 ||
       hash(first.drain) !== v.drainSHA256 ||
+      (jobMode && !equal(first.stamps[0].createTime, first.stamps[2].createTime)) ||
       s.stage !== 'completed' ||
-      s.disposition !== 'restored-normal-zero' ||
+      s.disposition !== (jobMode ? 'normal-zero-after-job' : 'restored-normal-zero') ||
       !s.recovery ||
       s.recoveryFailed ||
       s.neverStarted ||
-      !s.drained ||
-      !s.stopped ||
-      hash(s.restore?.pool) !== hash(v.restoredPool)
+      (jobMode ? !s.jobDrain || !s.jobTermination : !s.drained || !s.stopped) ||
+      hash(normalPool) !== hash(v.restoredPool)
     )
       fail();
     for (const key of [
@@ -369,20 +374,46 @@ export async function readRestoredMediaActivationAccess(o) {
       !p.origin.revisionUid
     )
       fail();
-    assertStoredMediaDiagnosticDrain(s.drained.observation, p, s.start.pool);
-    if (
-      s.drained.proofSHA256 !== hash(s.drained.observation) ||
-      !equal(first.drain, {
-        schemaVersion: 1,
-        operationId: o.recoveryOperationId,
-        releaseId: o.releaseId,
-        bindingDigest: v.bindingDigest,
-        planSHA256: hash(p),
-        proof: s.drained,
-      })
-    )
-      fail();
-    const { pool } = await readRestoredNativeLineage(originalOptions, ancestor, s, read);
+    let pool;
+    if (jobMode) {
+      if (
+        !equal(first.drain, {
+          schemaVersion: 2,
+          operationId: o.recoveryOperationId,
+          releaseId: o.releaseId,
+          bindingDigest: v.bindingDigest,
+          planSHA256: hash(p),
+          proof: s.jobDrain,
+        })
+      )
+        fail();
+      await readCompletedMediaRecoveryJob({
+        api: (url) => read(() => o.api(url)),
+        firestore: o.firestore,
+        read,
+        capsule: v,
+        recovery: s,
+      });
+      await read(() =>
+        observeMediaRecoveryStartedPool({ api: (url) => read(() => o.api(url)) }, p, p.origin, p.normalTemplate, 0)
+      );
+      pool = (({ revisionUid, ...value }) => value)(p.origin);
+    } else {
+      assertStoredMediaDiagnosticDrain(s.drained.observation, p, s.start.pool);
+      if (
+        s.drained.proofSHA256 !== hash(s.drained.observation) ||
+        !equal(first.drain, {
+          schemaVersion: 1,
+          operationId: o.recoveryOperationId,
+          releaseId: o.releaseId,
+          bindingDigest: v.bindingDigest,
+          planSHA256: hash(p),
+          proof: s.drained,
+        })
+      )
+        fail();
+      ({ pool } = await readRestoredNativeLineage(originalOptions, ancestor, s, read));
+    }
     const access = await read(() => readMediaRecoveryAncestorAccess(originalOptions));
     if (access.receiptsSHA256 !== ancestor.receiptsSHA256) fail();
     const sampled = Date.now(),
@@ -390,10 +421,10 @@ export async function readRestoredMediaActivationAccess(o) {
       actual = await read(() => o.api(`https://run.googleapis.com/v2/${p.name}`));
     const latest = { ...verifyPreparedPoolMetadata(ancestor.zeroPlan, actual), etag: actual.etag };
     if (!equal(latest, pool)) fail();
-    const revision = await read(() => o.api(`https://run.googleapis.com/v2/${s.restore.pool.revision}`));
+    const revision = await read(() => o.api(`https://run.googleapis.com/v2/${normalPool.revision}`));
     if (
-      normal(revision?.name) !== s.restore.pool.revision ||
-      revision.uid !== s.restore.pool.revisionUid ||
+      normal(revision?.name) !== normalPool.revision ||
+      revision.uid !== normalPool.revisionUid ||
       revision.deleteTime
     )
       fail();
@@ -407,7 +438,7 @@ export async function readRestoredMediaActivationAccess(o) {
       fail();
     return {
       plan: p,
-      pool: s.restore.pool,
+      pool: normalPool,
       capsuleSHA256,
       provenanceSHA256: hash(first),
       accessSHA256: hash(access),

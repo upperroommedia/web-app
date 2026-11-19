@@ -20,7 +20,7 @@ test('late native authority settlement cannot escape the original wall and monot
   };
   await assert.rejects(readMediaPromotionRetainedResources(options), /MEDIA_PROMOTION_RETAINED_EVIDENCE_UNCONFIRMED/);
 });
-test('retained evidence never removes unconditional media promotion denial', async () => {
+test('media promotion cannot read credentials without the guarded release caller', async () => {
   let reads = 0;
   const options = new Proxy(
     {},
