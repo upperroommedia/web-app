@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import TextField from '@mui/material/TextField';
 import MenuItem from '@mui/material/MenuItem';
-import { useProviderEnvironment } from '../context/provider/ProviderEnvironmentContext';
+import {
+  getSoundCloudPublishingAuthStatus,
+  useProviderEnvironment,
+} from '../context/provider/ProviderEnvironmentContext';
 import { SIMULATION_SCENARIO_LABELS } from '../utils/providerSimulation';
 import type { ProviderSimulationScenario } from '@upperroom/contracts/temporal';
 import Alert from '@mui/material/Alert';
@@ -22,11 +25,6 @@ import { DurableAdmissionUnknownError, submitDurableIntent } from '../utils/dura
 import { useDurableJob, useEntityJobs } from '../hooks/useDurableJobs';
 import EntityJobHistory from './jobs/EntityJobHistory';
 import { isDurableJobTerminal, type DurableAdmissionRequest } from '@upperroom/contracts/temporal';
-import { createFunctionV2 } from '../utils/createFunction';
-import type {
-  GetSoundCloudAuthStatusInput,
-  SoundCloudPublishingAuthStatus,
-} from '@upperroom/contracts/getSoundCloudAuthStatus';
 import { SOUNDCLOUD_ADVANCED_PATH } from '../shared/soundcloudAuth';
 import { buildSermonPublishIntent, hasPublishIntentChanges } from '../utils/sermonPublishIntent';
 
@@ -108,12 +106,9 @@ function SermonPublishPanel({ sermon, initialAdvancedOpen = false, onRequestAddT
 
   useEffect(() => {
     if (!user?.canPublish() || modeUnavailable) return;
-    const getStatus = createFunctionV2<GetSoundCloudAuthStatusInput, SoundCloudPublishingAuthStatus>(
-      'getSoundCloudAuthStatus'
-    );
     let active = true;
     const refresh = () => {
-      void getStatus({ view: 'publish' })
+      void getSoundCloudPublishingAuthStatus()
         .then((status) => {
           if (active) setSoundcloudReconnect(status.reconnectRequired === true);
         })
