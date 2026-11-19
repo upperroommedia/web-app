@@ -160,12 +160,17 @@ try {
         .trim()
         .split('\n')
         .filter((p) => p.endsWith('.mjs'));
-      for (const file of entries) {
+      for (const file of [
+        ...entries,
+        'pnpm-lock.yaml',
+        'pnpm-workspace.yaml',
+        'packages/contracts/staging-search.json',
+        'ops/temporal/versions.json',
+        'function-kits/firestore-send-email/src/temporal/public-address-ranges.json',
+      ]) {
         mkdirSync(dirname(join(temporary, file)), { recursive: true });
         writeFileSync(join(temporary, file), readFileSync(join(runtimeRoot, file)));
       }
-      for (const file of ['pnpm-lock.yaml', 'pnpm-workspace.yaml'])
-        writeFileSync(join(temporary, file), readFileSync(join(runtimeRoot, file)));
       for (const [file, bytes] of Object.entries({
         'package.json': '{}',
         'firebase.json': '{"functions":[{"source":"fixture-functions","codebase":"fixture"}]}',
