@@ -383,8 +383,14 @@ const AdvancedAdminPage: NextPage & { PageLayout?: React.ComponentType<{ childre
                   <CircularProgress size={24} />
                 ) : (
                   <Chip
-                    color={status?.connected ? 'success' : 'default'}
-                    label={status?.connected ? 'Connected' : 'Not connected'}
+                    color={status?.reconnectRequired ? 'warning' : status?.connected ? 'success' : 'default'}
+                    label={
+                      status?.reconnectRequired
+                        ? 'Reconnect required'
+                        : status?.connected
+                        ? 'Connected'
+                        : 'Not connected'
+                    }
                     variant={status?.connected ? 'filled' : 'outlined'}
                   />
                 )}
@@ -415,6 +421,11 @@ const AdvancedAdminPage: NextPage & { PageLayout?: React.ComponentType<{ childre
                 <Typography variant="body2" color="text.secondary">
                   Connected by: {status?.connectedByEmail ?? 'Not recorded'}
                 </Typography>
+                {status?.accountId && (
+                  <Typography variant="body2" color="text.secondary">
+                    SoundCloud account: {status.accountId}
+                  </Typography>
+                )}
                 <Typography variant="body2" color="text.secondary">
                   Token source: {status?.tokenSource ?? 'unknown'}
                 </Typography>
@@ -436,10 +447,10 @@ const AdvancedAdminPage: NextPage & { PageLayout?: React.ComponentType<{ childre
                   {isConnecting
                     ? 'Redirecting...'
                     : simulation
-                    ? status?.connected
+                    ? status?.connected || status?.reconnectRequired
                       ? 'Reconnect simulated account'
                       : 'Connect simulated account'
-                    : status?.connected
+                    : status?.connected || status?.reconnectRequired
                     ? 'Reconnect SoundCloud'
                     : 'Connect SoundCloud'}
                 </Button>

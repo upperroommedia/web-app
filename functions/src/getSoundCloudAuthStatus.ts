@@ -1,14 +1,24 @@
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
 import { getSoundCloudAuthStatus, soundcloudOAuthSecrets, type SoundCloudAuthStatus } from './soundcloudSecrets';
-import { isUserRoleAdmin } from '@upperroom/shared/types/User';
+import type {
+  GetSoundCloudAuthStatusInput,
+  SoundCloudPublishingAuthStatus,
+} from '@upperroom/contracts/getSoundCloudAuthStatus';
+import { canUserRolePublish, isUserRoleAdmin } from '@upperroom/shared/types/User';
 
-export type GetSoundCloudAuthStatusInput = Record<string, never>;
+export type { GetSoundCloudAuthStatusInput };
 export type GetSoundCloudAuthStatusReturnType = SoundCloudAuthStatus;
 
 const getSoundCloudAuthStatusCall = onCall(
   { secrets: soundcloudOAuthSecrets },
-  async (request: CallableRequest<GetSoundCloudAuthStatusInput>): Promise<GetSoundCloudAuthStatusReturnType> => {
+  async (
+    request: CallableRequest<GetSoundCloudAuthStatusInput>
+  ): Promise<GetSoundCloudAuthStatusReturnType | SoundCloudPublishingAuthStatus> => {
     const role = request.auth?.token.role;
+    if (request.data?.view === 'publish' && role && canUserRolePublish(role)) {
+      const status = await getSoundCloudAuthStatus();
+      return { connected: status.connected, ...(status.reconnectRequired ? { reconnectRequired: true } : {}) };
+    }
     if (!role || !isUserRoleAdmin(role)) {
       throw new HttpsError('permission-denied', 'Only admins can view SoundCloud auth status.');
     }

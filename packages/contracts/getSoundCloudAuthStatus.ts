@@ -3,6 +3,8 @@ export type SoundCloudAuthStatus = {
   callbackPath: string;
   connected: boolean;
   configured: boolean;
+  reconnectRequired?: true;
+  accountId?: string;
   tokenSource: 'firestore' | 'secret' | 'none';
   accessTokenExpiresAtMillis?: number;
   connectedAtMillis?: number;
@@ -10,5 +12,6 @@ export type SoundCloudAuthStatus = {
   updatedAtMillis?: number;
 };
 
-export type GetSoundCloudAuthStatusInput = Record<string, never>;
+export type GetSoundCloudAuthStatusInput = { view?: 'publish' };
+export type SoundCloudPublishingAuthStatus = Pick<SoundCloudAuthStatus, 'connected' | 'reconnectRequired'>;
 export type GetSoundCloudAuthStatusReturnType = SoundCloudAuthStatus;

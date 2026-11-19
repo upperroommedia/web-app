@@ -9,6 +9,8 @@ import axios from 'axios';
 import { Timestamp } from 'firebase-admin/firestore';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import exchangeSoundCloudAuthCode from '../../exchangeSoundCloudAuthCode';
+import * as soundcloudClient from '../../soundcloudClient';
+import * as soundcloudAuthAlerting from '../../soundcloudAuthAlerting';
 import * as soundcloudSecretsModule from '../../soundcloudSecrets';
 import type {
   ExchangeSoundCloudAuthCodeInput,
@@ -47,6 +49,8 @@ describe('exchangeSoundCloudAuthCode', () => {
   beforeEach(async () => {
     jest.restoreAllMocks();
     jest.clearAllMocks();
+    jest.spyOn(soundcloudClient, 'getAuthenticatedSoundCloudAccountId').mockResolvedValue('soundcloud:users:123');
+    jest.spyOn(soundcloudAuthAlerting, 'emitSoundCloudReconnectAlertIfNeeded').mockResolvedValue(true);
     process.env.SOUNDCLOUD_CLIENT_ID = 'client-id';
     process.env.SOUNDCLOUD_CLIENT_SECRET = 'client-secret';
     delete process.env.SOUNDCLOUD_REFRESH_TOKEN;
@@ -189,6 +193,128 @@ describe('exchangeSoundCloudAuthCode', () => {
       connectedByUid: 'admin-1',
       connectedByEmail: 'admin@example.com',
     });
+  });
+
+  it('marks an invalid refresh grant, stops further attempts and clears recovery after verified consent', async () => {
+    await soundCloudAuthStateRef.set({ accountId: 'soundcloud:users:123', refreshToken: 'rejected' });
+    const post = jest.spyOn(axios, 'post').mockRejectedValueOnce(
+      Object.assign(new Error('invalid grant'), {
+        isAxiosError: true,
+        response: { status: 400, data: { error: 'invalid_grant' } },
+      })
+    );
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await expect(soundcloudSecretsModule.getSoundCloudAccessToken()).rejects.toMatchObject({
+        details: { code: 'SOUNDCLOUD_AUTH_RECONNECT_REQUIRED' },
+      });
+    }
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(soundcloudAuthAlerting.emitSoundCloudReconnectAlertIfNeeded).toHaveBeenCalledTimes(1);
+    await expect(soundcloudSecretsModule.getSoundCloudAuthStatus()).resolves.toMatchObject({
+      connected: false,
+      reconnectRequired: true,
+    });
+
+    post.mockResolvedValue({
+      data: { access_token: 'fresh-access', refresh_token: 'fresh-refresh', expires_in: 3600 },
+    });
+    const session = await soundcloudSecretsModule.createSoundCloudAuthorizationSession({
+      adminUid: 'admin-1',
+      redirectUri: TEST_REDIRECT_URI,
+    });
+    const state = new URL(session.authorizeUrl).searchParams.get('state')!;
+    jest.mocked(soundcloudClient.getAuthenticatedSoundCloudAccountId).mockResolvedValueOnce('soundcloud:users:999');
+    await expect(
+      soundcloudSecretsModule.exchangeSoundCloudAuthorizationCode({
+        code: 'wrong-account-code',
+        state,
+        connectedByUid: 'admin-1',
+      })
+    ).rejects.toThrow('Select the previously connected SoundCloud account');
+    expect((await soundCloudAuthStateRef.get()).get('refreshRecovery')).toBe('invalid_grant');
+
+    const next = await soundcloudSecretsModule.createSoundCloudAuthorizationSession({
+      adminUid: 'admin-1',
+      redirectUri: TEST_REDIRECT_URI,
+    });
+    await soundcloudSecretsModule.exchangeSoundCloudAuthorizationCode({
+      code: 'correct-account-code',
+      state: new URL(next.authorizeUrl).searchParams.get('state')!,
+      connectedByUid: 'admin-1',
+    });
+    await expect(soundcloudSecretsModule.getSoundCloudAccessToken()).resolves.toBe('fresh-access');
+    await expect(soundcloudSecretsModule.getSoundCloudAuthStatus()).resolves.toMatchObject({
+      connected: true,
+      accountId: 'soundcloud:users:123',
+    });
+    expect((await soundCloudAuthStateRef.get()).get('refreshRecovery')).toBeUndefined();
+  });
+
+  it('preserves availability after a known rate rejection but fences a refresh with a lost response', async () => {
+    await soundCloudAuthStateRef.set({ refreshToken: 'single-use' });
+    const post = jest
+      .spyOn(axios, 'post')
+      .mockRejectedValueOnce(
+        Object.assign(new Error('rate limited'), {
+          isAxiosError: true,
+          response: { status: 429, data: {} },
+        })
+      )
+      .mockRejectedValueOnce(new Error('response lost'));
+    await expect(soundcloudSecretsModule.getSoundCloudAccessToken()).rejects.toMatchObject({ code: 'unavailable' });
+    await expect(soundcloudSecretsModule.getSoundCloudAuthStatus()).resolves.toMatchObject({ connected: true });
+    await expect(soundcloudSecretsModule.getSoundCloudAccessToken()).rejects.toMatchObject({
+      details: { code: 'SOUNDCLOUD_AUTH_RECONNECT_REQUIRED' },
+    });
+    await expect(soundcloudSecretsModule.getSoundCloudAccessToken()).rejects.toMatchObject({
+      details: { code: 'SOUNDCLOUD_AUTH_RECONNECT_REQUIRED' },
+    });
+    expect(post).toHaveBeenCalledTimes(2);
+    expect((await soundCloudAuthStateRef.get()).get('refreshRecovery')).toBe('outcome_unknown');
+  });
+
+  it('refreshes once when concurrent operations reject the same access token', async () => {
+    await soundCloudAuthStateRef.set({
+      accessToken: 'expired-at-provider',
+      refreshToken: 'single-use',
+      accessTokenExpiresAtMillis: Date.now() + 3600000,
+    });
+    const unauthorized = Object.assign(new Error('access rejected'), {
+      isAxiosError: true,
+      response: { status: 401 },
+    });
+    const post = jest.spyOn(axios, 'post').mockResolvedValue({
+      data: { access_token: 'renewed', refresh_token: 'rotated', expires_in: 3600 },
+    });
+    const operation = async (token: string) => {
+      if (token === 'expired-at-provider') throw unauthorized;
+      return token;
+    };
+    await expect(
+      Promise.all([
+        soundcloudSecretsModule.runWithSoundCloudAccessToken(operation),
+        soundcloudSecretsModule.runWithSoundCloudAccessToken(operation),
+      ])
+    ).resolves.toEqual(['renewed', 'renewed']);
+    expect(post).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not resend a grant after the previous refresh owner disappears', async () => {
+    await soundCloudAuthStateRef.set({
+      refreshToken: 'possibly-spent',
+      refreshLeaseOwner: 'old-owner',
+      refreshLeaseExpiresAtMillis: 1,
+    });
+    const post = jest.spyOn(axios, 'post');
+    await expect(soundcloudSecretsModule.getSoundCloudAuthStatus()).resolves.toMatchObject({
+      connected: false,
+      reconnectRequired: true,
+    });
+    await expect(soundcloudSecretsModule.getSoundCloudAccessToken()).rejects.toMatchObject({
+      details: { code: 'SOUNDCLOUD_AUTH_RECONNECT_REQUIRED' },
+    });
+    expect(post).not.toHaveBeenCalled();
+    expect((await soundCloudAuthStateRef.get()).get('refreshRecovery')).toBe('outcome_unknown');
   });
 
   it('does not replay a one-time grant after an uncertain provider edge failure', async () => {

@@ -7,6 +7,7 @@ import type {
   PublishingStepResult,
 } from './types';
 import { listProviderReceiptsForJob } from './providerReceipts';
+import { isSoundCloudReconnectRequiredError } from '../../soundcloudAuthErrors';
 import { runDurablePublishingOperation } from './durableOperationContext';
 
 /** Domain composition remains outside Firebase/Temporal transports and is testable with provider adapters. */
@@ -131,7 +132,7 @@ export function createPublishingActivities(dependencies: PublishingDomainDepende
         ? 'PROVIDER_CREATE_AMBIGUOUS'
         : detailCode === 'PUBLISHING_SOURCE_CLAIMS_FROZEN'
         ? 'PUBLISHING_SOURCE_CLAIMS_FROZEN'
-        : detailCode === 'SOUNDCLOUD_RECONNECT_REQUIRED'
+        : detailCode === 'SOUNDCLOUD_RECONNECT_REQUIRED' || isSoundCloudReconnectRequiredError(error)
         ? 'SOUNDCLOUD_RECONNECT_REQUIRED'
         : detailCode === 'PUBLISHED_LIST_DRIFT_BLOCKED'
         ? 'PUBLISHING_DRIFT'

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import TextField from '@mui/material/TextField';
 import MenuItem from '@mui/material/MenuItem';
 import { useProviderEnvironment } from '../context/provider/ProviderEnvironmentContext';
@@ -22,6 +22,12 @@ import { DurableAdmissionUnknownError, submitDurableIntent } from '../utils/dura
 import { useDurableJob, useEntityJobs } from '../hooks/useDurableJobs';
 import EntityJobHistory from './jobs/EntityJobHistory';
 import { isDurableJobTerminal, type DurableAdmissionRequest } from '@upperroom/contracts/temporal';
+import { createFunctionV2 } from '../utils/createFunction';
+import type {
+  GetSoundCloudAuthStatusInput,
+  SoundCloudPublishingAuthStatus,
+} from '@upperroom/contracts/getSoundCloudAuthStatus';
+import { SOUNDCLOUD_ADVANCED_PATH } from '../shared/soundcloudAuth';
 import { buildSermonPublishIntent, hasPublishIntentChanges } from '../utils/sermonPublishIntent';
 
 interface SermonPublishPanelProps {
@@ -55,6 +61,7 @@ function SermonPublishPanel({ sermon, initialAdvancedOpen = false, onRequestAddT
   const [seriesChoice, setSeriesChoice] = useState<boolean | null>(null);
   const [soundcloudChoice, setSoundcloudChoice] = useState<boolean | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [soundcloudReconnect, setSoundcloudReconnect] = useState(false);
   const [acceptedJobId, setAcceptedJobId] = useState<string>();
   // The receipt may outlive the bounded history window. Observe its execution directly.
   const acceptedExecution = useDurableJob(acceptedJobId);
@@ -98,6 +105,27 @@ function SermonPublishPanel({ sermon, initialAdvancedOpen = false, onRequestAddT
   const canPublish = sermon.status.audioStatus === sermonStatusType.PROCESSED || Boolean(sermon.subsplashId);
   const hasPublished =
     items.some((list) => list.uploadStatus?.status === uploadStatus.UPLOADED) || seriesPublished || soundcloudPublished;
+
+  useEffect(() => {
+    if (!user?.canPublish() || modeUnavailable) return;
+    const getStatus = createFunctionV2<GetSoundCloudAuthStatusInput, SoundCloudPublishingAuthStatus>(
+      'getSoundCloudAuthStatus'
+    );
+    let active = true;
+    const refresh = () => {
+      void getStatus({ view: 'publish' })
+        .then((status) => {
+          if (active) setSoundcloudReconnect(status.reconnectRequired === true);
+        })
+        .catch(() => undefined);
+    };
+    refresh();
+    window.addEventListener('focus', refresh);
+    return () => {
+      active = false;
+      window.removeEventListener('focus', refresh);
+    };
+  }, [user, modeUnavailable, acceptedJob?.state]);
 
   async function submit(mode: 'publish' | 'unpublish' | 'advanced') {
     setSubmitting(true);
@@ -204,6 +232,16 @@ function SermonPublishPanel({ sermon, initialAdvancedOpen = false, onRequestAddT
         </Stack>
       )}
       {notice && <Alert severity={notice.severity}>{notice.message}</Alert>}
+      {soundcloudReconnect && (
+        <Alert
+          severity="warning"
+          action={user?.isAdmin() ? <Button href={SOUNDCLOUD_ADVANCED_PATH}>Reconnect SoundCloud</Button> : undefined}
+        >
+          {user?.isAdmin()
+            ? 'SoundCloud needs to be reconnected before the SoundCloud destination can publish.'
+            : 'Ask an admin to reconnect SoundCloud before publishing to that destination.'}
+        </Alert>
+      )}
       {acceptedExecution.error && (
         <Alert severity="warning">
           Unable to refresh the submitted request. Publishing stays paused until its outcome can be confirmed.
@@ -251,7 +289,16 @@ function SermonPublishPanel({ sermon, initialAdvancedOpen = false, onRequestAddT
         {!isDevelopment && (
           <Stack direction="row" justifyContent="space-between">
             <Typography variant="body2">SoundCloud</Typography>
-            <Chip size="small" label={soundcloudPublished ? soundcloudAccessLabel : 'Not published'} />
+            <Chip
+              size="small"
+              label={
+                soundcloudReconnect
+                  ? 'Reconnect required'
+                  : soundcloudPublished
+                  ? soundcloudAccessLabel
+                  : 'Not published'
+              }
+            />
           </Stack>
         )}
       </Stack>

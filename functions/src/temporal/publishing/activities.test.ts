@@ -1,5 +1,6 @@
 jest.mock('./providerReceipts', () => ({ listProviderReceiptsForJob: jest.fn() }));
 import { listProviderReceiptsForJob } from './providerReceipts';
+import { createSoundCloudReconnectRequiredError } from '../../soundcloudAuthErrors';
 import { createPublishingActivities } from './activities';
 import type { PublishingDomainDependencies, PrivatePublishingIntent } from './types';
 
@@ -102,6 +103,19 @@ describe('publishing activity boundary', () => {
       { state: 'needs_review', code: 'PROVIDER_CREATE_AMBIGUOUS' }
     );
   });
+  it('blocks the SoundCloud step with a reconnect reason and can retry the same step', async () => {
+    const deps = dependencies();
+    const ref = { jobId: 'job-1', projectId: 'test' };
+    const activities = createPublishingActivities(deps);
+    jest.mocked(deps.ensureSoundCloudTrack).mockRejectedValueOnce(createSoundCloudReconnectRequiredError('reconnect'));
+    await expect(activities.ensurePublishingSoundCloud(ref)).resolves.toEqual({
+      state: 'blocked',
+      code: 'SOUNDCLOUD_RECONNECT_REQUIRED',
+    });
+    await expect(activities.ensurePublishingSoundCloud(ref)).resolves.toMatchObject({ state: 'completed' });
+    expect(deps.ensureSubsplashMedia).not.toHaveBeenCalled();
+  });
+
   it('checks active revision before performing a provider mutation', async () => {
     const deps = dependencies();
     (deps.assertCurrent as jest.Mock).mockRejectedValue(

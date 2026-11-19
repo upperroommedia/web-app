@@ -13,6 +13,9 @@ export const emitSoundCloudReconnectAlertIfNeeded = async (input: {
     return false;
   }
 
+  const details = input.error.details;
+  if (details && typeof details === 'object' && 'alertHandled' in details && details.alertHandled === true) return true;
+
   await emitOperationalAlert({
     alertCode: input.alertCode,
     summary: input.summary,
