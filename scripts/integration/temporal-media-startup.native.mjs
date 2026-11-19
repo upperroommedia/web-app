@@ -129,20 +129,6 @@ for (const drift of [
           instanceId: 'controlled-platform-instance',
         },
       };
-      const nativeTransaction = db.runTransaction.bind(db);
-      if (['lost-ack', 'rejected'].includes(drift))
-        db.runTransaction = async (fn, opts) => {
-          if (drift === 'rejected' && opts?.maxAttempts === 1) {
-            sourceCalls++;
-            throw Object.assign(new Error('Controlled rejected receipt create'), { code: 7 });
-          }
-          const value = await nativeTransaction(fn, opts);
-          if (opts?.maxAttempts === 1) {
-            sourceCalls++;
-            throw new Error('Controlled lost commit acknowledgement');
-          }
-          return value;
-        };
       const canary = async (_draining, _processing, _allocation, assertAuthority) => {
         canaryCalls++;
         if (drift === 'control') await controlRef.update({ admission: 'open' });
@@ -235,7 +221,23 @@ for (const drift of [
           }),
         };
         const record = () => recordMediaStartupCapacity({ firestore: db, buildId: b.buildId, witness, canary, kernel });
-        if (drift !== 'delayed') await record();
+        if (['lost-ack', 'rejected'].includes(drift)) {
+          // Fault only the startup receipt transaction. The controller also
+          // persists its own single-attempt checkpoints before and after startup.
+          const nativeTransaction = db.runTransaction;
+          db.runTransaction = async (fn, opts) => {
+            if (opts?.maxAttempts !== 1) return nativeTransaction.call(db, fn, opts);
+            sourceCalls++;
+            if (drift === 'rejected') throw Object.assign(new Error('Controlled rejected receipt create'), { code: 7 });
+            await nativeTransaction.call(db, fn, opts);
+            throw new Error('Controlled lost commit acknowledgement');
+          };
+          try {
+            await record();
+          } finally {
+            db.runTransaction = nativeTransaction;
+          }
+        } else if (drift !== 'delayed') await record();
         const parent = f.options.receipts.pool.identityState.plan.body.name;
         const readResource = async (name) =>
           name === parent
@@ -339,7 +341,6 @@ for (const drift of [
         assert.equal(result.stop.plan.target, 0);
         assert.equal((await startup.get()).exists, true);
         assert.equal(canaryCalls, 1);
-        if (drift === 'lost-ack') assert.equal(sourceCalls, 1);
         const existing = (await startup.get()).data();
         await assert.rejects(
           recordMediaStartupCapacity({
@@ -355,6 +356,13 @@ for (const drift of [
         await assert.rejects(bootstrapStopCloudRunMediaPool({ ...f.options, save, observeRegistration: registration }));
         assert.equal(canaryCalls, 1);
         assert.equal((await startup.get()).exists, false);
+      }
+      if (['lost-ack', 'rejected'].includes(drift)) {
+        assert.equal(sourceCalls, 1);
+        assert.deepEqual(
+          f.calls.filter(({ method }) => method === 'PATCH').map(({ request }) => request.scaling.manualInstanceCount),
+          [1, 0]
+        );
       }
     } finally {
       const failures = [];

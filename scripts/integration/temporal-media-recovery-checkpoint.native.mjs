@@ -786,19 +786,36 @@ for (const mode of [
                   const kernelRef = db.doc(`_control/temporalRestoredMediaKernel-${newId}`),
                     capacityRef = db.doc(`temporalRestoredMediaStartupCapacity/${newId}`);
                   idlePrivate.push(kernelRef, capacityRef);
-                  await writeFile(
-                    entry,
-                    `require(${JSON.stringify(
-                      require.resolve('ts-node')
-                    )}).register({skipProject:true,transpileOnly:true,compilerOptions:{module:'CommonJS',target:'ES2022',esModuleInterop:true,moduleResolution:'node'}});const k=require(${JSON.stringify(
-                      fileURLToPath(
-                        new URL('../../apps/temporal-worker/src/runtime/media-kernel-supervisor.ts', import.meta.url)
-                      )
-                    )});(async()=>{await k.awaitMediaKernelLaunch();await k.reportMediaKernelWitness(${JSON.stringify(
-                      childWitness
-                    )});process.exitCode=1;process.disconnect();})().catch(()=>process.exit(2));`
-                  );
                   try {
+                    await writeFile(
+                      join(dir, 'failed-child-input.json'),
+                      JSON.stringify({
+                        compilerPath: require.resolve('ts-node'),
+                        kernelPath: fileURLToPath(
+                          new URL('../../apps/temporal-worker/src/runtime/media-kernel-supervisor.ts', import.meta.url)
+                        ),
+                        childWitness,
+                      }),
+                      { flag: 'wx', mode: 0o600 }
+                    );
+                    await writeFile(
+                      entry,
+                      `const { compilerPath, kernelPath, childWitness } = require('./failed-child-input.json');
+require(compilerPath).register({
+  skipProject: true,
+  transpileOnly: true,
+  compilerOptions: { module: 'CommonJS', target: 'ES2022', esModuleInterop: true, moduleResolution: 'node' },
+});
+const kernel = require(kernelPath);
+(async () => {
+  await kernel.awaitMediaKernelLaunch();
+  await kernel.reportMediaKernelWitness(childWitness);
+  process.exitCode = 1;
+  process.disconnect();
+})().catch(() => process.exit(2));
+`,
+                      { flag: 'wx', mode: 0o600 }
+                    );
                     const close = await bounded(
                       kernelModule.superviseRestoredMediaKernel(db, cap, entry),
                       15000,
@@ -1731,7 +1748,10 @@ for (const mode of [
               await r.capacityRef.update({ digest: receipt.get('digest') });
               await assert.rejects(r.collect(op));
               if (idleRuntime.pollAuthority)
-                await assert.rejects(idleRuntime.pollAuthority.authorizePolling(), /RESTORED_MEDIA_STARTUP_UNCONFIRMED/);
+                await assert.rejects(
+                  idleRuntime.pollAuthority.authorizePolling(),
+                  /RESTORED_MEDIA_STARTUP_UNCONFIRMED/
+                );
             }
             if (mode === 'restored-promotion-resources') {
               const promotionId = randomUUID(),

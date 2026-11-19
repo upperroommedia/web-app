@@ -128,9 +128,11 @@ process.on('SIGTERM',()=>process.exit(0));
         } else if (mode === 'ipc-channel-error') {
           await writeFile(
             entry,
-            `process.on('SIGTERM',()=>process.exit(0));process.send({kind:'media-kernel-ready',nonce:${JSON.stringify(
-              randomUUID()
-            )},pid:process.pid},()=>process.disconnect());setInterval(()=>{},1000);`
+            `const { randomUUID } = require('node:crypto');
+process.on('SIGTERM', () => process.exit(0));
+process.send({ kind: 'media-kernel-ready', nonce: randomUUID(), pid: process.pid }, () => process.disconnect());
+setInterval(() => {}, 1000);
+`
           );
           await assert.rejects(
             (kind === 'normal'
@@ -143,9 +145,11 @@ process.on('SIGTERM',()=>process.exit(0));
         } else if (mode === 'ignored-cleanup-signal') {
           await writeFile(
             entry,
-            `process.on('SIGTERM',()=>{});process.send({kind:'media-kernel-ready',nonce:${JSON.stringify(
-              randomUUID()
-            )},pid:process.pid});setTimeout(()=>process.exit(0),12000);`
+            `const { randomUUID } = require('node:crypto');
+process.on('SIGTERM', () => {});
+process.send({ kind: 'media-kernel-ready', nonce: randomUUID(), pid: process.pid });
+setTimeout(() => process.exit(0), 12000);
+`
           );
           // Initial authority must hold. Revoke only after the owned child is born.
           await assert.rejects(
