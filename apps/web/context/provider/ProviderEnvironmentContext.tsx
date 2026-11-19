@@ -1,4 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import type {
+  GetSoundCloudAuthStatusInput,
+  SoundCloudPublishingAuthStatus,
+} from '@upperroom/contracts/getSoundCloudAuthStatus';
 import type { ProviderSandboxStatus } from '@upperroom/contracts/providerSandbox';
 import useAuth from '../user/UserContext';
 import { createFunctionV2 } from '../../utils/createFunction';
@@ -12,6 +16,10 @@ const Context = createContext<{
   refresh: () => void;
 }>({ loading: true, error: false, refresh: () => {} });
 const getStatus = () => createFunctionV2<Record<string, never>, ProviderSandboxStatus>('getProviderSandboxStatus')({});
+export const getSoundCloudPublishingAuthStatus = () =>
+  createFunctionV2<GetSoundCloudAuthStatusInput, SoundCloudPublishingAuthStatus>('getSoundCloudAuthStatus')({
+    view: 'publish',
+  });
 
 /** One authority read per signed-in identity, shared by the shell and all publish panels. */
 export function ProviderEnvironmentProvider({ children }: { children: React.ReactNode }) {

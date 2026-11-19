@@ -1,12 +1,12 @@
 import { logger } from 'firebase-functions/v2';
-import {
-  buildProfessionalEmailHtml,
-  formatEmailDateTime,
-} from './emailTemplates';
+import { buildProfessionalEmailHtml, formatEmailDateTime } from './emailTemplates';
 import { getAdminBaseUrl, getRuntimeAlertRecipients } from './notificationParams';
 import { OperationalAlertPayload } from './notificationTypes';
-import { queueEmail } from './queueEmail';
-import { SOUNDCLOUD_ADVANCED_PATH, SOUNDCLOUD_AUTH_RECONNECT_REQUIRED_CODE } from '@upperroom/shared/shared/soundcloudAuth';
+import { queueEmail, queueEmailOnce } from './queueEmail';
+import {
+  SOUNDCLOUD_ADVANCED_PATH,
+  SOUNDCLOUD_AUTH_RECONNECT_REQUIRED_CODE,
+} from '@upperroom/shared/shared/soundcloudAuth';
 import { captureFunctionsExceptionAndFlush } from '../sentry';
 import { isExpectedOperationalError } from '../expectedOperationalError';
 
@@ -17,6 +17,8 @@ export interface EmitOperationalAlertInput {
   summary: string;
   error: unknown;
   context?: Record<string, unknown>;
+  /** Stable incident identity. Queueing failures are returned to the owner for retry. */
+  idempotencyKey?: string;
 }
 
 type AlertMarkedError = Error & {
@@ -32,9 +34,7 @@ export const markOperationalAlertEmitted = (error: unknown): void => {
 export const hasOperationalAlertBeenEmitted = (error: unknown): boolean =>
   error instanceof Error && Boolean((error as AlertMarkedError)[OPERATIONAL_ALERT_EMITTED]);
 
-const toErrorPayload = (
-  error: unknown
-): Pick<OperationalAlertPayload, 'errorMessage' | 'errorName' | 'errorStack'> => {
+const toErrorPayload = (error: unknown): Pick<OperationalAlertPayload, 'errorMessage' | 'errorName' | 'errorStack'> => {
   if (error instanceof Error) {
     return {
       errorMessage: error.message,
@@ -62,6 +62,7 @@ const buildAlertPayload = (input: EmitOperationalAlertInput, occurredAtMs: numbe
 };
 
 const isSoundCloudReconnectAlert = (payload: OperationalAlertPayload): boolean => {
+  if (payload.alertCode === SOUNDCLOUD_AUTH_RECONNECT_REQUIRED_CODE) return true;
   if (!payload.alertCode.startsWith('PUBLISH_SOUNDCLOUD_')) {
     return false;
   }
@@ -76,7 +77,8 @@ const isSoundCloudReconnectAlert = (payload: OperationalAlertPayload): boolean =
   return contextCode === SOUNDCLOUD_AUTH_RECONNECT_REQUIRED_CODE;
 };
 
-const getSoundCloudReconnectActionUrl = (): string => `${getAdminBaseUrl().replace(/\/+$/, '')}${SOUNDCLOUD_ADVANCED_PATH}`;
+const getSoundCloudReconnectActionUrl = (): string =>
+  `${getAdminBaseUrl().replace(/\/+$/, '')}${SOUNDCLOUD_ADVANCED_PATH}`;
 
 const buildAlertMessageText = (payload: OperationalAlertPayload): string =>
   [
@@ -132,6 +134,24 @@ export const emitOperationalAlert = async (input: EmitOperationalAlertInput): Pr
   const payload = buildAlertPayload(input, Date.now());
   markOperationalAlertEmitted(input.error);
   try {
+    const recipients = getRuntimeAlertRecipients();
+    const notification = {
+      to: recipients,
+      source: 'runtime-alert' as const,
+      alertType: 'runtime-error',
+      alertCode: payload.alertCode,
+      metadata: payload.context,
+      message: {
+        subject: `[URM] Runtime alert: ${payload.alertCode}`,
+        text: buildAlertMessageText(payload),
+        html: buildAlertMessageHtml(payload),
+      },
+    };
+
+    // A durable incident queues one email, even on concurrent or uncertain retries.
+    if (input.idempotencyKey && !(await queueEmailOnce({ ...notification, idempotencyKey: input.idempotencyKey })))
+      return;
+
     try {
       await captureFunctionsExceptionAndFlush(input.error, {
         tags: {
@@ -152,8 +172,6 @@ export const emitOperationalAlert = async (input: EmitOperationalAlertInput): Pr
       });
     }
 
-    const recipients = getRuntimeAlertRecipients();
-
     logger.error('operational alert emitted', {
       alertCode: payload.alertCode,
       summary: payload.summary,
@@ -164,19 +182,8 @@ export const emitOperationalAlert = async (input: EmitOperationalAlertInput): Pr
       recipientCount: recipients.length,
     });
 
-    // Intentionally no dedupe/suppression; each invocation emits a distinct alert message.
-    await queueEmail({
-      to: recipients,
-      source: 'runtime-alert',
-      alertType: 'runtime-error',
-      alertCode: payload.alertCode,
-      metadata: payload.context,
-      message: {
-        subject: `[URM] Runtime alert: ${payload.alertCode}`,
-        text: buildAlertMessageText(payload),
-        html: buildAlertMessageHtml(payload),
-      },
-    });
+    // Alerts without an incident identity retain their per-invocation delivery.
+    if (!input.idempotencyKey) await queueEmail(notification);
   } catch (deliveryError) {
     logger.error('failed to deliver operational alert', {
       alertCode: payload.alertCode,
@@ -184,5 +191,6 @@ export const emitOperationalAlert = async (input: EmitOperationalAlertInput): Pr
       originalErrorMessage: payload.errorMessage,
       deliveryErrorMessage: deliveryError instanceof Error ? deliveryError.message : String(deliveryError),
     });
+    if (input.idempotencyKey) throw deliveryError;
   }
 };

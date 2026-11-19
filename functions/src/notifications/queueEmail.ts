@@ -54,25 +54,33 @@ export const prepareQueuedEmail = (input: QueueEmailInput) => {
   };
 };
 
-export const queueEmail = async (input: QueueEmailInput): Promise<string> => {
+const enqueueEmail = async (input: QueueEmailInput): Promise<{ id: string; created: boolean }> => {
   const payload = prepareQueuedEmail(input);
   const recipients = payload.to;
   const collection = firebaseAdmin.firestore().collection(MAIL_COLLECTION);
   const mailRef = input.idempotencyKey
     ? collection.doc(`notification-${createHash('sha256').update(input.idempotencyKey).digest('hex')}`)
     : await collection.add(payload);
-  if (input.idempotencyKey) {
-    await runDurableTransaction(firebaseAdmin.firestore(), async (transaction) => {
-      if (!(await transaction.get(mailRef)).exists) transaction.create(mailRef, payload);
+  const created = input.idempotencyKey
+    ? await runDurableTransaction(firebaseAdmin.firestore(), async (transaction) => {
+        if ((await transaction.get(mailRef)).exists) return false;
+        transaction.create(mailRef, payload);
+        return true;
+      })
+    : true;
+
+  if (created)
+    logger.info('notification email queued', {
+      mailId: mailRef.id,
+      source: input.source,
+      alertType: input.alertType,
+      recipientCount: recipients.length,
     });
-  }
 
-  logger.info('notification email queued', {
-    mailId: mailRef.id,
-    source: input.source,
-    alertType: input.alertType,
-    recipientCount: recipients.length,
-  });
-
-  return mailRef.id;
+  return { id: mailRef.id, created };
 };
+
+export const queueEmail = async (input: QueueEmailInput): Promise<string> => (await enqueueEmail(input)).id;
+
+export const queueEmailOnce = async (input: QueueEmailInput & { idempotencyKey: string }): Promise<boolean> =>
+  (await enqueueEmail(input)).created;
