@@ -1,0 +1,52 @@
+name: Temporal application validation tools
+description: Set up the pinned Linux tools used by both application validation modes.
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v7.1.0
+      with:
+        node-version: '22.23.3'
+    - name: Install pinned Temurin JDK
+      # Match the verified archive used by ops/local-validation/Dockerfile.
+      shell: bash
+      run: |
+        jdk_archive="$RUNNER_TEMP/temurin-21.0.12.1.tar.gz"
+        jdk_home="$RUNNER_TEMP/temurin-21.0.12.1"
+        curl --fail --location --silent --show-error \
+          'https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.12.1%2B1/OpenJDK21U-jdk_x64_linux_hotspot_21.0.12.1_1.tar.gz' \
+          --output "$jdk_archive"
+        echo "ce79869e1307ed8ee1e2baa86a412b1eb5b75d10a01006d788a6f968bcfaee94  $jdk_archive" | sha256sum --check
+        mkdir -p "$jdk_home"
+        tar -xzf "$jdk_archive" -C "$jdk_home" --strip-components=1
+        rm "$jdk_archive"
+        "$jdk_home/bin/java" -version
+        echo "JAVA_HOME=$jdk_home" >> "$GITHUB_ENV"
+        echo "$jdk_home/bin" >> "$GITHUB_PATH"
+    - name: Install pinned pnpm
+      shell: bash
+      run: |
+        npm install --global --fetch-retries=2 --fetch-timeout=45000 pnpm@12.11.2
+        test "$(pnpm --version)" = '12.11.2'
+    - name: Set up FFmpeg
+      shell: bash
+      run: |
+        # Same checksum-pinned Linux x64 archive as the worker image.
+        ffmpeg_archive="$RUNNER_TEMP/ffmpeg.tar.xz"
+        ffmpeg_home="$RUNNER_TEMP/ffmpeg"
+        curl --fail --location --silent --show-error --retry 1 --connect-timeout 10 --max-time 90 \
+          'https://github.com/FFmpeg-Builds/FFmpeg-Builds/releases/download/autobuild-2026-11-18-12-39/ffmpeg-n8.1.3-36-ge22a4510c9-linux64-gpl-8.1.tar.xz' \
+          --output "$ffmpeg_archive"
+        echo "fce424851b0a982bdd4ac4e96f0e7b32cf29de999e54500676d41ad175ed0c79  $ffmpeg_archive" | sha256sum --check
+        mkdir -p "$ffmpeg_home"
+        tar -xJf "$ffmpeg_archive" -C "$ffmpeg_home" --strip-components=1 --no-same-owner
+        # Media code resolves these absolute paths, as in the worker image.
+        sudo install -m 0755 "$ffmpeg_home/bin/ffmpeg" "$ffmpeg_home/bin/ffprobe" /usr/local/bin/
+        /usr/local/bin/ffmpeg -version
+        /usr/local/bin/ffprobe -version
+    - name: Verify rsync
+      shell: bash
+      run: rsync --version
+    - name: Set up read-only upload manifest validation
+      uses: google-github-actions/setup-gcloud@v3.0.1
+      with:
+        version: '588.0.0'

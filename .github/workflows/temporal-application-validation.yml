@@ -14,6 +14,7 @@ on:
       - '*json'
       - 'pnpm-*.yaml'
       - '.github/workflows/temporal-application-validation.yml'
+      - '.github/actions/temporal-application-tools/**'
       - '.github/workflows/*process-audio*deploy.yml'
       - 'ops/process-audio-hetzner/**'
       - 'ops/local-validation/**'
@@ -36,51 +37,8 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-node@v7.1.0
-        with:
-          node-version: '22.23.3'
-      - name: Install pinned Temurin JDK
-        # Match the verified archive used by ops/local-validation/Dockerfile.
-        run: |
-          jdk_archive="$RUNNER_TEMP/temurin-21.0.12.1.tar.gz"
-          jdk_home="$RUNNER_TEMP/temurin-21.0.12.1"
-          curl --fail --location --silent --show-error \
-            'https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.12.1%2B1/OpenJDK21U-jdk_x64_linux_hotspot_21.0.12.1_1.tar.gz' \
-            --output "$jdk_archive"
-          echo "ce79869e1307ed8ee1e2baa86a412b1eb5b75d10a01006d788a6f968bcfaee94  $jdk_archive" | sha256sum --check
-          mkdir -p "$jdk_home"
-          tar -xzf "$jdk_archive" -C "$jdk_home" --strip-components=1
-          rm "$jdk_archive"
-          "$jdk_home/bin/java" -version
-          echo "JAVA_HOME=$jdk_home" >> "$GITHUB_ENV"
-          echo "$jdk_home/bin" >> "$GITHUB_PATH"
-      - name: Install pinned pnpm
-        timeout-minutes: 4
-        run: |
-          npm install --global --fetch-retries=2 --fetch-timeout=45000 pnpm@12.11.2
-          test "$(pnpm --version)" = '12.11.2'
-      - name: Set up FFmpeg
-        timeout-minutes: 4
-        run: |
-          # Same checksum-pinned Linux x64 archive as the worker image.
-          ffmpeg_archive="$RUNNER_TEMP/ffmpeg.tar.xz"
-          ffmpeg_home="$RUNNER_TEMP/ffmpeg"
-          curl --fail --location --silent --show-error --retry 1 --connect-timeout 10 --max-time 90 \
-            'https://github.com/FFmpeg-Builds/FFmpeg-Builds/releases/download/autobuild-2026-11-18-12-39/ffmpeg-n8.1.3-36-ge22a4510c9-linux64-gpl-8.1.tar.xz' \
-            --output "$ffmpeg_archive"
-          echo "fce424851b0a982bdd4ac4e96f0e7b32cf29de999e54500676d41ad175ed0c79  $ffmpeg_archive" | sha256sum --check
-          mkdir -p "$ffmpeg_home"
-          tar -xJf "$ffmpeg_archive" -C "$ffmpeg_home" --strip-components=1 --no-same-owner
-          # Media code resolves these absolute paths, as in the worker image.
-          sudo install -m 0755 "$ffmpeg_home/bin/ffmpeg" "$ffmpeg_home/bin/ffprobe" /usr/local/bin/
-          /usr/local/bin/ffmpeg -version
-          /usr/local/bin/ffprobe -version
-      - name: Verify rsync
-        run: rsync --version
-      - name: Set up read-only upload manifest validation
-        uses: google-github-actions/setup-gcloud@v3.0.1
-        with:
-          version: '588.0.0'
+      - uses: ./.github/actions/temporal-application-tools
+        timeout-minutes: 8
       - name: Validate the complete application
         id: application_validation
         run: node scripts/validate-application.mjs
@@ -102,3 +60,67 @@ jobs:
             output/validation/temporal-worker-summary.json
           if-no-files-found: warn
           retention-days: 3
+
+  application-group:
+    name: Application group (${{ matrix.group }})
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [functions, integration, browser, worker]
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: ./.github/actions/temporal-application-tools
+        timeout-minutes: 8
+      - name: Validate application group
+        id: application_validation
+        env:
+          VALIDATION_GROUP: ${{ matrix.group }}
+        run: node scripts/validate-application-parallel.mjs run "$VALIDATION_GROUP"
+      - name: Preserve authenticated media failure traces
+        if: ${{ failure() && steps.application_validation.outputs.media_failed == 'true' }}
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: parallel-media-failure-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.group }}
+          path: apps/web/test-results/
+          if-no-files-found: warn
+          retention-days: 3
+      - name: Preserve group summary
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: parallel-application-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.group }}
+          path: output/validation/application-summary.json
+          if-no-files-found: error
+          retention-days: 3
+      - name: Preserve worker suite summary
+        if: ${{ always() && matrix.group == 'worker' }}
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: parallel-worker-${{ github.run_id }}-${{ github.run_attempt }}
+          path: output/validation/temporal-worker-summary.json
+          if-no-files-found: warn
+          retention-days: 3
+
+  parallel-application:
+    if: ${{ always() && github.event_name == 'pull_request' }}
+    needs: application-group
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require all application jobs to pass
+        env:
+          GROUP_RESULT: ${{ needs.application-group.result }}
+        run: test "$GROUP_RESULT" = success
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '22.23.3'
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          pattern: parallel-application-${{ github.run_id }}-${{ github.run_attempt }}-*
+          path: output/validation/groups/
+      - name: Verify complete coverage for this commit and attempt
+        run: node scripts/validate-application-parallel.mjs verify output/validation/groups
