@@ -62,12 +62,6 @@ jobs:
       - name: Set up FFmpeg
         timeout-minutes: 4
         run: |
-          if command -v ffmpeg >/dev/null && command -v ffprobe >/dev/null; then
-            ffmpeg -version
-            ffprobe -version
-            exit 0
-          fi
-
           # Same checksum-pinned Linux x64 archive as the worker image.
           ffmpeg_archive="$RUNNER_TEMP/ffmpeg.tar.xz"
           ffmpeg_home="$RUNNER_TEMP/ffmpeg"
@@ -76,10 +70,11 @@ jobs:
             --output "$ffmpeg_archive"
           echo "fce424851b0a982bdd4ac4e96f0e7b32cf29de999e54500676d41ad175ed0c79  $ffmpeg_archive" | sha256sum --check
           mkdir -p "$ffmpeg_home"
-          tar -xJf "$ffmpeg_archive" -C "$ffmpeg_home" --strip-components=1
-          "$ffmpeg_home/bin/ffmpeg" -version
-          "$ffmpeg_home/bin/ffprobe" -version
-          echo "$ffmpeg_home/bin" >> "$GITHUB_PATH"
+          tar -xJf "$ffmpeg_archive" -C "$ffmpeg_home" --strip-components=1 --no-same-owner
+          # Media code resolves these absolute paths, as in the worker image.
+          sudo install -m 0755 "$ffmpeg_home/bin/ffmpeg" "$ffmpeg_home/bin/ffprobe" /usr/local/bin/
+          /usr/local/bin/ffmpeg -version
+          /usr/local/bin/ffprobe -version
       - name: Verify rsync
         run: rsync --version
       - name: Set up read-only upload manifest validation
