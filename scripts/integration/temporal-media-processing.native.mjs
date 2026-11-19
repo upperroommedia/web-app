@@ -14,11 +14,9 @@ require('ts-node').register({
 const { runNativeMediaProcessingCanary } = require(fileURLToPath(
   new URL('../../apps/temporal-worker/src/runtime/media-processing-canary.ts', import.meta.url)
 ));
-// Exact local tools for development; CI's immutable-image acceptance remains a separate gate.
-const binaries =
-  process.platform === 'darwin'
-    ? { ffmpeg: '/opt/homebrew/bin/ffmpeg', ffprobe: '/opt/homebrew/bin/ffprobe' }
-    : { ffmpeg: '/usr/bin/ffmpeg', ffprobe: '/usr/bin/ffprobe' };
+// Linux CI uses the worker's default paths and validates the installed files' ownership.
+const localBinaries =
+  process.platform === 'darwin' ? { ffmpeg: '/opt/homebrew/bin/ffmpeg', ffprobe: '/opt/homebrew/bin/ffprobe' } : {};
 for (const mode of ['native-tools', 'pre-aborted', 'wrong-tool'])
   test(`actual synthetic PCM processing/cancel-drain/retry / ${mode}`, async () => {
     const directory = await mkdtemp(join(tmpdir(), 'urm-media-processing-'));
@@ -28,7 +26,7 @@ for (const mode of ['native-tools', 'pre-aborted', 'wrong-tool'])
       const options = {
         directory,
         signal: controller.signal,
-        ...binaries,
+        ...localBinaries,
         ...(mode === 'wrong-tool' ? { ffmpeg: process.execPath } : {}),
       };
       if (mode !== 'native-tools')
