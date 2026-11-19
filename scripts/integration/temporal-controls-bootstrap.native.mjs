@@ -59,7 +59,37 @@ test('native bootstrap protection recognizes original old pinned wait and reject
     operation = db.doc('_control/temporalReleaseOperation'),
     lock = db.doc(`temporalProviderMutationLocks/${operationId}`);
   const handles = [];
+  const ownedDocs = new Set();
+  const createFixtureDoc = async (ref, data) => {
+    await ref.create(data);
+    ownedDocs.add(ref);
+  };
+  let phase = 'create local namespace and paused authority';
   const rpc = (fn) => bounded(environment.connection.withDeadline(Date.now() + 5000, fn), 6000);
+  // A query proves the worker handled the workflow. The protection guard reads
+  // the separate visibility index, which can lag behind that acknowledgement.
+  const waitForOpenRuns = async (expected) => {
+    const end = Date.now() + 15000;
+    while (Date.now() < end) {
+      const report = await rpc(() =>
+        client.connection.workflowService.listWorkflowExecutions({
+          namespace,
+          pageSize: 100,
+          query: 'ExecutionStatus = "Running"',
+        })
+      );
+      const executions = report.executions ?? [];
+      const visible = new Set(executions.map(({ execution }) => `${execution.workflowId}/${execution.runId}`));
+      if (
+        !report.nextPageToken?.length &&
+        executions.length === expected.length &&
+        expected.every(({ workflowId, firstExecutionRunId }) => visible.has(`${workflowId}/${firstExecutionRunId}`))
+      )
+        return;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    assert.fail(`Visibility did not show the expected ${expected.length} running fixture workflows`);
+  };
   const launch = async (queue, workflow, version, identity = `owned-bootstrap-${operationId}-${workers.length}`) => {
     const worker = await Worker.create({
       connection: environment.nativeConnection,
@@ -91,9 +121,8 @@ test('native bootstrap protection recognizes original old pinned wait and reject
         const v = await rpc(() =>
           client.connection.workflowService.describeWorkerDeploymentVersion({ namespace, deploymentVersion: version })
         );
-        if (
-          v.workerDeploymentVersionInfo?.taskQueueInfos?.some((q) => q.name === queue && q.type === (workflow ? 1 : 2))
-        )
+        const registered = v.workerDeploymentVersionInfo?.taskQueueInfos ?? [];
+        if ((workflow ? [1, 2] : [2]).every((type) => registered.some((q) => q.name === queue && q.type === type)))
           return;
       } catch (error) {
         if (error.code !== 5) throw error;
@@ -109,7 +138,7 @@ test('native bootstrap protection recognizes original old pinned wait and reject
         workflowExecutionRetentionPeriod: msToTs(86400000),
       })
     );
-    await control.create({
+    await createFixtureDoc(control, {
       releaseId,
       admission: 'paused',
       domains: Object.fromEntries(
@@ -119,8 +148,8 @@ test('native bootstrap protection recognizes original old pinned wait and reject
         ])
       ),
     });
-    await state.create({ releaseId, phase: 'provider-usage-ready' });
-    await operation.create({ operationId, releaseId, bindingDigest, action: 'bootstrap-stop-cloud-run-controls' });
+    await createFixtureDoc(state, { releaseId, phase: 'provider-usage-ready' });
+    await createFixtureDoc(operation, { operationId, releaseId, bindingDigest, action: 'bootstrap-stop-cloud-run-controls' });
     const options = {
       client,
       firestore: db,
@@ -134,6 +163,7 @@ test('native bootstrap protection recognizes original old pinned wait and reject
         state: nativeSnapshotProof(await state.get()),
       },
     };
+    phase = 'observe original pinned workflow';
     const old = { deploymentName: 'urm-worker-staging', buildId: 'old-fixture' },
       oldQueue = `old-${operationId}`;
     await launch(oldQueue, true, old);
@@ -142,13 +172,15 @@ test('native bootstrap protection recognizes original old pinned wait and reject
         workflowId: `old-${operationId}`,
         taskQueue: oldQueue,
         versioningOverride: { pinnedTo: old },
-        workflowExecutionTimeout: '1 minute',
+        workflowExecutionTimeout: '5 minutes',
       })
     );
     handles.push(original);
     await rpc(() => original.query('workerRestartProbe.status'));
+    await waitForOpenRuns([original]);
     const proof = await observeBootstrapProtection(options);
     assert.equal(proof.protectedRunCount, 1);
+    phase = 'register candidate workers and verify poller identity';
     await launch('urm-controls', false, { deploymentName, buildId });
     assert.equal((await observeBootstrapRegistration(options)).role, 'controls');
     assert.equal((await observeBootstrapProtection(options)).protectedRunCount, 1);
@@ -171,28 +203,33 @@ test('native bootstrap protection recognizes original old pinned wait and reject
     for(const role of ['controls','orchestration','search','email','images','media']){
       const actions=[`bootstrap-stop-cloud-run-${role}`,`activate-cloud-run-${role}-pool`,`stop-cloud-run-${role}-activation`];
       options.role=role;
+      phase = `observe protected workflow for ${role}`;
       for(const action of actions){
         await operation.update({action});
         assert.equal((await observeBootstrapProtection(options)).protectedRunCount,1);
       }
       assert.deepEqual((await observeBootstrapRegistration(options)).queues,role!=='orchestration'?[{name:`urm-${role}`,type:2}]:[{name:'urm-orchestration',type:1},{name:'urm-orchestration',type:2}]);
     }
-    await lock.create({ state: 'held', sessionId: 'original' });
+    phase = 'reject an outstanding provider lock';
+    await createFixtureDoc(lock, { state: 'held', sessionId: 'original' });
     const before = await lock.get();
     await assert.rejects(observeBootstrapProtection(options), /CLOUD_RUN_BOOTSTRAP_PROTECTION_UNCONFIRMED/);
     assert.equal((await lock.get()).updateTime?.isEqual(before.updateTime), true);
     await lock.delete();
+    ownedDocs.delete(lock);
+    phase = 'reject a pinned candidate workflow';
     const candidateQueue = 'urm-orchestration';
     const candidate = await rpc(() =>
       client.workflow.start('WorkerRestartProbe', {
         workflowId: `candidate-${operationId}`,
         taskQueue: candidateQueue,
         versioningOverride: { pinnedTo: { deploymentName:'urm-worker-staging', buildId } },
-        workflowExecutionTimeout: '1 minute',
+        workflowExecutionTimeout: '5 minutes',
       })
     );
     handles.push(candidate);
     await rpc(() => candidate.query('workerRestartProbe.status'));
+    await waitForOpenRuns([original, candidate]);
     for(const role of ['controls','orchestration','search','email','images','media']){await selectRole(role);await assert.rejects(observeBootstrapProtection(options),/CLOUD_RUN_BOOTSTRAP_PROTECTION_UNCONFIRMED/);}
     for (const handle of handles) {
       await rpc(() => handle.signal('workerRestartProbe.release'));
@@ -201,25 +238,11 @@ test('native bootstrap protection recognizes original old pinned wait and reject
     handles.length = 0;
     // Establish all other predicates after eventual visibility settles, so the
     // following denial demonstrates current-routing protection specifically.
-    let noOpenRuns = false;
-    const visibleEnd = Date.now() + 15000;
-    while (Date.now() < visibleEnd) {
-      const visible = await rpc(() =>
-        client.connection.workflowService.listWorkflowExecutions({
-          namespace,
-          pageSize: 100,
-          query: 'ExecutionStatus = "Running"',
-        })
-      );
-      if (!(visible.executions ?? []).length) {
-        noOpenRuns = true;
-        break;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
-    assert.equal(noOpenRuns, true);
+    phase = 'observe completed fixture workflows';
+    await waitForOpenRuns([]);
     // Each target's positive non-current baseline precedes its LOCAL CAS negative.
     for(const binding of options.platform.roleBindings){
+      phase = `reject current routing for ${binding.role}`;
       await selectRole(binding.role);
       assert.equal((await observeBootstrapProtection(options)).protectedRunCount,0);
       const described=await rpc(()=>client.connection.workflowService.describeWorkerDeployment({namespace,deploymentName:binding.deploymentName}));
@@ -228,7 +251,7 @@ test('native bootstrap protection recognizes original old pinned wait and reject
       await assert.rejects(observeBootstrapProtection(options),/CLOUD_RUN_BOOTSTRAP_PROTECTION_UNCONFIRMED/);
     }
   } catch (error) {
-    failures.unshift(error);
+    failures.unshift(new Error(phase, { cause: error }));
   } finally {
     // Independent bounded cleanups retain primary failure and always stop server.
     for (const h of handles)
@@ -249,7 +272,7 @@ test('native bootstrap protection recognizes original old pinned wait and reject
     } catch (e) {
       failures.push(e);
     }
-    for (const ref of [lock, operation, control, state])
+    for (const ref of ownedDocs)
       try {
         await bounded(ref.delete());
       } catch (e) {
@@ -265,6 +288,9 @@ test('native bootstrap protection recognizes original old pinned wait and reject
     } catch (e) {
       failures.push(e);
     }
-    if (failures.length) throw new AggregateError(failures, 'Native controls protection fixture failed');
+    if (failures.length) {
+      const detail = failures[0].cause?.message ?? failures[0].message;
+      throw new AggregateError(failures, `Native controls protection fixture failed during ${phase} (${detail})`);
+    }
   }
 });
