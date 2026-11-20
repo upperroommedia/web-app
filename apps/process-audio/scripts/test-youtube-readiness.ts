@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 
 import {
   buildYouTubeReadinessSnapshot,
+  describeMediaCanaryError,
   clampYouTubeMediaByteCanaryIntervalMs,
   createNonOverlappingAsyncTaskRunner,
   createSerializedAsyncTaskRunner,
@@ -818,3 +819,8 @@ void (async () => {
   console.error(error);
   process.exitCode = 1;
 });
+
+assert.equal(describeMediaCanaryError(new Error('Requested format is not available: synthetic private detail')), 'format_unavailable');
+assert.equal(describeMediaCanaryError(new Error('Output file does not contain any stream')), 'no_output_stream');
+assert.equal(describeMediaCanaryError(new Error('HTTP Error 403: synthetic private detail')), 'upstream_access_denied');
+assert.equal(describeMediaCanaryError(new Error('synthetic sensitive value')), 'unclassified');
