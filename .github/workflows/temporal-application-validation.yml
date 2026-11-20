@@ -2,21 +2,6 @@ name: Temporal application validation
 
 on:
   pull_request:
-    paths:
-      - 'apps/**'
-      - 'functions*/**'
-      - 'function-kits/**'
-      - 'packages/**'
-      - 'scripts/**'
-      - 'patches/**'
-      - '*rules*'
-      - '*index*'
-      - '*json'
-      - 'pnpm-*.yaml'
-      - '.github/workflows/temporal-application-validation.yml'
-      - '.github/workflows/*process-audio*deploy.yml'
-      - 'ops/process-audio-hetzner/**'
-      - 'ops/local-validation/**'
   push:
     branches: [staging, main]
   workflow_dispatch:
@@ -29,11 +14,33 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  durable-application:
+  impact:
     runs-on: ubuntu-24.04
-    # The native upgrade check deliberately waits for the production five-minute
-    # timer; allow headroom for the full application run and tool installation.
-    timeout-minutes: 90
+    timeout-minutes: 10
+    outputs:
+      mode: ${{ steps.plan.outputs.mode }}
+      groups: ${{ steps.plan.outputs.groups }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          # Only non-release PRs can qualify for the prose exception.
+          fetch-depth: ${{ github.event_name == 'pull_request' && github.base_ref != 'staging' && github.base_ref != 'main' && '0' || '1' }}
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '22.23.3'
+      - id: plan
+        run: node scripts/application-validation-impact.mjs
+
+  application-group:
+    name: Application group (${{ matrix.group }})
+    needs: impact
+    if: ${{ needs.impact.outputs.mode == 'full' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        group: ${{ fromJSON(needs.impact.outputs.groups) }}
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-node@v7.1.0
@@ -81,10 +88,13 @@ jobs:
         uses: google-github-actions/setup-gcloud@v3.0.1
         with:
           version: '588.0.0'
-      - name: Validate the complete application
+      - name: Validate application group
         id: application_validation
-        run: node scripts/validate-application.mjs
+        env:
+          APPLICATION_GROUP: ${{ matrix.group }}
+        run: node scripts/validate-application-parallel.mjs run "$APPLICATION_GROUP"
       - name: Validate host coordinator source and immutable journals
+        if: ${{ matrix.group == 'functions' }}
         # Root is needed only for the owned temporary socket permission fixture;
         # it drops its client UID and never starts the host daemon.
         run: sudo python3 -B -m unittest discover -s ops/process-audio-hetzner/coordinator -p test_coordinator.py
@@ -96,13 +106,54 @@ jobs:
           path: apps/web/test-results/
           if-no-files-found: warn
           retention-days: 3
-      - name: Preserve validation summary
+      - name: Preserve group results
         if: ${{ always() }}
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: application-group-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.group }}
+          path: output/validation/group/
+          if-no-files-found: error
+          retention-days: 3
+
+  durable-application:
+    needs: [impact, application-group]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - name: Require the planned jobs to complete
+        env:
+          PLAN_RESULT: ${{ needs.impact.result }}
+          MODE: ${{ needs.impact.outputs.mode }}
+          GROUP_RESULT: ${{ needs.application-group.result }}
+        run: |
+          test "$PLAN_RESULT" = success
+          case "$MODE/$GROUP_RESULT" in
+            full/success) ;;
+            prose/skipped) echo 'Independent prose changes only. No application release evidence was produced.' ;;
+            *) exit 1 ;;
+          esac
+      - uses: actions/checkout@v7.0.1
+        if: ${{ needs.impact.outputs.mode == 'full' }}
+      - uses: actions/setup-node@v7.1.0
+        if: ${{ needs.impact.outputs.mode == 'full' }}
+        with:
+          node-version: '22.23.3'
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: ${{ needs.impact.outputs.mode == 'full' }}
+        with:
+          pattern: application-group-${{ github.run_id }}-${{ github.run_attempt }}-*
+          path: output/validation/groups
+      - name: Verify and join exact-run evidence
+        if: ${{ needs.impact.outputs.mode == 'full' }}
+        run: node scripts/validate-application-parallel.mjs join output/validation/groups
+      - name: Preserve validation summary
+        if: ${{ needs.impact.outputs.mode == 'full' }}
         uses: actions/upload-artifact@v7.0.2
         with:
           name: application-validation-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             output/validation/application-summary.json
             output/validation/temporal-worker-summary.json
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 3

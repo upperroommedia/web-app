@@ -7,6 +7,52 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 export const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
+// Each native process owns its fixture. Locally they share one serial emulator
+// session. Hosted jobs start the same dedicated configuration on isolated VMs.
+export const recoveryRuntimeParts = {
+  controls: [
+    'node ../scripts/tests/temporal-release-runtime.firestore.test.mjs',
+    'node ../scripts/tests/temporal-preparation-checkpoint.firestore.test.mjs',
+    'node ../scripts/integration/temporal-compute-isolation.native.mjs',
+    'node ../scripts/integration/temporal-controls-bootstrap.native.mjs',
+    'node ../scripts/integration/temporal-controls-promotion.native.mjs',
+  ],
+  checkpoint: [
+    'node ../scripts/integration/temporal-media-startup.native.mjs',
+    'node ../scripts/integration/temporal-media-kernel.native.mjs',
+    'node ../scripts/integration/temporal-media-recovery-checkpoint.native.mjs',
+  ],
+  drain: ['node ../scripts/integration/temporal-media-drain.native.mjs'],
+  media: [
+    'node ../scripts/integration/temporal-media-recovery-journal.native.mjs',
+    'node ../scripts/integration/temporal-media-processing.native.mjs',
+    'node ../scripts/integration/temporal-media-allocation.native.mjs',
+    'node --test ../scripts/integration/fixtures/owned-media-process.test.mjs',
+    'node ../scripts/integration/temporal-media-adoption.native.mjs',
+    'URM_MEDIA_REMOTE_ONLY=1 URM_MEDIA_REMOTE_CASES=remote-adopt,remote-revoked,remote-owner-changed,remote-generation-drift,remote-checksum-drift,remote-render-adopt node ../scripts/integration/temporal-media-adoption.native.mjs',
+    'node ../scripts/integration/temporal-media-recovery-work.native.mjs',
+    'node ../scripts/integration/temporal-image-replay.native.mjs',
+  ],
+};
+
+export function recoveryRuntimeCommand(suites = Object.values(recoveryRuntimeParts).flat()) {
+  return [
+    'pnpm',
+    '--dir',
+    'functions',
+    'exec',
+    'firebase',
+    'emulators:exec',
+    '--project',
+    'demo-release-runtime',
+    '--only',
+    'auth,firestore,database,storage',
+    '--config',
+    '../firebase.test.json',
+    suites.join(' && '),
+  ];
+}
+
 export function applicationStages(root = ROOT) {
   const node = (...args) => ['node', ...args];
   const pnpm = (...args) => ['pnpm', ...args];
@@ -49,6 +95,7 @@ export function applicationStages(root = ROOT) {
       node(
         '--test',
         'scripts/tests/validate-application.test.mjs',
+        'scripts/tests/validate-application-parallel.test.mjs',
         'scripts/tests/local-validation-launcher.test.mjs',
         'scripts/tests/test-temporal-worker.test.mjs',
         'scripts/tests/local-test-server-owner.test.mjs',
@@ -100,20 +147,7 @@ export function applicationStages(root = ROOT) {
         node('--test', 'scripts/temporal-media-history.test.mjs'),
         node('--test', 'scripts/temporal-media-restored-activation.test.mjs'),
         node('--test', 'scripts/temporal-restored-startup.test.mjs'),
-        pnpm(
-          '--dir',
-          'functions',
-          'exec',
-          'firebase',
-          'emulators:exec',
-          '--project',
-          'demo-release-runtime',
-          '--only',
-          'auth,firestore,database,storage',
-          '--config',
-          '../firebase.test.json',
-          'node ../scripts/tests/temporal-release-runtime.firestore.test.mjs && node ../scripts/tests/temporal-preparation-checkpoint.firestore.test.mjs && node ../scripts/integration/temporal-compute-isolation.native.mjs && node ../scripts/integration/temporal-controls-bootstrap.native.mjs && node ../scripts/integration/temporal-controls-promotion.native.mjs && node ../scripts/integration/temporal-media-startup.native.mjs && node ../scripts/integration/temporal-media-kernel.native.mjs && node ../scripts/integration/temporal-media-recovery-checkpoint.native.mjs && node ../scripts/integration/temporal-media-drain.native.mjs && node ../scripts/integration/temporal-media-recovery-journal.native.mjs && node ../scripts/integration/temporal-media-processing.native.mjs && node ../scripts/integration/temporal-media-allocation.native.mjs && node --test ../scripts/integration/fixtures/owned-media-process.test.mjs && node ../scripts/integration/temporal-media-adoption.native.mjs && URM_MEDIA_REMOTE_ONLY=1 URM_MEDIA_REMOTE_CASES=remote-adopt,remote-revoked,remote-owner-changed,remote-generation-drift,remote-checksum-drift,remote-render-adopt node ../scripts/integration/temporal-media-adoption.native.mjs && node ../scripts/integration/temporal-media-recovery-work.native.mjs && node ../scripts/integration/temporal-image-replay.native.mjs'
-        ),
+        recoveryRuntimeCommand(),
         pnpm(
           '--dir',
           'functions',
@@ -250,7 +284,13 @@ export async function runStages(
             active.once('error', (error) => resolveResult({ error: error.message }));
             active.once('close', (code, signal) => resolveResult({ code, signal }));
           });
-          row.commands.push({ ...result, elapsedMs: Date.now() - begun });
+          row.commands.push({
+            ...result,
+            argvSha256: createHash('sha256')
+              .update(JSON.stringify([command, ...args]))
+              .digest('hex'),
+            elapsedMs: Date.now() - begun,
+          });
           await cancellationCleanup;
           if (active.pid && alive(active)) {
             await settle(active);

@@ -1,4 +1,4 @@
-import { applicationStages } from './validate-application.mjs';
+import { groupStages } from './validate-application-parallel.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, cpSync, rmSync, existsSync } from 'node:fs';
@@ -428,11 +428,10 @@ test('audio upload ignore rules exclude root OIDC files while retaining workspac
 
 test('application CI runs both audio deployment suites for workflow and host changes', () => {
   const workflow = readFileSync(join(root, '.github/workflows/temporal-application-validation.yml'), 'utf8');
-  assert.ok(workflow.includes("- '.github/workflows/*process-audio*deploy.yml'"));
-  assert.ok(workflow.includes("- 'ops/process-audio-hetzner/**'"));
-  const validationCommand = 'node scripts/validate-application.mjs';
+  assert.doesNotMatch(workflow, /^\s+paths(?:-ignore)?:/m);
+  const validationCommand = 'node scripts/validate-application-parallel.mjs run';
   assert.equal(workflow.split(validationCommand).length - 1, 1);
-  const deployment = applicationStages().find((stage) => stage.id === 'audio-deployment');
+  const deployment = groupStages('worker').find(stage => stage.id === 'audio-deployment');
   assert.deepEqual(deployment.commands, [
     ['node', '--test', 'scripts/process-audio-deployment.test.mjs', 'scripts/test-process-audio-hetzner-isolation.mjs'],
   ]);

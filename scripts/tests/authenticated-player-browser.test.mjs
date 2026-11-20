@@ -1,3 +1,4 @@
+import { groupStages } from '../validate-application-parallel.mjs';
 import { applicationStages } from '../validate-application.mjs';
 import test from 'node:test';
 import { MEDIA_FIXTURE_ADMIN, MEDIA_FIXTURE_UPLOADER } from '../../apps/web/tests/helpers/mediaFixtureIdentity.ts';
@@ -512,7 +513,7 @@ test('production artifact binds actual built bytes, BUILD_ID and exact compile/r
   }
 });
 
-test('CI checks the actual producer/parser contract once before application regression tests', () => {
+test('CI checks the actual producer/parser contract once before the browser build and regressions', () => {
   const workflow = readFileSync(
     new URL('../../.github/workflows/temporal-application-validation.yml', import.meta.url),
     'utf8'
@@ -525,7 +526,9 @@ test('CI checks the actual producer/parser contract once before application regr
   );
   assert(stages.indexOf(contract) > stages.findIndex((stage) => stage.id === 'kits-native'));
   assert(stages.indexOf(contract) < stages.findIndex((stage) => stage.id === 'functions'));
-  assert.equal(workflow.split('run: node scripts/validate-application.mjs').length - 1, 1);
+  assert.deepEqual(groupStages('browser').map(stage => stage.id).slice(2),
+    ['media-contracts', 'build-web', 'media-browser', 'cold-navigation']);
+  assert.equal(workflow.split('run: node scripts/validate-application-parallel.mjs run').length - 1, 1);
   assert.match(workflow, /failure\(\) && steps\.application_validation\.outputs\.media_failed == 'true'/);
 });
 

@@ -6,6 +6,7 @@ import { resolve } from 'node:path';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { execFileSync } from 'node:child_process';
+import { readFullApplicationRun } from './temporal-preparation-evidence.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   validateReleaseConfig,
@@ -925,18 +926,7 @@ async function main() {
       };
     });
     const observationStart = new Date().toISOString();
-    const gh = (path) =>
-      JSON.parse(execFileSync('gh', ['api', path], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }));
-    const workflow = gh('repos/upperroommedia/web-app/actions/workflows/temporal-application-validation.yml');
-    const run = gh(`repos/upperroommedia/web-app/actions/runs/${review.candidateCiRunId}`);
-    if (
-      run.workflow_id !== workflow.id ||
-      run.repository?.full_name !== 'upperroommedia/web-app' ||
-      run.head_sha !== commit ||
-      run.status !== 'completed' ||
-      run.conclusion !== 'success'
-    )
-      throw new Error('Exact candidate application CI must have actually passed');
+    const run = await readFullApplicationRun(review.candidateCiRunId, commit);
     const candidateCi = {
       id: run.id,
       workflowId: run.workflow_id,
