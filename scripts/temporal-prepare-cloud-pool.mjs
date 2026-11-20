@@ -20,10 +20,17 @@ function matches(expected, actual) {
 }
 export function verifyPreparedPoolMetadata(plan, actual, { manualInstanceCount = 0 } = {}) {
   if (![0, 1].includes(manualInstanceCount)) fail();
+  const scaling = actual?.scaling;
+  // Older responses omit the mode and may omit a zero count.
+  if (scaling !== undefined && (
+    !scaling || typeof scaling !== 'object' || Array.isArray(scaling) ||
+    Object.keys(scaling).some(key => key !== 'scalingMode' && key !== 'manualInstanceCount') ||
+    (scaling.scalingMode !== undefined && scaling.scalingMode !== 'MANUAL')
+  )) fail();
   if (!actual || normalize(actual.name) !== plan.body.name || typeof actual.uid !== 'string' || !actual.uid || actual.deleteTime ||
     (actual.reconciling !== undefined && actual.reconciling !== false) ||
     !/^[1-9][0-9]*$/.test(String(actual.generation ?? '')) || String(actual.generation) !== String(actual.observedGeneration) ||
-    (actual.scaling?.manualInstanceCount === undefined ? 0 : actual.scaling.manualInstanceCount) !== manualInstanceCount ||
+    (scaling?.manualInstanceCount === undefined ? 0 : scaling.manualInstanceCount) !== manualInstanceCount ||
     !matches(plan.body.annotations, actual.annotations) || !matches(plan.body.template, actual.template) || !matches(plan.body.labels, actual.labels) ||
     actual.template?.containers?.[0]?.command?.length || actual.template?.containers?.[0]?.args?.length ||
     actual.terminalCondition?.state !== 'CONDITION_SUCCEEDED' ||
@@ -70,6 +77,9 @@ export async function prepareCloudRunZeroPool({ platform, role, settings, operat
     typeof observeComputeIsolation !== 'function'||typeof authorizeCreate!=='function') fail();
   const body = renderServerlessWorkerPool(binding, settings);
   body.annotations = { 'urm.upperroom.media/preparation': operationId };
+  // Create derives the resource name from the parent and workerPoolId query.
+  // Keep the full name in the saved plan for ownership and readback checks.
+  const { name, ...createBody } = body;
   const plan = { schemaVersion: 1, operationId, releaseId, evidenceDigest, role, buildId: platform.workerBuildId,
     runner: binding.runnerServiceAccount, identityReceiptSHA256: hash(identityReceipt), body };
   let state = saved;
@@ -81,7 +91,7 @@ export async function prepareCloudRunZeroPool({ platform, role, settings, operat
     if (state.stage === 'attempted' || state.stage === 'failed') fail();
     if (state.stage === 'planned') {
       const prerequisitesProof = await verifyPoolPreparationPrerequisites(plan, identityReceipt, api);
-      try { await api(`https://run.googleapis.com/v2/${body.name}`); fail(); }
+      try { await api(`https://run.googleapis.com/v2/${name}`); fail(); }
       catch (error) { if (error?.status !== 404) throw error; }
       const isolation = await observeComputeIsolation();
       assertFreshComputeIsolation(isolation, platform.temporalNamespace);
@@ -110,7 +120,7 @@ export async function prepareCloudRunZeroPool({ platform, role, settings, operat
       const response = await api(
         `https://run.googleapis.com/v2/projects/urm-app-staging/locations/us-central1/workerPools?workerPoolId=${binding.poolName}`,
         'POST',
-        body,
+        createBody,
         beforeSend
       );
       state = { ...state, stage: 'acknowledged', nativeOperation: operationName(response?.name) };
@@ -118,7 +128,7 @@ export async function prepareCloudRunZeroPool({ platform, role, settings, operat
     }
     if (state.stage === 'completed') {
       if(plan.role==='media')await verifyPoolPreparationPrerequisites(plan,identityReceipt,api);
-      const current = verifyPreparedPoolMetadata(plan, await api(`https://run.googleapis.com/v2/${body.name}`));
+      const current = verifyPreparedPoolMetadata(plan, await api(`https://run.googleapis.com/v2/${name}`));
       if (!isDeepStrictEqual(state.pool, current)) fail();
       return state;
     }
@@ -135,7 +145,7 @@ export async function prepareCloudRunZeroPool({ platform, role, settings, operat
     if (result?.done !== true) fail();
     if (result.error) { await save({ ...state, stage: 'failed', errorSHA256: hash(result.error) }); fail(); }
     const completed = verifyPreparedPoolMetadata(plan, result.response);
-    const current = verifyPreparedPoolMetadata(plan, await api(`https://run.googleapis.com/v2/${body.name}`));
+    const current = verifyPreparedPoolMetadata(plan, await api(`https://run.googleapis.com/v2/${name}`));
     if (!isDeepStrictEqual(completed, current)) fail();
     state = { ...state, stage: 'completed', pool: current, verifiedAt: new Date().toISOString(),
       scope: 'created configuration; desired manual count zero, not observed live instance count or activation readiness' };

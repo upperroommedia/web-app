@@ -13,6 +13,7 @@ test('source authorization executes after delayed credential acquisition and bef
     request: async (_url, options) => {
       order.push('HTTP');
       assert.equal(options.method, 'PATCH');
+      assert.equal(options.redirect, 'error');
       return { ok: true, json: async () => ({ accepted: true }) };
     },
   });

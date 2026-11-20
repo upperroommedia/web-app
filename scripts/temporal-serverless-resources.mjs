@@ -82,7 +82,6 @@ export function renderServerlessWorkerPool(config, settings) {
   const media = config.role === 'media';
   const environment = {
     NODE_ENV: 'production',
-    PORT: '8080',
     NODE_OPTIONS: '--max-old-space-size=1536',
     ...firebaseResourceEnvironment({
       firebaseProjectId: config.projectId,

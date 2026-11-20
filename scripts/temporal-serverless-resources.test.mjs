@@ -33,6 +33,8 @@ test('a controls pool starts at zero with one queue, its own identity and no pro
   assert.equal(env.STAGING_PROVIDER_MODE, 'sandbox');
   assert.equal(Object.hasOwn(env, 'GOOGLE_APPLICATION_CREDENTIALS'), false);
   assert.equal(Object.hasOwn(env, 'CLOUD_RUN_REVISION'), false);
+  assert.equal(Object.hasOwn(env, 'PORT'), false, 'Cloud Run reserves PORT');
+  assert.equal(worker.startupProbe.httpGet.port, 8080);
   assert.equal(
     worker.env.some((entry) => entry.valueSource),
     false

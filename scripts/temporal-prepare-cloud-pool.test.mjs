@@ -33,8 +33,15 @@ function fixture(role='controls') {
       if (method === 'POST') {
         postCount++;
         assert.equal(state.stage, 'attempted');
-        pool = { ...structuredClone(body), uid: 'native-pool-uid', generation: '1', observedGeneration: '1', terminalCondition: { state: 'CONDITION_SUCCEEDED' },
-          latestCreatedRevision: `${body.name}/revisions/rev1`, latestReadyRevision: `${body.name}/revisions/rev1` };
+        const request = new URL(url);
+        const workerPoolId = request.searchParams.get('workerPoolId');
+        const name = `${request.pathname.slice('/v2/'.length)}/${workerPoolId}`;
+        assert.equal(request.pathname, '/v2/projects/urm-app-staging/locations/us-central1/workerPools');
+        assert.equal(workerPoolId, p.roleBindings.find(binding => binding.role === role).poolName);
+        assert.equal(Object.hasOwn(body, 'name'), false, 'WorkerPools.CreateWorkerPool rejects a name on the request body');
+        assert.deepEqual({ name, ...body }, state.plan.body);
+        pool = { name, ...structuredClone(body), uid: 'native-pool-uid', generation: '1', observedGeneration: '1', terminalCondition: { state: 'CONDITION_SUCCEEDED' },
+          latestCreatedRevision: `${name}/revisions/rev1`, latestReadyRevision: `${name}/revisions/rev1` };
         return { name: op };
       }
       if (url.endsWith(op)) return { name: op, done: true, response: structuredClone(pool) };
@@ -51,6 +58,18 @@ test('one zero-target create after saved attempt, exact acknowledged LRO and nat
   assert.equal(f.posts, 1);
   assert.equal(f.calls.some(([method, url]) => method === 'PATCH' || /setIamPolicy|:access|compute-config/.test(url)), false);
   await prepareCloudRunZeroPool({ ...f.options, saved: f.saved });
+  assert.equal(f.posts, 1);
+});
+test('native MANUAL mode and zero count complete preparation', async () => {
+  const f = fixture(), api = f.options.api;
+  f.options.api = async (...args) => {
+    const value = await api(...args);
+    const pool = value.response ?? value;
+    if (pool.scaling) pool.scaling.scalingMode = 'MANUAL';
+    return value;
+  };
+  const result = await prepareCloudRunZeroPool(f.options);
+  assert.equal(result.pool.desiredManualInstanceCount, 0);
   assert.equal(f.posts, 1);
 });
 test('lost create ACK cannot be retried or adopted by matching pool GET', async () => {
@@ -88,7 +107,7 @@ for (const bad of ['runner', 'secret-version', 'secret-permission', 'isolation',
     };
     await assert.rejects(prepareCloudRunZeroPool(f.options)); assert.equal(f.posts, 0);
   });
-for (const bad of ['operation', 'nonzero', 'null-count', 'command', 'marker', 'uid', 'failed'])
+for (const bad of ['operation', 'nonzero', 'null-count', 'automatic-mode', 'automatic-settings', 'command', 'marker', 'uid', 'failed'])
   test(`native ${bad} readback cannot complete preparation or cause another create`, async () => {
     const f = fixture(), api = f.options.api;
     f.options.api = async (...args) => {
@@ -98,6 +117,8 @@ for (const bad of ['operation', 'nonzero', 'null-count', 'command', 'marker', 'u
         if (bad === 'failed') { value.error = { code: 7 }; delete value.response; }
         if (bad === 'nonzero') value.response.scaling.manualInstanceCount = 1;
         if (bad === 'null-count') value.response.scaling.manualInstanceCount = null;
+        if (bad === 'automatic-mode') value.response.scaling = { scalingMode: 'AUTOMATIC' };
+        if (bad === 'automatic-settings') value.response.scaling = { minInstanceCount: 0, maxInstanceCount: 1 };
         if (bad === 'command') value.response.template.containers[0].command = ['different'];
         if (bad === 'marker') value.response.annotations = {};
         if (bad === 'uid') value.response.uid = 'different';
