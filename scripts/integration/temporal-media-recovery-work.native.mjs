@@ -163,11 +163,16 @@ test(
         stage = `${mode}/setup`;
         const f = await mediaRecoveryFixture();
         let cycle;
-        f.options.runtime.execute = async () => {
+        const executeControlled = f.options.runtime.execute;
+        f.options.runtime.execute = async (inputs) => {
           cycle = structuredClone(f.saved);
+          if (mode === 'joint-supervised-recovery') return executeControlled(inputs);
           throw new Error('CONTROLLED_CAPTURE');
         };
-        await assert.rejects(runMediaRecoveryCycle(f.options));
+        if (mode === 'joint-supervised-recovery')
+          assert.equal((await runMediaRecoveryCycle(f.options)).stage, 'completed');
+        else
+          await assert.rejects(runMediaRecoveryCycle(f.options), /CONTROLLED_CAPTURE/);
         if (mode === 'normal') {
           cycle.plan.createdAt = new Date(Date.now() - 290000).toISOString();
           cycle.plan.expiresAt = Date.parse(cycle.plan.createdAt) + 300000;
