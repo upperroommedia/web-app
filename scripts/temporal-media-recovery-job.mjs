@@ -373,6 +373,16 @@ export async function assertMediaRecoveryJobAccess({ api, plan, access, jobUid }
   if (!isDeepStrictEqual(policy?.bindings, expected.grants) || policy.etag !== access.observedEtag) jobUnconfirmed();
 }
 
+export function renderMediaRecoveryJobCreateRequest(plan) {
+  // Cloud Run derives the resource name from the parent and jobId query.
+  const { name, ...body } = plan.job;
+  return {
+    url: endpoint + location + '/jobs?jobId=' + name.split('/').at(-1),
+    method: 'POST',
+    body,
+  };
+}
+
 /** A single CREATE and RUN under the caller's release snapshot and normal pool
  * isolation fence. Persisting intent or losing either ACK grants zero resends. */
 export async function advanceMediaRecoveryJob({ api, plan, saved, save, fence }) {
@@ -450,12 +460,8 @@ export async function advanceMediaRecoveryJob({ api, plan, saved, save, fence })
     return acknowledged;
   };
 
-  const create = await mutate(
-    'create',
-    endpoint + location + '/jobs?jobId=' + plan.job.name.split('/').at(-1),
-    plan.job,
-    absent
-  );
+  const createRequest = renderMediaRecoveryJobCreateRequest(plan);
+  const create = await mutate('create', createRequest.url, createRequest.body, absent);
   await fence(state);
   const createResult = await api(endpoint + jobOperationName(create.operation));
   if (normalize(createResult?.name) !== create.operation || createResult.error) jobUnconfirmed();

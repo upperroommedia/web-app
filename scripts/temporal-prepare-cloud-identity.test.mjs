@@ -50,6 +50,22 @@ test('lost attempt checkpoint acknowledgement cannot send HTTP', async () => {
   await assert.rejects(prepareCloudRunIdentity({ ...f.options, saved: f.saved }));
   assert.equal(f.postCount, 0);
 });
+test('an acknowledged account can propagate after a native GET 404 without another create', async () => {
+  const f = fixture(), native = f.options.api;
+  let propagationMiss = false;
+  f.options.api = async (url, method, body) => {
+    if ((method === undefined || method === 'GET') && f.saved?.stage === 'acknowledged' && !propagationMiss) {
+      propagationMiss = true;
+      throw Object.assign(new Error('not yet visible'), { status: 404 });
+    }
+    return native(url, method, body);
+  };
+  const result = await prepareCloudRunIdentity(f.options);
+  assert.ok(propagationMiss);
+  assert.equal(result.account.uniqueId, f.account.uniqueId);
+  assert.equal(f.saved.stage, 'completed');
+  assert.equal(f.postCount, 1);
+});
 test('lost create acknowledgement requires exact native audit binding, never adoption by marker alone', async () => {
   const f = fixture(), native = f.options.api;
   f.options.api = async (url, method, body) => {

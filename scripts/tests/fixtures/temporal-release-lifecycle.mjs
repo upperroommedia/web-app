@@ -8,6 +8,9 @@ import * as url from 'node:url';
 import * as continuity from '../../temporal-provider-usage-continuity.mjs';
 import { createReleaseFirebaseResources, runWithCleanup } from '../../temporal-release-resources.mjs';
 import { workerHandoffInput } from '../../temporal-worker-handoff-plan.mjs';
+import {
+  assertStagingMediaSuccessorLineage, verifyStagingMediaPredecessorStillIsolated,
+} from '../../temporal-staging-media-successor.mjs';
 const scenario = process.argv[2];
 const events = [],
   apps = [];
@@ -182,6 +185,9 @@ const imports = {
   },
   './temporal-release-resources.mjs': { runWithCleanup },
   './temporal-worker-handoff-plan.mjs': { workerHandoffInput },
+  './temporal-staging-media-successor.mjs': {
+    assertStagingMediaSuccessorLineage, verifyStagingMediaPredecessorStillIsolated,
+  },
   './temporal-release-api.mjs': {
     createReleaseApi: () => async () => {
       throw new Error('UNEXPECTED_API_REQUEST');

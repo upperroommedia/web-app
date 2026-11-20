@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { setTimeout as delay } from 'node:timers/promises';
 import { isDeepStrictEqual } from 'node:util';
 import { validateCloudRunReleasePlatform } from './temporal-release-cloud-run.mjs';
 import { preparationIdentityEmail } from './temporal-preparation-resources.mjs';
@@ -98,7 +99,18 @@ export async function prepareCloudRunIdentity(options) {
     }
     if (state.stage === 'rejected') fail();
     if (!Number.isFinite(Date.parse(state.attemptedAt ?? ''))) fail();
-    const current = nativeAccount(plan, await read());
+    // A saved create acknowledgement authorizes bounded GET-only propagation checks.
+    const deadline = state.stage === 'acknowledged' ? performance.now() + 15_000 : undefined;
+    let observedAccount = await read();
+    while (deadline !== undefined && observedAccount === null) {
+      const remaining = deadline - performance.now();
+      if (remaining <= 0) break;
+      await delay(Math.min(500, remaining));
+      if (performance.now() >= deadline) break;
+      observedAccount = await read();
+    }
+    if (deadline !== undefined && performance.now() >= deadline) fail();
+    const current = nativeAccount(plan, observedAccount);
     if (state.stage === 'attempted') {
       const audit = await creationAudit(plan, state, current, api);
       state = { ...state, stage: 'acknowledged', account: current, audit };

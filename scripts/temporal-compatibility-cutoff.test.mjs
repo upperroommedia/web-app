@@ -6,6 +6,7 @@ import { createRequire } from 'node:module';
 import { requiresSearchBootstrap } from './temporal-bootstrap-search.mjs';
 import { isSearchProviderUsageContinuity } from './temporal-provider-usage-continuity.mjs';
 import { proofDigest, nativeSnapshotProof, assertNativeSnapshot } from './temporal-release-runtime.mjs';
+import { assertStagingMediaSuccessorLineage } from './temporal-staging-media-successor.mjs';
 import {
   compatibilityCutoffUpdates,
   compatibilitySettlingDeadline,
@@ -295,6 +296,8 @@ function transactionFixture({ race, crash, mode = 'initial-cutover' } = {}) {
     workerReadiness: undefined,
     hetznerActivation: undefined,
     assertNativeSnapshot,
+    assertStagingMediaSuccessorLineage,
+    resourceBinding: { projectId: 'demo-release-test' },
     transitionPending: false,
     auditPath: (revision) => `fixture-audit/${revision}`,
     action: 'compatibility-ready',

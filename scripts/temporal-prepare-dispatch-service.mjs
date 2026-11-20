@@ -37,6 +37,9 @@ export async function prepareCloudRunDispatchService({ platform, role, settings,
     typeof api !== 'function' || typeof save !== 'function') fail();
   const body = workload.body;
   body.annotations = { 'urm.upperroom.media/preparation': operationId };
+  // Create derives the resource name from the parent and serviceId query.
+  // Keep the full name in the saved plan for ownership and readback checks.
+  const { name, ...createBody } = body;
   const plan = { schemaVersion: 1, operationId, releaseId, evidenceDigest, role, buildId: platform.workerBuildId,
     runner: workload.runner, apiKeyVersion: settings.apiKeyVersion, identityReceiptSHA256: proofDigest(identityReceipt), body };
   let state = saved;
@@ -47,14 +50,14 @@ export async function prepareCloudRunDispatchService({ platform, role, settings,
     if (state.stage === 'attempted' || state.stage === 'failed') fail();
     if (state.stage === 'planned') {
       const before = await prerequisites(plan, identityReceipt, api, platform);
-      try { await api(`https://run.googleapis.com/v2/${body.name}`); fail(); }
+      try { await api(`https://run.googleapis.com/v2/${name}`); fail(); }
       catch (error) { if (error?.status !== 404) throw error; }
       const fresh = await prerequisites(plan, identityReceipt, api, platform);
       if (!isDeepStrictEqual(before, fresh)) fail();
       state = { plan, stage: 'attempted', attemptedAt: new Date().toISOString(), prerequisites: fresh };
       await save(state);
       // v2 services.create has serviceId/validateOnly, not an idempotency requestId.
-      const response = await api(`https://run.googleapis.com/v2/projects/urm-app-staging/locations/us-central1/services?serviceId=${platform.dispatch.serviceId}`, 'POST', body);
+      const response = await api(`https://run.googleapis.com/v2/projects/urm-app-staging/locations/us-central1/services?serviceId=${platform.dispatch.serviceId}`, 'POST', createBody);
       state = { ...state, stage: 'acknowledged', nativeOperation: operationName(response?.name) };
       await save(state);
     }
@@ -63,7 +66,7 @@ export async function prepareCloudRunDispatchService({ platform, role, settings,
       if (!isDeepStrictEqual(state.service, current)) fail();
       const fresh = await prerequisites(plan, identityReceipt, api, platform);
       if (!isDeepStrictEqual(fresh, state.prerequisites)) fail();
-      const policy = await api(`https://run.googleapis.com/v2/${body.name}:getIamPolicy?options.requestedPolicyVersion=3`);
+      const policy = await api(`https://run.googleapis.com/v2/${name}:getIamPolicy?options.requestedPolicyVersion=3`);
       if (!policy || (policy.bindings !== undefined && (!Array.isArray(policy.bindings) || policy.bindings.length))) fail();
       return state;
     }
@@ -80,10 +83,10 @@ export async function prepareCloudRunDispatchService({ platform, role, settings,
     if (result?.done !== true) fail();
     if (result.error) { await save({ ...state, stage: 'failed', errorSHA256: proofDigest(result.error) }); fail(); }
     const acknowledged = preparedDispatchServiceIdentity(await observeCloudRunDispatchService(platform,
-      (url, ...args) => url === `https://run.googleapis.com/v2/${body.name}` ? Promise.resolve(result.response) : api(url, ...args), 'disabled'), plan);
+      (url, ...args) => url === `https://run.googleapis.com/v2/${name}` ? Promise.resolve(result.response) : api(url, ...args), 'disabled'), plan);
     const current = preparedDispatchServiceIdentity(await observeCloudRunDispatchService(platform, api, 'disabled'), plan);
     if (!isDeepStrictEqual(acknowledged, current)) fail();
-    const policy = await api(`https://run.googleapis.com/v2/${body.name}:getIamPolicy?options.requestedPolicyVersion=3`);
+    const policy = await api(`https://run.googleapis.com/v2/${name}:getIamPolicy?options.requestedPolicyVersion=3`);
     if (!policy || (policy.bindings !== undefined && (!Array.isArray(policy.bindings) || policy.bindings.length))) fail();
     const fresh = await prerequisites(plan, identityReceipt, api, platform);
     if (!isDeepStrictEqual(fresh, state.prerequisites)) fail();

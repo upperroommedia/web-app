@@ -45,7 +45,7 @@ function profile() {
   };
 }
 
-function fixture() {
+export function dispatchServiceFixture() {
  const p=profile(), runner=p.dispatch.runnerServiceAccount;
  const operationId='11111111-2222-4333-8444-555555555555',releaseId='22222222-2222-4333-8444-555555555555',evidenceDigest='e'.repeat(64);
  const op='projects/urm-app-staging/locations/us-central1/operations/create-service';
@@ -61,8 +61,16 @@ function fixture() {
  if(url.includes(':getIamPolicy'))return{etag:'empty',bindings:[]};
  if(method==='POST'){
  assert.equal(saved.stage,'attempted');posts++;
- service={...structuredClone(body),uid:'service-uid',etag:'service-etag',generation:'1',observedGeneration:'1',terminalCondition:{state:'CONDITION_SUCCEEDED'},
- latestCreatedRevision:`${body.name}/revisions/${p.dispatch.serviceId}-00001-abc`,latestReadyRevision:`${body.name}/revisions/${p.dispatch.serviceId}-00001-abc`,
+ const request = new URL(url);
+ const serviceId = request.searchParams.get('serviceId');
+ const name = `${request.pathname.slice('/v2/'.length)}/${serviceId}`;
+ assert.equal(request.origin, 'https://run.googleapis.com');
+ assert.equal(request.pathname, '/v2/projects/urm-app-staging/locations/us-central1/services');
+ assert.equal(serviceId, p.dispatch.serviceId);
+ assert.equal(Object.hasOwn(body, 'name'), false, 'Services.CreateService rejects a name on the request body');
+ assert.deepEqual({ name, ...body }, saved.plan.body);
+ service={name,...structuredClone(body),uid:'service-uid',etag:'service-etag',generation:'1',observedGeneration:'1',terminalCondition:{state:'CONDITION_SUCCEEDED'},
+ latestCreatedRevision:`${name}/revisions/${serviceId}-00001-abc`,latestReadyRevision:`${name}/revisions/${serviceId}-00001-abc`,
  uri:`https://${p.dispatch.serviceId}-251680231116.us-central1.run.app`};
  service.trafficStatuses=[{revision:service.latestReadyRevision,percent:100}];
  revision={...structuredClone(service.template),name:service.latestReadyRevision,uid:'revision-uid',etag:'rev-etag',generation:'1',observedGeneration:'1',conditions:[{type:'Ready',state:'CONDITION_SUCCEEDED'}]};
@@ -77,7 +85,7 @@ function fixture() {
 }
 
 export async function cycleFixture() {
- const f=fixture(), service=await prepareCloudRunDispatchService(f.options), p=f.options.platform;
+ const f=dispatchServiceFixture(), service=await prepareCloudRunDispatchService(f.options), p=f.options.platform;
  const receipt=(kind,id)=>({releaseId:f.options.releaseId,identityState:{stage:'completed',plan:{kind,role:'dispatch',buildId,email:p.dispatch[`${kind}ServiceAccount`],evidenceDigest:f.options.evidenceDigest},account:{email:p.dispatch[`${kind}ServiceAccount`],uniqueId:id,description:'owned'}}});
  const eventReceipt=receipt('event','12345678901234567891'),schedulerReceipt=receipt('scheduler','12345678901234567892');
  let saved, immutable, job, creates=0, pauses=0; const calls=[];

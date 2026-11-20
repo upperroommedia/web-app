@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { verifyPreparationEvidence, readPreparationReceipt } from './temporal-preparation-evidence.mjs';
+import { verifyPreparationEvidence, readPreparationReceipt, readFullApplicationRun } from './temporal-preparation-evidence.mjs';
 import { serverlessResourceNames } from './temporal-serverless-platform.mjs';
 import { dispatchResourceNames } from './temporal-serverless-dispatch-resources.mjs';
 const sha = value => createHash('sha256').update(value).digest('hex');
@@ -68,6 +68,19 @@ test('joins actual bounded ZIP bytes, exact tested merge, source archive and exp
   assert.match(result.scope, /not SLSA or runtime readiness/);
   assert.equal(f.calls.filter(x => x.endsWith('/zip')).length, 1);
 });
+test('successor provenance requires a verified signature, a PR run and the reviewed merge base', async t => {
+  const f = await evidenceFixture(t);
+  const options = { ...f.options, signedPullRequestBase: 'f'.repeat(40) };
+  const run = f.records['/actions/runs/123'];
+  const commit = f.records[`/git/commits/${buildId}`];
+  await assert.rejects(verifyPreparationEvidence(options));
+  commit.verification = { verified: true };
+  run.event = 'push';
+  await assert.rejects(verifyPreparationEvidence(options));
+  run.event = 'pull_request';
+  await assert.rejects(verifyPreparationEvidence({ ...options, signedPullRequestBase: '0'.repeat(40) }));
+  assert.equal((await verifyPreparationEvidence(options)).commit, buildId);
+});
 for (const mutation of ['failed-stage', 'nonzero-command', 'filtered-worker', 'failed-worker', 'duplicate-stage', 'missing-commands'])
   test(`rejects summary ${mutation} even when outer receipts and archive hash agree`, async t => {
     const f = await evidenceFixture(t, ({ application, worker }) => {
@@ -102,4 +115,24 @@ test('private evidence rejects altered bytes, world-readable receipts and missin
   const image = JSON.parse(await (await import('node:fs/promises')).readFile(f.proof.image.path));
   await rm(Object.keys(image.inputs)[0]);
   await assert.rejects(verifyPreparationEvidence(f.options));
+});
+
+test('legacy mutation gates require the complete exact-tree artifact for the current successful attempt', async t => {
+  const f = await evidenceFixture(t);
+  const run = f.records['/actions/runs/123'];
+  run.workflow_id = 789;
+  f.records['/actions/workflows/temporal-application-validation.yml'] = { id: 789 };
+  const list = { total_count: 1, artifacts: [f.records['/actions/artifacts/456']] };
+  const key = '/actions/runs/123/artifacts?name=application-validation-123-1';
+  f.records[key] = list;
+  const read = () => readFullApplicationRun(123, buildId, f.options.github);
+  assert.deepEqual(await read(), run);
+  f.records[key] = { total_count: 0, artifacts: [] };
+  await assert.rejects(read());
+  f.records[key] = list;
+  run.run_attempt = 2;
+  await assert.rejects(read());
+  run.run_attempt = 1;
+  f.records[`/git/commits/${buildId}`].tree.sha = '0'.repeat(40);
+  await assert.rejects(read());
 });

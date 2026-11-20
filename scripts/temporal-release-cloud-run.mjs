@@ -19,6 +19,7 @@ import {nativeSnapshotProof,proofDigest as recoveryHash} from './temporal-releas
 import {startMediaRecoveryWorkflow,observeMediaRecoveryStartedPool} from './temporal-media-recovery-start.mjs';
 import {independentPromotionRoles,denyUnprovedMediaPromotion} from './temporal-promotion-roles.mjs';
 import {loadNativeReleaseApplication} from './temporal-native-application.mjs';
+import { observeStagingPredecessorTemporal } from './temporal-staging-predecessor-temporal.mjs';
 import {promoteCloudRunControls,promoteCloudRunSearch,promoteCloudRunEmail,promoteCloudRunImages,promoteCloudRunMedia} from './temporal-promote-controls.mjs';
 import { observeBootstrapProtection, observeBootstrapRegistration, observeControlsPromotionBefore, observeControlsPromotionAfter,observeSearchPromotionBefore,observeSearchPromotionAfter,observeEmailPromotionBefore,observeEmailPromotionAfter,observeImagesPromotionBefore,observeImagesPromotionAfter } from './temporal-bootstrap-observations.mjs';
 import { createHash, randomUUID } from 'node:crypto';
@@ -129,6 +130,10 @@ async function withNativeCloudRunClient({ binding, config, platform, firestore }
     return await observe(client, application);
 
   } finally { await connection?.close(); }
+}
+
+export function verifyStagingPredecessorTemporal(options) {
+  return withNativeCloudRunClient(options, (client) => observeStagingPredecessorTemporal(client, options.successorBuildId));
 }
 
 /** A worker can run the candidate image on a replacement pool. Readiness

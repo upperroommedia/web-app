@@ -12,6 +12,7 @@ export function createReleaseApi({ getAccessToken, request = globalThis.fetch })
     if (beforeSend) await beforeSend();
     const response = await request(url, {
       method,
+      redirect: 'error',
       headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
       body: body ? JSON.stringify(body) : undefined,
       signal: AbortSignal.timeout(60_000),

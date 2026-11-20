@@ -63,8 +63,15 @@ function fixture() {
  if(url.includes(':getIamPolicy'))return{etag:'empty',bindings:[]};
  if(method==='POST'){
  assert.equal(saved.stage,'attempted');posts++;
- service={...structuredClone(body),uid:'service-uid',etag:'service-etag',generation:'1',observedGeneration:'1',terminalCondition:{state:'CONDITION_SUCCEEDED'},
- latestCreatedRevision:`${body.name}/revisions/${p.dispatch.serviceId}-00001-abc`,latestReadyRevision:`${body.name}/revisions/${p.dispatch.serviceId}-00001-abc`,
+ const request = new URL(url);
+ const serviceId = request.searchParams.get('serviceId');
+ const name = `${request.pathname.slice('/v2/'.length)}/${serviceId}`;
+ assert.equal(request.pathname, '/v2/projects/urm-app-staging/locations/us-central1/services');
+ assert.equal(serviceId, p.dispatch.serviceId);
+ assert.equal(Object.hasOwn(body, 'name'), false, 'Services.CreateService rejects a name on the request body');
+ assert.deepEqual({ name, ...body }, saved.plan.body);
+ service={name,...structuredClone(body),uid:'service-uid',etag:'service-etag',generation:'1',observedGeneration:'1',terminalCondition:{state:'CONDITION_SUCCEEDED'},
+ latestCreatedRevision:`${name}/revisions/${serviceId}-00001-abc`,latestReadyRevision:`${name}/revisions/${serviceId}-00001-abc`,
  uri:`https://${p.dispatch.serviceId}-251680231116.us-central1.run.app`};
  service.trafficStatuses=[{revision:service.latestReadyRevision,percent:100}];
  revision={...structuredClone(service.template),name:service.latestReadyRevision,uid:'revision-uid',etag:'rev-etag',generation:'1',observedGeneration:'1',conditions:[{type:'Ready',state:'CONDITION_SUCCEEDED'}]};
