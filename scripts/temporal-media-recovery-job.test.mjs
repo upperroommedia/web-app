@@ -351,8 +351,17 @@ function controllerFixture() {
         assert.equal(state[key].stage, 'attempted');
         assert.deepEqual(body, state[key].request.body);
         mutation.push(key);
-        if (key === 'create') present = true;
-        else {
+        if (key === 'create') {
+          const request = new URL(url);
+          const jobId = request.searchParams.get('jobId');
+          const name = `${request.pathname.slice('/v2/'.length)}/${jobId}`;
+          assert.equal(request.pathname, '/v2/projects/urm-app-staging/locations/us-central1/jobs');
+          assert.equal(jobId, plan.job.name.split('/').at(-1));
+          assert.equal(Object.hasOwn(body, 'name'), false, 'Jobs.CreateJob rejects a name on the request body');
+          assert.deepEqual({ name, ...body }, plan.job);
+          maps.job.name = name;
+          present = true;
+        } else {
           running = true;
           epoch += 1;
         }
@@ -576,12 +585,13 @@ test('the paused release journal accepts one immutable stage successor and rejec
   };
   const good = configure(false);
   const jobPlanSHA256 = proofDigest(plan.job);
+  const { name, ...body } = plan.job;
   const request = {
     method: 'POST',
     url:
       'https://run.googleapis.com/v2/projects/urm-app-staging/locations/us-central1/jobs?jobId=' +
-      plan.job.name.split('/').at(-1),
-    body: plan.job,
+      name.split('/').at(-1),
+    body,
   };
   const attemptedAt = new Date().toISOString();
   const next = {
@@ -602,6 +612,22 @@ test('the paused release journal accepts one immutable stage successor and rejec
     }),
     /CHECKPOINT_UNCONFIRMED/
   );
+  for (const forgedRequest of [
+    { ...request, body: plan.job },
+    { ...request, url: request.url.replace(/jobId=.*/, 'jobId=foreign-job') },
+  ]) {
+    await assert.rejects(
+      saveMediaRecoveryJobJournal(good, undefined, {
+        ...next,
+        create: {
+          ...next.create,
+          request: forgedRequest,
+          intentSHA256: proofDigest({ key: 'create', request: forgedRequest, jobPlanSHA256, attemptedAt }),
+        },
+      }),
+      /CHECKPOINT_UNCONFIRMED/
+    );
+  }
   good.ownedOperation = await saveMediaRecoveryJobJournal(good, undefined, next);
   assert.deepEqual(await readMediaRecoveryJobJournal(good), next);
   await assert.rejects(saveMediaRecoveryJobJournal(good, undefined, next), /CHECKPOINT_UNCONFIRMED/);

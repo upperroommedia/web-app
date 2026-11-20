@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { prepareCloudRunZeroPool } from './temporal-prepare-cloud-pool.mjs';
+import { createReleaseApi } from './temporal-release-api.mjs';
 import { serverlessResourceNames } from './temporal-serverless-platform.mjs';
 import { dispatchResourceNames } from './temporal-serverless-dispatch-resources.mjs';
 const buildId = 'a'.repeat(40), image = `us-central1-docker.pkg.dev/urm-app-staging/urm-temporal/worker@sha256:${'b'.repeat(64)}`;
@@ -129,22 +130,79 @@ for (const bad of ['operation', 'nonzero', 'null-count', 'automatic-mode', 'auto
     assert.notEqual(f.saved.stage, 'completed');
   });
 
-test('media zero preparation saves effective quotas before one POST and checks again after credential acquisition',async()=>{
- const f=fixture('media');await prepareCloudRunZeroPool(f.options);assert.equal(f.posts,1);assert.equal(f.saved.prerequisites.mediaDiskQuota.components.length,2);
- await prepareCloudRunZeroPool({...f.options,saved:f.saved});assert.equal(f.posts,1);
+test('a slow first compute scan leaves media quota usable as a baseline and the POST binds the post-ADC samples', async () => {
+  const f = fixture('media'), native = f.options.api, observe = f.options.observeComputeIsolation, save = f.options.save;
+  const originalNow = Date.now;
+  const observations = [];
+  let elapsed = 0, scans = 0;
+  let createTokenPending = false;
+  Date.now = () => originalNow() + elapsed;
+  const api = createReleaseApi({
+    getAccessToken: async () => {
+      if (createTokenPending) {
+        observations.push('create credentials');
+        createTokenPending = false;
+      }
+      return 'fake-credential';
+    },
+    request: async (url, { method, body }) => {
+      if (new URL(url).origin === 'https://cloudquotas.googleapis.com') observations.push('quota');
+      if (method === 'POST') observations.push('create HTTP');
+      try {
+        const value = await native(url, method, body && JSON.parse(body));
+        return { ok: true, json: async () => value };
+      } catch (error) {
+        if (error.status === 404) return { ok: false, status: 404 };
+        throw error;
+      }
+    },
+  });
+  f.options.api = (url, method, body, beforeSend) => {
+    if (method === 'POST') createTokenPending = true;
+    return api(url, method, body, beforeSend);
+  };
+  f.options.observeComputeIsolation = async () => {
+    observations.push('compute');
+    elapsed = ++scans === 1 ? 6864 : 7000;
+    return { ...await observe(), observedAt: new Date(Date.now()).toISOString() };
+  };
+  f.options.save = async (state) => {
+    await save(state);
+    if (state.stage === 'attempted') observations.push('attempt acknowledged');
+  };
+  f.options.authorizeCreate = async () => {
+    assert.equal(f.saved.stage, 'attempted');
+    observations.push('release authority');
+  };
+  try {
+    await prepareCloudRunZeroPool(f.options);
+    assert.deepEqual(observations, [
+      'quota', 'quota', 'compute', 'create credentials', 'compute', 'quota', 'quota',
+      'attempt acknowledged', 'release authority', 'create HTTP',
+    ]);
+    const { isolation, prerequisites: { mediaDiskQuota } } = f.saved;
+    assert.equal(mediaDiskQuota.components.length, 2);
+    assert.ok(mediaDiskQuota.components.every(component => component.observedAt >= isolation.observedAt));
+    await prepareCloudRunZeroPool({ ...f.options, saved: f.saved });
+    assert.equal(f.posts, 1);
+  } finally {
+    Date.now = originalNow;
+  }
 });
-for(const bad of ['instance','regional','desired-only','credential-drift','delayed-checkpoint'])test(`media ${bad} quota cannot authorize create`,async()=>{
- const f=fixture('media'),api=f.options.api,save=f.options.save;let credential=false;
- f.options.save=async state=>{await save(state);if(bad==='delayed-checkpoint'&&state.stage==='attempted')state.prerequisites.mediaDiskQuota.components.forEach(c=>c.observedAt=new Date(Date.now()-6000).toISOString());};
+
+for(const bad of ['instance','regional','desired-only','credential-drift'])test(`media ${bad} quota cannot authorize create`,async()=>{
+ const f=fixture('media'),api=f.options.api;let credential=false;
  f.options.api=async(...args)=>{
   if(args[1]==='POST'&&bad==='credential-drift')credential=true;
   const result=await api(...args);
   if(new URL(args[0]).origin === 'https://cloudquotas.googleapis.com'){
    if(bad==='desired-only'){delete result.dimensionsInfos[0].details.value;result.dimensionsInfos[0].details.desiredValue='107374182400';}
-   if(bad==='instance'&&args[0].includes('MaxPerInstance')||bad==='regional'&&args[0].endsWith('EphemeralDiskAllocPerProjectRegion')||credential)result.dimensionsInfos[0].details.value='10737418240';
+   if(bad==='instance'&&args[0].includes('MaxPerInstance')||bad==='regional'&&args[0].endsWith('EphemeralDiskAllocPerProjectRegion'))result.dimensionsInfos[0].details.value='10737418240';
+   if(credential)result.dimensionsInfos[0].details.value='108447924224';
   }return result;
  };
  await assert.rejects(prepareCloudRunZeroPool(f.options));assert.equal(f.posts,0);
+ assert.equal(f.saved.stage,'planned');
 });
 
 test('pool create authority is checked after credential acquisition before HTTP',async()=>{
@@ -153,11 +211,67 @@ test('pool create authority is checked after credential acquisition before HTTP'
  f.options.api=async(...args)=>{if(args[1]==='POST')authorized=false;return api(...args);};
  await assert.rejects(prepareCloudRunZeroPool(f.options));assert.equal(f.posts,0);
 });
-for(const finalAwait of [2,4])test(`media final awaited authorizer ${finalAwait} cannot renew expired original quota`,async()=>{
- const f=fixture('media'),now=Date.now;let calls=0;
- f.options.authorizeCreate=async()=>{if(++calls===finalAwait)Date.now=()=>now()+6000;};
- try{await assert.rejects(prepareCloudRunZeroPool(f.options));assert.equal(f.posts,0);}
- finally{Date.now=now;}
+for (const failure of ['unknown attempt save', 'unknown abort save', 'delayed checkpoint', 'authority rejection', 'stale after authority']) {
+  test(`media ${failure} fences the original attempt without a POST or renewal`, async () => {
+    const f = fixture('media'), now = Date.now, save = f.options.save;
+    const observe = f.options.observeComputeIsolation;
+    let scans = 0;
+    f.options.observeComputeIsolation = async () => {
+      scans++;
+      return observe();
+    };
+    f.options.save = async state => {
+      await save(state);
+      if (failure === 'unknown attempt save' && state.stage === 'attempted') throw new Error('unknown acknowledgement');
+      if (failure === 'unknown abort save' && state.stage === 'not-sent') throw new Error('unknown acknowledgement');
+      if (failure === 'delayed checkpoint' && state.stage === 'attempted') Date.now = () => now() + 6000;
+    };
+    f.options.authorizeCreate = async () => {
+      assert.equal(f.saved.stage, 'attempted');
+      if (failure === 'authority rejection' || failure === 'unknown abort save') throw new Error('authority changed');
+      if (failure === 'stale after authority') Date.now = () => now() + 6000;
+    };
+    try {
+      if (failure.startsWith('unknown')) await assert.rejects(prepareCloudRunZeroPool(f.options));
+      else assert.equal((await prepareCloudRunZeroPool(f.options)).stage, 'not-sent');
+      assert.deepEqual(f.states, failure === 'unknown attempt save' ? ['planned', 'attempted'] : ['planned', 'attempted', 'not-sent']);
+    } finally {
+      Date.now = now;
+    }
+    if (failure === 'unknown attempt save') await assert.rejects(prepareCloudRunZeroPool({ ...f.options, saved: f.saved }));
+    else assert.deepEqual(await prepareCloudRunZeroPool({ ...f.options, saved: f.saved }), f.saved);
+    assert.equal(scans, 2);
+    assert.equal(f.posts, 0);
+  });
+}
+
+test('media no-send record cannot be created after entering the HTTP request', async () => {
+  const f = fixture('media'), api = f.options.api;
+  f.options.api = async (...args) => {
+    const result = await api(...args);
+    if (args[1] === 'POST') throw new Error('lost response after entering HTTP');
+    return result;
+  };
+  await assert.rejects(prepareCloudRunZeroPool(f.options));
+  assert.deepEqual(f.states, ['planned', 'attempted']);
+  await assert.rejects(prepareCloudRunZeroPool({ ...f.options, saved: f.saved }));
+  assert.equal(f.posts, 1);
+});
+
+test('media compute drift before the attempt leaves a planned checkpoint that the same operation can resume', async () => {
+  const f = fixture('media'), observe = f.options.observeComputeIsolation;
+  let scans = 0;
+  f.options.observeComputeIsolation = async () => {
+    const value = await observe();
+    if (++scans === 2) value.inventorySHA256 = 'e'.repeat(64);
+    return value;
+  };
+  await assert.rejects(prepareCloudRunZeroPool(f.options));
+  assert.deepEqual(f.states, ['planned']);
+  assert.equal(f.posts, 0);
+  await prepareCloudRunZeroPool({ ...f.options, saved: f.saved });
+  assert.deepEqual(f.states, ['planned', 'attempted', 'acknowledged', 'completed']);
+  assert.equal(f.posts, 1);
 });
 
 for (const change of ['association', 'inventory', 'stale after authority check']) {

@@ -351,6 +351,7 @@ await runWithCleanup(
       operationVerified = false,
       transitionPending = false,
       diagnosticCompletionProof,
+      poolAbortProof,
       cloudWorkerProbePending = false,
       cloudIdentityPending = false,
       expectedAuthority,
@@ -1491,6 +1492,7 @@ await runWithCleanup(
             const hasSaved = Object.prototype.hasOwnProperty.call(currentOperation.data(), 'cloudPoolPreparation');
             if (hasSaved) cloudIdentityPending = true;
             const immutableReceipt = firestore.doc(`_control/temporalCloudPoolPreparation-${operationId}`);
+            const poolAbortReceipt = firestore.doc(`_control/temporalCloudPoolPreSendAbort-${operationId}`);
             const result = await prepareCloudRunZeroPool({ platform, role: preparationArguments.role, settings,
               authorizeCreate:()=>assertPoolPreparationAuthority({firestore,lockRef,controlRef,stateRef,ownedOperation,expectedAuthority,config,operationId,bindingDigest}),
               operationId, releaseId: config.releaseId, evidenceDigest: preparationArguments.digest,
@@ -1500,10 +1502,25 @@ await runWithCleanup(
               save: async identityState => {
                 cloudIdentityPending = true;
                 ownedOperation = await savePoolPreparationCheckpoint({ firestore, lockRef, controlRef, stateRef,
-                  immutableReceipt, ownedOperation, expectedAuthority, config, operationId, bindingDigest,
+                  immutableReceipt, poolAbortReceipt, ownedOperation, expectedAuthority, config, operationId, bindingDigest,
                   operatorPrincipal, identityState });
               },
             });
+            if (result.stage === 'not-sent') {
+              const [abort, success] = await firestore.getAll(poolAbortReceipt, immutableReceipt);
+              if (!abort.exists || !abort.createTime?.isEqual(abort.updateTime) ||
+                success.exists ||
+                abort.get('bindingDigest') !== bindingDigest || abort.get('operationId') !== operationId ||
+                abort.get('releaseId') !== config.releaseId ||
+                proofDigest(abort.get('originalAuthority.control')) !== proofDigest(expectedAuthority.control) ||
+                proofDigest(abort.get('originalAuthority.state')) !== proofDigest(expectedAuthority.state) ||
+                proofDigest(abort.get('identityState')) !== proofDigest(result))
+                throw new Error('POOL_PRE_SEND_ABORT_RECEIPT_UNCONFIRMED');
+              poolAbortProof = nativeSnapshotProof(abort);
+              cloudIdentityPending = false;
+              operationVerified = true;
+              throw new Error('POOL_CREATE_REJECTED_BEFORE_SEND_AUDIT_RETAINED');
+            }
             const receipt = await immutableReceipt.get();
             if (!receipt.exists || receipt.get('bindingDigest') !== bindingDigest ||
               receipt.get('identityState.pool.uid') !== result.pool.uid)
@@ -2406,6 +2423,18 @@ await runWithCleanup(
             if (action === 'prepare-cloud-run-dispatch-diagnostic' && lock.get('cloudDispatchDiagnostic')) {
               const final = await tx.get(firestore.doc(dispatchDiagnosticCompletionPath(operationId)));
               assertNativeSnapshot(diagnosticCompletionProof, final);
+            }
+            if (action === 'prepare-cloud-run-pool' && lock.get('cloudPoolPreparation.stage') === 'not-sent') {
+              const [abort, success] = await tx.getAll(
+                firestore.doc(`_control/temporalCloudPoolPreSendAbort-${operationId}`),
+                firestore.doc(`_control/temporalCloudPoolPreparation-${operationId}`)
+              );
+              assertNativeSnapshot(poolAbortProof, abort);
+              if (success.exists) throw new Error('POOL_PREPARATION_CONFLICTING_TERMINAL_RECEIPT');
+            }
+            if (action === 'prepare-cloud-run-pool' && lock.get('cloudPoolPreparation.stage') === 'completed') {
+              const abort = await tx.get(firestore.doc(`_control/temporalCloudPoolPreSendAbort-${operationId}`));
+              if (abort.exists) throw new Error('POOL_PREPARATION_CONFLICTING_TERMINAL_RECEIPT');
             }
             tx.delete(lockRef);
           }

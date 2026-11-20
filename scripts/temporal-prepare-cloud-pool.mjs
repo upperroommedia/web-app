@@ -6,6 +6,8 @@ import { readOwnedPreparationRunner, poolSecretReferences, normalizeStagingResou
 import { renderServerlessWorkerPool } from './temporal-serverless-resources.mjs';
 const fail = () => { throw new Error('CLOUD_RUN_ZERO_POOL_PREPARATION_UNCONFIRMED'); };
 const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+export const mediaPoolPreSendAbortReason = 'media-pool-final-authorization-rejected-before-send';
+export const mediaPoolSendFenceVersion = 'media-pool-send-v2';
 
 function operationName(value) {
   const result = normalize(value);
@@ -82,11 +84,17 @@ export async function prepareCloudRunZeroPool({ platform, role, settings, operat
   const { name, ...createBody } = body;
   const plan = { schemaVersion: 1, operationId, releaseId, evidenceDigest, role, buildId: platform.workerBuildId,
     runner: binding.runnerServiceAccount, identityReceiptSHA256: hash(identityReceipt), body };
-  let state = saved;
+  let state = saved, confirmedNoSend;
   try {
     if (state !== undefined && (!state || !isDeepStrictEqual(state.plan, plan) ||
-      !['planned', 'attempted', 'acknowledged', 'failed', 'completed'].includes(state.stage))) fail();
+      !['planned', 'attempted', 'acknowledged', 'failed', 'completed', 'not-sent'].includes(state.stage))) fail();
     if (state === undefined) { state = { plan, stage: 'planned' }; await save(state); }
+    if (state.stage === 'not-sent') {
+      if (role !== 'media' || state.sendFenceVersion !== mediaPoolSendFenceVersion ||
+        state.noSendReason !== mediaPoolPreSendAbortReason || state.nativeOperation) fail();
+      assertMediaDiskQuotaProof(state.prerequisites?.mediaDiskQuota);
+      return state;
+    }
     if(plan.role==='media'&&['attempted','acknowledged','completed'].includes(state.stage))assertMediaDiskQuotaProof(state.prerequisites?.mediaDiskQuota);
     if (state.stage === 'attempted' || state.stage === 'failed') fail();
     if (state.stage === 'planned') {
@@ -95,34 +103,53 @@ export async function prepareCloudRunZeroPool({ platform, role, settings, operat
       catch (error) { if (error?.status !== 404) throw error; }
       const isolation = await observeComputeIsolation();
       assertFreshComputeIsolation(isolation, platform.temporalNamespace);
-      state = { plan, stage: 'attempted', attemptedAt: new Date().toISOString(), prerequisites: prerequisitesProof, isolation };
-      await save(state);
-      // No automatic HTTP retry; this API has no requestId parameter.
-      const quotaFence=async()=>{
-        await authorizeCreate();
-        if(plan.role!=='media')return;
-        assertMediaDiskQuotaFresh(prerequisitesProof.mediaDiskQuota);
-        const fresh=await observeMediaDiskQuota(plan,api);
-        if(fresh.quotaSHA256!==prerequisitesProof.mediaDiskQuota.quotaSHA256)fail();
-        assertMediaDiskQuotaFresh(prerequisitesProof.mediaDiskQuota);
-        await authorizeCreate();
-        assertMediaDiskQuotaFresh(prerequisitesProof.mediaDiskQuota);
-        assertMediaDiskQuotaFresh(fresh);
+      const saveAttempt = async (prerequisites, sendIsolation) => {
+        const attempt = { plan, stage: 'attempted', attemptedAt: new Date().toISOString(), prerequisites,
+          isolation: sendIsolation, ...(role === 'media' ? { sendFenceVersion: mediaPoolSendFenceVersion } : {}) };
+        await save(attempt);
+        state = attempt;
       };
-      await quotaFence();
+      if (role !== 'media') {
+        await saveAttempt(prerequisitesProof, isolation);
+        await authorizeCreate();
+      }
       const beforeSend = async () => {
         const latestIsolation = await observeComputeIsolation();
         assertFreshComputeIsolation(latestIsolation, platform.temporalNamespace);
         if (latestIsolation.inventorySHA256 !== isolation.inventorySHA256) fail();
-        await quotaFence();
-        assertFreshComputeIsolation(latestIsolation, platform.temporalNamespace);
+        let mediaDiskQuota;
+        if (role === 'media') {
+          if (state.stage !== 'planned') fail();
+          // The initial quota is a value baseline. Journal the samples taken
+          // after credentials, then spend their remaining freshness on authority.
+          mediaDiskQuota = await observeMediaDiskQuota(plan, api);
+          if (mediaDiskQuota.quotaSHA256 !== prerequisitesProof.mediaDiskQuota.quotaSHA256) fail();
+          assertFreshComputeIsolation(latestIsolation, platform.temporalNamespace);
+          await saveAttempt({ ...prerequisitesProof, mediaDiskQuota }, latestIsolation);
+        }
+        try {
+          await authorizeCreate();
+          if (mediaDiskQuota) assertMediaDiskQuotaFresh(mediaDiskQuota);
+          assertFreshComputeIsolation(latestIsolation, platform.temporalNamespace);
+        } catch (error) {
+          if (role !== 'media') throw error;
+          // This callback has not returned, so the canonical transport cannot
+          // have invoked its HTTP request. Persist that fact before rejecting.
+          const notSent = { ...state, stage: 'not-sent', noSendReason: mediaPoolPreSendAbortReason };
+          await save(notSent);
+          state = notSent;
+          confirmedNoSend = notSent;
+          throw error;
+        }
       };
+      // No automatic HTTP retry; this API has no requestId parameter.
       const response = await api(
         `https://run.googleapis.com/v2/projects/urm-app-staging/locations/us-central1/workerPools?workerPoolId=${binding.poolName}`,
         'POST',
         createBody,
         beforeSend
       );
+      if (state.stage !== 'attempted') fail();
       state = { ...state, stage: 'acknowledged', nativeOperation: operationName(response?.name) };
       await save(state);
     }
@@ -151,5 +178,8 @@ export async function prepareCloudRunZeroPool({ platform, role, settings, operat
       scope: 'created configuration; desired manual count zero, not observed live instance count or activation readiness' };
     await save(state);
     return state;
-  } catch { return fail(); }
+  } catch {
+    if (confirmedNoSend) return confirmedNoSend;
+    return fail();
+  }
 }

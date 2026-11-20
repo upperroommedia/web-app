@@ -6,6 +6,7 @@ import { createRequire } from 'node:module';
 import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { prepareCloudRunIdentity } from '../temporal-prepare-cloud-identity.mjs';
+import { mediaPoolPreSendAbortReason, mediaPoolSendFenceVersion } from '../temporal-prepare-cloud-pool.mjs';
 import { saveDispatchActivationCheckpoint, saveDispatchEventarcCycleCheckpoint, saveDispatchSchedulerCycleCheckpoint, saveEventarcAuditPreparationCheckpoint, saveDispatchWakeStopCheckpoint, saveDispatchAccessPreparationCheckpoint, saveDispatchServicePreparationCheckpoint, saveIdentityPreparationCheckpoint, savePoolPreparationCheckpoint, saveSecretAccessPreparationCheckpoint, saveScalerAccessPreparationCheckpoint, saveFirestoreAccessPreparationCheckpoint, saveRuntimeRolePreparationCheckpoint, saveRuntimeAccessPreparationCheckpoint } from '../temporal-preparation-checkpoint.mjs';
 import { assertNativeSnapshot,nativeSnapshotProof } from '../temporal-release-runtime.mjs';
 import { serverlessResourceNames } from '../temporal-serverless-platform.mjs';
@@ -113,6 +114,66 @@ for (const kind of ['dispatchActivation', 'eventarcCycle', 'eventarcAudit', 'wak
   }
 });
 
+
+test('media pool journals a pre-send abort only for the new attempt fence and never writes a success receipt', async () => {
+  const app = initializeApp({ projectId: 'demo-preparation-checkpoint' }, randomUUID());
+  const db = getFirestore(app);
+  try {
+    for (const withSendFence of [false, true]) {
+      const operationId = randomUUID(), releaseId = randomUUID(), bindingDigest = 'b'.repeat(64);
+      const prefix = `_identityPreparationTests/${operationId}/records`;
+      const lockRef = db.doc(`${prefix}/operation`), controlRef = db.doc(`${prefix}/control`), stateRef = db.doc(`${prefix}/state`);
+      const immutableReceipt = db.doc(`_control/temporalCloudPoolPreparation-${operationId}`);
+      const poolAbortReceipt = db.doc(`_control/temporalCloudPoolPreSendAbort-${operationId}`);
+      try {
+        await lockRef.create({ operationId, releaseId, bindingDigest, action: 'prepare-cloud-run-pool' });
+        await controlRef.create({ releaseId, admission: 'paused', domains: { media: { admission: 'paused' } } });
+        await stateRef.create({ releaseId, phase: 'provider-usage-ready' });
+        const options = { firestore: db, lockRef, controlRef, stateRef, immutableReceipt, poolAbortReceipt,
+          operationId, bindingDigest, config: { releaseId, domains: ['media'], environment: 'staging', projectId: 'urm-app-staging' },
+          operatorPrincipal: { email: 'operator@example.test' },
+          ownedOperation: nativeSnapshotProof(await lockRef.get()),
+          expectedAuthority: { control: nativeSnapshotProof(await controlRef.get()), state: nativeSnapshotProof(await stateRef.get()) } };
+        const plan = { role: 'media', source: 'controlled' };
+        options.ownedOperation = await savePoolPreparationCheckpoint({ ...options, identityState: { plan, stage: 'planned' } });
+        const attempt = { plan, stage: 'attempted', attemptedAt: new Date().toISOString(),
+          prerequisites: { signature: 'original quota observation' }, isolation: { inventory: 'original' },
+          ...(withSendFence ? { sendFenceVersion: mediaPoolSendFenceVersion } : {}) };
+        options.ownedOperation = await savePoolPreparationCheckpoint({ ...options, identityState: attempt });
+        const aborted = { ...attempt, stage: 'not-sent', noSendReason: mediaPoolPreSendAbortReason };
+        await assert.rejects(savePoolPreparationCheckpoint({ ...options, identityState: { ...aborted, isolation: {} } }));
+        if (withSendFence) {
+          await immutableReceipt.create({ controlledConflictingReceipt: true });
+          await assert.rejects(savePoolPreparationCheckpoint({ ...options, identityState: aborted }));
+          assert.equal((await poolAbortReceipt.get()).exists, false);
+          await immutableReceipt.delete();
+          const originalAttemptProof = options.ownedOperation;
+          options.ownedOperation = await savePoolPreparationCheckpoint({ ...options, identityState: aborted });
+          const audit = await poolAbortReceipt.get();
+          assert.deepEqual(audit.get('identityState'), aborted);
+          assert.deepEqual(audit.get('originalAuthority.attempt'), originalAttemptProof);
+          assert.ok(audit.createTime.isEqual(audit.updateTime));
+          assert.deepEqual((await lockRef.get()).get('cloudPoolPreparation'), aborted);
+          await assert.rejects(savePoolPreparationCheckpoint({ ...options, identityState: attempt }));
+        } else {
+          await assert.rejects(savePoolPreparationCheckpoint({ ...options, identityState: aborted }));
+          assert.equal((await poolAbortReceipt.get()).exists, false);
+          assert.deepEqual((await lockRef.get()).get('cloudPoolPreparation'), attempt);
+          const acknowledged = { ...attempt, stage: 'acknowledged', nativeOperation: 'controlled-lro' };
+          options.ownedOperation = await savePoolPreparationCheckpoint({ ...options, identityState: acknowledged });
+          await poolAbortReceipt.create({ controlledConflictingReceipt: true });
+          await assert.rejects(savePoolPreparationCheckpoint({ ...options, identityState: { ...acknowledged, stage: 'completed' } }));
+          assert.deepEqual((await lockRef.get()).get('cloudPoolPreparation'), acknowledged);
+        }
+        assert.equal((await immutableReceipt.get()).exists, false);
+      } finally {
+        await Promise.all([lockRef, controlRef, stateRef, immutableReceipt, poolAbortReceipt].map((ref) => ref.delete()));
+      }
+    }
+  } finally {
+    await deleteApp(app);
+  }
+});
 
 for (const [cycle, saver, field] of [['scheduler', saveDispatchSchedulerCycleCheckpoint, 'cloudDispatchSchedulerCycle'], ['eventarc', saveDispatchEventarcCycleCheckpoint, 'cloudDispatchEventarcCycle']]) test(`${cycle} cycle atomically stores original creation receipt before nested stop and rejects authority/receipt drift`, async () => {
  const app=initializeApp({projectId:'demo-preparation-checkpoint'},randomUUID()),db=getFirestore(app);

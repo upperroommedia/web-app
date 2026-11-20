@@ -1,11 +1,12 @@
 import { assertNativeSnapshot, assertNativeSnapshotSuccessor, nativeSnapshotProof, proofDigest } from './temporal-release-runtime.mjs';
+import { mediaPoolPreSendAbortReason, mediaPoolSendFenceVersion } from './temporal-prepare-cloud-pool.mjs';
 
 /** Persist under the same native operation and release authority snapshots.
  * Provider HTTP mutations require the known checkpoint acknowledgement.
  * A new diagnostic intent can also use exact readback before its first START.
  */
 async function saveCheckpoint({ firestore, lockRef, controlRef, stateRef,
-  immutableReceipt, creationReceipt, ownedOperation, expectedAuthority, config, operationId, bindingDigest, operatorPrincipal, identityState, kind }) {
+  immutableReceipt, creationReceipt, poolAbortReceipt, ownedOperation, expectedAuthority, config, operationId, bindingDigest, operatorPrincipal, identityState, kind }) {
   const [field, action] = { mediaPromotion:['cloudMediaPromotion','promote-cloud-run-media'], imagesPromotion:['cloudImagesPromotion','promote-cloud-run-images'], emailPromotion:['cloudEmailPromotion','promote-cloud-run-email'], searchPromotion:['cloudSearchPromotion','promote-cloud-run-search'],controlsPromotion:['cloudControlsPromotion','promote-cloud-run-controls'], mediaCycle:['cloudMediaBootstrapCycle','bootstrap-stop-cloud-run-media'],mediaActivation:['cloudMediaActivation','activate-cloud-run-media-pool'],mediaAbort:['cloudMediaActivationStop','stop-cloud-run-media-activation'], imagesCycle:['cloudImagesBootstrapCycle','bootstrap-stop-cloud-run-images'],imagesActivation:['cloudImagesActivation','activate-cloud-run-images-pool'],imagesAbort:['cloudImagesActivationStop','stop-cloud-run-images-activation'], emailCycle:['cloudEmailBootstrapCycle','bootstrap-stop-cloud-run-email'],emailActivation:['cloudEmailActivation','activate-cloud-run-email-pool'],emailAbort:['cloudEmailActivationStop','stop-cloud-run-email-activation'], searchCycle:['cloudSearchBootstrapCycle','bootstrap-stop-cloud-run-search'],searchActivation:['cloudSearchActivation','activate-cloud-run-search-pool'],searchAbort:['cloudSearchActivationStop','stop-cloud-run-search-activation'], orchestrationCycle:['cloudOrchestrationBootstrapCycle','bootstrap-stop-cloud-run-orchestration'], orchestrationActivation:['cloudOrchestrationActivation','activate-cloud-run-orchestration-pool'], orchestrationAbort:['cloudOrchestrationActivationStop','stop-cloud-run-orchestration-activation'], poolActivation: ['cloudControlsActivation','activate-cloud-run-controls-pool'], poolAbort: ['cloudControlsActivationStop','stop-cloud-run-controls-activation'], bootstrapCycle: ['cloudPoolBootstrapCycle', 'bootstrap-stop-cloud-run-controls'], dispatchActivation: ['cloudDispatchActivation', 'activate-cloud-run-dispatch-service'], identity: ['cloudIdentityPreparation', 'prepare-cloud-run-identity'],
     dispatchWakes: ['cloudBusinessDispatchWakes', 'enable-staging-dispatch-wakes'],
     eventarcCycle: ['cloudDispatchEventarcCycle', 'prepare-stop-cloud-run-dispatch-eventarc'],
@@ -24,6 +25,13 @@ async function saveCheckpoint({ firestore, lockRef, controlRef, stateRef,
   if(expectedPoolRole&&identityState.plan?.role!==expectedPoolRole)throw new Error('BOOTSTRAP_ROLE_CHANGED');
   const armingDispatchProbe = kind === 'dispatchActivation' && identityState.stage === 'planned' &&
     Object.hasOwn(identityState, 'workerIntent');
+  const recordingPoolAbort = kind === 'pool' && identityState.stage === 'not-sent';
+  const poolSuccessPath = `_control/temporalCloudPoolPreparation-${operationId}`;
+  const poolAbortPath = `_control/temporalCloudPoolPreSendAbort-${operationId}`;
+  if (recordingPoolAbort && (config.environment !== 'staging' || config.projectId !== 'urm-app-staging' ||
+    immutableReceipt?.path !== poolSuccessPath || poolAbortReceipt?.path !== poolAbortPath))
+    throw new Error('POOL_PRE_SEND_ABORT_RECEIPT_REQUIRED');
+  const terminalReceipt = recordingPoolAbort ? poolAbortReceipt : immutableReceipt;
   let proposedDigest;
   const save = async tx => {
     const creationState = ['bootstrapCycle','poolActivation','orchestrationCycle','orchestrationActivation','searchCycle','searchActivation','emailCycle','emailActivation','imagesCycle','imagesActivation','mediaCycle','mediaActivation'].includes(kind) ? identityState.activationState : ['schedulerCycle', 'eventarcCycle'].includes(kind) ? identityState.creationState : undefined;
@@ -42,11 +50,15 @@ async function saveCheckpoint({ firestore, lockRef, controlRef, stateRef,
       creationState && (creationState.plan?.operationId !== operationId || proofDigest(creationState.plan) !== proofDigest(identityState.plan?.creation))))
       throw new Error('SCHEDULER_CREATION_PLAN_CHANGED');
     if (creationState && (!creationReceipt || creationState.stage !== 'completed')) throw new Error('SCHEDULER_CREATION_RECEIPT_REQUIRED');
-    const [current, control, state, receipt, originalCreation] = await Promise.all([
+    const conflictingPoolPath = recordingPoolAbort ? poolSuccessPath :
+      kind === 'pool' && identityState.stage === 'completed' ? poolAbortPath : undefined;
+    const [current, control, state, receipt, originalCreation, conflictingPoolReceipt] = await Promise.all([
       tx.get(lockRef), tx.get(controlRef), tx.get(stateRef),
-      identityState.stage === 'completed' ? tx.get(immutableReceipt) : Promise.resolve(undefined),
+      identityState.stage === 'completed' || recordingPoolAbort ? tx.get(terminalReceipt) : Promise.resolve(undefined),
       creationState ? tx.get(creationReceipt) : Promise.resolve(undefined),
+      conflictingPoolPath ? tx.get(firestore.doc(conflictingPoolPath)) : Promise.resolve(undefined),
     ]);
+    if (conflictingPoolReceipt?.exists) throw new Error('POOL_PREPARATION_CONFLICTING_TERMINAL_RECEIPT');
     assertNativeSnapshot(ownedOperation, current);
     assertNativeSnapshot(expectedAuthority.control, control);
     assertNativeSnapshot(expectedAuthority.state, state);
@@ -67,8 +79,16 @@ async function saveCheckpoint({ firestore, lockRef, controlRef, stateRef,
     }
     if(kind==='pool'){
       const before=current.get(field);
+      if (recordingPoolAbort) {
+        const { stage, noSendReason, ...originalAttempt } = identityState;
+        if (before?.stage !== 'attempted' || before.plan?.role !== 'media' || stage !== 'not-sent' ||
+          before.sendFenceVersion !== mediaPoolSendFenceVersion || noSendReason !== mediaPoolPreSendAbortReason ||
+          before.nativeOperation ||
+          proofDigest(before) !== proofDigest({ ...originalAttempt, stage: 'attempted' }))
+          throw new Error('POOL_PRE_SEND_ABORT_AUTHORITY_CHANGED');
+      }
       if(before){
-        const transitions={planned:['planned','attempted'],attempted:['attempted','acknowledged'],acknowledged:['acknowledged','completed','failed'],completed:['completed'],failed:['failed']};
+        const transitions={planned:['planned','attempted'],attempted:['attempted','acknowledged','not-sent'],acknowledged:['acknowledged','completed','failed'],completed:['completed'],failed:['failed'],'not-sent':[]};
         if(!(transitions[before.stage]??[]).includes(identityState.stage))throw new Error('POOL_PREPARATION_STAGE_ROLLBACK');
         if(before.stage!=='planned'&&['prerequisites','isolation','attemptedAt'].some(key=>proofDigest(before[key]??null)!==proofDigest(identityState[key]??null)))throw new Error('POOL_PREPARATION_ORIGINAL_ATTEMPT_CHANGED');
         if(before.nativeOperation&&before.nativeOperation!==identityState.nativeOperation)throw new Error('POOL_PREPARATION_NATIVE_OPERATION_CHANGED');
@@ -113,7 +133,11 @@ async function saveCheckpoint({ firestore, lockRef, controlRef, stateRef,
         (previous?.stage === 'completed' && proofDigest(previous) !== proofDigest(identityState)))
         throw new Error('DISPATCH_WAKE_CHECKPOINT_CHANGED');
     }
-    const record = { operationId, releaseId: config.releaseId, bindingDigest, identityState, operatorPrincipal };
+    const record = { operationId, releaseId: config.releaseId, bindingDigest, identityState, operatorPrincipal,
+      ...(recordingPoolAbort ? { originalAuthority: {
+        attempt: nativeSnapshotProof(current), control: expectedAuthority.control, state: expectedAuthority.state,
+      } } : {}),
+    };
     if (receipt?.exists && proofDigest(receipt.data()) !== proofDigest(record))
       throw new Error('IDENTITY_PREPARATION_RECEIPT_CHANGED');
     const creationRecord = creationState ? { operationId, releaseId: config.releaseId, bindingDigest, identityState: creationState, operatorPrincipal } : undefined;
@@ -121,7 +145,7 @@ async function saveCheckpoint({ firestore, lockRef, controlRef, stateRef,
       throw new Error('SCHEDULER_CREATION_RECEIPT_CHANGED');
     tx.update(lockRef, { [field]: identityState });
     if (originalCreation && !originalCreation.exists) tx.create(creationReceipt, creationRecord);
-    if (receipt && !receipt.exists) tx.create(immutableReceipt, record);
+    if (receipt && !receipt.exists) tx.create(terminalReceipt, record);
     proposedDigest = proofDigest({ ...current.data(), [field]: identityState });
   };
   try {

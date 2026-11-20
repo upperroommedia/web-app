@@ -1,4 +1,4 @@
-import { mediaRecoveryJobAccessPlan, renderMediaRecoveryJob } from './temporal-media-recovery-job.mjs';
+import { mediaRecoveryJobAccessPlan, renderMediaRecoveryJob, renderMediaRecoveryJobCreateRequest } from './temporal-media-recovery-job.mjs';
 import {assertStoredMediaDiagnosticDrain,assertFreshMediaDiagnosticDrain} from './temporal-media-diagnostic-drain.mjs';
 import { assertNativeSnapshot, assertNativeSnapshotSuccessor, nativeSnapshotProof, proofDigest as hash } from './temporal-release-runtime.mjs';
 import {prepareCompletedMediaRecoveryCapsule} from './temporal-media-recovery-capsule.mjs';
@@ -358,13 +358,11 @@ export async function saveMediaRecoveryJobJournal(o, before, next) {
           changed.jobPlanSHA256 !== next.jobPlanSHA256) fail();
     } else {
       const request = changed.request;
-      const url = key === 'create'
-        ? 'https://run.googleapis.com/v2/projects/urm-app-staging/locations/us-central1/jobs?jobId=' + o.plan.job.name.split('/').at(-1)
-        : 'https://run.googleapis.com/v2/' + o.plan.job.name + ':run';
       const attemptedAt = Date.parse(changed.attemptedAt);
       if (
-        request?.method !== 'POST' || request.url !== url ||
-        (key === 'create' ? hash(request.body) !== hash(o.plan.job) :
+        request?.method !== 'POST' ||
+        (key === 'create' ? hash(request) !== hash(renderMediaRecoveryJobCreateRequest(o.plan)) :
+          request.url !== 'https://run.googleapis.com/v2/' + o.plan.job.name + ':run' ||
           Object.keys(request.body ?? {}).join(',') !== 'etag' || typeof request.body.etag !== 'string' || !request.body.etag) ||
         !Number.isFinite(attemptedAt) || attemptedAt > Date.now() ||
         attemptedAt < Date.parse(o.plan.createdAt) || attemptedAt >= o.plan.expiresAt ||
