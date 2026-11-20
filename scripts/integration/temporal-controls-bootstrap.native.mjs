@@ -114,7 +114,7 @@ test('native bootstrap protection recognizes original old pinned wait and reject
     });
     const done = worker.run();
     void done.catch((e) => failures.push(e));
-    workers.push({ worker, done });
+    workers.push({ worker, done, queue, identity });
     const end = Date.now() + 15000;
     while (Date.now() < end) {
       try {
@@ -240,15 +240,53 @@ test('native bootstrap protection recognizes original old pinned wait and reject
     // following denial demonstrates current-routing protection specifically.
     phase = 'observe completed fixture workflows';
     await waitForOpenRuns([]);
-    // Each target's positive non-current baseline precedes its LOCAL CAS negative.
-    for(const binding of options.platform.roleBindings){
-      phase = `reject current routing for ${binding.role}`;
+    // SetCurrent acknowledges the deployment before Matching necessarily exposes
+    // the new route. The next role's positive guard inventories this peer too.
+    // Wait for independent native evidence of the change before using it as a
+    // negative control. Never retry the guard that is under test.
+    const service = client.connection.workflowService;
+    const waitForCurrentRouting = async (binding) => {
+      const queue = `urm-${binding.role}`;
+      const owner = workers.find(worker => worker.queue === queue);
+      assert.ok(owner, `No fixture worker owns ${queue}`);
+      const matches = version => version?.deploymentName === binding.deploymentName && version.buildId === buildId;
+      const types = binding.role === 'orchestration' ? [1, 2] : [2];
+      const end = Date.now() + 15000;
+      while (Date.now() < end) {
+        const [deployment, ...queues] = await client.connection.withDeadline(Math.min(end, Date.now() + 5000), () =>
+          Promise.all([
+            service.describeWorkerDeployment({ namespace, deploymentName: binding.deploymentName }),
+            ...types.map(taskQueueType => service.describeTaskQueue({
+              namespace, taskQueue: { name: queue, kind: 1 }, taskQueueType,
+            })),
+          ])
+        );
+        if (
+          matches(deployment.workerDeploymentInfo?.routingConfig?.currentDeploymentVersion) &&
+          queues.every(report =>
+            matches(report.versioningInfo?.currentDeploymentVersion) &&
+            report.pollers?.some(poller => poller.identity === owner.identity && matches(poller.deploymentOptions))
+          )
+        ) return;
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+      assert.fail(`Native deployment and matching routes with owned pollers did not converge for ${binding.role}`);
+    };
+
+    for (const binding of options.platform.roleBindings) {
+      phase = `observe non-current baseline for ${binding.role}`;
       await selectRole(binding.role);
-      assert.equal((await observeBootstrapProtection(options)).protectedRunCount,0);
-      const described=await rpc(()=>client.connection.workflowService.describeWorkerDeployment({namespace,deploymentName:binding.deploymentName}));
-      await rpc(()=>client.connection.workflowService.setWorkerDeploymentCurrentVersion({namespace,deploymentName:binding.deploymentName,buildId,
-        conflictToken:described.conflictToken,identity:'owned-negative-protection-fixture'}));
-      await assert.rejects(observeBootstrapProtection(options),/CLOUD_RUN_BOOTSTRAP_PROTECTION_UNCONFIRMED/);
+      assert.equal((await observeBootstrapProtection(options)).protectedRunCount, 0);
+      phase = `set current routing for ${binding.role}`;
+      const described = await rpc(() => service.describeWorkerDeployment({ namespace, deploymentName: binding.deploymentName }));
+      await rpc(() => service.setWorkerDeploymentCurrentVersion({
+        namespace, deploymentName: binding.deploymentName, buildId,
+        conflictToken: described.conflictToken, identity: 'owned-negative-protection-fixture',
+      }));
+      phase = `observe current deployment, queue route and pollers for ${binding.role}`;
+      await waitForCurrentRouting(binding);
+      phase = `reject confirmed current routing for ${binding.role}`;
+      await assert.rejects(observeBootstrapProtection(options), /CLOUD_RUN_BOOTSTRAP_PROTECTION_UNCONFIRMED/);
     }
   } catch (error) {
     failures.unshift(new Error(phase, { cause: error }));

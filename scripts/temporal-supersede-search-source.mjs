@@ -5,6 +5,7 @@ import { resolve, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { execFileSync } from 'node:child_process';
+import { readFullApplicationRun } from './temporal-preparation-evidence.mjs';
 import { randomUUID } from 'node:crypto';
 import {
   validateReleaseConfig,
@@ -573,19 +574,9 @@ async function main(args) {
       cwd: root,
       ...options,
     });
-  const ci = JSON.parse(
-    run('gh', [
-      'run',
-      'view',
-      String(review.candidateCiRunId),
-      '--repo',
-      'upperroommedia/web-app',
-      '--json',
-      'headSha,status,conclusion',
-    ])
-  );
-  if (ci.headSha !== nextRelease.compatibilityCommit || ci.status !== 'completed' || ci.conclusion !== 'success')
+  await readFullApplicationRun(review.candidateCiRunId, nextRelease.compatibilityCommit).catch(() => {
     throw fail('SEARCH_SUPERSESSION_CI_NOT_PASSED');
+  });
   const resource = loadReleaseResourceBinding(nextRelease),
     oldResource = loadReleaseResourceBinding(oldRelease);
   if (!same(resource.resources, oldResource.resources)) throw fail('SEARCH_SUPERSESSION_RESOURCE_CHANGED');

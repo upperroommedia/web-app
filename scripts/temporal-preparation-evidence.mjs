@@ -26,7 +26,8 @@ export async function readPreparationReceipt(path, expectedSHA256) {
 
 /** Fixed repository only. The live release entry never accepts an injected GitHub reader. */
 export function readPreparationGithub(path) {
-  if (!/^\/(?:actions\/(?:runs\/[1-9][0-9]*|artifacts\/[1-9][0-9]*(?:\/zip)?)|git\/commits\/[a-f0-9]{40})$/.test(path)) fail();
+  if (!/^\/actions\/runs\/[1-9][0-9]*\/artifacts\?name=application-validation-[1-9][0-9]*-[1-9][0-9]*$/.test(path) &&
+      path !== '/actions/workflows/temporal-application-validation.yml' && !/^\/(?:actions\/(?:runs\/[1-9][0-9]*|artifacts\/[1-9][0-9]*(?:\/zip)?)|git\/commits\/[a-f0-9]{40})$/.test(path)) fail();
   try {
     const archive = path.endsWith('/zip');
     const output = execFileSync('gh', ['api', `repos/upperroommedia/web-app${path}`], {
@@ -35,6 +36,64 @@ export function readPreparationGithub(path) {
     });
     return archive ? output : JSON.parse(output);
   } catch { return fail(); }
+}
+
+function fullApplicationSource(zip) {
+  const summaries = JSON.parse(execFileSync('python3', ['-c', `
+import io,json,zipfile,sys
+z=zipfile.ZipFile(io.BytesIO(sys.stdin.buffer.read()))
+if len(z.infolist())>16: raise ValueError('archive bound')
+result={}
+for expected in ['application-summary.json','temporal-worker-summary.json']:
+ entries=[i for i in z.infolist() if i.filename.split('/')[-1]==expected]
+ if len(entries)!=1 or entries[0].file_size>4194304: raise ValueError('summary bound')
+ result[expected]=json.loads(z.read(entries[0]))
+print(json.dumps(result))
+`], { input: zip, encoding: 'utf8', timeout: 15000, maxBuffer: 8 * 1024 * 1024, stdio: ['pipe', 'pipe', 'pipe'] }));
+  const application = summaries['application-summary.json'], worker = summaries['temporal-worker-summary.json'];
+  const stages = applicationStages();
+  if (application.schemaVersion !== 1 || application.passed !== true ||
+      !/^[a-f0-9]{40}$/.test(application.source?.commit ?? '') ||
+      !/^[a-f0-9]{40}$/.test(application.source?.tree ?? '') || application.source?.trackedDiffSha256 !== sha('') ||
+      !Array.isArray(application.stages) || application.stages.length !== 19 ||
+      application.stages.some((stage, i) => stage.id !== stages[i]?.id || stage.status !== 'passed' ||
+        !Array.isArray(stage.commands) || stage.commands.length !== stages[i].commands.length ||
+        stage.commands.some(command => command.code !== 0 || command.signal !== null)) ||
+      worker.schemaVersion !== 1 || worker.passed !== true || !Array.isArray(worker.filters) || worker.filters.length ||
+      !Array.isArray(worker.suites) || worker.suites.length < 48 ||
+      worker.suites.some(suite => suite.status !== 'passed' || suite.exitCode !== 0)) fail();
+  return application.source;
+}
+
+// Status-only consumers must distinguish a complete validation from the green
+// required check on prose-only PRs. Bind to the latest attempt and exact tree.
+export async function readFullApplicationRun(id, commit, github = readPreparationGithub) {
+  if (!Number.isSafeInteger(id) || id < 1 || !/^[a-f0-9]{40}$/.test(commit)) fail();
+  const workflow = await github('/actions/workflows/temporal-application-validation.yml');
+  const run = await github(`/actions/runs/${id}`);
+  if (run.id !== id || !Number.isSafeInteger(workflow.id) || run.workflow_id !== workflow.id ||
+      run.path !== '.github/workflows/temporal-application-validation.yml' ||
+      run.repository?.full_name !== 'upperroommedia/web-app' || run.head_sha !== commit ||
+      run.status !== 'completed' || run.conclusion !== 'success' ||
+      !Number.isSafeInteger(run.run_attempt) || run.run_attempt < 1) fail();
+  const name = `application-validation-${id}-${run.run_attempt}`;
+  const list = await github(`/actions/runs/${id}/artifacts?name=${name}`);
+  if (list?.total_count !== 1 || list.artifacts?.length !== 1) fail();
+  const [artifact] = list.artifacts;
+  if (!Number.isSafeInteger(artifact.id) || artifact.id < 1 || artifact.name !== name ||
+      artifact.expired !== false || artifact.workflow_run?.id !== id || artifact.workflow_run?.head_sha !== commit ||
+      !/^sha256:[a-f0-9]{64}$/.test(artifact.digest ?? '')) fail();
+  const zip = await github(`/actions/artifacts/${artifact.id}/zip`);
+  if (!Buffer.isBuffer(zip) || zip.length > 32 * 1024 * 1024 || 'sha256:' + sha(zip) !== artifact.digest) fail();
+  const source = fullApplicationSource(zip);
+  const head = await github(`/git/commits/${commit}`);
+  if (head.sha !== commit || head.tree?.sha !== source.tree) fail();
+  if (source.commit !== commit) {
+    const merge = await github(`/git/commits/${source.commit}`);
+    if (merge.sha !== source.commit || merge.tree?.sha !== source.tree ||
+        merge.parents?.length !== 2 || merge.parents[1]?.sha !== commit) fail();
+  }
+  return run;
 }
 
 /** Join the existing root-produced full-CI/tree and uploaded-source/image receipts
@@ -77,28 +136,8 @@ export async function verifyPreparationEvidence({
       artifact.name !== `application-validation-${ci.ciRun}-${run.run_attempt}`) fail();
     const zip = await github(`/actions/artifacts/${ci.artifactId}/zip`);
     if (!Buffer.isBuffer(zip) || zip.length > 32 * 1024 * 1024 || `sha256:${sha(zip)}` !== artifact.digest) fail();
-    const summaries = JSON.parse(execFileSync('python3', ['-c', `
-import io,json,zipfile,sys
-z=zipfile.ZipFile(io.BytesIO(sys.stdin.buffer.read()))
-if len(z.infolist())>16: raise ValueError('archive bound')
-result={}
-for expected in ['application-summary.json','temporal-worker-summary.json']:
- entries=[i for i in z.infolist() if i.filename.split('/')[-1]==expected]
- if len(entries)!=1 or entries[0].file_size>4194304: raise ValueError('summary bound')
- result[expected]=json.loads(z.read(entries[0]))
-print(json.dumps(result))
-`], { input: zip, encoding: 'utf8', timeout: 15000, maxBuffer: 8 * 1024 * 1024, stdio: ['pipe', 'pipe', 'pipe'] }));
-    const application = summaries['application-summary.json'], worker = summaries['temporal-worker-summary.json'];
-    if (application.schemaVersion !== 1 || application.passed !== true || application.source?.commit !== ci.mergeRef ||
-      application.source?.tree !== ci.sourceTree || application.source?.trackedDiffSha256 !== sha('') ||
-      !Array.isArray(application.stages) || application.stages.length !== 19 ||
-      application.stages.some((stage, i) => stage.id !== applicationStages()[i]?.id) ||
-      application.stages.some(stage => stage.status !== 'passed' ||
-        !Array.isArray(stage.commands) || stage.commands.length !== applicationStages()[application.stages.indexOf(stage)].commands.length ||
-        stage.commands.some(command => command.code !== 0 || command.signal !== null)) ||
-      worker.schemaVersion !== 1 || worker.passed !== true || !Array.isArray(worker.filters) || worker.filters.length ||
-      !Array.isArray(worker.suites) || worker.suites.length < 48 ||
-      worker.suites.some(suite => suite.status !== 'passed' || suite.exitCode !== 0)) fail();
+    const applicationSource = fullApplicationSource(zip);
+    if (applicationSource.commit !== ci.mergeRef || applicationSource.tree !== ci.sourceTree) fail();
 
     // Every retained producer input remains byte-bound. A passed flag alone grants nothing.
     const inputs = Object.entries(image.inputs ?? {});

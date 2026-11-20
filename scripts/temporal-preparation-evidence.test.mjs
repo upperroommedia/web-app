@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { verifyPreparationEvidence, readPreparationReceipt } from './temporal-preparation-evidence.mjs';
+import { verifyPreparationEvidence, readPreparationReceipt, readFullApplicationRun } from './temporal-preparation-evidence.mjs';
 import { serverlessResourceNames } from './temporal-serverless-platform.mjs';
 import { dispatchResourceNames } from './temporal-serverless-dispatch-resources.mjs';
 const sha = value => createHash('sha256').update(value).digest('hex');
@@ -115,4 +115,24 @@ test('private evidence rejects altered bytes, world-readable receipts and missin
   const image = JSON.parse(await (await import('node:fs/promises')).readFile(f.proof.image.path));
   await rm(Object.keys(image.inputs)[0]);
   await assert.rejects(verifyPreparationEvidence(f.options));
+});
+
+test('legacy mutation gates require the complete exact-tree artifact for the current successful attempt', async t => {
+  const f = await evidenceFixture(t);
+  const run = f.records['/actions/runs/123'];
+  run.workflow_id = 789;
+  f.records['/actions/workflows/temporal-application-validation.yml'] = { id: 789 };
+  const list = { total_count: 1, artifacts: [f.records['/actions/artifacts/456']] };
+  const key = '/actions/runs/123/artifacts?name=application-validation-123-1';
+  f.records[key] = list;
+  const read = () => readFullApplicationRun(123, buildId, f.options.github);
+  assert.deepEqual(await read(), run);
+  f.records[key] = { total_count: 0, artifacts: [] };
+  await assert.rejects(read());
+  f.records[key] = list;
+  run.run_attempt = 2;
+  await assert.rejects(read());
+  run.run_attempt = 1;
+  f.records[`/git/commits/${buildId}`].tree.sha = '0'.repeat(40);
+  await assert.rejects(read());
 });
