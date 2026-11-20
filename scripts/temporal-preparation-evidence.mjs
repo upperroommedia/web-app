@@ -41,7 +41,9 @@ export function readPreparationGithub(path) {
  * to fresh authenticated GitHub/CloudBuild metadata. This is metadata provenance,
  * not SLSA or an independent compiled-byte attestation. No remote mutation occurs.
  */
-export async function verifyPreparationEvidence({ path, digest, platform, binding, google, github = readPreparationGithub }) {
+export async function verifyPreparationEvidence({
+  path, digest, platform, binding, google, github = readPreparationGithub, signedPullRequestBase,
+}) {
   validateCloudRunReleasePlatform(platform);
   try {
     const proof = await readPreparationReceipt(path, digest);
@@ -68,6 +70,9 @@ export async function verifyPreparationEvidence({ path, digest, platform, bindin
       head.sha !== commit || head.tree?.sha !== ci.sourceTree || merge.sha !== ci.mergeRef || merge.tree?.sha !== ci.sourceTree ||
       merge.parents?.length !== 2 || merge.parents[1]?.sha !== commit ||
       !Array.isArray(ci.parents) || ci.parents.some((parent, i) => parent !== merge.parents[i]?.sha) || ci.parents.length !== 2) fail();
+    if (signedPullRequestBase !== undefined &&
+      (head.verification?.verified !== true || run.event !== 'pull_request' || merge.parents[0].sha !== signedPullRequestBase))
+      fail();
     if (!Number.isSafeInteger(run.run_attempt) || run.run_attempt < 1 ||
       artifact.name !== `application-validation-${ci.ciRun}-${run.run_attempt}`) fail();
     const zip = await github(`/actions/artifacts/${ci.artifactId}/zip`);

@@ -68,6 +68,19 @@ test('joins actual bounded ZIP bytes, exact tested merge, source archive and exp
   assert.match(result.scope, /not SLSA or runtime readiness/);
   assert.equal(f.calls.filter(x => x.endsWith('/zip')).length, 1);
 });
+test('successor provenance requires a verified signature, a PR run and the reviewed merge base', async t => {
+  const f = await evidenceFixture(t);
+  const options = { ...f.options, signedPullRequestBase: 'f'.repeat(40) };
+  const run = f.records['/actions/runs/123'];
+  const commit = f.records[`/git/commits/${buildId}`];
+  await assert.rejects(verifyPreparationEvidence(options));
+  commit.verification = { verified: true };
+  run.event = 'push';
+  await assert.rejects(verifyPreparationEvidence(options));
+  run.event = 'pull_request';
+  await assert.rejects(verifyPreparationEvidence({ ...options, signedPullRequestBase: '0'.repeat(40) }));
+  assert.equal((await verifyPreparationEvidence(options)).commit, buildId);
+});
 for (const mutation of ['failed-stage', 'nonzero-command', 'filtered-worker', 'failed-worker', 'duplicate-stage', 'missing-commands'])
   test(`rejects summary ${mutation} even when outer receipts and archive hash agree`, async t => {
     const f = await evidenceFixture(t, ({ application, worker }) => {

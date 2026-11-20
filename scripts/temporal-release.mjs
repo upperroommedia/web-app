@@ -44,6 +44,14 @@ import { activateCloudRunDispatchService } from './temporal-activate-dispatch-se
 import { prepareCloudRunDispatchService } from './temporal-prepare-dispatch-service.mjs';
 import { bootstrapStopCloudRunOrchestrationPool, activateCloudRunOrchestrationPool, stopCloudRunOrchestrationActivation, activateCloudRunControlsPool, stopCloudRunControlsActivation, bootstrapStopCloudRunControlsPool } from './temporal-bootstrap-pool.mjs';
 import { prepareCloudRunZeroPool } from './temporal-prepare-cloud-pool.mjs';
+import {
+  assertStagingMediaSuccessorLineage, observeStagingMediaSuccessorTransfer,
+  predecessorReleaseId, transferStagingMediaSuccessor, verifyStagingMediaPredecessorStillIsolated,
+} from './temporal-staging-media-successor.mjs';
+import { verifyStagingPredecessorTemporal } from './temporal-release-cloud-run.mjs';
+import {
+  assertStagingPredecessorDispatchWork, observeStagingPredecessorDispatch,
+} from './temporal-staging-predecessor-dispatch.mjs';
 import { readPreparationReceipt } from './temporal-preparation-evidence.mjs';
 import { createTraditionalKubernetesTransport } from './temporal-traditional-kubernetes-transport.mjs';
 import { attachCloudRunWorkerCompute, runCloudRunOrchestrationHandoff, runCloudRunTraditionalRetirement, runCloudRunWorkerWake, verifyManagedWorkerHandoff } from './temporal-release-cloud-run.mjs';
@@ -182,6 +190,8 @@ if (
     'resume',
     'rollback-ui',
     'restore-reviewed-ui',
+    'supersede-staging-media-create',
+    'observe-staging-media-supersession',
   ].includes(action) ||
   !args.includes('--release') ||
   !configPath
@@ -189,6 +199,10 @@ if (
   throw new Error('Usage: temporal-release.mjs ACTION --release PATH [--apply] [--output PATH]');
 const descriptorBytes = await readFile(configPath, 'utf8');
 const config = validateReleaseConfig(JSON.parse(descriptorBytes));
+const mediaSuccessorAction = ['supersede-staging-media-create', 'observe-staging-media-supersession'].includes(action);
+if (mediaSuccessorAction && (config.environment !== 'staging' || config.mode !== 'durable-upgrade' ||
+  config.releaseId === predecessorReleaseId || args.includes('--resume-operation')))
+  throw new Error('STAGING_MEDIA_SUCCESSOR_SCOPE_REQUIRED');
 const parent = `projects/${config.projectId}/locations/${config.location}/backends/${config.backendId}`;
 if (action === 'plan') {
   console.log(
@@ -198,9 +212,16 @@ if (action === 'plan') {
 }
 if (!args.includes('--apply'))
   throw new Error('Remote release operations require explicit --apply; use plan for offline review');
+const resourceBinding = loadReleaseResourceBinding(config);
+async function readBoundPlatform() {
+  const bytes = await readFile(config.platformConfig);
+  if (hash(bytes) !== resourceBinding.platformConfigSHA256)
+    throw new Error('RELEASE_RESOURCE_PLATFORM_CHANGED');
+  return JSON.parse(bytes);
+}
 const workerHandoff = workerHandoffInput(action, args, config);
 const workerReadiness = ['workers-ready', 'take-ownership', 'open'].includes(action)
-  ? workerHandoffInput(action, args, config, JSON.parse(await readFile(config.platformConfig, 'utf8')).workerHosting)
+  ? workerHandoffInput(action, args, config, (await readBoundPlatform()).workerHosting)
   : undefined;
 if (workerReadiness) {
   const flag = '--dispatch-wakes-operation';
@@ -213,7 +234,6 @@ if (workerReadiness) {
 const operatorRoot = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const runtimeRoot = args.includes('--runtime-root') ? resolve(args[args.indexOf('--runtime-root') + 1]) : operatorRoot;
 const binding = pinReleaseCheckouts(operatorRoot, runtimeRoot, config);
-const resourceBinding = loadReleaseResourceBinding(config);
 const operatorIdentity = {
   descriptorSHA256: hash(descriptorBytes),
   operatorRoot: binding.operatorRoot,
@@ -346,6 +366,69 @@ await runWithCleanup(
       adcType: adc.adcType,
       sdkCredentialImplementationSHA256: adc.sdkCredentialImplementationSHA256,
     };
+    if (mediaSuccessorAction) {
+      if (!operatorPrincipal.adcAndGcloudAccountMatch)
+        throw new Error('STAGING_MEDIA_SUCCESSOR_OPERATOR_UNCONFIRMED');
+      function requiredOption(flag) {
+        const at = args.indexOf(flag);
+        const value = args[at + 1];
+        if (at < 0 || at !== args.lastIndexOf(flag) || !value || value.startsWith('--'))
+          throw new Error('STAGING_MEDIA_SUCCESSOR_ARGUMENT_REQUIRED ' + flag);
+        return value;
+      }
+      const api = createReleaseApi({ getAccessToken: () => resources.credential.getAccessToken()
+        .then(({ access_token }) => access_token) });
+      await verifyReleaseResourceIdentity(resourceBinding, api);
+      if (action === 'observe-staging-media-supersession') {
+        console.log(JSON.stringify(await observeStagingMediaSuccessorTransfer(firestore, config, resourceBinding)));
+        return;
+      }
+
+      const oldDescriptor = await readFile(requiredOption('--predecessor-release'), 'utf8');
+      const oldConfig = validateReleaseConfig(JSON.parse(oldDescriptor));
+      if (oldConfig.releaseId !== predecessorReleaseId || oldConfig.projectId !== config.projectId)
+        throw new Error('STAGING_MEDIA_SUCCESSOR_PREDECESSOR_REQUIRED');
+      const oldBinding = pinReleaseCheckouts(operatorRoot, requiredOption('--predecessor-runtime-root'), oldConfig);
+      const oldResourceBinding = loadReleaseResourceBinding(oldConfig);
+      const [oldPlatformBytes, platformBytes] = await Promise.all([
+        readFile(oldConfig.platformConfig), readFile(config.platformConfig),
+      ]);
+      if (hash(oldPlatformBytes) !== oldResourceBinding.platformConfigSHA256 ||
+        hash(platformBytes) !== resourceBinding.platformConfigSHA256)
+        throw new Error('STAGING_MEDIA_SUCCESSOR_PLATFORM_CHANGED');
+      const oldPlatform = JSON.parse(oldPlatformBytes);
+      const platform = JSON.parse(platformBytes);
+      const path = requiredOption('--preparation-proof');
+      const digest = requiredOption('--preparation-proof-sha256');
+      if (!/^[a-f0-9]{64}$/.test(digest)) throw new Error('STAGING_MEDIA_SUCCESSOR_PROOF_DIGEST_REQUIRED');
+      const result = await transferStagingMediaSuccessor({
+        db: firestore, api, successor: config, resourceBinding,
+        verifyCandidate: () => verifyPreparationEvidence({
+          path, digest, platform, binding, google: api,
+          signedPullRequestBase: '546a7c12aed57e08db3d66514b05e08f02354dd7',
+        }),
+        observeWorkExclusion: async ({ original }) => {
+          const previousOperator = original.operation.operatorPrincipal;
+          if (previousOperator?.adcAndGcloudAccountMatch !== true || previousOperator.verified !== true ||
+            previousOperator.email !== operatorPrincipal.email ||
+            !previousOperator.subject || previousOperator.subject !== operatorPrincipal.subject ||
+            original.operation.operatorIdentity.descriptorSHA256 !== hash(oldDescriptor) ||
+            proofDigest(original.operation.operatorIdentity.resourceBinding) !== proofDigest(oldResourceBinding))
+            throw new Error('STAGING_MEDIA_SUCCESSOR_PREDECESSOR_OPERATOR_CHANGED');
+          const [temporal, dispatch] = await Promise.all([
+            verifyStagingPredecessorTemporal({ binding: oldBinding, config: oldConfig, platform: oldPlatform, firestore,
+              successorBuildId: config.compatibilityCommit }),
+            observeStagingPredecessorDispatch({ db: firestore, api, platform: oldPlatform,
+              state: original.state, successorBuildId: config.compatibilityCommit }),
+          ]);
+          return { temporal, dispatch };
+        },
+        assertPrivateWorkIdle: (tx, work) =>
+          assertStagingPredecessorDispatchWork(firestore, tx, config.compatibilityCommit, work.dispatch),
+      });
+      console.log(JSON.stringify(result));
+      return;
+    }
     const operationId = resumeOperation ?? randomUUID();
     let operationAcquired = false,
       operationVerified = false,
@@ -587,7 +670,7 @@ await runWithCleanup(
             ],
             { stdio: 'inherit', cwd: binding.operatorRoot }
           );
-          const platform = JSON.parse(await readFile(config.platformConfig, 'utf8'));
+          const platform = await readBoundPlatform();
           validateWorkerCoverage(config, platform);
           const pods = JSON.parse(
             execFileSync(
@@ -750,6 +833,8 @@ await runWithCleanup(
               'Release descriptor differs from immutable checkpoint; resume with the original reviewed descriptor'
             );
           const validatedControl = validateControl(control.data());
+          const predecessor = await assertStagingMediaSuccessorLineage(firestore, checkpoint, config, firestore, resourceBinding);
+          await verifyStagingMediaPredecessorStillIsolated(firestore, api, predecessor);
           if (hasCompatibilitySettlingCheckpoint(validatedControl, checkpoint, config))
             assertCompatibilitySettlingCheckpoint(validatedControl, checkpoint, config);
           sourceControl ??= validatedControl;
@@ -760,7 +845,7 @@ await runWithCleanup(
         let hetznerActivation;
         async function verifyHetznerActivation(control, state) {
           if (config.environment !== 'staging' || !config.domains.includes('media')) return;
-          const platform = JSON.parse(await readFile(config.platformConfig, 'utf8'));
+          const platform = await readBoundPlatform();
           if (platform.workerHosting !== 'cloud-run') return;
           const ref = firestore.doc(hetznerActivationPath(config.releaseId));
           const activation = await ref.get();
@@ -799,6 +884,7 @@ await runWithCleanup(
               assertNativeSnapshot(expectedAuthority.control, current);
               assertNativeSnapshot(expectedAuthority.state, currentState);
             }
+            await assertStagingMediaSuccessorLineage(firestore, currentState.data(), config, tx, resourceBinding);
             if (hasCompatibilitySettlingCheckpoint(current.data(), currentState.data(), config)) {
               assertCompatibilitySettlingCheckpoint(current.data(), currentState.data(), config);
               if (!['compatibility-ready', 'pause', 'resume', 'rollback-ui', 'restore-reviewed-ui'].includes(action))
@@ -1350,7 +1436,7 @@ await runWithCleanup(
             requirePhase(state, ['provider-usage-ready']);
             if (config.environment !== 'staging' || operatorPrincipal.adcAndGcloudAccountMatch !== true)
               throw new Error('IDENTITY_PREPARATION_REQUIRES_MATCHED_STAGING_OPERATOR');
-            const platform = JSON.parse(await readFile(config.platformConfig, 'utf8'));
+            const platform = await readBoundPlatform();
             if (platform.workerHosting !== 'cloud-run') throw new Error('IDENTITY_PREPARATION_REQUIRES_CLOUD_RUN');
             validateWorkerCoverage(config, platform);
             await verifyPreparationEvidence({ ...preparationArguments,
@@ -1381,7 +1467,7 @@ await runWithCleanup(
             requirePhase(state, ['provider-usage-ready']);
             if(config.environment!=='staging'||operatorPrincipal.adcAndGcloudAccountMatch!==true)
               throw new Error('BOOTSTRAP_REQUIRES_MATCHED_STAGING_OPERATOR');
-            const platform=JSON.parse(await readFile(config.platformConfig,'utf8'));
+            const platform=await readBoundPlatform();
             validateWorkerCoverage(config,platform);
             await verifyPreparationEvidence({...preparationArguments,path:preparationArguments.proof,platform,binding,google:api});
             const settings=await readPreparationReceipt(preparationArguments.settings,preparationArguments.settingsDigest);
@@ -1480,7 +1566,7 @@ await runWithCleanup(
             requirePhase(state, ['provider-usage-ready']);
             if (config.environment !== 'staging' || operatorPrincipal.adcAndGcloudAccountMatch !== true)
               throw new Error('POOL_PREPARATION_REQUIRES_MATCHED_STAGING_OPERATOR');
-            const platform = JSON.parse(await readFile(config.platformConfig, 'utf8'));
+            const platform = await readBoundPlatform();
             validateWorkerCoverage(config, platform);
             await verifyPreparationEvidence({ ...preparationArguments, path: preparationArguments.proof,
               platform, binding, google: api });
@@ -1531,7 +1617,7 @@ await runWithCleanup(
             requirePhase(state, ['provider-usage-ready']);
             if (config.environment !== 'staging' || operatorPrincipal.adcAndGcloudAccountMatch !== true)
               throw new Error('DIAGNOSTIC_REQUIRES_MATCHED_STAGING_OPERATOR');
-            const platform = JSON.parse(await readFile(config.platformConfig, 'utf8'));
+            const platform = await readBoundPlatform();
             validateWorkerCoverage(config, platform);
             await verifyPreparationEvidence({ ...preparationArguments, path: preparationArguments.proof, platform, binding, google: api });
             const settings = await readPreparationReceipt(preparationArguments.settings, preparationArguments.settingsDigest);
@@ -1664,7 +1750,7 @@ await runWithCleanup(
             requirePhase(state, ['provider-usage-ready']);
             if (config.environment !== 'staging' || operatorPrincipal.adcAndGcloudAccountMatch !== true)
               throw new Error('DISPATCH_ACTIVATION_REQUIRES_MATCHED_STAGING_OPERATOR');
-            const platform = JSON.parse(await readFile(config.platformConfig, 'utf8'));
+            const platform = await readBoundPlatform();
             validateWorkerCoverage(config, platform);
             await verifyPreparationEvidence({ ...preparationArguments, path: preparationArguments.proof, platform, binding, google: api });
             const settings = await readPreparationReceipt(preparationArguments.settings, preparationArguments.settingsDigest);
@@ -1721,7 +1807,7 @@ await runWithCleanup(
             requirePhase(state, ['provider-usage-ready']);
             if (config.environment !== 'staging' || operatorPrincipal.adcAndGcloudAccountMatch !== true)
               throw new Error('DISPATCH_SERVICE_PREPARATION_REQUIRES_MATCHED_STAGING_OPERATOR');
-            const platform = JSON.parse(await readFile(config.platformConfig, 'utf8'));
+            const platform = await readBoundPlatform();
             validateWorkerCoverage(config, platform);
             await verifyPreparationEvidence({ ...preparationArguments, path: preparationArguments.proof,
               platform, binding, google: api });
@@ -1762,7 +1848,7 @@ await runWithCleanup(
             requirePhase(state, ['provider-usage-ready']);
             if (config.environment !== 'staging' || operatorPrincipal.adcAndGcloudAccountMatch !== true)
               throw new Error('SECRET_PREPARATION_REQUIRES_MATCHED_STAGING_OPERATOR');
-            const platform = JSON.parse(await readFile(config.platformConfig, 'utf8'));
+            const platform = await readBoundPlatform();
             validateWorkerCoverage(config, platform);
             await verifyPreparationEvidence({ ...preparationArguments, path: preparationArguments.proof,
               platform, binding, google: api });
@@ -1798,7 +1884,7 @@ await runWithCleanup(
             requirePhase(state, ['provider-usage-ready']);
             if (config.environment !== 'staging' || operatorPrincipal.adcAndGcloudAccountMatch !== true)
               throw new Error('SCHEDULER_CYCLE_REQUIRES_MATCHED_STAGING_OPERATOR');
-            const platform = JSON.parse(await readFile(config.platformConfig, 'utf8'));
+            const platform = await readBoundPlatform();
             validateWorkerCoverage(config, platform);
             await verifyPreparationEvidence({ ...preparationArguments, path: preparationArguments.proof, platform, binding, google: api });
             const settings = await readPreparationReceipt(preparationArguments.settings, preparationArguments.settingsDigest);
@@ -1844,7 +1930,7 @@ await runWithCleanup(
             requirePhase(state, ['provider-usage-ready']);
             if (config.environment !== 'staging' || operatorPrincipal.adcAndGcloudAccountMatch !== true)
               throw new Error('DISPATCH_WAKE_STOP_REQUIRES_MATCHED_STAGING_OPERATOR');
-            const platform = JSON.parse(await readFile(config.platformConfig, 'utf8'));
+            const platform = await readBoundPlatform();
             validateWorkerCoverage(config, platform);
             await verifyPreparationEvidence({ ...preparationArguments, path: preparationArguments.proof,
               platform, binding, google: api });
@@ -1883,7 +1969,7 @@ await runWithCleanup(
             requirePhase(state, ['provider-usage-ready']);
             if (config.environment !== 'staging' || operatorPrincipal.adcAndGcloudAccountMatch !== true)
               throw new Error('DISPATCH_ACCESS_PREPARATION_REQUIRES_MATCHED_STAGING_OPERATOR');
-            const platform = JSON.parse(await readFile(config.platformConfig, 'utf8'));
+            const platform = await readBoundPlatform();
             validateWorkerCoverage(config, platform);
             await verifyPreparationEvidence({ ...preparationArguments, path: preparationArguments.proof,
               platform, binding, google: api });
@@ -1923,7 +2009,7 @@ await runWithCleanup(
             requirePhase(state, ['provider-usage-ready']);
             if (config.environment !== 'staging' || operatorPrincipal.adcAndGcloudAccountMatch !== true)
               throw new Error('SCALER_PREPARATION_REQUIRES_MATCHED_STAGING_OPERATOR');
-            const platform = JSON.parse(await readFile(config.platformConfig, 'utf8'));
+            const platform = await readBoundPlatform();
             validateWorkerCoverage(config, platform);
             await verifyPreparationEvidence({ ...preparationArguments, path: preparationArguments.proof,
               platform, binding, google: api });
