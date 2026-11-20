@@ -60,3 +60,13 @@ test('rejects shared mutable source paths before any provider or storage effect'
   await expect(normalizeImageAdmission(request)).rejects.toThrow('Invalid image upload source');
   expect(deps.getMetadata).not.toHaveBeenCalled();
 });
+test('canonical deletion source must match configured image bucket without rewriting its identity', async () => {
+  const original = { bucket: 'foreign-images', path: 'speaker-images/retained', generation: '42', contentType: 'image/png' };
+  const deps = dependencies();
+  const request = input(deps); request.kind = 'image.delete';
+  const get = jest.fn(async () => ({ exists: true, id: 'image', data: () => ({ source: original }) }));
+  request.firestore = { collection: jest.fn(() => ({ doc: jest.fn(() => ({ get })) })) } as unknown as typeof request.firestore;
+  await expect(normalizeImageAdmission(request)).rejects.toThrow('unapproved bucket');
+  expect(deps.storage.bucket).not.toHaveBeenCalled();
+  expect(original).toEqual({ bucket: 'foreign-images', path: 'speaker-images/retained', generation: '42', contentType: 'image/png' });
+});

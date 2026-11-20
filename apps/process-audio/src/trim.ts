@@ -1,7 +1,6 @@
 import { CancelToken } from './CancelToken';
 import path from 'path';
 import { Bucket, File } from '@google-cloud/storage';
-import { Reference } from 'firebase-admin/database';
 import { convertStringToMilliseconds, createTempFile, logMemoryUsage, getFFmpegPath } from './utils';
 import { CustomMetadata } from './types';
 import { unlink } from 'fs/promises';
@@ -9,7 +8,7 @@ import { spawn } from 'child_process';
 import { finished } from 'stream';
 import { createLoggerWithContext } from './WinstonLogger';
 import { LogContext } from './context';
-import { setProcessAudioProgress } from './processAudioProgress';
+import { setProcessAudioProgress, type ProcessAudioProgressTarget } from './processAudioProgress';
 
 // Parse ffmpeg stderr for progress and duration
 function parseFFmpegProgress(stderrLine: string): { time?: string; duration?: string } {
@@ -36,7 +35,7 @@ const trim = async (
   storageFilePath: string,
   outputFilePath: string,
   tempFiles: Set<string>,
-  realtimeDBRef: Reference,
+  realtimeDBRef: ProcessAudioProgressTarget,
   customMetadata: CustomMetadata,
   startTime?: number,
   duration?: number,
@@ -86,6 +85,7 @@ const trim = async (
   const proc = spawn(ffmpegPath, args, {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
+  cancelToken.trackProcess(proc);
 
   if (!proc.stdout) {
     throw new Error('FFmpeg stdout is null');

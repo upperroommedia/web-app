@@ -89,6 +89,17 @@ export function applicationStages(root = ROOT) {
       'recovery-sdk',
       'Validate release and recovery through the real Firestore SDK',
       [
+        node('scripts/integration/temporal-orchestration-handoff.native.mjs'),
+        node('--test', 'scripts/temporal-image-replay.test.mjs'),
+        node('--test', 'scripts/temporal-media-recovery-cycle.test.mjs'),
+        node('--test', 'scripts/temporal-media-diagnostic-drain.test.mjs'),
+        node('--test', 'scripts/temporal-media-stop-confirmation.test.mjs'),
+        node('--test', 'scripts/temporal-media-recovery-phase-pool.test.mjs'),
+        node('--test', 'scripts/temporal-media-recovery-protection.test.mjs'),
+        node('--test', 'scripts/temporal-media-recovery-capsule.test.mjs'),
+        node('--test', 'scripts/temporal-media-history.test.mjs'),
+        node('--test', 'scripts/temporal-media-restored-activation.test.mjs'),
+        node('--test', 'scripts/temporal-restored-startup.test.mjs'),
         pnpm(
           '--dir',
           'functions',
@@ -101,7 +112,7 @@ export function applicationStages(root = ROOT) {
           'auth,firestore,database,storage',
           '--config',
           '../firebase.test.json',
-          'node ../scripts/tests/temporal-release-runtime.firestore.test.mjs'
+          'node ../scripts/tests/temporal-release-runtime.firestore.test.mjs && node ../scripts/tests/temporal-preparation-checkpoint.firestore.test.mjs && node ../scripts/integration/temporal-compute-isolation.native.mjs && node ../scripts/integration/temporal-controls-bootstrap.native.mjs && node ../scripts/integration/temporal-controls-promotion.native.mjs && node ../scripts/integration/temporal-media-startup.native.mjs && node ../scripts/integration/temporal-media-kernel.native.mjs && node ../scripts/integration/temporal-media-recovery-checkpoint.native.mjs && node ../scripts/integration/temporal-media-drain.native.mjs && node ../scripts/integration/temporal-media-recovery-journal.native.mjs && node ../scripts/integration/temporal-media-processing.native.mjs && node ../scripts/integration/temporal-media-allocation.native.mjs && node --test ../scripts/integration/fixtures/owned-media-process.test.mjs && node ../scripts/integration/temporal-media-adoption.native.mjs && URM_MEDIA_REMOTE_ONLY=1 URM_MEDIA_REMOTE_CASES=remote-adopt,remote-revoked,remote-owner-changed,remote-generation-drift,remote-checksum-drift,remote-render-adopt node ../scripts/integration/temporal-media-adoption.native.mjs && node ../scripts/integration/temporal-media-recovery-work.native.mjs && node ../scripts/integration/temporal-image-replay.native.mjs'
         ),
         pnpm(
           '--dir',

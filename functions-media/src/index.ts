@@ -3,6 +3,7 @@ import { setGlobalOptions } from 'firebase-functions/v2';
 import { runtimeAlertRecipientsSecret } from '../../functions/src/notifications/notificationSecrets';
 import { functionsSentryDsnSecret, initFunctionsSentry } from '../../functions/src/sentry';
 import addintrooutrotaskgenerator from './addIntroOutroTaskGenerator';
+import getpinnedaudioplayback from './getPinnedAudioPlayback';
 import getyoutubecookiestatus from './getYouTubeCookieStatus';
 import { processaudiofiletask, processaudioyoutubetask } from './processAudioTask';
 import setyoutubecookies from './setYouTubeCookies';
@@ -20,3 +21,5 @@ exports.processaudioyoutubetask = processaudioyoutubetask;
 exports.getyoutubecookiestatus = getyoutubecookiestatus;
 exports.setyoutubecookies = setyoutubecookies;
 exports.sermonaudiocreatetrigger = sermonAudioCreateTrigger;
+
+exports.getpinnedaudioplayback = getpinnedaudioplayback;

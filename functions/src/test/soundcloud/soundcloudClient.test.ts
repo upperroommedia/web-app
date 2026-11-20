@@ -18,12 +18,14 @@ const mockedAxios = axios as jest.Mocked<typeof axios>;
 type MockFile = {
   getMetadata: jest.Mock;
   createReadStream: jest.Mock;
+  getSignedUrl: jest.Mock;
 };
 
 const createBucket = (): Bucket & { __file: MockFile } => {
   const file = {
     getMetadata: jest.fn(async () => [{ size: '9', contentType: 'audio/mpeg' }]),
     createReadStream: jest.fn(() => Readable.from(['file-data'])),
+    getSignedUrl: jest.fn(async () => ['https://storage.example/pinned-audio']),
   };
 
   return {
@@ -241,4 +243,34 @@ describe('soundcloudClient', () => {
     expect(stream.destroyed).toBe(true);
     expect(mockedAxios.post).toHaveBeenCalledTimes(1);
   });
+});
+
+it('opens only the exact retained audio generation for a pinned publish', async () => {
+  jest.clearAllMocks();
+  const bucket = createBucket();
+  const generation = '90071992547409931';
+  bucket.__file.getMetadata.mockResolvedValueOnce([{ generation, size: '5', contentType: 'audio/mpeg' }]);
+  const stream = Readable.from(['audio']);
+  mockedAxios.get.mockResolvedValueOnce({ data: stream });
+  const input = {
+    bucket,
+    audioStoragePath: 'audio.mp3',
+    audioGeneration: generation,
+    title: 'Track',
+    tags: [],
+    description: '',
+  };
+  const prepared = await prepareMultipartUpload(input);
+  expect(bucket.__file.getSignedUrl).toHaveBeenCalledWith(expect.objectContaining({ queryParams: { generation } }));
+  expect(bucket.__file.createReadStream).not.toHaveBeenCalled();
+  expect(mockedAxios.get).toHaveBeenCalledWith(
+    'https://storage.example/pinned-audio',
+    expect.objectContaining({ responseType: 'stream', maxRedirects: 0 })
+  );
+  prepared.dispose();
+  expect(stream.destroyed).toBe(true);
+  bucket.__file.getMetadata.mockResolvedValueOnce([{ generation: '3', size: '5', contentType: 'audio/mpeg' }]);
+  await expect(prepareMultipartUpload(input)).rejects.toThrow('retained audio generation changed');
+  expect(bucket.__file.getSignedUrl).toHaveBeenCalledTimes(1);
+  expect(mockedAxios.post).not.toHaveBeenCalled();
 });

@@ -50,7 +50,7 @@ import {
   runDurableTransaction,
 } from './durableOperationContext';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
-import { readFirebaseDownloadUrl } from '../../storageDownloadUrl';
+import { readPublishingAudioUrl } from '../../storageDownloadUrl';
 import { FieldValue, type Transaction } from 'firebase-admin/firestore';
 import { HttpsError } from 'firebase-functions/v2/https';
 import type { CallableRequest } from 'firebase-functions/v2/https';
@@ -95,7 +95,7 @@ type Store = Pick<
   | 'prepareProviderMutationEffectsClosed'
 > & {
   commitCurrent(ref: PublishingJobRef, mutation: (tx: Transaction) => Promise<void>): Promise<void>;
-  leaseAudio(ref: PublishingJobRef, sermonId?: string, sourcePath?: string): Promise<void>;
+  leaseAudio(ref: PublishingJobRef, sermonId?: string, sourcePath?: string, sourceGeneration?: string): Promise<void>;
   releaseAudio(ref: PublishingJobRef): Promise<{ released: boolean }>;
 };
 const fail: (code: string) => never = (code) => {
@@ -131,7 +131,11 @@ async function publishingAllocationInput(
   ref: PublishingJobRef,
   intent: PrivatePublishingIntent,
   sermon: Sermon
-): Promise<{ source: ReturnType<typeof capturePublishingAllocationSource>; audioPath: string }> {
+): Promise<{
+  source: ReturnType<typeof capturePublishingAllocationSource>;
+  audioPath: string;
+  audioGeneration?: string;
+}> {
   const source = intent.payload.allocationSource as ReturnType<typeof capturePublishingAllocationSource> | undefined;
   if (
     !source ||
@@ -144,7 +148,14 @@ async function publishingAllocationInput(
     typeof intent.payload.audioStoragePath === 'string'
       ? intent.payload.audioStoragePath
       : `intro-outro-sermons/${intent.sermonId}`;
-  if (!intent.payload.processAudio) return { source, audioPath };
+  const audioGeneration = () => {
+    const current = sermon.audioArtifacts;
+    if (current?.finalGeneration === undefined) return undefined;
+    if (current.finalPath !== audioPath || !/^[1-9][0-9]{0,29}$/.test(current.finalGeneration))
+      return fail('PUBLISHING_AUDIO_SUPERSEDED');
+    return current.finalGeneration;
+  };
+  if (!intent.payload.processAudio) return { source, audioPath, audioGeneration: audioGeneration() };
   const dependency = await db().collection('temporalPublishingAudioDependencies').doc(ref.jobId).get();
   const media = dependency.get('mediaRef') as
     | { projectId?: string; jobId?: string; sermonId?: string; revision?: number; requestVersion?: string }
@@ -177,6 +188,7 @@ async function publishingAllocationInput(
         .audioFingerprint,
     },
     audioPath,
+    audioGeneration: audioGeneration(),
   };
 }
 /** An edit owns one complete membership graph until its canonical selection commits. */
@@ -220,9 +232,19 @@ export function createFirebasePublishingDependencies(store: Store): PublishingDo
       const sermon = await canonical(intent);
       if (sermon.subsplashId) return;
       await authorizedRequest(intent, {});
-      const { source: allocationSource, audioPath } = await publishingAllocationInput(ref, intent, sermon);
-      await store.leaseAudio(ref, intent.sermonId, audioPath);
-      const audioUrl = await readFirebaseDownloadUrl(firebaseAdmin.storage().bucket().file(audioPath));
+      const {
+        source: allocationSource,
+        audioPath,
+        audioGeneration,
+      } = await publishingAllocationInput(ref, intent, sermon);
+      await store.leaseAudio(
+        ref,
+        intent.sermonId,
+        audioPath,
+        ...(audioGeneration === undefined ? [] : [audioGeneration])
+      );
+      const bucket = firebaseAdmin.storage().bucket();
+      const audioUrl = await readPublishingAudioUrl(bucket.file(audioPath), audioGeneration);
       const result = (await uploadToSubsplashDomain(
         {
           operationKey: key(ref, `${intent.sermonId}:subsplash-create`),
@@ -239,6 +261,7 @@ export function createFirebasePublishingDependencies(store: Store): PublishingDo
           autoPublish: false,
         },
         {
+          ...(audioGeneration === undefined ? {} : { pinnedAudio: { path: audioPath, generation: audioGeneration } }),
           readExistingMedia: async () => {
             await store.assertCurrent(ref, intent);
             return (await canonical(intent)).subsplashId;
@@ -287,7 +310,11 @@ export function createFirebasePublishingDependencies(store: Store): PublishingDo
         await store.assertCurrent(ref, intent);
         const sermon = await canonical(intent);
         if (sermon.soundCloudTrackId) return;
-        const { source: allocationSource, audioPath } = await publishingAllocationInput(ref, intent, sermon);
+        const {
+          source: allocationSource,
+          audioPath,
+          audioGeneration,
+        } = await publishingAllocationInput(ref, intent, sermon);
         await claimPublishingAllocation(db(), store, {
           ref,
           sermonId: intent.sermonId,
@@ -296,8 +323,13 @@ export function createFirebasePublishingDependencies(store: Store): PublishingDo
           source: allocationSource,
         });
         await authorizedRequest(intent, {});
-        await store.leaseAudio(ref, intent.sermonId, audioPath);
-        const result = await uploadToSoundCloudDomain({
+        await store.leaseAudio(
+          ref,
+          intent.sermonId,
+          audioPath,
+          ...(audioGeneration === undefined ? [] : [audioGeneration])
+        );
+        const audio = {
           operationKey: key(ref, `${intent.sermonId}:soundcloud-create`),
           audioStoragePath: audioPath,
           title: content(intent).title,
@@ -305,7 +337,10 @@ export function createFirebasePublishingDependencies(store: Store): PublishingDo
           tags: [content(intent).subtitle, ...content(intent).topics],
           speakers: content(intent).speakers.map((s) => s.name),
           imageSource: content(intent).images.find((image) => image.type === 'square')?.downloadLink,
-        });
+        };
+        const result = await (audioGeneration === undefined
+          ? uploadToSoundCloudDomain(audio)
+          : uploadToSoundCloudDomain(audio, { audioGeneration }));
         await store.assertCurrent(ref, intent);
         await store.commitCurrent(ref, async (tx) => {
           const settle = await preparePublishingAllocationCommit(

@@ -1,3 +1,4 @@
+import { getFirebaseImagesBucket } from '@upperroom/shared/shared/firebaseProjectConfig';
 import { createHash } from 'node:crypto';
 import type { Firestore, Transaction } from 'firebase-admin/firestore';
 import { HttpsError } from 'firebase-functions/v2/https';
@@ -1086,6 +1087,7 @@ export async function resolveDurableDomain(
       await images.resolveImageDeletionReview(
         {
           firestore,
+          imagesBucket: getFirebaseImagesBucket(),
           loadIntent: (ref) => store.loadIntent<import('./images/types').ImageIntent>(ref),
           assertCurrent: async (ref) => {
             await store.assertCurrent(ref);
@@ -1110,6 +1112,7 @@ export async function resolveDurableDomain(
       await images.resolveImageAllocation(
         {
           firestore,
+          imagesBucket: getFirebaseImagesBucket(),
           loadIntent: (ref) => store.loadIntent<import('./images/types').ImageIntent>(ref),
           assertCurrent: async (ref) => {
             await store.assertCurrent(ref);

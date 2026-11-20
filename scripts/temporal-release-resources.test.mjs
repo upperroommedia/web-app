@@ -23,6 +23,10 @@ function fixture({ existing = false, failures = [] } = {}) {
       apps.push(app);
       return app;
     },
+    getAuth: (app) => {
+      events.push('auth');
+      return { app };
+    },
     getFirestore: () => {
       events.push('firestore');
       return { terminate: step('terminate') };
@@ -193,6 +197,7 @@ test('original action failure wins over cleanup/reporting failures; successful c
 for (const scenario of [
   'success',
   'claim-failure',
+  'changed-claim',
   'action-failure',
   'lock-failure',
   'action-failure-lock-failure',
@@ -219,11 +224,22 @@ for (const scenario of [
     assert(receipt.events.includes('database-offline'));
     assert(receipt.events.includes('firestore-terminate'));
     assert(receipt.events.includes('app-delete'));
-    assert.equal(receipt.lockAbsent, !scenario.includes('lock-failure'));
+    assert.equal(receipt.lockAbsent, !scenario.includes('lock-failure') && !scenario.startsWith('action-failure') && scenario !== 'changed-claim');
     if (scenario.startsWith('action-failure')) assert.equal(receipt.failure, 'ORIGINAL_ACTION_FAILURE');
+    if (scenario === 'changed-claim') assert.equal(receipt.failure, 'RELEASE_NATIVE_AUTHORITY_CHANGED');
     if (scenario === 'claim-failure') assert.equal(receipt.failure, 'ORIGINAL_CLAIM_FAILURE');
     if (scenario === 'success') {
       assert.equal(receipt.phase, 'paused-for-recovery');
       assert(receipt.events.indexOf('lock-delete') < receipt.events.indexOf('database-offline'));
     }
   });
+
+test('Auth uses the exact owned named app once and cleanup never initializes it', async () => {
+  const f = fixture();
+  const resources = createReleaseFirebaseResources(project, url, f.sdk);
+  const first = resources.auth;
+  assert.equal(resources.auth, first);
+  assert.equal(first.app.name, `temporal-release-${project}`);
+  await resources.close();
+  assert.equal(f.events.filter((v) => v === 'auth').length, 1);
+});

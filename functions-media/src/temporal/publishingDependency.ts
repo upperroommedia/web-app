@@ -91,8 +91,19 @@ export function createPublishingMediaDependency(options: PublishingMediaDependen
         });
       });
     },
-    leasePublishingAudio: async (ref: DurableJobRef, sermonId?: string, sourcePath?: string): Promise<void> => {
+    leasePublishingAudio: async (
+      ref: DurableJobRef,
+      sermonId?: string,
+      sourcePath?: string,
+      sourceGeneration?: string
+    ): Promise<void> => {
       if (ref.projectId !== options.projectId) throw new Error('Publishing media project mismatch.');
+      if (
+        sourceGeneration !== undefined &&
+        (sourcePath === undefined || !/^[1-9][0-9]{0,29}$/.test(sourceGeneration))
+      ) {
+        throw new Error('Publishing audio generation requires an exact source path.');
+      }
       await options.assertCurrent(ref);
       const entityId = sermonId ?? (await options.loadIntent(ref)).sermonId;
       await options.firestore.runTransaction(async (transaction) => {
@@ -112,13 +123,20 @@ export function createPublishingMediaDependency(options: PublishingMediaDependen
           );
           artifactId = canonical.get('artifactIds.final') as string | undefined;
         }
-        if (!artifactId) return; // Legacy aliases are outside the indexed immutable cleanup domain.
+        if (!artifactId) {
+          if (sourceGeneration !== undefined)
+            throw new Error('Publishing audio generation requires an owned artifact.');
+          return; // Legacy aliases are outside the indexed immutable cleanup domain.
+        }
         const attach = await prepareMediaReference(transaction, options.firestore, {
           artifactId,
           projectId: ref.projectId,
           type: 'publishing_job',
           id: ref.jobId,
           createdAt: Date.now(),
+          ...(sourcePath !== undefined && sourceGeneration !== undefined
+            ? { expectedObject: { path: sourcePath, generation: sourceGeneration } }
+            : {}),
         });
         attach();
         transaction.set(

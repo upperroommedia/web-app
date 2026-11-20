@@ -1,3 +1,4 @@
+import { validateCloudRunReleasePlatform } from './temporal-release-cloud-run.mjs';
 import { PROVIDER_USAGE_SCAN_GROUPS } from './temporal-backfill-provider-usage.mjs';
 import { createRequire } from 'node:module';
 import { createReleaseFirebaseResources } from './temporal-release-resources.mjs';
@@ -296,12 +297,14 @@ export function firebaseAdmin(projectId, databaseURL) {
     deleteApp,
     getFirestore,
     getDatabase,
+    getAuth:app=>require('firebase-admin/auth').getAuth(app),
     serverTimestamp: () => FieldValue.serverTimestamp(),
   });
 }
 
 export function validateWorkerCoverage(release, platform) {
-  if (platform.dispatcherEnabled === false)
+  if (platform.workerHosting === 'cloud-run') validateCloudRunReleasePlatform(platform);
+  if (platform.workerHosting !== 'cloud-run' && platform.dispatcherEnabled === false)
     throw new Error(
       'Application cutover requires the orchestration dispatcher enabled; a restart-probe-only deployment cannot own admissions'
     );
@@ -416,4 +419,13 @@ export function validateProviderUsageMarker(config, marker, expectedEpoch) {
       'Provider reference index lacks the verified ready project/release/epoch and complete source groups'
     );
   return marker;
+}
+
+/** Cleanup can abandon an untouched lock. Once any checkpoint is present,
+ * an unsuccessful invocation preserves the original operation for readback. */
+export function canReleaseOwnedOperationLock(lock, operationVerified) {
+  const initialFields = new Set([
+    'operationId', 'releaseId', 'action', 'bindingDigest', 'operatorIdentity', 'operatorPrincipal', 'createdAt',
+  ]);
+  return operationVerified === true || Object.keys(lock).every((field) => initialFields.has(field));
 }

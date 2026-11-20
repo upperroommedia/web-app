@@ -1,5 +1,5 @@
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
-import { DesktopDatePicker } from '@mui/x-date-pickers/DesktopDatePicker';
+import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import React, { memo } from 'react';
 
@@ -11,7 +11,7 @@ interface UploaderDatePickerProps {
 function UploaderDatePicker({ date, handleDateChange }: UploaderDatePickerProps) {
   return (
     <LocalizationProvider dateAdapter={AdapterDateFns}>
-      <DesktopDatePicker
+      <DatePicker
         label="Date"
         format="MM/dd/yyyy"
         value={date}

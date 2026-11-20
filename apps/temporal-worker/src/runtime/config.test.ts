@@ -168,3 +168,42 @@ test.each([
 ])('Cloud rejects unbound or incorrectly formed namespace endpoint %s', (address) => {
   expect(() => loadRuntimeConfig({ ...cloudEnv, TEMPORAL_ADDRESS: address })).toThrow('trusted namespace');
 });
+
+const serverlessEnv = {
+  ...cloudEnv,
+  TEMPORAL_WORKER_HOSTING: 'cloud-run',
+  TEMPORAL_DISPATCHER_ENABLED: 'false',
+  TEMPORAL_MEDIA_CONCURRENCY: '1',
+  TEMPORAL_TASK_QUEUES: 'urm-orchestration',
+  TEMPORAL_DEPLOYMENT_NAME: 'urm-worker-staging',
+};
+test('serverless pools disable the continuous outbox poller and reserve a bounded shutdown window', () => {
+  expect(loadRuntimeConfig(serverlessEnv)).toMatchObject({
+    hosting: 'cloud-run',
+    dispatcherEnabled: false,
+    shutdownGraceTimeMs: 8000,
+  });
+});
+test.each([
+  { TEMPORAL_DISPATCHER_ENABLED: undefined },
+  { TEMPORAL_DISPATCHER_ENABLED: 'true' },
+  { TEMPORAL_WORKER_HOSTING: 'unknown' },
+  { TEMPORAL_TASK_QUEUES: 'urm-media', TEMPORAL_MEDIA_CONCURRENCY: '2' },
+  { TEMPORAL_TASK_QUEUES: undefined },
+  { TEMPORAL_TASK_QUEUES: 'urm-controls' },
+  { GOOGLE_APPLICATION_CREDENTIALS: '/unexpected-account.json' },
+  { TEMPORAL_WORKER_POD_NAME: 'pod' },
+  { TEMPORAL_CLUSTER_ID: 'cluster' },
+])('serverless startup rejects an unsafe hosting binding %j', (patch) => {
+  expect(() => loadRuntimeConfig({ ...serverlessEnv, ...patch })).toThrow();
+});
+test('serverless hosting cannot use a self-hosted namespace', () => {
+  expect(() =>
+    loadRuntimeConfig({
+      ...env,
+      TEMPORAL_WORKER_HOSTING: 'cloud-run',
+      TEMPORAL_DISPATCHER_ENABLED: 'false',
+      TEMPORAL_MEDIA_CONCURRENCY: '1',
+    })
+  ).toThrow();
+});

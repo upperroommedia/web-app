@@ -50,6 +50,20 @@ A real authenticated media-byte canary must succeed before authenticated request
 
 Interactive browser login continues through its existing authenticated desktop interface. Signals contain recovery generations only. Native browser-profile leases and storage-generation safeguards remain necessary independently of Temporal orchestration.
 
+### Staging Hetzner activation
+
+During the controlled staging release at `ownership-changed`, deploy the committed candidate under the existing release lock.
+
+```bash
+node scripts/temporal-deploy-guard.mjs --project urm-app-staging \
+  --release /private/release.json --phase ownership-changed --hetzner-youtube-render -- \
+  bash scripts/deploy-process-audio-hetzner.sh staging
+```
+
+The candidate starts in verification mode. Only the loopback deployment canaries run in that mode. They check media bytes through the existing extractor and authenticated cookie-provider path. The worker verifies the owned release lock, the paused Temporal media boundary, and the empty host slot before replacing the staging container with the same exact image in render mode. Readback checks the image, staging Sentry configuration and route registration.
+
+An unresolved activation retains the remote deployment metadata and the release operation lock. An active Temporal YouTube host requires a native drain and reviewed handoff before any subsequent replacement. The guarded browser and Workflow smoke remains required for staging readiness.
+
 ## Verification
 
 Native process tests cover cancellation of silent children, waiting for process close, already-cancelled starts, measured ffmpeg progress parsing and provider diagnostic redaction. Real Temporal time-skipping tests cover coalescing, captured-history replay, authentication waits, archive timers, native cancellation acknowledgement, bounded parent completion/cancellation, and idle retirement/restart. Transaction-admission tests cover atomic source confirmation, concurrent cancellation replay, pinned generations, actor identity, request deduplication and pending coalesced-job settlement. The dedicated Firebase emulator configuration remains the only supported emulator datastore harness.

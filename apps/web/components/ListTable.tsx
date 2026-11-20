@@ -1,4 +1,3 @@
-import SearchAttribution from './algoliaComponents/SearchAttribution';
 import { ChangeEvent, MouseEvent } from 'react';
 import { useRouter } from 'next/router';
 import Image from 'next/image';
@@ -180,7 +179,6 @@ const ListTable = ({
               ),
             }}
           />
-          <SearchAttribution />
           <FormControl size="small" sx={{ minWidth: 180 }}>
             <InputLabel id="list-type-filter-label">Type</InputLabel>
             <Select

@@ -157,6 +157,16 @@ test('shared complete stage contract preserves mandatory suites, one build, dist
   assert(stages.findIndex((s) => s.id === 'media-browser') < stages.findIndex((s) => s.id === 'functions'));
   assert.deepEqual(stages.find((s) => s.id === 'functions').commands, [['pnpm', '--dir', 'functions', 'test']]);
   const sdk = stages.find((s) => s.id === 'recovery-sdk');
+  assert.deepEqual(
+    sdk.commands.find((args) => args.includes('scripts/integration/temporal-orchestration-handoff.native.mjs')),
+    ['node', 'scripts/integration/temporal-orchestration-handoff.native.mjs']
+  );
+  const render = sdk.commands.find((args) =>
+    args.some((arg) =>
+      arg.includes(',remote-render-adopt node ../scripts/integration/temporal-media-adoption.native.mjs')
+    )
+  );
+  assert(render?.includes('emulators:exec'));
   assert.equal(sdk.env.RELEASE_RUNTIME_TEST_ROOT, root);
   assert.equal(sdk.env.BUNDLE_RECOVERY_TEST_RUNTIME_ROOT, root);
   for (const args of commands.filter((a) => a.includes('emulators:exec'))) {

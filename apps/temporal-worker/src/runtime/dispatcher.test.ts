@@ -3,7 +3,12 @@ import { durableEntityKey } from '@upperroom/orchestration/job-store';
 import { OutboxDispatcher } from './dispatcher';
 import { loadRuntimeConfig } from './config';
 import { safeActivities } from './safe-activities';
-import { ApplicationFailure, CancelledFailure, WorkflowIdReusePolicy } from '@temporalio/common';
+import {
+  ApplicationFailure,
+  CancelledFailure,
+  defaultPayloadConverter,
+  WorkflowIdReusePolicy,
+} from '@temporalio/common';
 const mockContext: any = { cancellationSignal: { aborted: false }, info: { attempt: 1 } };
 jest.mock('@temporalio/activity', () => ({ Context: { current: () => mockContext } }));
 
@@ -14,14 +19,16 @@ const dispatch = {
   workflowId: 'test:test-project:job1',
   taskQueue: 'urm-orchestration',
 };
-function harness(records: Record<string, any>, now = 1000) {
+function harness(records: Record<string, any>, now: number | (() => number) = 1000, requireOpenAdmission = false) {
   const doc = (id: string): any => ({
     id,
+    path: id,
     get: async () => ({ exists: !!records[id], data: () => records[id], get: (field: string) => records[id]?.[field] }),
     collection: (child: string) => ({ doc: (key: string) => doc(`${id}/${child}/${key}`) }),
     update: async (patch: any) => Object.assign(records[id], patch),
   });
   const db: any = {
+    doc,
     runTransaction: async (run: any) =>
       run({
         get: async (reference: any) => ({ data: () => structuredClone(records[reference.id]) }),
@@ -52,17 +59,23 @@ function harness(records: Record<string, any>, now = 1000) {
   };
   const workflow = {
     start: jest.fn().mockResolvedValue({}),
-    signalWithStart: jest.fn().mockResolvedValue({}),
+    options: {
+      namespace: 'test-namespace',
+      identity: 'test-dispatcher',
+      loadedDataConverter: { payloadConverter: defaultPayloadConverter, payloadCodecs: [] },
+    },
     getHandle: jest.fn().mockReturnValue({ cancel: jest.fn(), signal: jest.fn() }),
   };
+  const workflowService = { signalWithStartWorkflowExecution: jest.fn().mockResolvedValue({}) };
   const dispatcher = new OutboxDispatcher({
     db,
-    client: { workflow } as any,
+    client: { workflow, workflowService } as any,
     projectId: ref.projectId,
-    now: () => now,
+    now: typeof now === 'number' ? () => now : now,
     leaseMs: 100,
+    requireOpenAdmission,
   });
-  return { dispatcher, workflow, db };
+  return { dispatcher, workflow, workflowService, db };
 }
 const pending = (extra: any = {}) => ({
   state: 'pending',
@@ -100,22 +113,35 @@ test('never steals an unexpired lease', async () => {
   await dispatcher.tick();
   expect(workflow.start).not.toHaveBeenCalled();
 });
-test('uses signalWithStart for singleton admission with reference-only arguments', async () => {
-  const { dispatcher, workflow } = harness({
-    'durableJobOutbox/a': pending({
-      dispatch: { ...dispatch, startArgs: { initial: ref }, signal: { name: 'request', args: ref } },
-    }),
-  });
+test('reuses the native signal-with-start ID for the same outbox document and isolates distinct submissions', async () => {
+  let clock = 1000;
+  const singleton = { ...dispatch, startArgs: { initial: ref }, signal: { name: 'request', args: ref } };
+  const records = {
+    'durableJobOutbox/a': pending({ dispatch: singleton }),
+    'durableJobOutbox/b': pending({ dispatch: singleton, nextAttemptAt: 4000 }),
+  };
+  const { dispatcher, workflowService } = harness(records, () => clock);
+  const rpc = workflowService.signalWithStartWorkflowExecution;
+  rpc.mockRejectedValueOnce(new Error('lost response'));
   await dispatcher.tick();
-  expect(workflow.signalWithStart).toHaveBeenCalledWith(
-    'testWorkflow',
-    expect.objectContaining({
-      args: [{ initial: ref }],
-      signal: 'request',
-      signalArgs: [ref],
-      workflowIdReusePolicy: WorkflowIdReusePolicy.ALLOW_DUPLICATE,
-    })
-  );
+  expect(records['durableJobOutbox/a'].state).toBe('pending');
+  clock = 4000;
+  await dispatcher.tick();
+  expect(rpc).toHaveBeenCalledTimes(3);
+  const [first, retry, other] = rpc.mock.calls.map(([request]) => request);
+  expect(first).toMatchObject({
+    requestId: expect.stringMatching(/^[a-f0-9]{64}$/),
+    namespace: 'test-namespace',
+    workflowId: singleton.workflowId,
+    workflowType: { name: singleton.workflowType },
+    taskQueue: { name: singleton.taskQueue },
+    signalName: 'request',
+    input: { payloads: [defaultPayloadConverter.toPayload({ initial: ref })] },
+    signalInput: { payloads: [defaultPayloadConverter.toPayload(ref)] },
+  });
+  expect(retry).toEqual(first);
+  expect(other.requestId).not.toBe(first.requestId);
+  expect(records['durableJobOutbox/a'].state).toBe('dispatched');
 });
 test('cross-project records fail before reaching Temporal', async () => {
   const { dispatcher, workflow } = harness({
@@ -148,6 +174,20 @@ test('lost acknowledgements remain pending with bounded backoff and readiness fa
   expect(records['durableJobOutbox/a'].state).toBe('pending');
   expect(records['durableJobOutbox/a'].nextAttemptAt).toBeGreaterThan(1000);
   expect(dispatcher.healthy).toBe(false);
+});
+test('a signal RPC rejected without a reason stays pending until acknowledged on retry', async () => {
+  let clock = 1000;
+  const row = pending({ dispatch: { ...dispatch, signal: { name: 'request', args: ref } } });
+  const { dispatcher, workflowService } = harness({ 'durableJobOutbox/a': row }, () => clock);
+  workflowService.signalWithStartWorkflowExecution.mockRejectedValueOnce(undefined);
+  await dispatcher.tick();
+  expect(row.state).toBe('pending');
+  expect(row.nextAttemptAt).toBeGreaterThan(clock);
+  expect(dispatcher.healthy).toBe(false);
+  clock = row.nextAttemptAt;
+  await dispatcher.tick();
+  expect(workflowService.signalWithStartWorkflowExecution).toHaveBeenCalledTimes(2);
+  expect(row.state).toBe('dispatched');
 });
 test('rejects namespace/project mismatch and missing production TLS before startup', () => {
   const env = { FIREBASE_PROJECT_ID: 'test', TEMPORAL_NAMESPACE: 'other' };
@@ -214,9 +254,9 @@ test('lost acknowledgements of completed singleton jobs do not restart old inten
     'durableJobOutbox/a': pending({ dispatch: { ...dispatch, signal: { name: 'request', args: ref } } }),
     'durableJobs/job1': { projectId: ref.projectId, state: 'succeeded' },
   };
-  const { dispatcher, workflow } = harness(records);
+  const { dispatcher, workflow, workflowService } = harness(records);
   await dispatcher.tick();
-  expect(workflow.signalWithStart).not.toHaveBeenCalled();
+  expect(workflowService.signalWithStartWorkflowExecution).not.toHaveBeenCalled();
   expect(records['durableJobOutbox/a'].state).toBe('dispatched');
 });
 
@@ -353,4 +393,127 @@ test('a new coalesced fact arriving while signaling remains pending after old le
     acknowledgedEvidenceVersion: 1,
     nextAttemptAt: 0,
   });
+});
+
+test('an interrupted pass leaves ambiguous leases and does not claim its next record', async () => {
+  const records = { 'durableJobOutbox/a': pending(), 'durableJobOutbox/b': pending() };
+  const { dispatcher, workflow } = harness(records);
+  const abort = new AbortController();
+  workflow.start.mockImplementationOnce(async () => {
+    abort.abort();
+    return {};
+  });
+  await dispatcher.tick(abort.signal);
+  expect(workflow.start).toHaveBeenCalledTimes(1);
+  expect(records['durableJobOutbox/a'].state).toBe('dispatching');
+  expect(records['durableJobOutbox/b'].state).toBe('pending');
+  expect(dispatcher.healthy).toBe(false);
+});
+
+const openRelease = () => ({
+  schemaVersion: 1,
+  revision: 1,
+  releaseId: 'fixture-release',
+  admission: 'open',
+  domains: Object.fromEntries(
+    ['media', 'publishing', 'images', 'emails', 'accounts', 'bundles', 'search'].map((domain) => [
+      domain,
+      { owner: 'temporal', admission: 'open' },
+    ])
+  ),
+});
+test.each([
+  undefined,
+  { ...openRelease(), admission: 'paused' },
+  { ...openRelease(), schemaVersion: 2 },
+  { ...openRelease(), revision: 0 },
+  { ...openRelease(), releaseId: '' },
+  { ...openRelease(), domains: {} },
+  { ...openRelease(), domains: [] },
+  { ...openRelease(), domains: { ...openRelease().domains, media: [] } },
+  { ...openRelease(), domains: { ...openRelease().domains, media: { owner: ['temporal'], admission: ['open'] } } },
+])('independent dispatcher fails closed for unavailable or invalid admission %j', async (control) => {
+  const records: Record<string, any> = { 'durableJobOutbox/a': pending() };
+  if (control) records['_control/temporalRelease'] = control;
+  const { dispatcher, workflow } = harness(records, 1000, true);
+  await dispatcher.tick();
+  expect(workflow.start).not.toHaveBeenCalled();
+  expect(records['durableJobOutbox/a'].attempt).toBe(0);
+  expect(dispatcher.healthy).toBe(false);
+});
+test.each(['durableJobOutbox', 'durableJobCommands'])(
+  'independent dispatcher rechecks release pause inside the %s lease transaction',
+  async (collection) => {
+    const records: Record<string, any> = { [`${collection}/a`]: pending(), '_control/temporalRelease': openRelease() };
+    const { dispatcher, workflow, db } = harness(records, 1000, true);
+    const transaction = db.runTransaction;
+    db.runTransaction = async (run: any) => {
+      records['_control/temporalRelease'].admission = 'paused';
+      return transaction(run);
+    };
+    await dispatcher.tick();
+    expect(workflow.start).not.toHaveBeenCalled();
+    expect(dispatcher.healthy).toBe(false);
+    expect(records[`${collection}/a`].attempt).toBe(0);
+  }
+);
+test('independent dispatcher resumes the unchanged pending operation after admission opens', async () => {
+  const records: Record<string, any> = {
+    'durableJobOutbox/a': pending(),
+    '_control/temporalRelease': { ...openRelease(), admission: 'paused' },
+  };
+  const { dispatcher, workflow } = harness(records, 1000, true);
+  await dispatcher.tick();
+  expect(records['durableJobOutbox/a'].attempt).toBe(0);
+  records['_control/temporalRelease'] = { ...openRelease(), revision: 2 };
+  await dispatcher.tick();
+  expect(workflow.start).toHaveBeenCalledTimes(1);
+  expect(records['durableJobOutbox/a'].state).toBe('dispatched');
+});
+
+test.each(['expired', 'replaced', 'paused', 'different-revision'] as const)(
+  'dispatcher suppresses an RPC when the original send fence is %s',
+  async (mode) => {
+    let now = 1000;
+    const row = pending();
+    const control = openRelease();
+    const { dispatcher, workflow, db } = harness(
+      {
+        'durableJobOutbox/a': row,
+        '_control/temporalRelease': control,
+      },
+      () => now,
+      true
+    );
+    const transaction = db.runTransaction;
+    let reads = 0;
+    db.runTransaction = async (...options: any[]) => {
+      if (++reads === 2) {
+        expect(row.state).toBe('dispatching');
+        if (mode === 'expired') now += 100;
+        if (mode === 'replaced') row.leaseToken = 'original-was-replaced';
+        if (mode === 'paused') control.admission = 'paused';
+        if (mode === 'different-revision') control.revision++;
+      }
+      return transaction(...options);
+    };
+    await dispatcher.tick();
+    expect(workflow.start).not.toHaveBeenCalled();
+    expect(dispatcher.healthy).toBe(false);
+    expect(row.state).toBe(['expired', 'replaced'].includes(mode) ? 'dispatching' : 'pending');
+  }
+);
+
+test('a confirmed response after lease expiry cannot settle the lease or acknowledge delivery', async () => {
+  let now = 1000;
+  const row = pending();
+  const { dispatcher, workflow } = harness({ 'durableJobOutbox/a': row }, () => now);
+  workflow.start.mockImplementationOnce(async () => {
+    now += 100;
+  });
+  await dispatcher.tick();
+  expect(workflow.start).toHaveBeenCalledTimes(1);
+  expect(row.state).toBe('dispatching');
+  expect(row.acknowledgedAt).toBeUndefined();
+  expect(dispatcher.healthy).toBe(false);
 });

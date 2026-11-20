@@ -1,3 +1,9 @@
+import {
+  createRuntimeYouTubeAcquisition,
+  createRuntimeYouTubeArchiveWaitRecorder,
+  createRuntimeYouTubeRender,
+  createRuntimeYouTubeRenderAuthentication,
+} from './hetzner-media';
 import { createReviewedCreateActivities } from './reviewed-create';
 import { beginClaimedPublishingStep } from './activity-step-start';
 import { readAuthoritativeCriticalRepairStepIds } from '../../../../functions/src/temporal/publishing/criticalRepairStepAuthority';
@@ -36,6 +42,7 @@ import {
 import { createHash } from 'node:crypto';
 import { Context } from '@temporalio/activity';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
+import { getFirebaseImagesBucket } from '@upperroom/shared/shared/firebaseProjectConfig';
 import { Storage } from '@google-cloud/storage';
 import { withProviderIndexedTransaction } from '@upperroom/orchestration/provider-transaction';
 import { createDurableJobStore, durableEntityKey } from '@upperroom/orchestration/job-store';
@@ -74,7 +81,13 @@ import { createMutationSettlementProjection } from './mutation-settlement';
 import { assertLiveProviderMutationProject } from './provider-isolation';
 import { isSandboxProviderIntent } from '../../../../functions/src/providerSandbox/admission';
 import { withSandboxRequestContext } from '../../../../functions/src/providerSandbox/http';
-import { getProviderExecutionProfile, assertSandboxIntentProfile, assertMatchingSandboxProfile, assertSandboxCatalogReady, sandboxProfileDocumentPath } from '../../../../functions/src/providerSandbox/profile';
+import {
+  getProviderExecutionProfile,
+  assertSandboxIntentProfile,
+  assertMatchingSandboxProfile,
+  assertSandboxCatalogReady,
+  sandboxProfileDocumentPath,
+} from '../../../../functions/src/providerSandbox/profile';
 import { safeActivities, safeCancellation, type ActivityFailureProjection } from './safe-activities';
 
 export function createRuntimeActivities(
@@ -390,8 +403,8 @@ export function createRuntimeActivities(
           await withProviderIndexedTransaction(tx, db, projectId, mutate);
         });
       },
-      leaseAudio: async (ref, sermonId, sourcePath) => {
-        await publishingMedia.leasePublishingAudio(ref, sermonId, sourcePath);
+      leaseAudio: async (ref, sermonId, sourcePath, sourceGeneration) => {
+        await publishingMedia.leasePublishingAudio(ref, sermonId, sourcePath, sourceGeneration);
       },
       releaseAudio: publishingMedia.releasePublishingAudio,
       recordStep: domainStep,
@@ -414,15 +427,51 @@ export function createRuntimeActivities(
         return withProviderIndexedTransaction(tx, db, projectId, mutate);
       });
     },
-    leaseAudio: async (ref, sermonId, sourcePath) => {
-      await publishingMedia.leasePublishingAudio(ref, sermonId, sourcePath);
+    leaseAudio: async (ref, sermonId, sourcePath, sourceGeneration) => {
+      await publishingMedia.leasePublishingAudio(ref, sermonId, sourcePath, sourceGeneration);
     },
     releaseAudio: publishingMedia.releasePublishingAudio,
     recordResult: async (ref, result) => {
       await domainStep(ref, 'entity', result);
     },
   });
+  const assertMediaActorInTransaction = async (
+    tx: Parameters<typeof store.assertCurrentInTransaction>[0],
+    ref: DurableJobRef
+  ) => {
+    const intent = await store.assertCurrentInTransaction(tx, ref);
+    await authorizeActor(intent, tx);
+    return intent;
+  };
+  const acquireYouTubeSource = createRuntimeYouTubeAcquisition({
+    projectId,
+    firestore: db,
+    witness,
+    assertCurrent: assertMediaActorInTransaction,
+  });
   const media = createMediaActivities({
+    requireRemoteYouTube: witness?.cloudRun !== undefined,
+    recordYouTubeArchiveWait: createRuntimeYouTubeArchiveWaitRecorder({
+      projectId,
+      firestore: db,
+      witness,
+      assertCurrent: assertMediaActorInTransaction,
+    }),
+    acquireYouTubeSource,
+    renderYouTube: createRuntimeYouTubeRender({
+      projectId,
+      firestore: db,
+      witness,
+      bucket: firebaseAdmin.storage().bucket(),
+      assertCurrent: assertMediaActorInTransaction,
+    }),
+    recoverYouTubeRenderAuthentication: createRuntimeYouTubeRenderAuthentication({
+      projectId,
+      firestore: db,
+      witness,
+      assertCurrent: assertMediaActorInTransaction,
+    }),
+    assertAuthorizedInTransaction: assertMediaActorInTransaction,
     assertAuthorized: assertCurrent,
     projectId,
     firestore: db,
@@ -631,7 +680,8 @@ export function createRuntimeActivities(
                 const job = await store.loadJob(ref);
                 const pinned = assertSandboxIntentProfile(profile, intent);
                 assertMatchingSandboxProfile(profile, job.providerExecution);
-                if (job.providerExecution?.scenario !== pinned.scenario) throw new Error('PROVIDER_INTENT_PROFILE_MISMATCH');
+                if (job.providerExecution?.scenario !== pinned.scenario)
+                  throw new Error('PROVIDER_INTENT_PROFILE_MISMATCH');
                 const marker = await db.doc(sandboxProfileDocumentPath(profile)).get();
                 assertSandboxCatalogReady(profile, marker.data());
               }
@@ -870,7 +920,12 @@ export function createRuntimeActivities(
         ...createReviewedCreateActivities(db, store, projectId),
         ...createLifecycleActivities(store, { authorizeCriticalRepair: criticalRepair.loadCertificate }),
         ...createEmailControlActivities({ db, store, projectId }),
-        ...createImageControlActivities({ firestore: db, loadIntent: store.loadIntent, project }),
+        ...createImageControlActivities({
+          imagesBucket: getFirebaseImagesBucket(),
+          firestore: db,
+          loadIntent: store.loadIntent,
+          project,
+        }),
         ...createSearchControlActivities({ firestore: db, project }),
         ...createProviderOrphanReviewActivities(db, projectId, project),
       }),
@@ -879,6 +934,7 @@ export function createRuntimeActivities(
     'urm-images': () =>
       protect(
         createImageActivities({
+          imagesBucket: getFirebaseImagesBucket(),
           getActor: (uid: string) => firebaseAdmin.auth().getUser(uid),
           firestore: db,
           storage: new Storage({ projectId }),

@@ -50,6 +50,7 @@ export const getAuthenticatedSoundCloudAccountId = async (accessToken: string): 
 export interface UploadTrackParams {
   bucket: Bucket;
   audioStoragePath: string;
+  audioGeneration?: string;
   imageSource?: string;
   title: string;
   tags: string[];
@@ -192,13 +193,35 @@ async function createBucketStreamSource(
   bucket: Bucket,
   storagePath: string,
   fallbackFilename: string,
-  fallbackContentType: string
+  fallbackContentType: string,
+  generation?: string
 ): Promise<MultipartStreamSource> {
   const file = bucket.file(storagePath);
   const [metadata] = await file.getMetadata();
   const filename = inferMultipartFilename(storagePath, fallbackFilename);
+  let stream: Readable;
+  if (generation === undefined) {
+    stream = file.createReadStream();
+  } else {
+    if (!/^[1-9][0-9]{0,29}$/.test(generation) || metadata.generation !== generation)
+      throw new Error('The retained audio generation changed.');
+    try {
+      // Keep the generation as a decimal string. The SDK FileOptions value
+      // is coerced to Number, which can select a different object generation.
+      const [url] = await file.getSignedUrl({
+        action: 'read',
+        version: 'v4',
+        expires: Date.now() + 60_000,
+        queryParams: { generation },
+      });
+      const source = await axios.get<Readable>(url, { responseType: 'stream', timeout: 60_000, maxRedirects: 0 });
+      stream = source.data;
+    } catch {
+      throw new Error('The retained audio could not be opened.');
+    }
+  }
   return {
-    stream: file.createReadStream(),
+    stream,
     filename,
     contentType: metadata.contentType || fallbackContentType,
     knownLength: parseKnownLength(metadata.size),
@@ -232,6 +255,8 @@ export async function prepareMultipartUpload(params: UploadTrackParams): Promise
     // Resolve exact source generations before the receipt-wrapped post; do not create
     // FormData or buffer/parse the audio. The engine reads the bounded Storage stream.
     const audio = await sandboxStageAsset(params.audioStoragePath, params.bucket.name);
+    if (params.audioGeneration !== undefined && audio.generation !== params.audioGeneration)
+      throw new Error('The retained audio generation changed.');
     const artwork = params.imageSource ? await sandboxStageAsset(params.imageSource, params.bucket.name) : undefined;
     let disposed = false,
       posted = false;
@@ -281,7 +306,8 @@ export async function prepareMultipartUpload(params: UploadTrackParams): Promise
       params.bucket,
       params.audioStoragePath,
       'audio.mp3',
-      'audio/mpeg'
+      'audio/mpeg',
+      params.audioGeneration
     );
     streams.push(audioSource.stream);
     form.append('track[title]', params.title);

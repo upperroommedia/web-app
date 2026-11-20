@@ -247,3 +247,10 @@ it('does not accept a caller supplied duration as measured asset evidence', asyn
   const measured = await inspectStageAsset(profile, untrusted);
   expect(measured.durationSeconds).toBeUndefined();
 });
+
+it('does not substitute the returned generation for an explicit signed-source pin', async () => {
+  await expect(resolveStageAsset(profile, `gs://${asset.bucket}/${asset.path}?generation=101`)).rejects.toThrow(
+    'Requested media generation is unavailable'
+  );
+  expect(requestedGeneration).toBe('101');
+});

@@ -1,4 +1,3 @@
-import SearchAttribution from './algoliaComponents/SearchAttribution';
 import { ChangeEvent, MouseEvent } from 'react';
 import { useRouter } from 'next/router';
 import Image from 'next/image';
@@ -141,7 +140,6 @@ const SpeakerTableToolbar = ({
           ),
         }}
       />
-      <SearchAttribution />
       <Button variant="contained" startIcon={<AddIcon />} onClick={onAddSpeaker}>
         Add Speaker
       </Button>

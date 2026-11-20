@@ -17,7 +17,7 @@ for (const interceptNetwork of [false, true]) {
       await page.goto(`/login?callbackurl=${encodeURIComponent(target)}`);
       await page.getByRole('button', { name: /Dev Login/i }).click();
       await expect(page).toHaveURL(new RegExp(`/admin/sermons/${sermon.id}$`));
-      await expect(page.getByRole('button', { name: 'Publish everywhere', exact: true })).toBeVisible();
+      await expect(page.getByRole('button', { name: /^(Publish to .+|Nothing to publish)$/ })).toBeVisible();
       expect(
         errors.filter((error) => /module factory is not available|Multiple Sentry Session Replay/i.test(error))
       ).toEqual([]);

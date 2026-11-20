@@ -585,6 +585,8 @@ Required GitHub secrets:
 - `HETZNER_PROCESS_AUDIO_SSH_TARGET`
 - `HETZNER_PROCESS_AUDIO_SSH_PRIVATE_KEY`
 
+The staging and production workflows verify the host’s Ed25519 fingerprint against [the reviewed pin](ssh-host-ed25519.sha256) before connecting. On a planned host-key rotation, verify the replacement fingerprint from the host console or another trusted channel, then update the pin through review before retrying deployment.
+
 Required deployment-canary variables (pass them to the deployment workflow step; deploy runs and finalizes the canaries transactionally):
 
 - `PROCESS_AUDIO_HETZNER_PUBLIC_SMOKE_YOUTUBE_URL`
@@ -702,3 +704,7 @@ failures propagate so the caller can release its reservation and retry later.
 Signing in does not immediately declare the session healthy: the existing periodic
 authenticated media download check must pass before waiting jobs resume. The
 page refreshes this status every 30 seconds. Leave Chrome open and signed in.
+
+### Read-only acquisition resource inventory
+
+`python3 ops/process-audio-hetzner/scripts/inspect-acquisition-resources.py` runs on the existing host and reads Docker resource configuration, physical root capacity and native memory observations. It emits no container environment, command or provider diagnostics. Keep its output private because it identifies native containers and host mount paths. It does not change workloads or authorize an acquisition/deployment; `activationAuthorized` is always false. Missing hard limits and unproved shared-host enforcement must be resolved through the reviewed serverless plan before the new acquisition adapter is activated. Existing full-file budgets remain unchanged.

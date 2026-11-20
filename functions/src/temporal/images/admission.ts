@@ -14,10 +14,13 @@ export async function normalizeImageAdmission(input: {
   firestore: Firestore;
   storage: Storage;
 }): Promise<ImageIntent> {
+  if (typeof input.imagesBucket !== 'string' || !/^[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]$/.test(input.imagesBucket))
+    throw new Error('Configured image bucket required');
   if (input.kind === 'image.delete') {
     const snapshot = await input.firestore.collection('images').doc(input.entityId).get();
     if (!snapshot.exists) throw new Error('Image no longer exists');
     const image = snapshot.data()!;
+    if (image.source?.bucket !== input.imagesBucket) throw new Error('Image source belongs to an unapproved bucket');
     if (!image.source?.generation)
       throw new Error('Legacy image must have its source generation reconciled before deletion');
     const allocation = image.durableJobId

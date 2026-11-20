@@ -49,6 +49,9 @@ function AppContent({ Component, pageProps }: Omit<ComponentWithPageLayout, 'rou
               flexDirection: 'column',
               flexGrow: 1,
               minHeight: '100vh',
+              '@supports (height: 100dvh)': { minHeight: '100dvh' },
+              pl: 'env(safe-area-inset-left, 0px)',
+              pr: 'env(safe-area-inset-right, 0px)',
               bgcolor: 'background.default',
             }}
           >
@@ -84,7 +87,7 @@ function MyApp({ Component, pageProps }: ComponentWithPageLayout) {
 Upper Room Media is a ministry of the Coptic Orthodox Church that brings to you rich & fresh spiritual resources including Sermons, Music, Videos, Blogs and much more!"
           key="description"
         />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
         <link rel="icon" href="/URM_icon.png" />
         <link rel="apple-touch-icon" href="/URM_icon.png"></link>
         {algoliaAppId && (

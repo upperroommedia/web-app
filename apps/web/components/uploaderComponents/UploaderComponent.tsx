@@ -76,7 +76,7 @@ import uploadFile, {
   transferAudioSource,
 } from '../../utils/uploadFile';
 import { useDurableJob } from '../../hooks/useDurableJobs';
-import JobStatusPanel from '../jobs/JobStatusPanel';
+import PlainJobStatus from '../jobs/PlainJobStatus';
 import LinearProgress from '@mui/material/LinearProgress';
 import DropZone from '../DropZone';
 import { useOwnedAudioSource } from '../../hooks/useOwnedAudioSource';
@@ -826,7 +826,7 @@ const Uploader = (props: UploaderProps) => {
           message:
             error instanceof Error
               ? error.message
-              : 'The new attempt could not be confirmed. Your source has been kept. Check Activity before trying again.',
+              : 'The new attempt could not be confirmed. Your source has been kept. Check the sermon’s current status before trying again.',
         });
       } finally {
         sourceRetryInFlight.current = false;
@@ -979,7 +979,7 @@ const Uploader = (props: UploaderProps) => {
         {(resumeError || resumeStale) && (
           <Alert severity="info">Reconnecting. Wait for current status before sending the file.</Alert>
         )}
-        {resumeJob && <JobStatusPanel job={resumeJob} stale={resumeStale} />}
+        {resumeJob && <PlainJobStatus job={resumeJob} stale={resumeStale || Boolean(resumeError)} />}
         {resumeJob?.state === 'awaiting_source' && (
           <Stack spacing={2} sx={{ mt: 2 }}>
             <Typography>
@@ -1008,7 +1008,7 @@ const Uploader = (props: UploaderProps) => {
                   setUploadProgress({
                     error: false,
                     percent: 100,
-                    message: 'File received. Follow processing in Activity.',
+                    message: 'File received. Follow processing on the sermon page.',
                   });
                 } catch (error) {
                   setUploadProgress({
@@ -1041,9 +1041,20 @@ const Uploader = (props: UploaderProps) => {
             {uploadProgress.message}
           </Alert>
         )}
-        <Button sx={{ mt: 2 }} onClick={() => void router.push('/admin/activity')}>
-          Open Activity
-        </Button>
+        {resumeJob?.entity.type === 'sermon' && (
+          <Button
+            sx={{ mt: 2 }}
+            disabled={isUploading}
+            onClick={() => void router.push(`/admin/sermons/${encodeURIComponent(resumeJob.entity.id)}`)}
+          >
+            View Sermon
+          </Button>
+        )}
+        {props.user.isAdmin() && (
+          <Button sx={{ mt: 2 }} onClick={() => void router.push('/admin/activity')}>
+            Open Activity
+          </Button>
+        )}
       </Box>
     );
   }
@@ -1058,17 +1069,17 @@ const Uploader = (props: UploaderProps) => {
       <FormControl
         sx={{
           display: 'grid',
-          gridTemplateColumns: { xs: 'auto', md: '4fr 1fr' },
-          maxWidth: '80%',
-          gap: '1ch 100px',
-          margin: 'auto',
-          alignItems: 'center',
-          justifyContent: 'center',
+          gridTemplateColumns: { xs: 'minmax(0, 1fr)', md: 'minmax(0, 4fr) minmax(200px, 1fr)' },
+          width: '100%',
+          maxWidth: 1080,
+          gap: { xs: 2, md: '12px 32px' },
+          mx: 'auto',
+          alignItems: 'start',
         }}
       >
-        <h1 style={{ justifySelf: 'center', gridColumn: '1/-1' }}>
+        <Typography component="h1" variant="h4" sx={{ gridColumn: '1/-1', mb: 1 }}>
           {props.existingSermon ? 'Edit Sermon' : 'Uploader'}
-        </h1>
+        </Typography>
         {(catalogErrors.subtitles || catalogErrors.latest) && (
           <Alert
             severity="warning"
@@ -1291,7 +1302,7 @@ const Uploader = (props: UploaderProps) => {
             </div>
           )}
         </Box>
-        <Box sx={{ margin: 'auto' }} width={1} maxWidth={300} minWidth={200}>
+        <Box sx={{ mx: 'auto', minWidth: 0, width: '100%', maxWidth: 300 }}>
           <ImageViewer
             images={sermon.images}
             speaker={sermon.speakers[0]}
@@ -1497,7 +1508,7 @@ const Uploader = (props: UploaderProps) => {
                 >
                   {getErrorMessage(formErrors.durationSeconds)}
                 </Typography>
-                <Box display="flex" gap={2}>
+                <Box display="flex" justifyContent="center" flexWrap="wrap" gap={{ xs: 1, sm: 2 }}>
                   <Box
                     component="fieldset"
                     disabled={catalogBlocksNewAdmission(

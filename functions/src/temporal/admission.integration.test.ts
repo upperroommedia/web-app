@@ -86,6 +86,35 @@ afterAll(async () => {
 });
 
 describe('authenticated durable admission transaction', () => {
+  it('pins image callable admission to shared images bucket rather than the audio or legacy alias', async () => {
+    const keys = ['TASK_ORCHESTRATOR_IMAGES', 'FIREBASE_IMAGES_BUCKET', 'NEXT_PUBLIC_FIREBASE_IMAGES_BUCKET', 'IMAGES_BUCKET'] as const;
+    const prior = Object.fromEntries(keys.map(key => [key, process.env[key]]));
+    const bucket = `${temporalProjectId()}-images`;
+    const requestId = 'shared-image-bucket';
+    const path = `durable-image-sources/durable-owner/${requestId}/source`;
+    const file = firebaseAdmin.storage().bucket(bucket).file(path);
+    try {
+      process.env.TASK_ORCHESTRATOR_IMAGES = 'temporal';
+      process.env.FIREBASE_IMAGES_BUCKET = bucket;
+      process.env.NEXT_PUBLIC_FIREBASE_IMAGES_BUCKET = bucket;
+      process.env.IMAGES_BUCKET = 'unapproved-legacy-alias';
+      await db.doc('_control/temporalRelease').update({ 'domains.images': { owner: 'temporal', admission: 'open' } });
+      await file.save(Buffer.from('owned image fixture'), { metadata: { contentType: 'image/png',
+        metadata: { ownerUID: 'durable-owner', durableRequestId: requestId } } });
+      const [metadata] = await file.getMetadata();
+      const result = await submitServerDurableJob({ actorUid: 'durable-owner', requestId,
+        kind: 'image.ingest', entity: { type: 'image', id: 'image-placeholder' },
+        payload: { sourcePath: path, sourceGeneration: String(metadata.generation), contentType: 'image/png', type: 'wide', name: 'Owned image' } });
+      const intent = await db.collection('durableJobIntents').doc(result.jobId).get();
+      expect(intent.get('payload.source')).toEqual({ bucket, path, generation: String(metadata.generation), contentType: 'image/png' });
+    } finally {
+      await file.delete({ ignoreNotFound: true });
+      for (const key of keys) {
+        if (prior[key] === undefined) delete process.env[key];
+        else process.env[key] = prior[key];
+      }
+    }
+  });
   it('admits deletion of a large managed membership catalog without eagerly changing its mirrors', async () => {
     process.env.TASK_ORCHESTRATOR_PUBLISHING = 'temporal';
     try {

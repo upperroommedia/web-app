@@ -1,4 +1,5 @@
 import type { File } from '@google-cloud/storage';
+import { currentSandboxProfile } from './providerSandbox/http';
 import { randomUUID } from 'crypto';
 import { buildFirebaseStorageDownloadUrl } from '@upperroom/shared/shared/firebaseStorageUrls';
 
@@ -73,4 +74,36 @@ export const ensureFirebaseDownloadUrl = async (file: File): Promise<string> => 
   });
 
   return buildStorageDownloadUrl(file.bucket.name, file.name, token);
+};
+
+/** A signing URL is transport only. Keep the exact Storage generation in the
+ * server-derived source identity, separately from any rotating URL. */
+const signPinnedAudioDownloadUrl = async (file: File, generation: string): Promise<string> => {
+  try {
+    const [url] = await file.getSignedUrl({
+      action: 'read',
+      version: 'v4',
+      expires: Date.now() + 2 * 60 * 60 * 1000,
+      queryParams: { generation },
+    });
+    return url;
+  } catch {
+    throw new Error('The retained audio could not be opened.');
+  }
+};
+
+export const readPublishingAudioUrl = async (file: File, generation: string | undefined): Promise<string> => {
+  if (generation === undefined) return readFirebaseDownloadUrl(file);
+  if (typeof generation !== 'string' || !/^[1-9][0-9]{0,29}$/.test(generation))
+    throw new Error('The retained audio generation changed.');
+  const [metadata] = await file.getMetadata();
+  if (metadata.generation !== generation) throw new Error('The retained audio generation changed.');
+  if (!Number.isSafeInteger(Number(metadata.size)) || Number(metadata.size) <= 0) {
+    throw new Error('The retained audio is empty or its size is invalid.');
+  }
+  if (currentSandboxProfile()) {
+    const path = file.name.split('/').map(encodeURIComponent).join('/');
+    return `gs://${file.bucket.name}/${path}?generation=${generation}`;
+  }
+  return signPinnedAudioDownloadUrl(file, generation);
 };

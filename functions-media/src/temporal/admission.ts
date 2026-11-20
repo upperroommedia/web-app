@@ -233,13 +233,14 @@ export function createMediaAdmission(dependencies: Dependencies) {
       };
       const createdAt = Date.now();
       const sourceReferences = await Promise.all(
-        Object.values(sources)
-          .filter((source) => source.path.startsWith(`workflow-audio/${payload.id}/`))
-          .map((source) =>
+        Object.entries(sources)
+          .filter(([, source]) => source.path.startsWith(`workflow-audio/${payload.id}/`))
+          .map(([kind, source]) =>
             prepareMediaReference(transaction, db, {
               artifactId: mediaArtifactId(projectId, source.path),
               projectId,
               type: 'media_job',
+              expectedObject: kind === 'storage' ? source : undefined,
               id: ref.jobId,
               createdAt,
             })

@@ -106,10 +106,11 @@ function harness() {
   };
   const deps = {
     firestore,
+    imagesBucket: 'images',
     loadIntent: async () => ({ payload }),
     assertCurrent: jest.fn(async () => undefined),
     assertCurrentInTransaction: jest.fn(async () => undefined),
-  } as unknown as Pick<ImageDependencies, 'firestore' | 'loadIntent' | 'assertCurrent' | 'assertCurrentInTransaction'>;
+  } as unknown as Pick<ImageDependencies, 'firestore' | 'loadIntent' | 'assertCurrent' | 'assertCurrentInTransaction' | 'imagesBucket'>;
   const review: ImageAllocationReview = {
     actorUid: 'admin',
     commandId: 'command',
@@ -123,6 +124,29 @@ function harness() {
   };
   return { records, deps, review, payload };
 }
+test.each(['allocation', 'deletion'] as const)('%s review rejects foreign source before completed-audit shortcut', async (entry) => {
+  const h = harness();
+  const resolve = () => entry === 'allocation'
+    ? resolveImageAllocation(h.deps, ref, 'remote', h.review)
+    : resolveImageDeletionReview(h.deps, ref, { ...h.review, remoteId: 'remote', decision: 'retain_existing_resource' });
+  await resolve();
+  h.payload.source.bucket = 'foreign-images';
+  jest.mocked(axios).mockClear();
+  const before = structuredClone([...h.records]);
+  await expect(resolve()).rejects.toMatchObject({ type: 'ImageSourceBucketInvalid', nonRetryable: true });
+  expect(axios).not.toHaveBeenCalled();
+  expect([...h.records]).toEqual(before);
+});
+test.each(['allocation', 'deletion'] as const)('%s fresh foreign-source review cannot contact a provider or change private evidence', async (entry) => {
+  const h = harness(); h.payload.source.bucket = 'foreign-images';
+  const before = structuredClone([...h.records]);
+  const operation = entry === 'allocation'
+    ? resolveImageAllocation(h.deps, ref, 'remote', h.review)
+    : resolveImageDeletionReview(h.deps, ref, { ...h.review, remoteId: 'remote', decision: 'retain_existing_resource' });
+  await expect(operation).rejects.toMatchObject({ type: 'ImageSourceBucketInvalid', nonRetryable: true });
+  expect(axios).not.toHaveBeenCalled();
+  expect([...h.records]).toEqual(before);
+});
 beforeEach(() => {
   jest.clearAllMocks();
   jest.mocked(assertProviderMutationTransportAllowed).mockReset();

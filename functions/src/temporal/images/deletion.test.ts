@@ -100,6 +100,7 @@ function harness() {
   const removeSource = jest.fn(async () => undefined);
   const deps = {
     firestore,
+    imagesBucket: 'images',
     storage: { bucket: jest.fn(() => ({ file: jest.fn(() => ({ delete: removeSource })) })) },
     getActor: jest.fn(async () => ({
       disabled: false,
@@ -134,6 +135,45 @@ beforeEach(() => {
   payload.providerAccount = configuredImageProviderAccount();
   jest.mocked(axios).mockResolvedValue({ status: 404 });
 });
+test.each([
+  'prepareImage', 'allocateImage', 'uploadImageBytes', 'commitImage', 'deleteImageProviders',
+  'supersedeImage', 'reconcileImageReceipt', 'cancelImage', 'getImageDisposition',
+] as const)('%s rejects a foreign bucket before storage, provider or cleanup effects', async (name) => {
+  const h = harness();
+  const foreign = { ...payload, source: { ...payload.source, bucket: 'other-project-images' } };
+  h.deps.loadIntent = async () => ({ payload: foreign });
+  const before = structuredClone([...h.records]);
+  await expect(new MockActivityEnvironment().run(async () => { await h.activities[name](ref); }))
+    .rejects.toMatchObject({ type: 'ImageSourceBucketInvalid', nonRetryable: true });
+  expect(h.deps.storage.bucket).not.toHaveBeenCalled();
+  expect(axios).not.toHaveBeenCalled();
+  expect(h.removeSource).not.toHaveBeenCalled();
+  expect([...h.records]).toEqual(before);
+  expect(h.deps.project).not.toHaveBeenCalled();
+});
+test('foreign bucket cannot bypass validation through an already cleaned receipt', async () => {
+  const h = harness();
+  h.deps.loadIntent = async () => ({ payload: { ...payload, operation: 'reconcile', originalJobId: 'original',
+    canonicalImageId: payload.imageId, source: { ...payload.source, bucket: 'other-project-images' } } });
+  h.records.set('temporalImageReceipts/delete-job', { state: 'cleaned' });
+  await expect(new MockActivityEnvironment().run(h.activities.reconcileImageReceipt, ref))
+    .rejects.toMatchObject({ type: 'ImageSourceBucketInvalid', nonRetryable: true });
+  expect(h.deps.project).not.toHaveBeenCalled();
+  expect(h.records.get('temporalImageReceipts/delete-job')).toEqual({ state: 'cleaned' });
+});
+test('missing configured bucket is denied without falling back to source bucket', () => {
+  const h = harness();
+  expect(() => createImageActivities({ ...h.deps, imagesBucket: '' })).toThrow('Configured image bucket required');
+});
+test('a completed step cannot bypass the preserved source bucket fence', async () => {
+  const h = harness(); const job = await h.deps.loadJob(ref);
+  job.steps = [{ id: 'delete', label: 'Remove image destinations', state: 'succeeded', attempt: 1 }];
+  h.deps.loadJob = async () => job;
+  h.deps.loadIntent = async () => ({ payload: { ...payload, source: { ...payload.source, bucket: 'foreign-images' } } });
+  await expect(new MockActivityEnvironment().run(h.activities.deleteImageProviders, ref))
+    .rejects.toMatchObject({ type: 'ImageSourceBucketInvalid', nonRetryable: true });
+  expect(h.deps.storage.bucket).not.toHaveBeenCalled(); expect(axios).not.toHaveBeenCalled();
+});
 test('confirmed remote and storage deletion finalizes canonical consistency after original actor is revoked', async () => {
   const h = harness();
   h.removeSource.mockImplementation(async () => {
@@ -165,6 +205,7 @@ test('partial acknowledged deletion pauses on revocation; fresh admin continuati
   expect(h.records.has('images/image')).toBe(true);
   await h.firestore.runTransaction(async (tx) => {
     const commit = await authorizeImageDeletionContinuation(h.firestore, tx, ref, {
+        imagesBucket: 'images',
       actorUid: 'admin',
       commandId: 'review',
       expectedRevision: 4,
@@ -185,6 +226,7 @@ test('cleanup grants do not authorize a wholly unstarted deletion', async () => 
   await expect(
     h.firestore.runTransaction((tx) =>
       authorizeImageDeletionContinuation(h.firestore, tx, ref, {
+        imagesBucket: 'images',
         actorUid: 'admin',
         commandId: 'review',
         expectedRevision: 4,
@@ -247,4 +289,17 @@ test('legacy images without an original account binding cannot infer absence fro
   });
   expect(axios).not.toHaveBeenCalled();
   expect(h.removeSource).not.toHaveBeenCalled();
+});
+
+test('a foreign saved bucket cannot be reported as succeeded or offer an unsafe retry', async () => {
+  const h = harness();
+  h.deps.loadIntent = async () => ({ payload: { ...payload, source: { ...payload.source, bucket: 'other-project-images' } } });
+  const before = structuredClone([...h.records]);
+  await new MockActivityEnvironment().run(async () => { await h.activities.finishImage(ref, 'succeeded'); });
+  expect(h.deps.project).toHaveBeenCalledWith(ref, expect.objectContaining({
+    state: 'needs_attention', actions: [], error: expect.objectContaining({ code: 'IMAGE_SOURCE_BUCKET_INVALID', retryable: false }),
+  }));
+  expect([...h.records]).toEqual(before);
+  expect(h.deps.storage.bucket).not.toHaveBeenCalled();
+  expect(axios).not.toHaveBeenCalled();
 });

@@ -8,6 +8,10 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Readable, Writable } from 'node:stream';
+import { mediaArtifactId } from '@upperroom/orchestration/media-artifacts';
+import { youtubeAcquisitionId } from '../../../../process-audio/src/temporal/hetzner-acquisition';
+import { youtubeRenderOutput } from '../../../../process-audio/src/temporal/hetzner-render-output';
+import { YOUTUBE_ACQUISITIONS } from '../../../../process-audio/src/temporal/hetzner-acquisition-store';
 import type { MediaJobRef } from '../../../../process-audio/src/temporal/types';
 
 const read = (value: any, field: string) => field.split('.').reduce((data, key) => data?.[key], value);
@@ -198,3 +202,103 @@ test('real staged audio retains original coordinates, publishes measured final m
     await rm(directory, { recursive: true, force: true });
   }
 }, 120_000);
+
+test.each(['valid', 'wrong-generation', 'wrong-owner', 'unretained', 'stopped', 'stale-episode', 'unmerged'] as const)(
+  'staging YouTube publication rechecks the adopted episode and registry (%s)',
+  async (mode) => {
+    const store = new Store();
+    const objects = new Objects();
+    const environment = new MockActivityEnvironment();
+    const payload = {
+      id: 'sermon',
+      youtubeUrl: 'https://www.youtube.com/watch?v=abcdefghijk',
+      startTime: 0,
+      duration: 30,
+      introUrl: 'intros/default_intro.mp3',
+    };
+    const ref: MediaJobRef = {
+      jobId: 'render-job',
+      projectId: 'urm-app-staging',
+      sermonId: payload.id,
+      revision: 1,
+      requestVersion: computeProcessAudioRequestVersion(payload),
+    };
+    const episodeId = '11111111-1111-4111-8111-111111111111';
+    const paths = youtubeRenderOutput(ref, episodeId);
+    const source = { path: paths.source, generation: '31', duration: 60 };
+    const processed = { path: paths.processed, generation: '32', duration: 30 };
+    const final = { path: paths.merged, generation: '33', duration: 31 };
+    store.records.set(`temporalMediaRequests/${ref.jobId}`, {
+      ref,
+      payload,
+      sources: { intro: { path: payload.introUrl, generation: '2' } },
+      youtubeRenderEpisode: episodeId,
+      artifacts: { source, processed, final: mode === 'unmerged' ? processed : final },
+    });
+    const render = {
+      ref,
+      renderProtocol: 1,
+      preparedEpisode: episodeId,
+      renderStopped: false,
+      ...(mode === 'stale-episode' ? { headEpisode: '22222222-2222-4222-8222-222222222222' } : {}),
+    };
+    store.records.set(`${YOUTUBE_ACQUISITIONS}/${youtubeAcquisitionId(ref)}`, render);
+    const sermon = { status: { audioStatus: 'PENDING' } };
+    store.records.set('sermons/sermon', sermon);
+    store.records.set('temporalMediaState/sermon', { ref, owner: 'temporal' });
+    store.records.set(`durableJobs/${ref.jobId}`, { state: 'queued' });
+    for (const artifact of [source, processed, final]) {
+      objects.objects.set(artifact.path, { bytes: Buffer.from('fixture'), generation: artifact.generation });
+      store.records.set(`temporalMediaArtifacts/${mediaArtifactId(ref.projectId, artifact.path)}`, {
+        ...artifact,
+        projectId: ref.projectId,
+        sermonId: ref.sermonId,
+        ownerJobId: ref.jobId,
+        status: 'retained',
+      });
+    }
+    const latest = store.records.get(`temporalMediaArtifacts/${mediaArtifactId(ref.projectId, final.path)}`);
+    if (mode === 'wrong-generation') latest.generation = '34';
+    if (mode === 'wrong-owner') latest.ownerJobId = 'another-job';
+    if (mode === 'unretained') latest.status = 'uploading';
+    const renderYouTube = jest.fn();
+    const activity = createMediaActivities({
+      projectId: ref.projectId,
+      firestore: store as any,
+      bucket: objects as any,
+      database: { ref: () => ({ transaction: async () => undefined }) } as any,
+      ytdlpPath: 'unused',
+      renderYouTube,
+      assertAuthorized: async () => undefined,
+      assertAuthorizedInTransaction: async () => undefined,
+      projectJob: async (_ref, projection) => {
+        if (mode === 'stopped' && projection.state === 'running') render.renderStopped = true;
+      },
+    });
+    const result = environment.run(activity.publishMedia, ref);
+    if (mode === 'valid') {
+      await expect(result).resolves.toEqual({ kind: 'ready' });
+      expect(store.records.get('sermons/sermon').audioArtifacts).toMatchObject({
+        finalPath: final.path,
+        finalGeneration: final.generation,
+      });
+      expect(store.records.get('temporalMediaCanonicalRefs/sermon').artifactIds.final).toBe(
+        mediaArtifactId(ref.projectId, final.path)
+      );
+    } else {
+      if (mode === 'stopped') await expect(result).resolves.toEqual({ kind: 'cancelled' });
+      else await expect(result).rejects.toThrow();
+      if (mode === 'unmerged') {
+        await expect(environment.run(activity.acquireMedia, ref)).rejects.toMatchObject({
+          type: 'INVALID_MEDIA_ARTIFACT',
+        });
+        await expect(environment.run(activity.mergeMedia, ref)).rejects.toMatchObject({
+          type: 'INVALID_MEDIA_ARTIFACT',
+        });
+        expect(renderYouTube).not.toHaveBeenCalled();
+      }
+      expect(store.records.get('sermons/sermon').audioArtifacts).toBeUndefined();
+      expect(store.records.get('temporalMediaCanonicalRefs/sermon')).toBeUndefined();
+    }
+  }
+);

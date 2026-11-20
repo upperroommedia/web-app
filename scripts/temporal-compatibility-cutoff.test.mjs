@@ -292,6 +292,8 @@ function transactionFixture({ race, crash, mode = 'initial-cutover' } = {}) {
     resourceIdentity: { projectId: 'demo-release-test' },
     ownedOperation,
     expectedAuthority,
+    workerReadiness: undefined,
+    hetznerActivation: undefined,
     assertNativeSnapshot,
     transitionPending: false,
     auditPath: (revision) => `fixture-audit/${revision}`,

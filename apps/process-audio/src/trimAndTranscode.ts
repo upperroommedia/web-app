@@ -1,6 +1,7 @@
+import { uploadYouTubeRenderStream } from './temporal/hetzner-render-output';
 import { CancelToken } from './CancelToken';
 import { Bucket, File } from '@google-cloud/storage';
-import { Database, Reference } from 'firebase-admin/database';
+import { Database } from 'firebase-admin/database';
 import {
   convertStringToMilliseconds,
   createTempFile,
@@ -11,13 +12,13 @@ import {
 } from './utils';
 import { CustomMetadata, AudioSource } from './types';
 import { downloadYouTubeAudioToFile } from './processYouTubeUrl';
-import { finished } from 'stream';
+import { pipeline } from 'node:stream/promises';
 import { spawn } from 'child_process';
 import { sermonStatus, sermonStatusType } from './types';
 import { createLoggerWithContext } from './WinstonLogger';
 import { LogContext } from './context';
 import { ffmpegSemaphore, ytDlpDownloadSemaphore } from './concurrency';
-import { setProcessAudioProgress } from './processAudioProgress';
+import { setProcessAudioProgress, type ProcessAudioProgressTarget } from './processAudioProgress';
 
 function buildQueuedStageLabel(args: { action: string; active: number; waiting: number; limit: number }): string {
   const queuedBehind = args.waiting + (args.active >= args.limit ? args.active : 0);
@@ -73,26 +74,27 @@ const trimAndTranscode = async (
   audioSource: AudioSource,
   outputFilePath: string,
   tempFiles: Set<string>,
-  realtimeDBRef: Reference,
+  realtimeDBRef: ProcessAudioProgressTarget,
   realtimeDB: Database,
-  docRef: FirebaseFirestore.DocumentReference,
+  docRef: { update(change: { status: sermonStatus }): Promise<unknown> },
   sermonStatus: sermonStatus,
   customMetadata: CustomMetadata,
   startTime?: number,
   duration?: number,
   ctx?: LogContext,
-  sourceBucket: Bucket = bucket
+  sourceBucket: Bucket = bucket,
+  outputIdentity?: Readonly<Record<string, string>>,
+  onYouTubeProviderFailure?: (error: unknown) => void,
+  retainYouTubeSource?: (path: string) => Promise<void>,
+  authorizeOutputUpload?: () => Promise<void>,
+  recordOutputGeneration?: (generation: string) => void
 ): Promise<File> => {
   const log = createLoggerWithContext(ctx);
   const outputFile = bucket.file(outputFilePath);
   const contentDisposition = customMetadata.title
     ? `inline; filename="${customMetadata.title}.mp3"`
     : 'inline; filename="untitled.mp3"';
-  const writeStream = outputFile.createWriteStream({
-    contentType: 'audio/mpeg',
-    metadata: { contentDisposition, metadata: customMetadata },
-    timeout: 30 * 60 * 1000, // 30 minutes in milliseconds
-  });
+  let upload: Promise<void> | undefined;
   let inputSource: string | undefined;
   let proc: ReturnType<typeof spawn> | undefined;
   let releaseFfmpegSlot: (() => void) | undefined;
@@ -300,6 +302,9 @@ const trimAndTranscode = async (
           realtimeDB,
           ctx
         );
+      } catch (error) {
+        if (!cancelToken.signal.aborted) onYouTubeProviderFailure?.(error);
+        throw error;
       } finally {
         releaseYtDlpSlot();
       }
@@ -308,6 +313,7 @@ const trimAndTranscode = async (
         tempFiles.add(downloadedFile);
       }
       inputSource = downloadedFile;
+      await retainYouTubeSource?.(inputSource);
     } else {
       // Process the audio source from storage
       const rawSourceFile = createTempFile(`raw-${audioSource.id}`, tempFiles);
@@ -372,35 +378,12 @@ const trimAndTranscode = async (
       },
     });
 
+    if (authorizeOutputUpload) await authorizeOutputUpload();
+    cancelToken.signal.throwIfAborted();
     proc = spawn(ffmpegPath, args, {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
-
-    // Pipe output
-    if (!proc.stdout) {
-      throw new Error('FFmpeg stdout is null');
-    }
-    proc.stdout.pipe(writeStream);
-
-    // Handle EPIPE on write stream (can occur if storage write fails or is cancelled)
-    writeStream.on('error', (err: NodeJS.ErrnoException) => {
-      if (err.code === 'EPIPE') {
-        log.warn('Write stream EPIPE - storage may have closed connection', { code: err.code });
-      } else {
-        log.error('Write stream error', { error: err, code: err.code });
-      }
-      if (proc) {
-        proc.kill('SIGTERM');
-      }
-    });
-
-    proc.stdout.on('error', (err: NodeJS.ErrnoException) => {
-      if (err.code === 'EPIPE') {
-        log.debug('FFmpeg stdout EPIPE - write stream may have closed', { code: err.code });
-      } else {
-        log.error('FFmpeg stdout error', { error: err, code: err.code });
-      }
-    });
+    cancelToken.trackProcess(proc);
 
     let totalTimeMillis: number | undefined;
     let loggedDurationWarning = false;
@@ -411,31 +394,43 @@ const trimAndTranscode = async (
       throw new Error('FFmpeg process not initialized');
     }
 
-    // Capture proc in const for use in promise callbacks
+    // Observe spawn errors even if opening Storage throws before the pipe is created.
     const ffmpegProc = proc;
-
-    // Use Node.js stream.finished() to properly wait for GCS upload completion
-    // This handles 'finish', 'error', and premature 'close' events correctly
-    const writeStreamDone = new Promise<void>((resolveWrite, rejectWrite) => {
-      finished(writeStream, (err) => {
-        if (err) {
-          log.error('GCS write stream error', { error: err.message, code: (err as NodeJS.ErrnoException).code });
-          rejectWrite(err);
-        } else {
-          log.debug('GCS write stream finished - upload complete');
-          resolveWrite();
-        }
-      });
+    let spawnFailure: Error | undefined;
+    ffmpegProc.once('error', (error) => {
+      spawnFailure = error;
     });
 
-    const promiseResult = await new Promise<File>((resolve, reject) => {
-      ffmpegProc.on('error', (err) => {
-        log.error('FFmpeg spawn error', { error: err });
-        reject(err);
-      });
+    if (!ffmpegProc.stdout) throw new Error('FFmpeg stdout is null');
+    cancelToken.signal.throwIfAborted();
+    const options = {
+      contentType: 'audio/mpeg' as const,
+      metadata: { contentDisposition, metadata: { ...customMetadata, ...outputIdentity } },
+      ...(outputIdentity ? { preconditionOpts: { ifGenerationMatch: 0 } } : {}),
+      timeout: 30 * 60 * 1000,
+    };
+    const writeStreamDone =
+      outputIdentity && recordOutputGeneration
+        ? uploadYouTubeRenderStream({
+            bucket,
+            path: outputFilePath,
+            input: ffmpegProc.stdout,
+            options,
+            identity: outputIdentity,
+            signal: cancelToken.signal,
+          }).then(({ generation }) => recordOutputGeneration(generation))
+        : pipeline(ffmpegProc.stdout, outputFile.createWriteStream(options), { signal: cancelToken.signal });
+    upload = writeStreamDone;
+    // Attach immediately. A failed upload must stop a still-running FFmpeg.
+    void writeStreamDone.catch(cancelToken.cancel);
 
+    const promiseResult = await new Promise<File>((resolve, reject) => {
       ffmpegProc.on('close', async (code, signal) => {
         log.debug('FFmpeg process closed', { exitCode: code, signal });
+        if (spawnFailure) {
+          reject(spawnFailure);
+          return;
+        }
 
         if (code !== 0) {
           log.error('FFmpeg process failed', {
@@ -499,7 +494,7 @@ const trimAndTranscode = async (
             ffmpegStderrTail: ffmpegStderrBuffer.trim() || null,
             error: err,
           });
-          ffmpegProc.kill('SIGTERM');
+          cancelToken.cancel();
           reject(err);
           return;
         }
@@ -530,7 +525,7 @@ const trimAndTranscode = async (
         if (progress.time) {
           if (cancelToken.isCancellationRequested) {
             log.warn('Cancellation requested, terminating processes');
-            ffmpegProc.kill('SIGTERM');
+            cancelToken.cancel();
             reject(new Error('Trim and Transcode operation was cancelled'));
             return;
           }
@@ -653,6 +648,8 @@ const trimAndTranscode = async (
       });
     });
 
+    const result = await promiseResult;
+    cancelToken.signal.throwIfAborted();
     if (typeof inputSource === 'string') {
       await logMemoryUsage('Before raw audio delete', ctx, tempFiles);
       log.debug('Deleting raw audio temp file', { file: inputSource });
@@ -660,22 +657,15 @@ const trimAndTranscode = async (
       await logMemoryUsage('After raw audio delete', ctx, tempFiles);
     }
 
-    return promiseResult;
+    return result;
   } catch (error) {
     log.error('Trim and transcode failed', {
       error: error instanceof Error ? error.message : String(error),
       stack: error instanceof Error ? error.stack : undefined,
     });
 
-    // Cleanup: kill processes if they exist
-    if (proc) {
-      try {
-        log.debug('Terminating FFmpeg process due to error');
-        proc.kill('SIGTERM');
-      } catch (killError) {
-        log.warn('Failed to kill FFmpeg process', { error: killError });
-      }
-    }
+    cancelToken.cancel();
+    await Promise.allSettled([cancelToken.waitForProcesses(), upload]);
     if (inputSource) {
       try {
         await unlinkSafeTempFile(inputSource, tempFiles);

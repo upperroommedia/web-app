@@ -1,4 +1,3 @@
-import SearchAttribution from './SearchAttribution';
 import { ReactElement, useEffect, useState } from 'react';
 import Stack from '@mui/material/Stack';
 import TextField from '@mui/material/TextField';
@@ -53,7 +52,6 @@ const CustomSearchBox = (props: UseSearchBoxProps & { TextFieldEndAdornment?: Re
         }}
         InputProps={TextFieldEndAdornment ? { endAdornment: TextFieldEndAdornment } : {}}
       />
-      <SearchAttribution />
       <Typography
         variant="subtitle1"
         sx={{

@@ -61,3 +61,32 @@ test('private template stays aligned with canonical field and instance policy an
   for (const [id, config] of Object.entries(example)) (config as { writeKey: string }).writeKey = `private-${id}`;
   expect(() => validateSearchConfigurations(example, target.projectId)).not.toThrow();
 });
+
+test('Cloud Run search accepts a role-scoped Secret Manager JSON value without a world-readable file', () => {
+  const expected = valid();
+  expect(
+    loadSearchConfigurations(target.projectId, ['urm-search'], {
+      TEMPORAL_WORKER_HOSTING: 'cloud-run',
+      TEMPORAL_SEARCH_CONFIG_JSON: JSON.stringify(expected),
+    })
+  ).toEqual(expected);
+});
+test('JSON search configuration rejects ambiguous sources, other hosting and malformed private contents', () => {
+  for (const env of [
+    { TEMPORAL_SEARCH_CONFIG_JSON: JSON.stringify(valid()) },
+    {
+      TEMPORAL_WORKER_HOSTING: 'cloud-run',
+      TEMPORAL_SEARCH_CONFIG_JSON: JSON.stringify(valid()),
+      TEMPORAL_SEARCH_CONFIG_FILE: '/private/file',
+    },
+    { TEMPORAL_WORKER_HOSTING: 'cloud-run', TEMPORAL_SEARCH_CONFIG_JSON: '{private-value-never-log' },
+  ]) {
+    try {
+      loadSearchConfigurations(target.projectId, ['urm-search'], env);
+      throw new Error('Expected invalid configuration');
+    } catch (error) {
+      expect((error as Error).message).not.toContain('private-value-never-log');
+      expect((error as Error).message).not.toBe('Expected invalid configuration');
+    }
+  }
+});

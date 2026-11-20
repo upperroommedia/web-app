@@ -1,5 +1,3 @@
-import type { Reference } from 'firebase-admin/database';
-
 export type ProcessAudioProgressStage =
   | 'queued'
   | 'processing'
@@ -41,8 +39,12 @@ export function buildProcessAudioProgressState(
   };
 }
 
+export interface ProcessAudioProgressTarget {
+  set(progress: ProcessAudioProgressState): Promise<unknown>;
+}
+
 export async function setProcessAudioProgress(
-  ref: Reference,
+  ref: ProcessAudioProgressTarget,
   overallPercent: number,
   stage: ProcessAudioProgressStage,
   stageLabel: string,

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import useAudioPlayer from '../context/audio/audioPlayerContext';
+import functions, { httpsCallable } from '../firebase/functions';
 import { getDownloadURL, getStorage, ref } from '../firebase/storage';
 import { AudioPlayer } from '@videojs/react/audio';
 import { PlaybackFeedbackProvider } from '../context/audio/audioPlayback';
@@ -10,6 +11,10 @@ import firestore, { doc, onSnapshot } from '../firebase/firestore';
 const DynamicBottomAudioBar = dynamic(() => import('./BottomAudioBar'));
 
 const storage = getStorage();
+const getPinnedAudioPlayback = httpsCallable<{ sermonId: string; generation: string }, { url: string }>(
+  functions,
+  'getpinnedaudioplayback'
+);
 
 function MediaPlayerComponent({ children }: { children: React.ReactNode }) {
   const { currentSermon } = useAudioPlayer();
@@ -19,11 +24,11 @@ function MediaPlayerComponent({ children }: { children: React.ReactNode }) {
   const [resolvedSrcSermonId, setResolvedSrcSermonId] = useState<string | undefined>(undefined);
   const router = useRouter();
   const sermonId = currentSermon?.id;
-  const sermonUrl = currentSermon?.url;
+  const sermonUrl = currentSermon?.audioArtifacts?.finalGeneration === undefined ? currentSermon?.url : undefined;
 
   useEffect(() => {
     let cancelled = false;
-    let selectedAudioPath: string | undefined;
+    let selectedAudio: string | undefined;
     let requestRevision = 0;
 
     if (!sermonId) {
@@ -44,12 +49,24 @@ function MediaPlayerComponent({ children }: { children: React.ReactNode }) {
     const stop = onSnapshot(
       doc(firestore, 'sermons', sermonId),
       (snapshot) => {
-        const artifacts = snapshot.data()?.audioArtifacts as { finalPath?: string } | undefined;
+        const artifacts = snapshot.data()?.audioArtifacts as
+          | { finalPath?: string; finalGeneration?: string }
+          | undefined;
         const selectedPath = artifacts?.finalPath || `intro-outro-sermons/${sermonId}`;
-        if (selectedAudioPath === selectedPath) return;
-        selectedAudioPath = selectedPath;
+        const generation = artifacts?.finalGeneration;
+        const selection = JSON.stringify([selectedPath, generation]);
+        if (selectedAudio === selection) return;
+        if (generation !== undefined) {
+          setSrc('');
+          setResolvedSrcSermonId(undefined);
+        }
+        selectedAudio = selection;
         const revision = ++requestRevision;
-        void getDownloadURL(ref(storage, selectedPath))
+        const url =
+          generation === undefined
+            ? getDownloadURL(ref(storage, selectedPath))
+            : getPinnedAudioPlayback({ sermonId, generation }).then(({ data }) => data.url);
+        void url
           .then((url) => {
             if (!cancelled && revision === requestRevision) {
               setSourceFailure(undefined);
@@ -59,7 +76,7 @@ function MediaPlayerComponent({ children }: { children: React.ReactNode }) {
           })
           .catch((error) => {
             if (cancelled || revision !== requestRevision) return;
-            selectedAudioPath = undefined;
+            selectedAudio = undefined;
             setSourceFailure({ sermonId, message: 'Audio could not load. Select Retry audio to try again.' });
             setSrc('');
             setResolvedSrcSermonId(undefined);

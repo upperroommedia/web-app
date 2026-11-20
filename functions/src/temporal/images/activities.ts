@@ -28,6 +28,7 @@ export interface ImageDependencies {
   firestore: Firestore;
   getActor(uid: string): Promise<{ disabled: boolean; customClaims?: { role?: unknown } }>;
   storage: Storage;
+  imagesBucket: string;
   loadIntent(ref: DurableJobRef): Promise<{ payload: ImageIntent }>;
   loadJob(ref: DurableJobRef): Promise<DurableJob>;
   assertCurrentInTransaction(tx: Transaction, ref: DurableJobRef): Promise<unknown>;
@@ -118,18 +119,31 @@ export function imageDeletionIntentHash(intent: ImageIntent): string {
     .digest('hex');
 }
 
+function assertImageBucketConfigured(bucket: string): void {
+  if (typeof bucket !== 'string' || !/^[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]$/.test(bucket))
+    throw new Error('Configured image bucket required');
+}
+function assertImageSourceBucket(intent: ImageIntent, bucket: string): void {
+  if (intent?.source?.bucket !== bucket)
+    throw ApplicationFailure.nonRetryable('Image source is outside the configured bucket', 'ImageSourceBucketInvalid');
+}
+
 /** URLs and image metadata stay in private receipts, never in Activity arguments/results. */
 export function createImageActivities(deps: ImageDependencies): ImageActivities {
+  assertImageBucketConfigured(deps.imagesBucket);
   const receipt = (ref: DurableJobRef) => deps.firestore.collection('temporalImageReceipts').doc(ref.jobId);
   async function source(ref: DurableJobRef) {
     await deps.assertCurrent(ref);
     const { payload } = await deps.loadIntent(ref);
+    assertImageSourceBucket(payload, deps.imagesBucket);
     const file = deps.storage
       .bucket(payload.source.bucket)
       .file(payload.source.path, { generation: payload.source.generation });
     return { intent: payload, file };
   }
   async function step(ref: DurableJobRef, id: string, label: string, operation: () => Promise<void>) {
+    const { payload } = await deps.loadIntent(ref);
+    assertImageSourceBucket(payload, deps.imagesBucket);
     const previous = (await deps.loadJob(ref)).steps.find((item) => item.id === id);
     if (previous?.state === 'succeeded') return;
     // Manual resume schedules a fresh Activity whose SDK attempt resets to one.
@@ -342,6 +356,7 @@ export function createImageActivities(deps: ImageDependencies): ImageActivities 
     async deleteImageProviders(ref) {
       await step(ref, 'delete', 'Remove image destinations', async () => {
         const { payload: intent } = await deps.loadIntent(ref);
+        assertImageSourceBucket(intent, deps.imagesBucket);
         if (intent.operation !== 'delete')
           throw ApplicationFailure.nonRetryable('Invalid image deletion intent', 'ImageDeletionInvalid');
         const intentHash = imageDeletionIntentHash(intent);
@@ -475,6 +490,7 @@ export function createImageActivities(deps: ImageDependencies): ImageActivities 
     },
     async supersedeImage(ref) {
       const { payload } = await deps.loadIntent(ref);
+      assertImageSourceBucket(payload, deps.imagesBucket);
       const oldReceipt = (await receipt(ref).get()).data();
       const canonical = (await deps.firestore.collection('images').doc(payload.imageId).get()).data();
       if (
@@ -523,6 +539,7 @@ export function createImageActivities(deps: ImageDependencies): ImageActivities 
     },
     async reconcileImageReceipt(ref) {
       const { payload } = await deps.loadIntent(ref);
+      assertImageSourceBucket(payload, deps.imagesBucket);
       if (payload.operation !== 'reconcile' || !payload.originalJobId || !payload.canonicalImageId)
         throw ApplicationFailure.nonRetryable('Invalid image reconciliation intent', 'ImageReconciliationInvalid');
       await deps.assertCurrent(ref);
@@ -620,6 +637,7 @@ export function createImageActivities(deps: ImageDependencies): ImageActivities 
     },
     async cancelImage(ref) {
       const { payload } = await deps.loadIntent(ref);
+      assertImageSourceBucket(payload, deps.imagesBucket);
       const canonical = (await deps.firestore.collection('images').doc(payload.imageId).get()).data();
       const saved = (await receipt(ref).get()).data();
       if (saved?.state === 'committed' || canonical?.durableJobId === ref.jobId) {
@@ -657,12 +675,14 @@ export interface ImageAllocationReview {
 /** Read-only retention never claims matching metadata proves the original POST or source bytes.
  * A private audit retains unresolved-original risk; existing provider bytes are never overwritten. */
 export async function resolveImageAllocation(
-  deps: Pick<ImageDependencies, 'firestore' | 'loadIntent' | 'assertCurrent' | 'assertCurrentInTransaction'>,
+  deps: Pick<ImageDependencies, 'firestore' | 'loadIntent' | 'assertCurrent' | 'assertCurrentInTransaction' | 'imagesBucket'>,
   ref: DurableJobRef,
   remoteId: string,
   review: ImageAllocationReview
 ): Promise<void> {
+  assertImageBucketConfigured(deps.imagesBucket);
   const { payload } = await deps.loadIntent(ref);
+  assertImageSourceBucket(payload, deps.imagesBucket);
   if (payload.operation === 'ingest' && review.decision !== 'retain_existing_resource')
     throw new Error(
       'Original provider bytes are not verifiable. Retain the existing resource and start a separate upload; it will not be overwritten.'
@@ -679,7 +699,7 @@ export interface ImageDeletionReview extends Omit<ImageAllocationReview, 'decisi
   decision: 'retain_existing_resource' | 'confirm_existing_resource_absent';
 }
 export async function resolveImageDeletionReview(
-  deps: Pick<ImageDependencies, 'firestore' | 'loadIntent' | 'assertCurrent' | 'assertCurrentInTransaction'>,
+  deps: Pick<ImageDependencies, 'firestore' | 'loadIntent' | 'assertCurrent' | 'assertCurrentInTransaction' | 'imagesBucket'>,
   ref: DurableJobRef,
   review: ImageDeletionReview
 ): Promise<void> {
@@ -691,6 +711,9 @@ export async function resolveImageDeletionReview(
     !review.reason?.trim()
   )
     throw new Error('Retain the shared resource or verify fixed-ID absence; forced deletion is unavailable');
+  assertImageBucketConfigured(deps.imagesBucket);
+  const { payload } = await deps.loadIntent(ref);
+  assertImageSourceBucket(payload, deps.imagesBucket);
   const fingerprint = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
   const inputHash = fingerprint([
     ref,
@@ -709,7 +732,6 @@ export async function resolveImageDeletionReview(
     if (previous.get('inputHash') !== inputHash) throw new Error('Image review command was reused');
     if (previous.get('state') === 'completed') return;
   }
-  const { payload } = await deps.loadIntent(ref);
   if (!['delete', 'reconcile', 'ingest'].includes(payload.operation))
     throw new Error('Image retention requires a cleanup operation');
   const target = deps.firestore.collection('temporalImageReceipts').doc(ref.jobId),
@@ -873,12 +895,14 @@ export async function authorizeImageDeletionContinuation(
   tx: Transaction,
   ref: DurableJobRef,
   review: {
+    imagesBucket: string;
     actorUid: string;
     commandId: string;
     expectedRevision: number;
     assertAdmin(): Promise<void>;
   }
 ): Promise<() => void> {
+  assertImageBucketConfigured(review.imagesBucket);
   await review.assertAdmin();
   const [job, intent, receipt, grant] = await Promise.all([
     tx.get(firestore.collection('durableJobs').doc(ref.jobId)),
@@ -887,6 +911,7 @@ export async function authorizeImageDeletionContinuation(
     tx.get(firestore.collection('temporalImageCleanupAuthorizations').doc(ref.jobId)),
   ]);
   const payload = intent.get('payload') as ImageIntent;
+  assertImageSourceBucket(payload, review.imagesBucket);
   const deletion = receipt.get('deletion');
   if (
     job.get('projectId') !== ref.projectId ||
@@ -913,11 +938,14 @@ export async function authorizeImageDeletionContinuation(
 
 export type ImageControlActivities = Pick<ImageActivities, 'finishImage' | 'getImageDisposition'>;
 export function createImageControlActivities(
-  deps: Pick<ImageDependencies, 'firestore' | 'loadIntent' | 'project'>
+  deps: Pick<ImageDependencies, 'firestore' | 'loadIntent' | 'project' | 'imagesBucket'>
 ): ImageControlActivities {
+  assertImageBucketConfigured(deps.imagesBucket);
   const receipt = (ref: DurableJobRef) => deps.firestore.collection('temporalImageReceipts').doc(ref.jobId);
   return {
     async getImageDisposition(ref) {
+      const { payload } = await deps.loadIntent(ref);
+      assertImageSourceBucket(payload, deps.imagesBucket);
       const snapshot = await receipt(ref).get(),
         saved = snapshot.data();
       if (saved?.state !== 'retained') return 'continue';
@@ -948,6 +976,15 @@ export function createImageControlActivities(
     },
     async finishImage(ref, state, failureCode) {
       const { payload } = await deps.loadIntent(ref);
+      // Report the fence without claiming completion, rewriting the source or
+      // offering a retry that cannot be authorized for this saved bucket.
+      if (payload?.source?.bucket !== deps.imagesBucket) {
+        const message = 'This saved image needs administrator review before it can continue.';
+        await deps.project(ref, { state: 'needs_attention', actions: [],
+          attention: { kind: 'source_unavailable', message },
+          error: { code: 'IMAGE_SOURCE_BUCKET_INVALID', message, retryable: false } });
+        return;
+      }
       const saved = (await receipt(ref).get()).data();
       const additionalReview = failureCode === 'ImageAdditionalAllocationReview';
       const sharedReferenceReview =

@@ -3,6 +3,7 @@
  * Supports both light and dark modes with flame logo color palette
  */
 import { createTheme, ThemeOptions, PaletteMode } from '@mui/material/styles';
+import type {} from '@mui/x-date-pickers/themeAugmentation';
 
 // Color Palette - Flame Logo Inspired
 export const colors = {
@@ -80,7 +81,7 @@ const getThemeOptions = (mode: PaletteMode): ThemeOptions => {
         main: colors.accent.primary,
         light: colors.accent.secondary,
         dark: colors.accent.dark,
-        contrastText: '#ffffff',
+        contrastText: colors.light.text.primary,
       },
       secondary: {
         main: modeColors.text.secondary,
@@ -246,6 +247,7 @@ const getThemeOptions = (mode: PaletteMode): ThemeOptions => {
             padding: '8px 16px',
             fontWeight: 500,
             transition: 'all 0.2s ease-in-out',
+            '@media (pointer: coarse)': { minHeight: 44 },
           },
           contained: {
             boxShadow: 'none',
@@ -477,6 +479,44 @@ const getThemeOptions = (mode: PaletteMode): ThemeOptions => {
             backgroundColor: modeColors.background.card,
             border: `1px solid ${modeColors.border.default}`,
             borderRadius: 12,
+            '@media (max-width: 599.95px)': {
+              '&:not(.MuiDialog-paperFullScreen)': {
+                margin: 12,
+                width: 'calc(100% - 24px)',
+                maxWidth: 'calc(100% - 24px)',
+                '&.MuiDialog-paperScrollPaper': {
+                  '@supports (height: 100dvh)': {
+                    maxHeight: 'calc(100dvh - 24px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px))',
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      MuiDialogActions: {
+        styleOverrides: {
+          root: {
+            '@media (max-width: 599.95px)': {
+              flexWrap: 'wrap',
+              gap: 8,
+              padding: '8px 12px',
+              '& > :not(style) ~ :not(style)': { marginLeft: 0 },
+            },
+          },
+        },
+      },
+      MuiInputBase: {
+        styleOverrides: {
+          input: {
+            '@media (pointer: coarse)': { fontSize: 'max(1rem, 16px)' },
+          },
+        },
+      },
+      MuiPickersInputBase: {
+        styleOverrides: {
+          sectionsContainer: {
+            '@media (pointer: coarse)': { fontSize: 'max(1rem, 16px)' },
           },
         },
       },

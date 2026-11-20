@@ -104,6 +104,8 @@ service cloud.firestore {
     match /_durableBundlePointers/{document=**} { allow read, write: if false; }
     match /temporalImageReceipts/{document=**} { allow read, write: if false; }
     match /temporalImageResolutionAudits/{document=**} { allow read, write: if false; }
+    match /temporalYouTubeAcquisitions/{document=**} { allow read, write: if false; }
+    match /temporalYouTubeRenderHosts/{document=**} { allow read, write: if false; }
     match /temporalMediaArtifacts/{document=**} { allow read, write: if false; }
     match /temporalMediaCanonicalRefs/{document=**} { allow read, write: if false; }
     match /temporalMediaJobArtifacts/{document=**} { allow read, write: if false; }
@@ -184,6 +186,14 @@ service cloud.firestore {
       allow update: if canUpload() && 'uploaderId' in resource.data && resource.data.uploaderId == request.auth.uid && sermonClientUpdateAllowed();
       allow delete: if releaseAllowsLegacy('publishing') && releaseAllowsLegacy('media') && canUpload() && 'uploaderId' in resource.data && resource.data.uploaderId == request.auth.uid && (resource.data.status.soundCloud != 'UPLOADED' && resource.data.status.subsplash != 'UPLOADED');
       allow create: if releaseAllowsLegacy('media') && canUpload() && request.resource.data.uploaderId == request.auth.uid;
+    }
+
+    // Native operator execution evidence is private, including from browser admins.
+    match /temporalMediaStartupCapacity/{document=**} {
+      allow read, write: if false;
+    }
+    match /temporalWorkerReadiness/{document=**} {
+      allow read, write: if false;
     }
 
     // Bundle metadata - allow public read access for bundle timestamp checking

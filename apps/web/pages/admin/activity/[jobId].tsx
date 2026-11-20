@@ -2,7 +2,7 @@ import { useRouter } from 'next/router';
 import Alert from '@mui/material/Alert';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
-import AppLayout from '../../../layout/AppLayout';
+import AdminActivityLayout from '../../../layout/AdminActivityLayout';
 import { useDurableJob } from '../../../hooks/useDurableJobs';
 import JobStatusPanel from '../../../components/jobs/JobStatusPanel';
 
@@ -22,4 +22,4 @@ export default function ActivityDetailsPage() {
     </Stack>
   );
 }
-ActivityDetailsPage.PageLayout = AppLayout;
+ActivityDetailsPage.PageLayout = AdminActivityLayout;

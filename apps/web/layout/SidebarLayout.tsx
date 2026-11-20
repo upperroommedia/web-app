@@ -58,13 +58,13 @@ interface NavItem {
 
 // Navigation items for publishers/uploaders
 const publisherNavItems: NavItem[] = [
-  { label: 'Activity', path: '/admin/activity', icon: <HistoryIcon /> },
   { label: 'Sermons', path: '/admin/sermons', icon: <MicIcon /> },
   { label: 'Series', path: '/admin/series', icon: <CollectionsIcon /> },
 ];
 
 // Additional navigation items for admins only
 const adminOnlyNavItems: NavItem[] = [
+  { label: 'Activity', path: '/admin/activity', icon: <HistoryIcon /> },
   { label: 'Users', path: '/admin/users', icon: <PeopleIcon /> },
   { label: 'Speakers', path: '/admin/speakers', icon: <RecordVoiceOverIcon /> },
   { label: 'Lists', path: '/admin/lists', icon: <PlaylistPlayIcon /> },
@@ -76,24 +76,16 @@ interface SidebarLayoutProps {
   children: ReactNode;
 }
 
-const MainContentSlot = memo(function MainContentSlot({
-  children,
-  sidebarCollapsed,
-}: {
-  children: ReactNode;
-  sidebarCollapsed: boolean;
-}) {
+const MainContentSlot = memo(function MainContentSlot({ children }: { children: ReactNode }) {
   return (
     <Box
       component="main"
       sx={{
         flexGrow: 1,
         minWidth: 0,
-        minHeight: '100vh',
         display: 'flex',
         flexDirection: 'column',
         bgcolor: 'background.default',
-        pt: sidebarCollapsed ? '64px' : 0,
       }}
     >
       {children}
@@ -121,6 +113,10 @@ const SidebarLayout = ({ children }: SidebarLayoutProps) => {
     setMobileOpen((prev) => !prev);
   }, []);
 
+  const closeDrawer = useCallback(() => {
+    setMobileOpen(false);
+  }, []);
+
   const toggleTheme = useCallback(() => {
     const activeTheme = resolvedTheme ?? currentTheme;
     const nextTheme = activeTheme === 'dark' ? 'light' : 'dark';
@@ -130,8 +126,8 @@ const SidebarLayout = ({ children }: SidebarLayoutProps) => {
   const isActivePath = useCallback(
     (path: string) => {
       if (path === '/') return router.pathname === '/';
-      if (path === '/admin/sermons') return router.pathname === '/admin/sermons' || router.pathname === '/admin';
-      return router.pathname.startsWith(path);
+      if (path === '/admin/sermons' && router.pathname === '/admin') return true;
+      return router.pathname === path || router.pathname.startsWith(path + '/');
     },
     [router.pathname]
   );
@@ -148,12 +144,13 @@ const SidebarLayout = ({ children }: SidebarLayoutProps) => {
           href={item.path}
           aria-label={item.label}
           selected={isActivePath(item.path)}
+          aria-current={isActivePath(item.path) ? 'page' : undefined}
           onClick={closeDrawerIfMobile}
           sx={{
             width: '100%',
             textDecoration: 'none',
             py: 0.5,
-            minHeight: 36,
+            minHeight: { xs: 44, lg: 36 },
             '&.Mui-selected': {
               '& .MuiListItemIcon-root': {
                 color: 'primary.main',
@@ -191,7 +188,7 @@ const SidebarLayout = ({ children }: SidebarLayoutProps) => {
       }}
     >
       {/* Logo Section - Clickable to navigate to sermons */}
-      <Link href="/admin/sermons" passHref style={{ textDecoration: 'none' }}>
+      <Link href="/admin/sermons" passHref onClick={closeDrawerIfMobile} style={{ textDecoration: 'none' }}>
         <Box
           sx={{
             px: 1.5,
@@ -255,6 +252,7 @@ const SidebarLayout = ({ children }: SidebarLayoutProps) => {
           href="/"
           aria-label="Upload Sermon"
           selected={isActivePath('/')}
+          aria-current={isActivePath('/') ? 'page' : undefined}
           onClick={closeDrawerIfMobile}
           sx={{
             background: isActivePath('/')
@@ -271,6 +269,7 @@ const SidebarLayout = ({ children }: SidebarLayoutProps) => {
             borderRadius: 1.5,
             mx: 0.5,
             py: 0.75,
+            minHeight: { xs: 44, lg: 0 },
             '&:hover': {
               background: `linear-gradient(135deg, ${alpha(muiTheme.palette.primary.main, 0.2)} 0%, ${alpha(
                 muiTheme.palette.primary.light,
@@ -321,20 +320,7 @@ const SidebarLayout = ({ children }: SidebarLayoutProps) => {
 
       {/* Publisher Nav Items (Sermons, Series) */}
       <List sx={{ py: 0, px: 0.5 }} dense>
-        {publisherNavItems.map((item) =>
-          renderNavItem(
-            item.path === '/admin/activity'
-              ? {
-                  ...item,
-                  icon: (
-                    <Badge badgeContent={activeCount} color="primary">
-                      <HistoryIcon />
-                    </Badge>
-                  ),
-                }
-              : item
-          )
-        )}
+        {publisherNavItems.map(renderNavItem)}
       </List>
 
       {/* Admin Only Section */}
@@ -356,7 +342,20 @@ const SidebarLayout = ({ children }: SidebarLayoutProps) => {
           </Typography>
 
           <List sx={{ py: 0, px: 0.5 }} dense>
-            {adminOnlyNavItems.map(renderNavItem)}
+            {adminOnlyNavItems.map((item) =>
+              renderNavItem(
+                item.path === '/admin/activity'
+                  ? {
+                      ...item,
+                      icon: (
+                        <Badge badgeContent={activeCount} color="primary">
+                          <HistoryIcon />
+                        </Badge>
+                      ),
+                    }
+                  : item
+              )
+            )}
           </List>
         </>
       )}
@@ -459,12 +458,14 @@ const SidebarLayout = ({ children }: SidebarLayoutProps) => {
   );
 
   return (
-    <Box sx={{ display: 'flex', minHeight: '100vh', bgcolor: 'background.default' }}>
+    <Box sx={{ display: 'flex', flex: 1, flexDirection: { xs: 'column', lg: 'row' }, bgcolor: 'background.default' }}>
       {/* Mobile App Bar */}
       {sidebarCollapsed && (
         <AppBar
-          position="fixed"
+          position="sticky"
           sx={{
+            top: 0,
+            pt: 'env(safe-area-inset-top, 0px)',
             bgcolor: 'background.paper',
             borderBottom: 1,
             borderColor: 'divider',
@@ -474,22 +475,25 @@ const SidebarLayout = ({ children }: SidebarLayoutProps) => {
             <IconButton
               color="inherit"
               aria-label="open drawer"
+              aria-expanded={mobileOpen}
+              aria-controls="mobile-navigation"
               edge="start"
               onClick={handleDrawerToggle}
-              sx={{ color: 'text.primary' }}
+              sx={{ color: 'text.primary', minWidth: 44, minHeight: 44 }}
             >
               <MenuIcon />
             </IconButton>
             <Link
               href="/admin/sermons"
               passHref
-              style={{ display: 'flex', alignItems: 'center', gap: 8, textDecoration: 'none', flex: 1 }}
+              style={{ display: 'flex', alignItems: 'center', gap: 8, textDecoration: 'none', flex: 1, minWidth: 0 }}
             >
               <Avatar
                 variant="square"
                 sx={{
                   width: 32,
                   height: 32,
+                  flexShrink: 0,
                   bgcolor: 'transparent',
                   position: 'relative',
                 }}
@@ -511,7 +515,11 @@ const SidebarLayout = ({ children }: SidebarLayoutProps) => {
             </Link>
             {/* Mobile Theme Toggle */}
             <Tooltip title={displayTheme === 'dark' ? 'Light Mode' : 'Dark Mode'}>
-              <IconButton onClick={toggleTheme} size="small" sx={{ color: 'text.primary' }}>
+              <IconButton
+                aria-label={displayTheme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+                onClick={toggleTheme}
+                sx={{ color: 'text.primary', minWidth: 44, minHeight: 44 }}
+              >
                 {displayTheme === 'dark' ? <LightModeIcon /> : <DarkModeIcon />}
               </IconButton>
             </Tooltip>
@@ -544,14 +552,20 @@ const SidebarLayout = ({ children }: SidebarLayoutProps) => {
         <Drawer
           variant="temporary"
           open={mobileOpen}
-          onClose={handleDrawerToggle}
+          onClose={closeDrawer}
+          slotProps={{ paper: { id: 'mobile-navigation', component: 'nav', 'aria-label': 'Main navigation' } }}
           ModalProps={{
             keepMounted: true,
           }}
           sx={{
             '& .MuiDrawer-paper': {
               width: DRAWER_WIDTH,
+              maxWidth: '100%',
               boxSizing: 'border-box',
+              pt: 'env(safe-area-inset-top, 0px)',
+              pb: 'env(safe-area-inset-bottom, 0px)',
+              pl: 'env(safe-area-inset-left, 0px)',
+              overscrollBehaviorY: 'contain',
             },
           }}
         >
@@ -560,7 +574,7 @@ const SidebarLayout = ({ children }: SidebarLayoutProps) => {
       )}
 
       {/* Main Content Area - memoized so layout state (e.g. mobileOpen) doesn't force page re-render */}
-      <MainContentSlot sidebarCollapsed={sidebarCollapsed}>{children}</MainContentSlot>
+      <MainContentSlot>{children}</MainContentSlot>
     </Box>
   );
 };

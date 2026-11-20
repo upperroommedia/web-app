@@ -29,6 +29,19 @@ const job = (patch: Partial<DurableJob> = {}): DurableJob => ({
   ...patch,
 });
 describe('accessible truthful job details', () => {
+  it('keeps compact Activity navigation admin-only without hiding the user’s status', () => {
+    const administrator = identity.user;
+    identity.user = { uid: 'uploader', isAdmin: () => false };
+    try {
+      const html = renderToStaticMarkup(<JobStatusPanel job={job()} compact />);
+      expect(html).not.toContain('/admin/activity');
+      expect(html).toContain('Sending to destination');
+      expect(html).toContain('Request cancellation');
+    } finally {
+      identity.user = administrator;
+    }
+  });
+
   it('claims email capture only for a completed staging receipt with full safe provenance', () => {
     const deliveryTransport = {
       schemaVersion: 1,

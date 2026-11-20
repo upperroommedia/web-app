@@ -1,6 +1,7 @@
 import { prepareProviderAdmission, assertProviderAdmissionCatalog } from '../providerSandbox/admission';
 import { createHash } from 'node:crypto';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
+import { getFirebaseImagesBucket } from '@upperroom/shared/shared/firebaseProjectConfig';
 import { HttpsError } from 'firebase-functions/v2/https';
 import { FieldValue, type Transaction } from 'firebase-admin/firestore';
 import {
@@ -373,7 +374,7 @@ export async function submitServerDurableJob(args: {
       requestId: args.requestId,
       payload,
       actorUid: args.actorUid,
-      imagesBucket: process.env.IMAGES_BUCKET ?? firebaseAdmin.storage().bucket().name,
+      imagesBucket: getFirebaseImagesBucket(),
       firestore: db(),
       storage: firebaseAdmin.storage().bucket().storage,
     });

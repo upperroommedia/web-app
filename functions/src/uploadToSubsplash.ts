@@ -110,6 +110,7 @@ export interface SubsplashCreatedMedia {
 /** Server-only callbacks: the callable transport never accepts or forwards these hooks. */
 export interface TrustedSubsplashUploadCallbacks {
   readExistingMedia(): Promise<string | undefined>;
+  pinnedAudio?: { path: string; generation: string };
   beforeCreateMedia?(): Promise<void>;
   commitCreatedMedia(result: SubsplashCreatedMedia): Promise<void>;
 }
@@ -154,11 +155,14 @@ export const uploadToSubsplashDomain = async (
           }
           tags = tags.concat(data.topics.map((topic: string) => `topic:${topic}`));
         }
+        const receiptPayload = options?.pinnedAudio
+          ? { ...data, audioUrl: undefined, pinnedAudio: options.pinnedAudio }
+          : data;
         // Post the audio and retrieve the audio id
         const audioId = await executeProviderCreate({
           operationKey,
           step: 'subsplash-audio',
-          payload: data,
+          payload: receiptPayload,
           execute: () => createAudioRef(data.audioTitle, bearerToken),
         });
         logger.info(`Audio ID: ${audioId}`);
@@ -166,7 +170,7 @@ export const uploadToSubsplashDomain = async (
         const transcodeResponse = await executeProviderCreate({
           operationKey,
           step: 'subsplash-transcode',
-          payload: data,
+          payload: receiptPayload,
           prepare: () =>
             reserveDurableProviderBindings(
               [{ provider: 'subsplash', account: 'app:9XTSHD', remoteId: audioId }],
@@ -214,7 +218,7 @@ export const uploadToSubsplashDomain = async (
         const result = await executeProviderCreate<SubsplashCreatedMedia>({
           operationKey,
           step: 'subsplash-media-item',
-          payload: data,
+          payload: receiptPayload,
           prepare: () =>
             reserveDurableProviderBindings(
               [

@@ -271,3 +271,25 @@ describe('uploadToSubsplash lock contract', () => {
     expect(events).toEqual(['read', 'commit', 'release', 'read', 'release']);
   });
 });
+
+it('keeps pinned provider receipt identity stable when the authorized audio transport changes', async () => {
+  jest.clearAllMocks();
+  mockAxios.mockResolvedValue({ data: { id: 'media-item-1' } } as never);
+  const input = buildValidPayload();
+  const pinnedAudio = { path: 'workflow-audio/sermon/final.mp3', generation: '90071992547409931' };
+  const options = {
+    pinnedAudio,
+    readExistingMedia: async () => undefined,
+    commitCreatedMedia: async () => undefined,
+  };
+  await uploadToSubsplashDomain({ ...input, audioUrl: 'https://storage.example/first' }, options);
+  const first = mockCreate.mock.calls.map(([call]) => call.payload);
+  mockCreate.mockClear();
+  await uploadToSubsplashDomain({ ...input, audioUrl: 'https://storage.example/renewed' }, options);
+  expect(mockCreate.mock.calls.map(([call]) => call.payload)).toEqual(first);
+  expect(first).toHaveLength(3);
+  for (const payload of first) {
+    expect(payload.pinnedAudio).toEqual(pinnedAudio);
+    expect(payload.audioUrl).toBeUndefined();
+  }
+});

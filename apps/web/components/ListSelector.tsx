@@ -13,7 +13,6 @@ import { List, ListType, ListWithHighlight } from '../types/List';
 import Button from '@mui/material/Button';
 import Typography from '@mui/material/Typography';
 import { useAlgoliaSearch } from '../context/search/AlgoliaSearchContext';
-import SearchAttribution from './algoliaComponents/SearchAttribution';
 import { browseLists, type BrowsePage } from '../utils/algolia/browseRecords';
 import { normalizeAlgoliaListHit, searchListsIndex } from '../utils/algolia/searchRecords';
 
@@ -248,7 +247,6 @@ const ListSelector: FunctionComponent<ListSelectorProps> = (props: ListSelectorP
           </IconButton>
         )}
       </Box>
-      {client && <SearchAttribution />}
       {!client && (
         <Typography variant="caption">Search is unavailable. Filter the lists loaded below, or load more.</Typography>
       )}

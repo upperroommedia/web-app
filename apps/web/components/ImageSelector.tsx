@@ -24,7 +24,6 @@ import styles from '../styles/ImageSelector.module.css';
 import CircularProgress from '@mui/material/CircularProgress';
 import { SearchResponse } from 'algoliasearch';
 import { useAlgoliaSearch } from '../context/search/AlgoliaSearchContext';
-import SearchAttribution from './algoliaComponents/SearchAttribution';
 import TextField from '@mui/material/TextField';
 import Tooltip from '@mui/material/Tooltip';
 import InputAdornment from '@mui/material/InputAdornment';
@@ -240,7 +239,6 @@ const ImageSelector = (props: {
               ),
             }}
           />
-          {client && <SearchAttribution />}
           {imageSearchQuery !== '' && imageSearchResults ? (
             <InfiniteScroll
               next={() => {}}

@@ -1,7 +1,13 @@
+import { awaitYouTubeRenderDrain } from './hetzner-render-drain';
+import { isDeepStrictEqual } from 'node:util';
+import { youtubeRenderOutput } from './hetzner-render-output';
+import { consumeAcquiredYouTubeSource } from './acquired-youtube-source';
+import { youtubeAcquisitionId, type RemoteYouTubeResult } from './hetzner-acquisition';
+import { YOUTUBE_ACQUISITIONS } from './hetzner-acquisition-store';
 import { Context } from '@temporalio/activity';
 import { ApplicationFailure } from '@temporalio/common';
 import type { Bucket } from '@google-cloud/storage';
-import type { Firestore } from 'firebase-admin/firestore';
+import type { Firestore, Transaction } from 'firebase-admin/firestore';
 import type { Database } from 'firebase-admin/database';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -17,7 +23,14 @@ import type { YouTubeAcquisitionError } from '../processYouTubeUrl';
 import { createContext } from '../context';
 import { getFFmpegPath, getFFprobePath, validateAddIntroOutroData } from '../utils';
 import { downloadMediaStream, runMediaCommand, uploadMediaStream } from './native';
-import type { MediaActivities, MediaJobProjection, MediaJobRef, MediaOutcome, MediaStage } from './types';
+import type {
+  MediaActivities,
+  MediaJobProjection,
+  MediaJobRef,
+  MediaOutcome,
+  MediaStage,
+  MediaArchiveWait,
+} from './types';
 import { checkMediaWorkspace, mediaResources, reserveMediaWorkspace } from './resources';
 import { createMediaAuthenticationProbe } from './authentication';
 import {
@@ -35,16 +48,58 @@ type PrivateRequest = {
   payload: AddIntroOutroInputType;
   sources: Record<string, { path: string; generation: string }>;
   artifacts?: { source?: Artifact; processed?: Artifact; final?: Artifact };
+  youtubeRenderEpisode?: string;
 };
+function adoptedYouTubeRender(ref: MediaJobRef, request: PrivateRequest) {
+  const episodeId = request.youtubeRenderEpisode;
+  if (episodeId === undefined) return undefined;
+  const { payload, artifacts } = request;
+  const { source, processed, final } = artifacts ?? {};
+  const invalid = () => ApplicationFailure.nonRetryable('Render audio receipts are invalid', 'INVALID_MEDIA_ARTIFACT');
+  if (
+    !('youtubeUrl' in payload) ||
+    typeof episodeId !== 'string' ||
+    !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(episodeId) ||
+    !source ||
+    !processed ||
+    !final
+  )
+    throw invalid();
+  const paths = youtubeRenderOutput(ref, episodeId);
+  const merged = Boolean(payload.introUrl || payload.outroUrl);
+  if (
+    source.path !== paths.source ||
+    processed.path !== paths.processed ||
+    (merged ? final.path !== paths.merged : !isDeepStrictEqual(final, processed))
+  )
+    throw invalid();
+  return { episodeId, source, processed, final };
+}
 export interface MediaActivityDependencies {
   projectId: string;
   assertAuthorized: (ref: MediaJobRef) => Promise<void>;
+  requireRemoteYouTube?: boolean;
+  acquireYouTubeSource?: (
+    ref: MediaJobRef,
+    signal: AbortSignal,
+    archiveResume?: MediaArchiveWait
+  ) => Promise<RemoteYouTubeResult>;
+  renderYouTube?: (
+    ref: MediaJobRef,
+    signal: AbortSignal,
+    archiveResume?: MediaArchiveWait,
+    authenticationGeneration?: string
+  ) => Promise<MediaOutcome>;
+  recoverYouTubeRenderAuthentication?: MediaActivities['recoverMediaAuthentication'];
+  recordYouTubeArchiveWait?: (ref: MediaJobRef, wait: MediaArchiveWait) => Promise<void>;
+  assertAuthorizedInTransaction?: (tx: Transaction, ref: MediaJobRef) => Promise<unknown>;
   firestore: Firestore;
   database: Database;
   bucket: Bucket;
   ytdlpPath: string;
   projectJob: (ref: MediaJobRef, projection: MediaJobProjection) => Promise<void>;
-  /** Must perform a real authenticated media-byte canary, not merely inspect cookies. */
+  /** Local acquisition only: performs a real authenticated media-byte canary.
+   * Remote acquisition requires its separate same-host episode protocol. */
   checkAuthenticatedMedia?: (ref: MediaJobRef) => Promise<{ ready: boolean; generation: string | null }>;
 }
 
@@ -72,7 +127,13 @@ export function storagePathFromMediaUrl(value: string, bucket: string): string {
 /** Private request documents are never serialized into Temporal event history. */
 export function createMediaActivities(dependencies: MediaActivityDependencies): MediaActivities {
   const { firestore: db, database: realtime, bucket } = dependencies;
-  const authenticationProbe = dependencies.checkAuthenticatedMedia ?? createMediaAuthenticationProbe(dependencies);
+  // A successful canary on this worker cannot recover the retained host's
+  // authenticated session. Keep that separate protocol unavailable until its
+  // original episode, physical admission, native drain and generation are joined.
+  const authenticationProbe =
+    dependencies.requireRemoteYouTube || dependencies.acquireYouTubeSource || dependencies.renderYouTube
+      ? undefined
+      : dependencies.checkAuthenticatedMedia ?? createMediaAuthenticationProbe(dependencies);
   const requestDoc = (ref: MediaJobRef) => db.collection('temporalMediaRequests').doc(ref.jobId);
   const stateDoc = (ref: MediaJobRef) => db.collection('temporalMediaState').doc(ref.sermonId);
   const sermonDoc = (ref: MediaJobRef) => db.collection('sermons').doc(ref.sermonId);
@@ -356,21 +417,75 @@ export function createMediaActivities(dependencies: MediaActivityDependencies): 
       await project(ref, 'preparing', 0);
       return { kind: 'ready' };
     },
-    acquireMedia: async (ref) => {
+    acquireMedia: async (ref, archiveResume, authenticationGeneration) => {
       const eligible = await eligibility(ref);
       if (eligible.kind !== 'ready') return eligible;
-      const request = await load(ref);
+      let request = await load(ref);
+      const rendered = adoptedYouTubeRender(ref, request);
+      if (rendered) {
+        await verifyArtifact(rendered.processed);
+        return { kind: 'ready', hostBound: true };
+      }
       if (request.artifacts?.processed) {
         await verifyArtifact(request.artifacts.processed);
         return { kind: 'ready' };
       }
       const { payload } = request;
+      if ('youtubeUrl' in payload && dependencies.renderYouTube)
+        return dependencies.renderYouTube(
+          ref,
+          Context.current().cancellationSignal,
+          archiveResume,
+          authenticationGeneration
+        );
+      if ('youtubeUrl' in payload && dependencies.requireRemoteYouTube && !dependencies.acquireYouTubeSource)
+        throw ApplicationFailure.nonRetryable(
+          'The Cloud Run media worker requires the authorized Hetzner YouTube integration.',
+          'YOUTUBE_ACQUISITION_BINDING_REQUIRED'
+        );
       try {
         return await withNativeActivity(ref, 'downloading', async (directory, signal) => {
           let input = join(directory, 'source');
+          let adoptRemote: ((duration: number) => Promise<void>) | undefined;
           await project(ref, 'downloading', 5);
           if (request.artifacts?.source) {
             await download(request.artifacts.source.path, input, signal, request.artifacts.source.generation);
+          } else if ('youtubeUrl' in payload && dependencies.acquireYouTubeSource) {
+            if (!dependencies.assertAuthorizedInTransaction)
+              throw ApplicationFailure.nonRetryable(
+                'Remote media adoption authorization is unavailable.',
+                'PERMISSION_CHANGED'
+              );
+            const remote = await dependencies.acquireYouTubeSource(ref, signal, archiveResume);
+            signal.throwIfAborted();
+            if (remote.kind === 'retryable')
+              throw ApplicationFailure.create({
+                message: 'YouTube acquisition requires a verified native retry.',
+                type: 'YOUTUBE_ACQUISITION_RETRYABLE',
+              });
+            if (remote.kind !== 'source' && remote.kind !== 'source_available') return remote;
+            request = await load(ref);
+            if (request.artifacts?.processed) {
+              await verifyArtifact(request.artifacts.processed);
+              return { kind: 'ready' };
+            }
+            if (remote.kind === 'source')
+              adoptRemote = await consumeAcquiredYouTubeSource({
+                db,
+                bucket,
+                ref,
+                source: remote.artifact,
+                destination: input,
+                signal,
+                assertCurrent: dependencies.assertAuthorizedInTransaction,
+              });
+            else if (request.artifacts?.source)
+              await download(request.artifacts.source.path, input, signal, request.artifacts.source.generation);
+            else
+              throw ApplicationFailure.create({
+                message: 'Canonical acquired source is not yet available.',
+                type: 'YOUTUBE_ACQUISITION_PENDING',
+              });
           } else if ('youtubeUrl' in payload) {
             const { downloadYouTubeAudioToFile } = await import('../processYouTubeUrl');
             const cancellation = new CancelToken();
@@ -400,10 +515,13 @@ export function createMediaActivities(dependencies: MediaActivityDependencies): 
             await download(source.path, input, signal, source.generation);
           }
           signal.throwIfAborted();
-          const sourceDuration = request.artifacts?.source?.duration ?? (await measure(input, signal));
+          const sourceDuration = adoptRemote
+            ? await measure(input, signal)
+            : request.artifacts?.source?.duration ?? (await measure(input, signal));
           if (payload.startTime >= sourceDuration || payload.startTime + payload.duration > sourceDuration + 1)
             throw ApplicationFailure.nonRetryable('Requested trim exceeds available audio', 'INVALID_MEDIA_RANGE');
-          if (!request.artifacts?.source) {
+          if (adoptRemote) await adoptRemote(sourceDuration);
+          else if (!request.artifacts?.source) {
             const duration = sourceDuration;
             const pinned = request.sources.storage;
             if (pinned?.path.startsWith(`workflow-audio/${ref.sermonId}/`)) {
@@ -414,6 +532,7 @@ export function createMediaActivities(dependencies: MediaActivityDependencies): 
                   artifactId: mediaArtifactId(ref.projectId, pinned.path),
                   projectId: ref.projectId,
                   type: 'media_job',
+                  expectedObject: pinned,
                   id: ref.jobId,
                   createdAt: Date.now(),
                 });
@@ -470,6 +589,7 @@ export function createMediaActivities(dependencies: MediaActivityDependencies): 
       const eligible = await eligibility(ref);
       if (eligible.kind !== 'ready') return eligible;
       const request = await load(ref);
+      adoptedYouTubeRender(ref, request);
       if (request.artifacts?.final) {
         await verifyArtifact(request.artifacts.final);
         return { kind: 'ready' };
@@ -545,6 +665,7 @@ export function createMediaActivities(dependencies: MediaActivityDependencies): 
       const processed = request.artifacts?.processed;
       const final = request.artifacts?.final;
       const source = request.artifacts?.source;
+      const rendered = adoptedYouTubeRender(ref, request);
       if (!source || !processed || !final)
         throw ApplicationFailure.nonRetryable('Audio receipts are missing', 'MISSING_MEDIA_RECEIPT');
       await Promise.all([verifyArtifact(source), verifyArtifact(processed), verifyArtifact(final)]);
@@ -563,6 +684,27 @@ export function createMediaActivities(dependencies: MediaActivityDependencies): 
           ['cancel_requested', 'cancelled'].includes(job.get('state'))
         )
           return { kind: 'cancelled' } as const;
+        if (rendered) {
+          if (!dependencies.assertAuthorizedInTransaction)
+            throw ApplicationFailure.nonRetryable('Render publication is unavailable', 'PERMISSION_CHANGED');
+          const [pinned, render] = await Promise.all([
+            transaction.get(requestDoc(ref)),
+            transaction.get(db.collection(YOUTUBE_ACQUISITIONS).doc(youtubeAcquisitionId(ref))),
+          ]);
+          if (
+            render.get('renderProtocol') !== 1 ||
+            !isDeepStrictEqual(render.get('ref'), ref) ||
+            (render.get('headEpisode') ?? render.get('preparedEpisode')) !== rendered.episodeId ||
+            !isDeepStrictEqual(pinned.get('ref'), ref) ||
+            pinned.get('youtubeRenderEpisode') !== rendered.episodeId ||
+            !isDeepStrictEqual(pinned.get('artifacts.source'), source) ||
+            !isDeepStrictEqual(pinned.get('artifacts.processed'), processed) ||
+            !isDeepStrictEqual(pinned.get('artifacts.final'), final)
+          )
+            throw ApplicationFailure.nonRetryable('Audio receipts changed', 'INVALID_MEDIA_ARTIFACT');
+          if (render.get('renderStopped') === true) return { kind: 'cancelled' } as const;
+          await dependencies.assertAuthorizedInTransaction(transaction, ref);
+        }
         const canonicalRefDoc = db.collection('temporalMediaCanonicalRefs').doc(ref.sermonId);
         const previousRefs = (await transaction.get(canonicalRefDoc)).get('artifactIds') as
           | Record<string, string>
@@ -585,14 +727,15 @@ export function createMediaActivities(dependencies: MediaActivityDependencies): 
           )
         );
         const attachments = await Promise.all(
-          Object.entries(artifactIds).map(([slot, artifactId]) =>
+          (['source', 'processed', 'final'] as const).map((slot) =>
             prepareMediaReference(transaction, db, {
-              artifactId,
+              artifactId: artifactIds[slot],
               projectId: ref.projectId,
               type: 'canonical',
               id: ref.sermonId,
               slot,
               createdAt: Date.now(),
+              ...(rendered ? { expectedObject: { ...rendered[slot], ownerJobId: ref.jobId } } : {}),
             })
           )
         );
@@ -608,6 +751,7 @@ export function createMediaActivities(dependencies: MediaActivityDependencies): 
             sourceDurationSeconds: source.duration,
             processedPath: processed.path,
             finalPath: final.path,
+            ...(rendered ? { finalGeneration: final.generation } : {}),
             durationSeconds: final.duration,
           },
           'status.audioStatus': 'PROCESSED',
@@ -628,11 +772,27 @@ export function createMediaActivities(dependencies: MediaActivityDependencies): 
       return result;
     },
     recoverMediaAuthentication: async (ref) => {
+      if (dependencies.recoverYouTubeRenderAuthentication) {
+        if ((await eligibility(ref)).kind !== 'ready') return { ready: false, generation: null };
+        return dependencies.recoverYouTubeRenderAuthentication(ref);
+      }
+      if (!authenticationProbe)
+        throw ApplicationFailure.nonRetryable(
+          'YouTube authentication requires verified recovery on the acquisition host.',
+          'YOUTUBE_SAME_HOST_AUTHENTICATION_REQUIRED'
+        );
       if ((await eligibility(ref)).kind !== 'ready') return { ready: false, generation: null };
       return authenticationProbe(ref);
     },
-    projectMediaWaiting: async (ref, reason, attempt) => {
+    projectMediaWaiting: async (ref, reason, attempt, archiveWait) => {
       if ((await eligibility(ref)).kind !== 'ready') return;
+      if (archiveWait !== undefined) {
+        if (reason !== 'archive' || archiveWait.attempt !== attempt)
+          throw new Error('YOUTUBE_ARCHIVE_WAIT_UNCONFIRMED');
+        if (dependencies.acquireYouTubeSource && !dependencies.recordYouTubeArchiveWait)
+          throw new Error('YOUTUBE_ARCHIVE_WAIT_UNCONFIRMED');
+        await dependencies.recordYouTubeArchiveWait?.(ref, archiveWait);
+      }
       await dependencies.projectJob(ref, { state: 'waiting', reason, progress: 0 });
       await db.runTransaction(async (transaction) => {
         const [sermon, state] = await Promise.all([transaction.get(sermonDoc(ref)), transaction.get(stateDoc(ref))]);
@@ -649,6 +809,8 @@ export function createMediaActivities(dependencies: MediaActivityDependencies): 
       });
     },
     projectMediaFailure: async (ref, code) => {
+      if (dependencies.projectId === 'urm-app-staging')
+        await awaitYouTubeRenderDrain({ firestore: db, ref, stop: true });
       const cancelled = code === 'CANCELLED' || code === 'SERMON_DELETED';
       const state = await stateDoc(ref).get();
       const superseded = code === 'SUPERSEDED' || !matches(state.get('ref'), ref);
@@ -667,6 +829,8 @@ export function createMediaActivities(dependencies: MediaActivityDependencies): 
       });
     },
     cleanupMedia: async (ref) => {
+      if (dependencies.projectId === 'urm-app-staging')
+        await awaitYouTubeRenderDrain({ firestore: db, ref, stop: false, polls: 1 });
       // Successful artifacts remain immutable for playback. Remove only revision-owned UI progress.
       await realtime
         .ref(`addIntroOutro/${ref.sermonId}`)

@@ -65,6 +65,7 @@ export async function prepareMediaReference(
     artifactId: string;
     projectId: string;
     type: 'media_job' | 'canonical' | 'publishing_job' | 'backup';
+    expectedObject?: { path: string; generation: string; ownerJobId?: string };
     id: string;
     slot?: string;
     createdAt: number;
@@ -75,6 +76,14 @@ export async function prepareMediaReference(
   const record = snapshot.data() as MediaArtifactRecord | undefined;
   if (!record || record.projectId !== input.projectId || ['deleting', 'deleted'].includes(record.status))
     throw new Error('Media artifact reference is unavailable.');
+  if (
+    input.expectedObject &&
+    (record.status !== 'retained' ||
+      record.path !== input.expectedObject.path ||
+      record.generation !== input.expectedObject.generation ||
+      (input.expectedObject.ownerJobId !== undefined && record.ownerJobId !== input.expectedObject.ownerJobId))
+  )
+    throw new Error('Retained media source generation changed.');
   return () => {
     transaction.set(artifact.collection('references').doc(mediaReferenceId(input.type, input.id, input.slot)), {
       projectId: input.projectId,

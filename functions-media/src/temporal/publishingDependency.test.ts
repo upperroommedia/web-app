@@ -4,10 +4,14 @@ import { mediaArtifactId, mediaReferenceId } from '../../../packages/orchestrati
 test('publishing leases its admitted source after canonical final advances', async () => {
   const projectId = 'project';
   const oldPath = 'workflow-audio/sermon/old/final.mp3';
+  const generation = '90071992547409931';
   const oldId = mediaArtifactId(projectId, oldPath);
   const newId = mediaArtifactId(projectId, 'workflow-audio/sermon/new/final.mp3');
   const records = new Map<string, any>([
-    [`temporalMediaArtifacts/${oldId}`, { projectId, sermonId: 'sermon', path: oldPath, status: 'retained' }],
+    [
+      `temporalMediaArtifacts/${oldId}`,
+      { projectId, sermonId: 'sermon', path: oldPath, generation, status: 'retained' },
+    ],
     ['temporalMediaCanonicalRefs/sermon', { artifactIds: { final: newId } }],
   ]);
   const collection = (path: string): any => ({
@@ -40,7 +44,13 @@ test('publishing leases its admitted source after canonical final advances', asy
     },
   });
   const ref = { projectId, jobId: 'publishing' };
-  await factory.leasePublishingAudio(ref, 'sermon', oldPath);
+  const initialRecordCount = records.size;
+  await expect(factory.leasePublishingAudio(ref, 'sermon', oldPath, '90071992547409932')).rejects.toThrow(
+    'Retained media source generation changed.'
+  );
+  await expect(factory.leasePublishingAudio(ref, 'sermon', 'sermons/sermon', generation)).rejects.toThrow('owned');
+  expect(records.size).toBe(initialRecordCount);
+  await factory.leasePublishingAudio(ref, 'sermon', oldPath, generation);
   expect(
     records.has(`temporalMediaArtifacts/${oldId}/references/${mediaReferenceId('publishing_job', ref.jobId)}`)
   ).toBe(true);
