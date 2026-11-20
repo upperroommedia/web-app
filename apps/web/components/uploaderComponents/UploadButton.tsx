@@ -1,5 +1,5 @@
 import React, { Dispatch, SetStateAction } from 'react';
-import uploadFile, { AudioSource } from '../../pages/api/uploadFile';
+import uploadFile, { AudioSource } from '../../utils/uploadFile';
 import { User } from '../../types/User';
 import { UploadProgress } from '../../context/types';
 import { List } from '../../types/List';

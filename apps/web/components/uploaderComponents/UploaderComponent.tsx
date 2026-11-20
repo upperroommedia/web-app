@@ -60,7 +60,7 @@ import UploadButton from './UploadButton';
 import UploadProgressComponent from './UploadProgressComponent';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/router';
-import { AudioSource } from '../../pages/api/uploadFile';
+import { AudioSource } from '../../utils/uploadFile';
 import DropZone, { revokeUploadableFilePreview } from '../DropZone';
 import BundleListSelector from '../BundleListSelector';
 import { getLatestListFromBundle, getSubtitlesFromBundle } from '../../utils/bundleHelpers';

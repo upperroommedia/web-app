@@ -10,7 +10,7 @@ import LocalFireDepartmentIcon from '@mui/icons-material/LocalFireDepartment';
 import CloseIcon from '@mui/icons-material/Close';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import { UploadProgress } from '../../context/types';
-import { AudioSource } from '../../pages/api/uploadFile';
+import { AudioSource } from '../../utils/uploadFile';
 import { Sermon } from '../../types/SermonTypes';
 import AvatarWithDefaultImage from '../AvatarWithDefaultImage';
 

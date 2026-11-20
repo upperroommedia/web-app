@@ -1,19 +1,19 @@
-import firestore, { deleteDoc, doc, writeBatch, getDocs, query, collection, orderBy, limit } from '../../firebase/firestore';
-import storage, { ref, uploadBytesResumable, UploadMetadata, deleteObject } from '../../firebase/storage';
+import firestore, { deleteDoc, doc, writeBatch, getDocs, query, collection, orderBy, limit } from '../firebase/firestore';
+import storage, { ref, uploadBytesResumable, UploadMetadata, deleteObject } from '../firebase/storage';
 
 import { Dispatch, SetStateAction } from 'react';
-import { UploadableFile } from '../../components/DropZone';
-import { sermonConverter } from '../../types/Sermon';
-import { Sermon, uploadStatus } from '../../types/SermonTypes';
-import { ImageType } from '../../types/Image';
-import { List } from '../../types/List';
-import { sermonListConverter } from '../../types/SermonList';
-import { createFunctionV2 } from '../../utils/createFunction';
+import { UploadableFile } from '../components/DropZone';
+import { sermonConverter } from '../types/Sermon';
+import { Sermon, uploadStatus } from '../types/SermonTypes';
+import { ImageType } from '../types/Image';
+import { List } from '../types/List';
+import { sermonListConverter } from '../types/SermonList';
+import { createFunctionV2 } from './createFunction';
 import { AddIntroOutroInputType } from '@upperroom/contracts/addIntroOutro/types';
-import { getIntroAndOutro } from '../../utils/uploadUtils';
-import { UploadProgress } from '../../context/types';
-import { createOperationKey } from '../../utils/callableConcurrency';
-import { retryStorageUpload } from '../../utils/retryStorageUpload';
+import { getIntroAndOutro } from './uploadUtils';
+import { UploadProgress } from '../context/types';
+import { createOperationKey } from './callableConcurrency';
+import { retryStorageUpload } from './retryStorageUpload';
 
 export type AudioSource =
   | {
@@ -84,7 +84,7 @@ const addFirestoreDocument = async (
   // Update series item count after batch commit if sermon has seriesId
   if (sermon.seriesId) {
     try {
-      const { getDoc, updateDoc, increment } = await import('../../firebase/firestore');
+      const { getDoc, updateDoc, increment } = await import('../firebase/firestore');
       const seriesRef = doc(firestore, 'series', sermon.seriesId);
       const seriesDoc = await getDoc(seriesRef);
       if (seriesDoc.exists()) {

@@ -43,8 +43,12 @@ describe('caller lock/idempotency contract adoption', () => {
     expect(sermonsListAdminPage).toContain('formatLockBusyRetryMessage(');
   });
 
+  it('keeps the browser upload helper out of the Next.js API routes', () => {
+    expect(fs.readdirSync(path.join(process.cwd(), 'pages/api')).map(path.parse).map((file) => file.name)).not.toContain('uploadFile');
+  });
+
   it('propagates operation keys from API-layer mutation helpers', () => {
-    const uploadFileApi = readFile('pages/api/uploadFile.tsx');
+    const uploadFileApi = readFile('utils/uploadFile.ts');
     const editSermonApi = readFile('pages/api/editSermon.ts');
 
     expect(uploadFileApi).toContain("createOperationKey('upload-file-add-intro-outro', props.sermon.id)");

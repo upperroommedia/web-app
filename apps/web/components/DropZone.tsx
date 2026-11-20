@@ -1,7 +1,7 @@
 import { Dispatch, SetStateAction, useCallback, useState } from 'react';
 import { FileRejection, useDropzone } from 'react-dropzone';
 import styles from '../styles/DropZone.module.css';
-import { AudioSource } from '../pages/api/uploadFile';
+import { AudioSource } from '../utils/uploadFile';
 import { UploaderFieldError } from '../context/types';
 import { getErrorMessage, showError } from './uploaderComponents/utils';
 export interface UploadableFile {
