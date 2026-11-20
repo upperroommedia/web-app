@@ -132,16 +132,16 @@ export async function prepareCloudRunZeroPool({ platform, role, settings, operat
       if (!isDeepStrictEqual(state.pool, current)) fail();
       return state;
     }
-    const op = operationName(state.nativeOperation), end = Date.now() + 30000;
+    const op = operationName(state.nativeOperation), end = performance.now() + 120_000;
     let result;
     do {
       result = await api(`https://run.googleapis.com/v2/${op}`);
       if (operationName(result.name) !== op) fail();
+      if (performance.now() >= end) fail();
       if (result.done === true) break;
       if (result.done !== undefined && result.done !== false) fail();
-      if (Date.now() >= end) fail();
       await new Promise(resolve => setTimeout(resolve, 1000));
-    } while (Date.now() < end);
+    } while (performance.now() < end);
     if (result?.done !== true) fail();
     if (result.error) { await save({ ...state, stage: 'failed', errorSHA256: hash(result.error) }); fail(); }
     const completed = verifyPreparedPoolMetadata(plan, result.response);
