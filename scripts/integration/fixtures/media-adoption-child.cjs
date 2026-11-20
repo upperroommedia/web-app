@@ -119,6 +119,11 @@ process.once('message', async (message) => {
       const {
         readEligibleYouTubeAcquisition,
       } = require('../../../apps/process-audio/src/temporal/hetzner-acquisition-policy.ts');
+      const {
+        readPreparedYouTubeEpisode,
+        recordYouTubeEpisodeResource,
+        recordReleasedYouTubeEpisode,
+      } = require('../../../apps/process-audio/src/temporal/hetzner-acquisition-episode.ts');
       const { uploadYouTubeObject } = require('../../../apps/process-audio/src/temporal/hetzner-acquisition-upload.ts');
       acquisition.createHetznerAcquisitionTransport = () => async (method, request, signal) => {
         if (method !== 'GET') throw Error('Unexpected repeated remote admission');
@@ -128,8 +133,27 @@ process.once('message', async (message) => {
           return { status: 'ready', operationId: request.operationId, artifact: prepared.get('result.artifact') };
         if (prepared.get('preparedBy.instanceId') !== `CONTROLLED_CLOUD_${instanceId}`)
           throw Error('Native preparer not bound');
-        // CONTROLLED host identity and drain only. Real SDK Activity/actor/canonical
-        // guard, private store/upload, actual emulator bytes and local tools below.
+        const verifiedCallerEmail = prepared.get('preparedBy.serviceAccount');
+        const episode = await readPreparedYouTubeEpisode({ firestore: db, ref: request.ref, verifiedCallerEmail });
+        const assertEligible = async (tx, ref, purpose) => {
+          const result = await readEligibleYouTubeAcquisition({
+            firestore: db,
+            auth: getAuth(app),
+            transaction: tx,
+            ref,
+          });
+          if (result.kind !== (purpose === 'source_available' ? 'source_available' : 'ready'))
+            throw Error('Host canonical authority denied');
+        };
+        // Physical coordinator replies are controlled here. The real episode
+        // store still verifies the caller, order, immutable facts and release.
+        const custody = { v: 1, id: episode.id, peerBound: true, receiptHash: 'c'.repeat(64) };
+        const directory = `/workspace/yt-acquisition-scratch/${episode.id}`;
+        const reservation = { ...custody, state: 'reserved', directory };
+        const enrollment = { ...custody, state: 'enrolled', directory };
+        const assertCurrent = (tx, ref) => assertEligible(tx, ref, 'prelaunch');
+        await recordYouTubeEpisodeResource({ firestore: db, episode, phase: 'reserved', proof: reservation, assertCurrent });
+        await recordYouTubeEpisodeResource({ firestore: db, episode, phase: 'enrolled', proof: enrollment, assertCurrent });
         const host = createYouTubeAcquisitionHostStore({
           firestore: db,
           projectId: 'urm-app-staging',
@@ -140,18 +164,11 @@ process.once('message', async (message) => {
             startTicks: '100',
             buildId: 'b'.repeat(40),
           },
-          assertEligible: async (tx, ref, purpose) => {
-            const result = await readEligibleYouTubeAcquisition({
-              firestore: db,
-              auth: getAuth(app),
-              transaction: tx,
-              ref,
-            });
-            if (result.kind !== (purpose === 'source_available' ? 'source_available' : 'ready'))
-              throw Error('Host canonical authority denied');
-          },
+          episodeId: episode.id,
+          nativeEnrollment: enrollment,
+          assertEligible,
         });
-        if (!(await host.claim(request.ref, prepared.get('preparedBy.serviceAccount'))).launch)
+        if (!(await host.claim(request.ref, verifiedCallerEmail)).launch)
           throw Error('Unexpected host claim');
         const [bytes] = await getStorage(app).bucket().file(`sermons/${request.ref.sermonId}.wav`).download();
         const journal = host.upload(request.ref, randomUUID());
@@ -165,7 +182,7 @@ process.once('message', async (message) => {
           }),
         });
         await host.settle(request.ref, { kind: 'source', artifact }, async () => undefined);
-        // CONTROLLED remote parent kernel/death, never actual host process proof.
+        const drain = { ...custody, state: 'drained', groupAbsent: true };
         await require('../../../apps/process-audio/src/temporal/hetzner-acquisition-store.ts').closeYouTubeAcquisitionNativeProcess(
           {
             firestore: db,
@@ -173,8 +190,10 @@ process.once('message', async (message) => {
             owner: (await db.doc(`temporalYouTubeAcquisitions/${request.operationId}`).get()).get('owner'),
             startedAt: (await db.doc(`temporalYouTubeAcquisitions/${request.operationId}`).get()).get('startedAt'),
             fact: { processId: process.pid, exitCode: 0, exitSignal: null, outcome: 'completed', closedAt: Date.now() },
+            episode: { id: episode.id, proof: drain },
           }
         );
+        await recordReleasedYouTubeEpisode({ firestore: db, episode, proof: { ...drain, state: 'closed' } });
         if (process.env.URM_MEDIA_REMOTE_CASE === 'remote-revoked')
           await getAuth(app).setCustomUserClaims(request.ref.jobId, { role: 'guest' });
         if (process.env.URM_MEDIA_REMOTE_CASE === 'remote-owner-changed')
