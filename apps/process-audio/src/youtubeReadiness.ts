@@ -530,3 +530,14 @@ export const buildYouTubeReadinessSnapshot = (input: BuildYouTubeReadinessSnapsh
     },
   };
 };
+
+// Only return fixed labels. Upstream error messages can include signed URLs and headers.
+export function describeMediaCanaryError(error: unknown): string {
+  const message = error instanceof Error ? error.message : typeof error === 'string' ? error : '';
+  if (/requested format is not available|did not return an audio-only format/i.test(message)) return 'format_unavailable';
+  if (/does not contain any stream|matches no streams/i.test(message)) return 'no_output_stream';
+  if (/without producing media bytes/i.test(message)) return 'empty_output';
+  if (/http (?:error )?(?:401|403)\b/i.test(message)) return 'upstream_access_denied';
+  if (/timed out|timeout/i.test(message)) return 'timeout';
+  return 'unclassified';
+}

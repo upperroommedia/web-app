@@ -30,7 +30,7 @@ import type {
   BrowserFallbackRequest,
   BrowserFallbackResolveAudioUrlResponse,
 } from '@upperroom/contracts/browserFallback';
-import type { YouTubeMediaByteCanaryReport } from './youtubeReadiness';
+import { describeMediaCanaryError, type YouTubeMediaByteCanaryReport } from './youtubeReadiness';
 import { isValidBrowserPoToken, isYouTubeMedia403, mergeBrowserPoTokenExtractorArg } from './youtubeBrowserPoToken';
 
 interface ObservedOutboundIdentity {
@@ -2015,6 +2015,9 @@ export async function runAuthenticatedYouTubeMediaByteCanary(
           failureClass: null,
         };
       } catch (cookieError) {
+        if (process.env.SENTRY_ENVIRONMENT === 'staging') {
+          log.warn('Staging audio check failed', { step: 'initial_download', category: describeMediaCanaryError(cookieError) });
+        }
         lastError = cookieError;
         const cookieMessage = cookieError instanceof Error ? cookieError.message : String(cookieError);
         if (shouldAttemptBrowserCookieRefresh(cookieMessage, 'cookie_provider', ctx)) {
@@ -2029,6 +2032,9 @@ export async function runAuthenticatedYouTubeMediaByteCanary(
               failureClass: null,
             };
           } catch (refreshError) {
+            if (process.env.SENTRY_ENVIRONMENT === 'staging') {
+              log.warn('Staging audio check failed', { step: 'retry_download', category: describeMediaCanaryError(refreshError) });
+            }
             lastError = refreshError;
           }
         }
@@ -2067,6 +2073,9 @@ export async function runAuthenticatedYouTubeMediaByteCanary(
           failureClass: null,
         };
       } catch (fallbackError) {
+        if (process.env.SENTRY_ENVIRONMENT === 'staging') {
+          log.warn('Staging audio check failed', { step: 'fallback_download', category: describeMediaCanaryError(fallbackError) });
+        }
         lastError = fallbackError;
         lastFailureMode = 'browser_fallback';
       }
