@@ -72,7 +72,12 @@ function Slider() {
       valueLabelDisplay="auto"
       valueLabelFormat={formatTime}
       size="small"
-      sx={{ width: '100%', py: 1.5, color: 'text.primary' }}
+      sx={{
+        width: '100%',
+        py: 1.5,
+        color: 'text.primary',
+        '@media (pointer: coarse)': { minHeight: 36 },
+      }}
     />
   );
 }
@@ -120,11 +125,12 @@ function Mute({ tooltipPlacement }: MediaButtonProps) {
   );
 }
 
-function Play({ tooltipPlacement }: MediaButtonProps) {
+function Play({ tooltipPlacement, hasSource }: MediaButtonProps & { hasSource: boolean }) {
   const { paused, waiting } = usePlayer((state) => ({ paused: state.paused, waiting: state.waiting }));
-  const { ready, error } = usePlaybackFeedback();
+  const { error } = usePlaybackFeedback();
   const { togglePaused } = usePlaybackActions();
-  const loading = !error && (waiting || !ready);
+  // Safari can wait for a play gesture before loading a preselected source.
+  const loading = !error && (!hasSource || (!paused && waiting));
   const label = paused ? 'Play' : 'Pause';
   return (
     <Tooltip title={loading ? 'Loading audio' : label} placement={tooltipPlacement}>
@@ -133,7 +139,7 @@ function Play({ tooltipPlacement }: MediaButtonProps) {
           className="floating-player-play-btn"
           aria-label={label}
           aria-busy={loading}
-          disabled={loading && paused}
+          disabled={!hasSource}
           onClick={togglePaused}
         >
           {loading ? (
@@ -206,6 +212,7 @@ function PlaybackMedia({ source, sourceError }: { source: string; sourceError?: 
         const current = generation.current;
         const sourceKey = getSource();
         const media = event.currentTarget;
+        if (!media.paused) return;
         void Promise.resolve()
           .then(() => media.play())
           .catch((error: unknown) => {
@@ -237,7 +244,6 @@ const BottomAudioBar = ({
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const downLG = useMediaQuery(theme.breakpoints.down('lg'));
-  const sidebarHidden = useMediaQuery(theme.breakpoints.down('lg'));
   const { currentSermon, setCurrentSermon } = useAudioPlayer();
   const remote = usePlaybackActions();
   const player = usePlayer();
@@ -272,21 +278,20 @@ const BottomAudioBar = ({
       docEl.style.setProperty(ROOT_PLAYER_OFFSET_CSS_VAR, '0px');
     };
 
-    const ro = new ResizeObserver(updateOffset);
-    ro.observe(el);
     updateOffset();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(updateOffset);
+    if (observer) observer.observe(el);
+    else window.addEventListener('resize', updateOffset);
 
     return () => {
-      ro.disconnect();
+      observer?.disconnect();
+      if (!observer) window.removeEventListener('resize', updateOffset);
       clearOffset();
     };
   }, []);
 
   // Get the sermon image
   const sermonImage = currentSermon?.images?.find((image) => image.type === 'square');
-
-  // Sidebar width for desktop positioning (260px sidebar + some margin)
-  const sidebarOffset = sidebarHidden ? 0 : 130; // Half of 260px to offset center
 
   return (
     <Box
@@ -330,19 +335,26 @@ const BottomAudioBar = ({
       sx={{
         '&:focus-visible': { outline: '2px solid', outlineColor: 'primary.main', outlineOffset: 3 },
         position: 'fixed',
-        bottom: `${PLAYER_BOTTOM_GAP_PX}px`,
-        // Center in the main content area (account for sidebar on desktop)
-        left: { xs: '50%', md: `calc(50% + ${sidebarOffset}px)` },
+        bottom: `calc(${PLAYER_BOTTOM_GAP_PX}px + env(safe-area-inset-bottom, 0px))`,
+        // The 260px desktop sidebar only occupies space from the lg breakpoint.
+        left: { xs: '50%', lg: 'calc(50% + 130px)' },
         transform: 'translateX(-50%)',
-        width: { xs: 'calc(100% - 16px)', sm: 'calc(100% - 32px)', md: 'calc(100% - 300px)' },
+        '--player-side-inset': 'max(env(safe-area-inset-left, 0px), env(safe-area-inset-right, 0px))',
+        width: {
+          xs: 'calc(100% - 16px - 2 * var(--player-side-inset))',
+          sm: 'calc(100% - 32px - 2 * var(--player-side-inset))',
+          lg: 'calc(100% - 300px)',
+        },
         maxWidth: 1200,
         zIndex: 1200, // Below navbar (typically 1300) but above content
         borderRadius: downLG ? 3 : 100, // Slightly rounded when compact/multiline, pill shape when single-line
         overflow: 'hidden',
         // Glassmorphism effect
-        background: alpha(theme.palette.background.paper, 0.1),
-        backdropFilter: 'blur(50px) saturate(180%)',
-        WebkitBackdropFilter: 'blur(28px) saturate(180%)',
+        backgroundColor: alpha(theme.palette.background.paper, 0.94),
+        border: '1px solid',
+        borderColor: 'divider',
+        backdropFilter: 'blur(20px) saturate(140%)',
+        WebkitBackdropFilter: 'blur(20px) saturate(140%)',
         boxShadow: `0 8px 32px ${alpha(theme.palette.common.black, 0.2)}, 
                     0 0 40px ${alpha(theme.palette.primary.main, 0.1)}`,
         '&::before': {
@@ -361,7 +373,7 @@ const BottomAudioBar = ({
       }}
     >
       {error && (
-        <Box sx={{ px: 2, pt: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
+        <Box sx={{ px: 2, pt: 1, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 0.5 }}>
           <Typography role="status" aria-live="polite" sx={{ fontSize: '0.8rem' }}>
             {error}
           </Typography>
@@ -592,7 +604,7 @@ const BottomAudioBar = ({
               }}
             >
               {!isMobile && <Seek seconds={-10} tooltipPlacement="top" />}
-              <Play tooltipPlacement="top" />
+              <Play tooltipPlacement="top" hasSource={Boolean(source)} />
               {!isMobile && <Seek seconds={10} tooltipPlacement="top" />}
             </Box>
 
@@ -648,6 +660,8 @@ const BottomAudioBar = ({
               aria-label="Close audio player"
               size="small"
               sx={{
+                minWidth: { xs: 44, lg: 32 },
+                minHeight: { xs: 44, lg: 32 },
                 color: theme.palette.mode === 'dark' ? alpha(theme.palette.common.white, 0.7) : theme.palette.grey[600],
                 '&:hover': {
                   color: theme.palette.mode === 'dark' ? theme.palette.common.white : theme.palette.grey[900],
@@ -699,6 +713,7 @@ const BottomAudioBar = ({
               <Box
                 sx={{
                   flex: 1,
+                  minWidth: 0,
                   '& .MuiSlider-rail': {
                     position: 'absolute',
                     top: '50%',

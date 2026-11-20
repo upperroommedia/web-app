@@ -1932,10 +1932,16 @@ function buildMediaByteCanaryArgs(
   cookieArgs: string[] = [],
   browserPoToken?: string
 ): string[] {
+  // The bounded authenticated check uses -x. YouTube can return playable
+  // combined streams even when it supplies no audio-only formats.
+  const selector =
+    mode === 'cookie_provider' && !process.env.YTDLP_DIRECT_AUDIO_SELECTOR?.trim()
+      ? `${getPreferredDirectAudioFormatSelector()}/b[acodec!=none]`
+      : getPreferredDirectAudioFormatSelector();
   const args = [
     '--ignore-config',
     '-f',
-    getPreferredDirectAudioFormatSelector(),
+    selector,
     '--no-playlist',
     '--download-sections',
     '*0:00-0:03',

@@ -172,7 +172,7 @@ cp "$ROOT_DIR/ops/process-audio-hetzner/Caddyfile" "$WORK_DIR/Caddyfile"
 cp "$ROOT_DIR/ops/process-audio-hetzner/README.md" "$WORK_DIR/README.md"
 cp "$MEDIA_RUNTIME_VERSION_FILE" "$WORK_DIR/media-runtime-versions.env"
 
-"$ROOT_DIR/scripts/prepare-process-audio-hetzner-context.sh" "$WORK_DIR/context"
+"$ROOT_DIR/scripts/prepare-process-audio-hetzner-context.sh" "$WORK_DIR/context" "$RELEASE_SHA"
 
 CANDIDATE_CONTEXT_SHA="$(python3 - "$WORK_DIR/context" "$MEDIA_RUNTIME_VERSION_FILE" <<'PY'
 import hashlib

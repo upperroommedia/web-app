@@ -83,6 +83,7 @@ mark {
 
 /* Transition for theme changes */
 html {
+  scroll-padding-bottom: calc(var(--floating-player-offset, 0px) + env(safe-area-inset-bottom, 0px));
   transition: background-color 0.2s ease-in-out, color 0.2s ease-in-out;
 }
 

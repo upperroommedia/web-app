@@ -585,6 +585,8 @@ Required GitHub secrets:
 - `HETZNER_PROCESS_AUDIO_SSH_TARGET`
 - `HETZNER_PROCESS_AUDIO_SSH_PRIVATE_KEY`
 
+The staging and production workflows verify the host’s Ed25519 fingerprint against [the reviewed pin](ssh-host-ed25519.sha256) before connecting. On a planned host-key rotation, verify the replacement fingerprint from the host console or another trusted channel, then update the pin through review before retrying deployment.
+
 Required deployment-canary variables (pass them to the deployment workflow step; deploy runs and finalizes the canaries transactionally):
 
 - `PROCESS_AUDIO_HETZNER_PUBLIC_SMOKE_YOUTUBE_URL`

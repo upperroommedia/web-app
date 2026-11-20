@@ -32,6 +32,31 @@ test.describe('Player clear on upload / edit routes', () => {
     await expect(page.getByTestId('floating-audio-bar')).toHaveCount(0);
   });
 
+  test('iPhone Safari fits the upload form and navigation at 320 pixels', async ({
+    authenticatedMedia: { page },
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== 'iphone-safari', 'Run with the iPhone Safari project');
+    await page.setViewportSize({ width: 320, height: 568 });
+
+    const title = page.getByRole('textbox', { name: 'Title', exact: true });
+    await expect(title).toBeVisible();
+    expect((await title.boundingBox())?.width).toBeGreaterThanOrEqual(270);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
+
+    await page.getByRole('button', { name: /choose date/i }).click();
+    await expect(page.getByRole('dialog')).toBeVisible();
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+
+    const menu = page.getByRole('button', { name: 'open drawer' });
+    expect((await menu.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+    await menu.click();
+    const drawer = page.getByRole('dialog', { name: 'Main navigation' });
+    await expect(drawer.getByRole('link', { name: 'Upload Sermon' })).toHaveAttribute('aria-current', 'page');
+    await drawer.getByRole('link', { name: 'Sermons', exact: true }).click();
+    await expect(drawer).toBeHidden();
+    await expect(page.getByRole('heading', { name: 'Sermons', exact: true })).toBeVisible();
+  });
+
   playingTest(
     'navigating to upload clears player when a sermon was playing',
     async ({ authenticatedMedia: { page, data: seededSermon } }) => {

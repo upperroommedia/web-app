@@ -1069,17 +1069,17 @@ const Uploader = (props: UploaderProps) => {
       <FormControl
         sx={{
           display: 'grid',
-          gridTemplateColumns: { xs: 'auto', md: '4fr 1fr' },
-          maxWidth: '80%',
-          gap: '1ch 100px',
-          margin: 'auto',
-          alignItems: 'center',
-          justifyContent: 'center',
+          gridTemplateColumns: { xs: 'minmax(0, 1fr)', md: 'minmax(0, 4fr) minmax(200px, 1fr)' },
+          width: '100%',
+          maxWidth: 1080,
+          gap: { xs: 2, md: '12px 32px' },
+          mx: 'auto',
+          alignItems: 'start',
         }}
       >
-        <h1 style={{ justifySelf: 'center', gridColumn: '1/-1' }}>
+        <Typography component="h1" variant="h4" sx={{ gridColumn: '1/-1', mb: 1 }}>
           {props.existingSermon ? 'Edit Sermon' : 'Uploader'}
-        </h1>
+        </Typography>
         {(catalogErrors.subtitles || catalogErrors.latest) && (
           <Alert
             severity="warning"
@@ -1302,7 +1302,7 @@ const Uploader = (props: UploaderProps) => {
             </div>
           )}
         </Box>
-        <Box sx={{ margin: 'auto' }} width={1} maxWidth={300} minWidth={200}>
+        <Box sx={{ mx: 'auto', minWidth: 0, width: '100%', maxWidth: 300 }}>
           <ImageViewer
             images={sermon.images}
             speaker={sermon.speakers[0]}
@@ -1508,7 +1508,7 @@ const Uploader = (props: UploaderProps) => {
                 >
                   {getErrorMessage(formErrors.durationSeconds)}
                 </Typography>
-                <Box display="flex" gap={2}>
+                <Box display="flex" justifyContent="center" flexWrap="wrap" gap={{ xs: 1, sm: 2 }}>
                   <Box
                     component="fieldset"
                     disabled={catalogBlocksNewAdmission(

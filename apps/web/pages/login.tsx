@@ -20,12 +20,14 @@ export default function LoginPage() {
 
       <Box
         sx={{
-          minHeight: '100vh',
+          flex: 1,
+          pt: 'max(16px, env(safe-area-inset-top, 0px))',
+          pb: 'max(16px, env(safe-area-inset-bottom, 0px))',
           display: 'flex',
           justifyContent: 'center',
           alignItems: 'center',
           bgcolor: 'background.default',
-          p: 2,
+          px: 2,
         }}
       >
         <Paper

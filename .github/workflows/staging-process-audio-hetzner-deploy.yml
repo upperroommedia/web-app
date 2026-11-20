@@ -24,6 +24,7 @@ on:
       - '.npmrc'
       - 'ops/process-audio-hetzner/**'
       - 'scripts/deploy-process-audio-hetzner.sh'
+      - 'scripts/pin-hetzner-ssh-host.sh'
       - 'scripts/setup-process-audio-hetzner-desktop-bridge.sh'
       - 'scripts/prepare-process-audio-hetzner-context.sh'
       - 'scripts/verify-hetzner-ytdlp-smoke.sh'
@@ -95,11 +96,9 @@ jobs:
           SSH_KEY: ${{ secrets.HETZNER_PROCESS_AUDIO_SSH_PRIVATE_KEY }}
         run: |
           set -euo pipefail
-          install -d -m 700 ~/.ssh
+          bash scripts/pin-hetzner-ssh-host.sh "${SSH_TARGET##*@}"
           printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
-          host_part="${SSH_TARGET##*@}"
-          ssh-keyscan -H "$host_part" >> ~/.ssh/known_hosts
 
       - name: Deploy staging Hetzner worker
         env:

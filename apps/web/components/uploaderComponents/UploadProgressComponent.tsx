@@ -172,27 +172,38 @@ export default function UploadProgressComponent({
           WebkitBackdropFilter: 'blur(12px)',
           cursor: canDismiss ? 'pointer' : 'default',
         },
-        '& .MuiDialog-paper': {
+        '& .MuiDialog-paper.MuiDialog-paperScrollPaper': {
+          '--status-margin': { xs: '12px', sm: '24px' },
+          '--status-top': 'max(var(--status-margin), env(safe-area-inset-top, 0px))',
+          '--status-bottom': 'max(var(--status-margin), env(safe-area-inset-bottom, 0px))',
+          '--status-left': 'max(var(--status-margin), env(safe-area-inset-left, 0px))',
+          '--status-right': 'max(var(--status-margin), env(safe-area-inset-right, 0px))',
           width: 420,
-          maxWidth: 'calc(100vw - 48px)',
-          minHeight: 320,
+          maxWidth: 'calc(100% - var(--status-left) - var(--status-right))',
+          maxHeight: 'calc(100% - var(--status-top) - var(--status-bottom))',
+          minHeight: { xs: 0, sm: 320 },
+          '@media (max-height: 420px)': { minHeight: 0 },
+          '@supports (height: 100dvh)': {
+            maxHeight: 'calc(100dvh - var(--status-top) - var(--status-bottom))',
+          },
           bgcolor: 'background.paper',
           borderRadius: 4,
           boxShadow: `0 24px 80px ${alpha(theme.palette.common.black, 0.25)}, 0 0 1px ${alpha(
             theme.palette.common.black,
             0.1
           )}`,
-          p: 4,
+          p: { xs: 2, sm: 4 },
           outline: 'none',
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
-          justifyContent: 'center',
-          overflow: 'hidden',
+          overflowX: 'hidden',
+          overflowY: 'auto',
+          overscrollBehaviorY: 'contain',
           position: 'relative',
           cursor: 'default',
           backgroundImage: 'none',
-          m: 3,
+          m: 'var(--status-top) var(--status-right) var(--status-bottom) var(--status-left)',
         },
       }}
     >
@@ -200,10 +211,11 @@ export default function UploadProgressComponent({
         sx={{
           position: 'relative',
           width: '100%',
+          flexShrink: 0,
+          my: 'auto',
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
-          justifyContent: 'center',
         }}
       >
         {/* Close button - only show when dismissable */}
@@ -214,6 +226,9 @@ export default function UploadProgressComponent({
               position: 'absolute',
               top: -12,
               right: -12,
+              minWidth: { xs: 44, sm: 32 },
+              minHeight: { xs: 44, sm: 32 },
+              zIndex: 2,
               color: 'text.secondary',
               '&:hover': {
                 color: 'text.primary',

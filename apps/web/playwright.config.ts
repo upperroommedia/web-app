@@ -23,5 +23,8 @@ export default defineConfig({
       name: 'mobile-chrome',
       use: { ...devices['Pixel 5'] },
     },
+    ...(process.env.PLAYWRIGHT_IPHONE_SAFARI === '1'
+      ? [{ name: 'iphone-safari', use: { ...devices['iPhone 13'] } }]
+      : []),
   ],
 });

@@ -40,7 +40,23 @@ test('actual Hetzner context includes Docker dependency manifests, source, and w
       mkdirSync(join(repo, file, '..'), { recursive: true });
       writeFileSync(join(repo, file), file);
     }
-    execFileSync('bash', [join(repo, 'scripts/prepare-process-audio-hetzner-context.sh'), output], { stdio: 'pipe' });
+    const git = (...args) => execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8' }).trim();
+    git('init', '-q');
+    writeFileSync(join(repo, '.gitignore'), 'dist/\nnode_modules/\n.env\n');
+    git('add', '.');
+    git('-c', 'user.name=Test', '-c', 'user.email=test@example.com', '-c', 'commit.gpgsign=false', 'commit', '-qm', 'candidate');
+    const candidate = git('rev-parse', 'HEAD');
+    writeFileSync(join(repo, 'packages/shared/src/entry.ts'), 'new HEAD');
+    git('add', 'packages/shared/src/entry.ts');
+    git('-c', 'user.name=Test', '-c', 'user.email=test@example.com', '-c', 'commit.gpgsign=false', 'commit', '-qm', 'later');
+    writeFileSync(join(repo, 'apps/process-audio/.env'), 'fixture only');
+    writeFileSync(join(repo, 'apps/process-audio/src/untracked.ts'), 'untracked');
+    writeFileSync(join(repo, 'apps/process-audio/src/entry.ts'), 'modified');
+    execFileSync('bash', [join(repo, 'scripts/prepare-process-audio-hetzner-context.sh'), output, candidate], {
+      stdio: 'pipe',
+    });
+    assert.equal(existsSync(join(output, 'apps/process-audio/.env')), false);
+    assert.equal(existsSync(join(output, 'apps/process-audio/src/untracked.ts')), false);
     for (const dir of ['apps/process-audio', 'packages/contracts', 'packages/shared', 'packages/orchestration']) {
       assert.equal(readFileSync(join(output, dir, 'src/entry.ts'), 'utf8'), `${dir}/src/entry.ts`);
       assert.ok(existsSync(join(output, dir, 'package.json')));
@@ -49,6 +65,51 @@ test('actual Hetzner context includes Docker dependency manifests, source, and w
     }
     assert.equal(readFileSync(join(output, 'patches/dependency.patch'), 'utf8'), 'patches/dependency.patch');
     assert.match(readFileSync(join(output, '.dockerignore'), 'utf8'), /^\/gha-creds-\*\.json$/m);
+  } finally {
+    rmSync(fixture, { recursive: true, force: true });
+  }
+});
+
+test('Hetzner SSH trusts only the independently pinned Ed25519 host key', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'urm-ssh-pin-test-'));
+  try {
+    for (const dir of ['scripts', 'ops/process-audio-hetzner', 'bin', 'home']) {
+      mkdirSync(join(fixture, dir), { recursive: true });
+    }
+    const helper = join(fixture, 'scripts/pin-hetzner-ssh-host.sh');
+    cpSync(join(root, 'scripts/pin-hetzner-ssh-host.sh'), helper);
+    const key = join(fixture, 'host');
+    execFileSync('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-f', key]);
+    const [type, encoded] = readFileSync(key + '.pub', 'utf8').split(' ');
+    writeFileSync(join(fixture, 'bin/ssh-keyscan'), `#!/bin/sh\nprintf '%s\\n' 'fixture.invalid ${type} ${encoded}'\n`, {
+      mode: 0o700,
+    });
+    const pin = join(fixture, 'ops/process-audio-hetzner/ssh-host-ed25519.sha256');
+    const homeDir = join(fixture, 'home');
+    const env = { ...process.env, HOME: homeDir, PATH: join(fixture, 'bin') + ':' + process.env.PATH };
+    const check = () => spawnSync('bash', [helper, 'fixture.invalid'], { env, encoding: 'utf8' });
+    writeFileSync(pin, 'SHA256:' + 'A'.repeat(43));
+    assert.notEqual(check().status, 0);
+    assert.equal(existsSync(join(homeDir, '.ssh/config')), false);
+    assert.equal(existsSync(join(homeDir, '.ssh/hetzner_known_hosts')), false);
+    const fingerprint = execFileSync('ssh-keygen', ['-E', 'sha256', '-lf', key + '.pub'], { encoding: 'utf8' }).split(/\s+/)[1];
+    writeFileSync(pin, fingerprint + '\n');
+    const success = check();
+    assert.equal(success.status, 0, success.stderr);
+    assert.equal(readFileSync(join(homeDir, '.ssh/hetzner_known_hosts'), 'utf8'), `fixture.invalid ${type} ${encoded}\n`);
+    const config = execFileSync('ssh', ['-G', '-F', join(homeDir, '.ssh/config'), 'fixture.invalid'], {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    assert.match(config, /^stricthostkeychecking (yes|true)$/m);
+    assert.match(config, /^batchmode yes$/m);
+    assert.match(config, /^hostkeyalgorithms ssh-ed25519$/m);
+    assert.match(config, /^globalknownhostsfile \/dev\/null$/m);
+    assert.match(config, /^userknownhostsfile .*hetzner_known_hosts$/m);
+    for (const branch of ['main', 'staging']) {
+      const workflow = readFileSync(join(root, `.github/workflows/${branch}-process-audio-hetzner-deploy.yml`), 'utf8');
+      assert.ok(workflow.includes('bash scripts/pin-hetzner-ssh-host.sh "${SSH_TARGET##*@}"'));
+      assert.equal(workflow.includes('ssh-keyscan'), false);
+    }
   } finally {
     rmSync(fixture, { recursive: true, force: true });
   }

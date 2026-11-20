@@ -34,7 +34,7 @@ const AppLayout = ({ children }: { children: React.ReactNode }) => {
         sx={{
           justifyContent: 'center',
           alignItems: 'center',
-          minHeight: '100vh',
+          flex: 1,
           bgcolor: 'background.default',
         }}
       >
@@ -47,10 +47,11 @@ const AppLayout = ({ children }: { children: React.ReactNode }) => {
         sx={{
           justifyContent: 'flex-start',
           alignItems: 'stretch',
-          minHeight: '100vh',
+          flex: 1,
           bgcolor: 'background.default',
           px: { xs: 2, sm: 3, md: 4 },
-          py: { xs: 3, sm: 4, md: 6 },
+          pt: { xs: 'max(24px, env(safe-area-inset-top, 0px))', sm: 4, md: 6 },
+          pb: { xs: 'max(24px, env(safe-area-inset-bottom, 0px))', sm: 4, md: 6 },
         }}
       >
         <Stack
@@ -147,7 +148,7 @@ const AppLayout = ({ children }: { children: React.ReactNode }) => {
             flex: 1,
             maxWidth: '100%',
             overflow: 'auto',
-            scrollbarGutter: 'stable',
+            scrollbarGutter: { lg: 'stable' },
             minHeight: 0,
             // The visible controls occupy space even while paused or waiting for their source.
             pb: MAIN_SCROLL_BOTTOM_INSET,

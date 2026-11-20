@@ -147,13 +147,13 @@ export class OutboxDispatcher {
     );
     if (this.stopped || signal?.aborted || this.now() >= lease.expiresAt) throw new Error('DISPATCH_INTERRUPTED');
   }
-  private async settle(lease: Lease, error?: unknown): Promise<boolean> {
+  private async settle(lease: Lease, outcome: 'acknowledged' | 'retry'): Promise<boolean> {
     return this.options.db.runTransaction(async (tx) => {
       const current = (await tx.get(lease.ref)).data() as OutboxRecord | undefined;
       if (!current || !this.ownsLease(lease, current)) return false;
       tx.update(
         lease.ref,
-        error
+        outcome === 'retry'
           ? {
               state: 'pending',
               leaseExpiresAt: 0,
@@ -349,10 +349,10 @@ export class OutboxDispatcher {
         try {
           await this.send(lease, signal);
           if (this.stopped || signal?.aborted) return;
-          if (!(await this.settle(lease))) successful = false;
-        } catch (error) {
+          if (!(await this.settle(lease, 'acknowledged'))) successful = false;
+        } catch {
           if (this.stopped || signal?.aborted) return;
-          await this.settle(lease, error);
+          await this.settle(lease, 'retry');
           successful = false;
         }
       }

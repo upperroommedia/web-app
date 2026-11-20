@@ -143,6 +143,7 @@ test('an owned extractor snapshot is private, uses one exact database and surviv
 
 test.each([
   'cookie provider',
+  'muxed-only input',
   'local browser fallback',
   'public-only fallback',
   'sealed Chrome token',
@@ -152,6 +153,7 @@ test.each([
     '../../../process-audio/src/processYouTubeUrl'
   );
   const root = await realpath(await mkdtemp(join(tmpdir(), 'render-profile-canary-')));
+  const muxedOnly = route === 'muxed-only input';
   const tokenRoute = route === 'sealed Chrome token' || route === 'foreign token';
   const { CancelToken } = await import('../../../process-audio/src/CancelToken');
   const { createContext } = await import('../../../process-audio/src/context');
@@ -162,6 +164,7 @@ test.each([
     PROCESS_AUDIO_RENDER_BROWSER_POT_CONTROL_DIR: root,
     PROCESS_AUDIO_YOUTUBE_AUTH_CANARY_URL: 'https://www.youtube.com/watch?v=abcdefghijk',
     YTDLP_POT_PROVIDER_BASE_URL: 'http://127.0.0.1:9',
+    YTDLP_DIRECT_AUDIO_SELECTOR: '',
     YOUTUBE_BROWSER_FALLBACK_ENABLED: 'true',
     PROCESS_AUDIO_IN_PROCESS_BROWSER_FALLBACK_ENABLED: tokenRoute ? 'false' : 'true',
     PROCESS_AUDIO_BROWSER_FALLBACK_STRATEGY: route === 'public-only fallback' ? 'public_only' : 'session_backed',
@@ -208,9 +211,16 @@ if (${tokenRoute} && !withToken) {
   console.error('HTTP Error 403: unable to download video data');
   process.exit(7);
 }
+if (${muxedOnly}) {
+  const selector = args[args.indexOf('-f') + 1];
+  if (selector !== 'ba[ext=m4a]/ba[ext=webm]/ba/b[acodec!=none]' || !args.includes('-x')) {
+    console.error('Requested format is not available');
+    process.exit(8);
+  }
+}
 if ((${JSON.stringify(
         route
-      )} !== 'cookie provider' && !withToken) || !args.includes('--download-sections')) process.exit(7);
+      )} !== 'cookie provider' && !${muxedOnly} && !withToken) || !args.includes('--download-sections')) process.exit(7);
 const output = args[args.indexOf('-o') + 1];
 const outputName = withToken ? 'cookie-provider-browser-token' : 'cookie-provider';
 if (args.indexOf('-o') < 0 || basename(output) !== outputName + '.%(ext)s'
@@ -262,7 +272,7 @@ writeFileSync(file, Buffer.alloc(256), { flag: 'wx' });
     }
     const report = await waiting;
     const bytes =
-      route === 'cookie provider' || route === 'sealed Chrome token'
+      route === 'cookie provider' || muxedOnly || route === 'sealed Chrome token'
         ? 128
         : route === 'local browser fallback'
         ? 256

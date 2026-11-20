@@ -121,22 +121,49 @@ test.describe('Audio player (floating bar)', () => {
   });
 
   mobileTest(
-    'player visible and bottom spacing on mobile viewport',
+    'mobile playback can start before the audio is ready and leaves room below the content',
     async ({ authenticatedMedia: { page, data: seededSermon } }) => {
       await expect(page.getByRole('heading', { name: 'Sermons' })).toBeVisible({
         timeout: 15_000,
       });
 
-      await playSermonFromSearch(page, seededSermon.title);
+      const port = process.env.NEXT_PUBLIC_FIREBASE_STORAGE_EMULATOR_PORT ?? '9199';
+      const mediaRequest = (url: URL) =>
+        (url.origin === `http://127.0.0.1:${port}` || url.origin === `http://localhost:${port}`) &&
+        decodeURIComponent(url.pathname).endsWith(`/o/intro-outro-sermons/${seededSermon.id}`) &&
+        url.searchParams.get('alt') === 'media';
+      let releaseMedia = () => {};
+      const mediaReleased = new Promise<void>((resolve) => {
+        releaseMedia = () => resolve();
+      });
+      const holdMedia = async (route: Route) => {
+        await mediaReleased;
+        return route.fallback();
+      };
+      await page.route(mediaRequest, holdMedia);
 
-      await expect(page.getByTestId('floating-audio-bar')).toBeVisible({ timeout: 10_000 });
+      const bar = page.getByTestId('floating-audio-bar');
+      const audio = bar.locator('audio');
+      try {
+        await playSermonFromSearch(page, seededSermon.title);
+        await expect(bar).toBeVisible();
+        const play = bar.getByRole('button', { name: 'Play', exact: true });
+        await expect(play).toBeEnabled();
+        expect(await audio.evaluate((node: HTMLAudioElement) => node.readyState)).toBeLessThan(3);
+        await play.click();
+      } finally {
+        releaseMedia();
+        await page.unroute(mediaRequest, holdMedia);
+      }
 
-      const mainScroll = page.getByTestId('main-content-scroll');
-      const paddingBottom = await mainScroll.evaluate((el) => {
-        const v = getComputedStyle(el).paddingBottom;
-        return parseFloat(v) || 0;
+      await expect.poll(() => audio.evaluate((node: HTMLAudioElement) => node.currentTime)).toBeGreaterThan(0);
+      const paddingBottom = await page.getByTestId('main-content-scroll').evaluate((el) => {
+        return parseFloat(getComputedStyle(el).paddingBottom) || 0;
       });
       expect(paddingBottom).toBeGreaterThan(0);
+      const closeSize = await bar.getByRole('button', { name: 'Close audio player' }).boundingBox();
+      expect(closeSize?.width).toBeGreaterThanOrEqual(44);
+      expect(closeSize?.height).toBeGreaterThanOrEqual(44);
     }
   );
 });

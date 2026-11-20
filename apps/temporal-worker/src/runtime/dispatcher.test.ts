@@ -175,6 +175,20 @@ test('lost acknowledgements remain pending with bounded backoff and readiness fa
   expect(records['durableJobOutbox/a'].nextAttemptAt).toBeGreaterThan(1000);
   expect(dispatcher.healthy).toBe(false);
 });
+test('a signal RPC rejected without a reason stays pending until acknowledged on retry', async () => {
+  let clock = 1000;
+  const row = pending({ dispatch: { ...dispatch, signal: { name: 'request', args: ref } } });
+  const { dispatcher, workflowService } = harness({ 'durableJobOutbox/a': row }, () => clock);
+  workflowService.signalWithStartWorkflowExecution.mockRejectedValueOnce(undefined);
+  await dispatcher.tick();
+  expect(row.state).toBe('pending');
+  expect(row.nextAttemptAt).toBeGreaterThan(clock);
+  expect(dispatcher.healthy).toBe(false);
+  clock = row.nextAttemptAt;
+  await dispatcher.tick();
+  expect(workflowService.signalWithStartWorkflowExecution).toHaveBeenCalledTimes(2);
+  expect(row.state).toBe('dispatched');
+});
 test('rejects namespace/project mismatch and missing production TLS before startup', () => {
   const env = { FIREBASE_PROJECT_ID: 'test', TEMPORAL_NAMESPACE: 'other' };
   expect(() => loadRuntimeConfig(env)).toThrow('namespace');
