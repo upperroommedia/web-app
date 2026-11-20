@@ -88,6 +88,7 @@ function buildAudioJsonWithUrl(url) {
   return {
     duration: 20,
     formats: [
+      { format_id: 'sb0', vcodec: 'none', acodec: 'none', protocol: 'mhtml', format_note: 'original', url: 'https://example.invalid/storyboard.webp' },
       {
         format_id: '140',
         ext: 'm4a',

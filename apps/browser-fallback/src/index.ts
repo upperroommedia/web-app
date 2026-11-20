@@ -274,11 +274,11 @@ async function exportCookiesFile(context: BrowserContext): Promise<{ cookiesFile
   return { cookiesFilePath, sessionState: 'authenticated' };
 }
 
-type AudioFormat = { url?: string; format_id?: string; ext?: string; vcodec?: string; abr?: number; duration?: number };
+type AudioFormat = { acodec?: string; protocol?: string; url?: string; format_id?: string; ext?: string; vcodec?: string; abr?: number; duration?: number };
 type YtDlpJson = { duration?: number; formats?: AudioFormat[] };
 
 function selectPreferredAudioFormat(formats: AudioFormat[]): AudioFormat | undefined {
-  const candidates = formats.filter((format) => format.vcodec === 'none' && format.url);
+  const candidates = formats.filter((format) => format.vcodec === 'none' && format.acodec !== 'none' && format.protocol !== 'mhtml' && format.url);
   return candidates.sort((left, right) => (right.abr || 0) - (left.abr || 0))[0];
 }
 

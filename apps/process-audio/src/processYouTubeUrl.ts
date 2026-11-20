@@ -75,6 +75,7 @@ export interface YouTubeAudioUrlResult {
 }
 
 interface YouTubeFragmentFormat {
+  acodec?: string;
   format_id?: string;
   url?: string;
   ext?: string;
@@ -2294,9 +2295,10 @@ function selectPreferredAudioFormat(
 ): YouTubeFragmentFormat | undefined {
   const completedLivestream = isCompletedYouTubeLivestream(info);
   const postLiveArchive = info?.live_status === 'post_live';
-  const audioOnlyCandidates = formats.filter((f) => f && f.vcodec === 'none');
+  const audioFormats = formats.filter((f) => f && f.acodec !== 'none' && f.protocol !== 'mhtml');
+  const audioOnlyCandidates = audioFormats.filter((f) => f.vcodec === 'none');
   const livestreamMuxedCandidates = completedLivestream
-    ? formats.filter((f) => f && f.vcodec !== 'none' && (f.protocol || '').toLowerCase().includes('m3u8'))
+    ? audioFormats.filter((f) => f.vcodec !== 'none' && (f.protocol || '').toLowerCase().includes('m3u8'))
     : [];
   const candidates = completedLivestream
     ? postLiveArchive
