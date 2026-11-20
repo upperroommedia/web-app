@@ -504,6 +504,119 @@ describe('speaker CRUD callables', () => {
     });
   });
 
+  it('recreates and persists a Subsplash speaker tag deleted outside the app', async () => {
+    const staleTagId = 'speaker-tag-stale';
+    const replacementTagId = 'speaker-tag-replacement';
+    const squareImage = createSquareImage('replacement-square');
+    await speakersCollection.doc('speaker-remote-drift').set({
+      id: 'speaker-remote-drift',
+      name: 'Speaker Remote Drift',
+      images: [createSquareImage('original-square')],
+      sermonCount: 3,
+      tagId: staleTagId,
+    });
+
+    mockAxios
+      .mockRejectedValueOnce({
+        isAxiosError: true,
+        response: { status: 404 },
+      })
+      .mockResolvedValueOnce({
+        data: { id: replacementTagId },
+        status: 201,
+      });
+
+    const result = await updateSpeakerHandler({
+      auth: defaultAuth,
+      data: {
+        speakerId: 'speaker-remote-drift',
+        patch: {
+          images: [squareImage],
+        },
+      },
+    });
+
+    expect(result.status).toBe('success');
+    expect(result.speaker.tagId).toBe(replacementTagId);
+    expect(mockAxios).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        method: 'PATCH',
+        url: `https://core.subsplash.com/tags/v1/tags/${staleTagId}`,
+      })
+    );
+    expect(mockAxios).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        method: 'POST',
+        url: 'https://core.subsplash.com/tags/v1/tags',
+        data: expect.objectContaining({
+          title: 'Speaker Remote Drift',
+          _embedded: {
+            'square-image': {
+              id: squareImage.id,
+              type: 'square',
+            },
+          },
+        }),
+      })
+    );
+    expect((await speakersCollection.doc('speaker-remote-drift').get()).data()).toMatchObject({
+      tagId: replacementTagId,
+      images: [squareImage],
+    });
+  });
+
+  it('leaves the stored speaker unchanged when replacement tag creation fails', async () => {
+    const staleTagId = 'speaker-tag-stale-failed-recovery';
+    const originalImage = createSquareImage('unchanged-square');
+    await speakersCollection.doc('speaker-failed-recovery').set({
+      id: 'speaker-failed-recovery',
+      name: 'Speaker Failed Recovery',
+      images: [originalImage],
+      sermonCount: 2,
+      tagId: staleTagId,
+    });
+
+    mockAxios
+      .mockRejectedValueOnce({
+        isAxiosError: true,
+        response: { status: 404 },
+      })
+      .mockRejectedValueOnce({
+        isAxiosError: true,
+        toJSON: () => ({}),
+        response: { status: 400 },
+      })
+      .mockResolvedValueOnce({
+        data: {
+          count: 0,
+          total: 0,
+          _embedded: { tags: [] },
+        },
+      });
+
+    await expect(
+      updateSpeakerHandler({
+        auth: defaultAuth,
+        data: {
+          speakerId: 'speaker-failed-recovery',
+          patch: {
+            name: 'Speaker Still Unchanged',
+          },
+        },
+      })
+    ).rejects.toMatchObject({
+      code: 'internal',
+    });
+
+    expect((await speakersCollection.doc('speaker-failed-recovery').get()).data()).toMatchObject({
+      name: 'Speaker Failed Recovery',
+      tagId: staleTagId,
+      images: [originalImage],
+    });
+  });
+
   it('updates and deletes speaker state through separate callables', async () => {
     await speakersCollection.doc('speaker-crud-1').set({
       id: 'speaker-crud-1',
