@@ -9,7 +9,7 @@ import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import { Dispatch, FunctionComponent, memo, SetStateAction, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import styles from '../styles/AudioTrimmer.module.css';
 import YouTubeTrimmerControls from './YouTubeTrimmerControls';
-import { AudioSource } from '../pages/api/uploadFile';
+import { AudioSource } from '../utils/uploadFile';
 import { UploaderFieldError } from '../context/types';
 import { getErrorMessage, showError } from './uploaderComponents/utils';
 import useDebounce from '@/hooks/useDebounce';
