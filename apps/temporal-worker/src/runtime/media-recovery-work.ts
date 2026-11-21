@@ -13,6 +13,7 @@ import { computeProcessAudioRequestVersion } from '../../../../packages/contract
 import { createActorAuthorization } from './authorization';
 import { workerReadinessDigest as hash } from './readiness-probe';
 import type { WorkerWitness } from './worker-witness';
+import { recheckMediaRecoveryTaskAttestation } from './media-recovery-task-attestation-reader';
 import { matchMediaRecoveryJobRun } from './media-recovery-job-witness';
 const projectId = 'urm-app-staging';
 export const MEDIA_RECOVERY_QUEUE = 'urm-media-kernel-recovery';
@@ -200,6 +201,7 @@ export function createMediaRecoveryWorkActivities(o: {
           const start = parent.get('mediaRecoveryWorkflowStart');
           const job = witness.cloudRunJob;
           const provider = parent.get('mediaRecoveryJobProvider');
+          if (job) await recheckMediaRecoveryTaskAttestation(db, tx, operationId, job, p, parent.get('mediaRecoveryTaskAttestation'));
           const ownedCompute = job
             ? !cloud &&
               !cycle?.start &&

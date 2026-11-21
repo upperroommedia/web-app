@@ -89,26 +89,32 @@ export async function observeMediaRecoveryProtection(o) {
     }
   };
   const rpc = (fn) => read(() => client.connection.withDeadline(at + 5000, fn));
+  const deferredPool=o.observeNormalPool;
+  let pendingPool,pendingCompute;
+  const requirePhasePool=phasePool=>{
+    if(phasePool?.kind!=='private-media-phase-pool-v1'||phasePool.operationId!==o.operationId||
+       phasePool.phase!==phase||phasePool.planSHA256!==hash(plan))fail();
+    phaseFresh(phasePool);
+    return phasePool;
+  };
   try {
-    if (
-      db.projectId !== 'urm-app-staging' ||
-      db.databaseId !== '(default)' ||
-      client.options.namespace !== namespace ||
-      plan.operationId !== o.operationId ||
-      o.phasePool?.kind !== 'private-media-phase-pool-v1' ||
-      o.phasePool.operationId !== o.operationId ||
-      o.phasePool.phase !== phase ||
-      o.phasePool.planSHA256 !== hash(plan)
-    )
-      fail();
-    phaseFresh(o.phasePool);
+    if(db.projectId!=='urm-app-staging'||db.databaseId!=='(default)'||
+       client.options.namespace!==namespace||plan.operationId!==o.operationId||
+       (deferredPool&&(typeof deferredPool!=='function'||phase!=='diagnostic'||!plan.job||o.phasePool)))fail();
+    // The finite Job leaves the normal pool at zero. Its exact resource
+    // observation can run beside the private namespace and custody scans.
+    pendingPool=deferredPool?Promise.resolve().then(deferredPool).then(
+      value=>({value}),error=>({error}),
+    ):undefined;
+    const fixedPool=pendingPool?undefined:requirePhasePool(o.phasePool);
+    const poolPosition=fixedPool?.position??'before';
     const idle = phase === 'start' ? await read(() => o.readIdle()) : null;
     const authority = () =>
       read(() =>
         db.runTransaction(
           async (tx) => {
             fresh();
-            const [root, c, s, journal, drain, ...facts] = await Promise.all(
+            const [[root,c,s,journal,drain,...facts]]=await Promise.all([Promise.all(
               [
                 o.lockRef,
                 o.controlRef,
@@ -117,7 +123,7 @@ export async function observeMediaRecoveryProtection(o) {
                 db.doc(`_control/temporalMediaRecoveryDrain-${o.operationId}`),
                 ...kinds.map((k) => db.doc(`_control/temporalMediaRecovery${k}-${o.operationId}`)),
               ].map((r) => tx.get(r))
-            );
+            ),o.assertOriginalRecoveryAuthority?.(tx)]);
             assertNativeSnapshot(o.ownedOperation, root);
             assertNativeSnapshot(o.expectedAuthority.control, c);
             assertNativeSnapshot(o.expectedAuthority.state, s);
@@ -156,9 +162,10 @@ export async function observeMediaRecoveryProtection(o) {
             const position = expected.exact
               ? 'exact'
               : expected.stage === 'acknowledged'
-              ? o.phasePool.position
+              ? poolPosition
               : 'before';
-            if (position !== o.phasePool.position || !['before', 'successor', 'exact'].includes(position)) fail();
+            if(position!==poolPosition||!['before','successor','exact'].includes(position)||
+               (pendingPool&&expected.stage!=='before-attempt'))fail();
             let ready, worker;
             const never = phase === 'never-started' || Boolean(cycle.neverStarted);
             if (phase === 'start') {
@@ -249,25 +256,35 @@ export async function observeMediaRecoveryProtection(o) {
           { readOnly: true }
         )
       );
-    const scan = async () => {
-      const auth = await authority();
-      const inventory = await scanPrivateMediaInventory({
-        client,
-        db,
-        plan,
-        operationId: o.operationId,
-        read,
-        rpc,
-        auth,
-        allowAbsent: auth.allowAbsent,
-        allowedPollerIdentity: idle?.allowedPollerIdentity ?? null,
-      });
-      const { ownedPollers, ...protectedInventory } = inventory;
-      return { auth, protectedInventory, ownedPollers };
+    const inventoryFor=auth=>scanPrivateMediaInventory({
+      client,db,plan,operationId:o.operationId,read,rpc,auth,allowAbsent:auth.allowAbsent,
+      allowedPollerIdentity:idle?.allowedPollerIdentity??null,
+    });
+    const scan=async()=>{
+      let auth,inventory;
+      if(pendingPool){
+        // Before Job send no candidate poller or candidate work can be
+        // admitted. That deny-only scan does not depend on custody readback.
+        const reads=await Promise.allSettled([authority(),inventoryFor({allowAbsent:true})]);
+        for(const result of reads)if(result.status==='rejected')throw result.reason;
+        [auth,inventory]=reads.map(result=>result.value);
+        if(auth.allowAbsent!==true||inventory.ownedPollers.length||inventory.jobWork?.candidateRows.length)fail();
+      }else{
+        auth=await authority();
+        inventory=await inventoryFor(auth);
+      }
+      const {ownedPollers,...protectedInventory}=inventory;
+      return {auth,protectedInventory,ownedPollers};
     };
-    const first = await scan(),
-      second = await scan(),
-      compute = await read(() => observeNamespaceComputeIsolation(client, namespace, { deadline: at + 5000 }));
+    pendingCompute=read(()=>observeNamespaceComputeIsolation(client,namespace,{deadline:at+5000})).then(
+      value=>({value}),error=>({error}),
+    );
+    const first=await scan();
+    const results=await Promise.allSettled([scan(),pendingCompute]);
+    for(const result of results)if(result.status==='rejected')throw result.reason;
+    const [second,computed]=results.map(result=>result.value);
+    if(computed.error)throw computed.error;
+    const compute=computed.value;
     const lastIdle = phase === 'start' ? await read(() => o.readIdle()) : null;
     if (idle) monotonicIdle(idle, lastIdle);
     const final = await authority();
@@ -277,7 +294,13 @@ export async function observeMediaRecoveryProtection(o) {
       final.authoritySHA256 !== first.auth.authoritySHA256
     )
       fail();
-    phaseFresh(o.phasePool);
+    if(pendingPool){
+      const observed=await pendingPool;
+      if(observed.error)throw observed.error;
+      const phasePool=requirePhasePool(observed.value);
+      if(phasePool.position!=='before'||phasePool.poolSHA256!==hash(plan.origin)||
+         phasePool.ancestorsSHA256!==plan.ancestorsSHA256)fail();
+    }else phaseFresh(fixedPool);
     phaseFresh(compute);
     fresh();
     return {
@@ -294,6 +317,7 @@ export async function observeMediaRecoveryProtection(o) {
       observedAt: new Date(at).toISOString(),
     };
   } catch {
+    await Promise.all([pendingPool,pendingCompute]);
     return fail();
   }
 }

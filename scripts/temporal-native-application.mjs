@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
 /** Called only inside the verified runtime loader by the release adapter. */
@@ -12,7 +13,14 @@ export function loadNativeReleaseApplication(runtimeRoot) {
   });
   try {
     const workerRequire = createRequire(resolve(runtimeRoot, 'apps/temporal-worker/package.json'));
+    const attestation = resolve(runtimeRoot, 'apps/temporal-worker/src/runtime/media-recovery-task-attestation.ts');
     return {
+      ...(existsSync(attestation) ? {
+        mediaRecoveryTaskAttestationMode: workerRequire(attestation).mediaRecoveryTaskAttestationMode,
+        validateHistoricalMediaRecoveryCapacity: workerRequire(
+          resolve(runtimeRoot, 'apps/temporal-worker/src/runtime/media-startup-capacity.ts')
+        ).validateHistoricalMediaRecoveryCapacity,
+      } : {}),
       ...workerRequire('@temporalio/common/lib/proto-utils'),
       ...workerRequire(resolve(runtimeRoot, 'apps/temporal-worker/src/runtime/media-recovery-work.ts')),
       ...workerRequire('@temporalio/client'),

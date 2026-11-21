@@ -13,6 +13,7 @@ const phases = [
   'task-list',
   'task-get',
   'task-identity',
+  'task-attestation',
   'capability',
   'capability-firestore',
   'capability-auth',
@@ -53,7 +54,7 @@ function classify(phase: MediaJobLaunchPhase, error: unknown): Fact {
         Number.isInteger(code) &&
         code >= 1 &&
         code <= 16 &&
-        ['capability-firestore', 'kernel-create', 'kernel-reconcile', 'temporal-connect'].includes(phase)
+        ['task-attestation', 'capability-firestore', 'kernel-create', 'kernel-reconcile', 'temporal-connect'].includes(phase)
       )
         return { phase, protocol: 'grpc', code };
       if (

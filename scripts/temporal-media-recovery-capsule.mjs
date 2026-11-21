@@ -66,8 +66,19 @@ export async function prepareCompletedMediaRecoveryCapsule(o, tx, parent, next, 
   )
     fail();
   const refs = kinds.map((k) => o.firestore.doc(`_control/temporalMediaRecovery${k}-${id}`));
+  if (p.taskAttestationPublicKey) refs.push(o.firestore.doc(`_control/temporalMediaRecoveryTaskAttestation-${id}`));
   const snapshots = await Promise.all(refs.map((r) => tx.get(r)));
   const facts = Object.fromEntries(kinds.map((k, i) => [k, snapshots[i]]));
+  const taskAttestation = parent.get('mediaRecoveryTaskAttestation');
+  if (p.taskAttestationPublicKey) {
+    const certificate = snapshots.at(-1);
+    const digest = hash(certificate.data() ?? null);
+    const proof = { digest, seconds: certificate.createTime?.seconds, nanoseconds: certificate.createTime?.nanoseconds };
+    if (!certificate.exists || !certificate.createTime?.isEqual(certificate.updateTime) ||
+        hash(taskAttestation ?? null) !== hash({ certificateSHA256: digest }) ||
+        ['Startup', 'ReplacementStartup'].some(kind =>
+          hash(facts[kind].get('taskAttestation') ?? null) !== hash(proof))) fail();
+  }
   const journal = facts.Journal.data(),
     ack = facts.Start.data(),
     intent = parent.get('mediaRecoveryWorkflowStart'),
@@ -168,6 +179,7 @@ export async function prepareCompletedMediaRecoveryCapsule(o, tx, parent, next, 
     mediaRecoveryJournalAttempt: attempt,
     mediaRecoveryWorkflowStart: intent,
     ...(jobMode ? { mediaRecoveryJobProvider: provider } : {}),
+    ...(p.taskAttestationPublicKey ? { mediaRecoveryTaskAttestation: taskAttestation } : {}),
   };
   const value = {
     schemaVersion: jobMode ? 2 : 1,

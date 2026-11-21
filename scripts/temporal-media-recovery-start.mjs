@@ -1,4 +1,7 @@
-import { observeMediaRecoveryJobActive } from './temporal-media-recovery-job.mjs';
+import { setTimeout as delay } from 'node:timers/promises';
+import { readMediaRecoveryJobStartup } from './temporal-media-recovery-job-startup.mjs';
+import { verifyMediaRecoveryTaskAttestation } from './temporal-media-recovery-task-attestation.mjs';
+import { observeMediaRecoveryAttestationTask, observeMediaRecoveryJobActive } from './temporal-media-recovery-job.mjs';
 import { randomUUID } from 'node:crypto';
 import {
   assertNativeSnapshot,
@@ -68,12 +71,15 @@ async function start(o) {
   fresh(false);
   const journalRef = db.doc(`_control/temporalMediaRecoveryJournal-${o.operationId}`),
     receiptRef = db.doc(`_control/temporalMediaRecoveryStart-${o.operationId}`);
+  const certificateRef = plan.taskAttestationPublicKey &&
+    db.doc(`_control/temporalMediaRecoveryTaskAttestation-${o.operationId}`);
+  let certificate, signedTask, startupProof;
   let owned = o.ownedOperation,
     cycle,
     existing;
   const authority = async (tx) => {
     const [parent, control, state, journal] = await Promise.all(
-      [o.lockRef, o.controlRef, o.stateRef, journalRef].map((r) => tx.get(r))
+      [...[o.lockRef, o.controlRef, o.stateRef, journalRef].map(r => tx.get(r)), o.assertOriginalRecoveryAuthority?.(tx)]
     );
     assertNativeSnapshot(owned, parent);
     assertNativeSnapshot(o.expectedAuthority.control, control);
@@ -143,6 +149,24 @@ async function start(o) {
       domains.some((d) => control.get(`domains.${d}.admission`) !== 'paused')
     )
       fail();
+    if (certificateRef) {
+      const certificateSnapshot = await tx.get(certificateRef);
+      const record = certificateSnapshot.data(), pointer = parent.get('mediaRecoveryTaskAttestation');
+      if (!certificateSnapshot.exists || !certificateSnapshot.createTime?.isEqual(certificateSnapshot.updateTime) ||
+          hash(pointer ?? null) !== hash({ certificateSHA256: hash(record) })) fail();
+      const signed = verifyMediaRecoveryTaskAttestation(record, plan.taskAttestationPublicKey);
+      if (signed.planSHA256 !== hash(plan) || signed.armingSHA256 !== hash(j) ||
+          signed.authoritySHA256 !== hash(o.expectedAuthority) ||
+          signed.createOperation !== parent.get('mediaRecoveryJobProvider.create.operation') ||
+          signed.runOperation !== run.operation || signed.runIntentSHA256 !== run.intentSHA256 ||
+          signed.jobUid !== run.jobUid || signed.execution !== run.execution || signed.executionUid !== run.executionUid)
+        fail();
+      const proof = { digest: pointer.certificateSHA256,
+        seconds: certificateSnapshot.createTime.seconds, nanoseconds: certificateSnapshot.createTime.nanoseconds };
+      if (certificate && hash(certificate) !== hash(proof)) fail();
+      certificate = proof;
+      signedTask = signed;
+    }
     if (cycle && hash(cycle) !== hash(c)) fail();
     cycle = c;
     fresh(false);
@@ -155,6 +179,30 @@ async function start(o) {
     },
     { readOnly: true }
   );
+  const observeStartup = async tx => {
+    if (!certificateRef) return;
+    const observed = await readMediaRecoveryJobStartup(db, tx, plan, run,
+      application.validateHistoricalMediaRecoveryCapacity, certificate);
+    if (observed && (observed.taskIdentity.name !== signedTask.task ||
+        observed.taskIdentity.createTime !== signedTask.taskCreateTime ||
+        (observed.taskIdentity.uid ?? null) !== signedTask.taskUid)) fail();
+    return observed;
+  };
+  if (!existing && certificateRef) {
+    do {
+      fresh();
+      startupProof = await db.runTransaction(async tx => {
+        const p = await authority(tx);
+        if (p.get('mediaRecoveryWorkflowStart') !== undefined) fail();
+        return observeStartup(tx);
+      }, { readOnly: true });
+      fresh();
+      if (!startupProof) await delay(250);
+    } while (!startupProof);
+  }
+  const assertStartupUnchanged = async tx => {
+    if (certificateRef && (!startupProof || hash(await observeStartup(tx)) !== hash(startupProof))) fail();
+  };
   const input = { operationId: o.operationId, startNonce: existing?.nonce ?? randomUUID() },
     intent = {
       schemaVersion: 1,
@@ -184,14 +232,16 @@ async function start(o) {
   let send = false;
   if (!existing) {
     fresh();
-    await observeCompute();
+    const observation = await observeCompute();
     fresh();
     // Lost intent ACK cannot authorize a START, even if readback finds our intent.
     const proposedDigest = await db.runTransaction(
       async (tx) => {
         const parent = await authority(tx);
         if (parent.get('mediaRecoveryWorkflowStart') !== undefined || (await tx.get(receiptRef)).exists) fail();
+        await assertStartupUnchanged(tx);
         fresh();
+        if (certificateRef && performance.now() - observation.sampledMonotonic > 5000) fail();
         tx.update(o.lockRef, { mediaRecoveryWorkflowStart: intent });
         return hash({ ...parent.data(), mediaRecoveryWorkflowStart: intent });
       },
@@ -211,8 +261,14 @@ async function start(o) {
   async function observeCompute() {
     if (!job) return livePool(o, plan, pool);
     const started = performance.now();
-    await observeMediaRecoveryJobActive({ api: o.api, plan, run });
-    const zero = await livePool(o, plan, plan.origin, plan.normalTemplate, 0);
+    const [zero, observed] = await Promise.all([
+      livePool(o, plan, plan.origin, plan.normalTemplate, 0),
+      certificateRef
+        ? observeMediaRecoveryAttestationTask({ api: o.api, plan, run })
+        : observeMediaRecoveryJobActive({ api: o.api, plan, run }),
+    ]);
+    if (certificateRef && (!observed ||
+        Object.entries(observed).some(([name, value]) => signedTask[name] !== value))) fail();
     if (performance.now() - started >= 5000) fail();
     return { ...zero, sampledMonotonic: started };
   }
@@ -292,6 +348,7 @@ async function start(o) {
       async (tx) => {
         const p = await authority(tx);
         if (hash(p.get('mediaRecoveryWorkflowStart')) !== hash(intent) || (await tx.get(receiptRef)).exists) fail();
+        await assertStartupUnchanged(tx);
       },
       { readOnly: true }
     );

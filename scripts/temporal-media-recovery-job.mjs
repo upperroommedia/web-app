@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from 'node:util';
+import { createPublicKey } from 'node:crypto';
 import { nativeSnapshotProof, proofDigest } from './temporal-release-runtime.mjs';
 import { prepareFencedPolicyGrant, verifyPreparedDirectPolicyGrant } from './temporal-preparation-iam.mjs';
 
@@ -88,6 +89,15 @@ function validGeneration(value) {
   );
 }
 
+export function attestationPublicKey(value) {
+  if (typeof value !== 'string' || value.length !== 60) fail();
+  const der = Buffer.from(value, 'base64');
+  if (der.length !== 44 || der.toString('base64') !== value) fail();
+  const key = createPublicKey({ key: der, format: 'der', type: 'spki' });
+  if (key.asymmetricKeyType !== 'ed25519' || !key.export({ format: 'der', type: 'spki' }).equals(der)) fail();
+  return key;
+}
+
 /** Derive the finite diagnostic compute from the reviewed media worker image,
  * resources and credentials. The ordinary worker pool template stays intact. */
 export function renderMediaRecoveryJob(plan) {
@@ -123,8 +133,16 @@ export function renderMediaRecoveryJob(plan) {
     env.has('TEMPORAL_MEDIA_RECOVERY_COMPUTE')
   )
     fail();
+  const modeName = 'TEMPORAL_MEDIA_RECOVERY_ATTESTATION_MODE';
+  const keyName = 'TEMPORAL_MEDIA_RECOVERY_ATTESTATION_KEY';
+  if (worker.env.some(({ name }) => name === modeName || name === keyName)) fail();
   delete worker.startupProbe;
   worker.env.push({ name: 'TEMPORAL_MEDIA_RECOVERY_COMPUTE', value: 'cloud-run-job-v1' });
+  if (Object.hasOwn(plan, 'taskAttestationPublicKey')) {
+    attestationPublicKey(plan.taskAttestationPublicKey);
+    worker.env.push({ name: modeName, value: 'operator-ed25519-v1' },
+      { name: keyName, value: plan.taskAttestationPublicKey });
+  }
   return {
     name: `${location}/jobs/urm-media-recovery-${plan.operationId.replaceAll('-', '')}`,
     launchStage: 'BETA',
@@ -313,6 +331,7 @@ export async function readCompletedMediaRecoveryJob({ api, firestore, read, caps
   const paths = ['Kernel', 'ReplacementKernel'].map(
     (kind) => `_control/temporalMediaRecovery${kind}-${plan.operationId}`
   );
+  if (plan.taskAttestationPublicKey) paths.push(`_control/temporalMediaRecoveryTaskAttestation-${plan.operationId}`);
   const snapshots = await read(() => firestore.getAll(...paths.map((path) => firestore.doc(path))));
   if (snapshots.length !== paths.length) fail();
   for (const [index, path] of paths.entries()) {
@@ -328,7 +347,11 @@ export async function readCompletedMediaRecoveryJob({ api, firestore, read, caps
     )
       fail();
   }
-  const [original, replacement] = snapshots;
+  const [original, replacement, certificate] = snapshots;
+  if (plan.taskAttestationPublicKey && (!certificate?.createTime?.isEqual(certificate.updateTime) ||
+      !isDeepStrictEqual(capsule.originalParent.mediaRecoveryTaskAttestation, {
+        certificateSHA256: proofDigest(certificate.data()),
+      }))) fail();
   const native = await read(() =>
     observeMediaRecoveryJobTermination({
       api,
@@ -417,7 +440,7 @@ export function renderMediaRecoveryJobCreateRequest(plan) {
 
 /** A single CREATE and RUN under the caller's release snapshot and normal pool
  * isolation fence. Persisting intent or losing either ACK grants zero resends. */
-export async function advanceMediaRecoveryJob({ api, plan, saved, save, fence }) {
+export async function advanceMediaRecoveryJob({ api, plan, saved, save, fence, observeAcknowledgedRun }) {
   if (
     ![api, save, fence].every((method) => typeof method === 'function') ||
     !isDeepStrictEqual(plan?.job, renderMediaRecoveryJob(plan)) ||
@@ -492,10 +515,25 @@ export async function advanceMediaRecoveryJob({ api, plan, saved, save, fence })
     return acknowledged;
   };
 
+  const readAcknowledged = async (ack, kind) => {
+    const name = jobOperationName(ack.operation);
+    const deadline = performance.now() + 25000;
+    for (;;) {
+      const result = await api(endpoint + name);
+      if (!observeAcknowledgedRun ||
+          performance.now() >= deadline || result?.error || normalize(result?.name) !== name ||
+          ![undefined, false, true].includes(result.done) ||
+          result.done === true || (kind === 'run' && result.metadata?.name)) return result;
+      if (Date.now() >= plan.expiresAt) jobUnconfirmed();
+      await new Promise(resolve => setTimeout(resolve, 250));
+    }
+  };
+  const originalRun = () => observeAcknowledgedRun ? observeAcknowledgedRun() : fence(state);
   const createRequest = renderMediaRecoveryJobCreateRequest(plan);
   const create = await mutate('create', createRequest.url, createRequest.body, absent);
-  await fence(state);
-  const createResult = await api(endpoint + jobOperationName(create.operation));
+  if (state.run?.stage === 'acknowledged') await originalRun();
+  else await fence(state);
+  const createResult = await readAcknowledged(create, 'create');
   if (normalize(createResult?.name) !== create.operation || createResult.error) jobUnconfirmed();
   if (createResult.done !== true) {
     if (![undefined, false].includes(createResult.done)) jobUnconfirmed();
@@ -545,8 +583,8 @@ export async function advanceMediaRecoveryJob({ api, plan, saved, save, fence })
     await verifyEmptyJob();
     await assertMediaRecoveryJobAccess({ api, plan, access: state.access, jobUid: current.uid });
   });
-  await fence(state);
-  const runResult = await api(endpoint + jobOperationName(run.operation));
+  await originalRun();
+  const runResult = await readAcknowledged(run, 'run');
   if (normalize(runResult?.name) !== run.operation || runResult.error) jobUnconfirmed();
   if (![undefined, false, true].includes(runResult.done)) jobUnconfirmed();
   const reported = runResult.done === true ? runResult.response : runResult.metadata;
@@ -582,14 +620,14 @@ export async function advanceMediaRecoveryJob({ api, plan, saved, save, fence })
   if (state.runIdentity) {
     if (!isDeepStrictEqual(state.runIdentity, owned)) jobUnconfirmed();
   } else {
-    await fence(state);
+    await originalRun();
     await put('runIdentity', owned);
   }
   return state;
 }
 
 /** Active execution guard for the sole Temporal START, distinct from terminal evidence. */
-export async function observeMediaRecoveryJobActive({ api, plan, run }) {
+export async function observeMediaRecoveryJobActive({ api, plan, run, allowProvisioning = false }) {
   if (
     typeof api !== 'function' ||
     !isDeepStrictEqual(plan?.job, renderMediaRecoveryJob(plan)) ||
@@ -617,11 +655,59 @@ export async function observeMediaRecoveryJobActive({ api, plan, run }) {
     !refersTo(execution.job, plan.job.name) ||
     execution.deleteTime ||
     execution.completionTime ||
+    execution.conditions?.some(({ type, state }) =>
+      type === 'Completed' && ['CONDITION_FAILED', 'CONDITION_SUCCEEDED'].includes(state)) ||
     execution.parallelism !== 1 ||
     execution.taskCount !== 1 ||
     ![undefined, 0].includes(execution.retriedCount) ||
-    execution.runningCount !== 1 ||
+    ![undefined, 0].includes(execution.failedCount) ||
+    ![undefined, 0].includes(execution.cancelledCount) ||
+    ![undefined, 0].includes(execution.succeededCount) ||
     !exactTaskSpec(execution.template, plan.job.template.template)
   )
     jobUnconfirmed();
+  if (allowProvisioning && [undefined, 0].includes(execution.runningCount)) return undefined;
+  if (execution.runningCount !== 1) jobUnconfirmed();
+  return execution;
+}
+
+/** The controller, using its own read authority, witnesses the native task
+ * attached to the original acknowledged execution. */
+export async function observeMediaRecoveryAttestationTask({ api, plan, run }) {
+  const execution = await observeMediaRecoveryJobActive({ api, plan, run, allowProvisioning: true });
+  if (!execution) return undefined;
+  if (!validGeneration(execution)) jobUnconfirmed();
+  const task = run.execution + '/tasks/' + run.execution.split('/').at(-1) + '-task0';
+  const listed = await api(endpoint + run.execution + '/tasks?pageSize=2');
+  if (![undefined, ''].includes(listed?.nextPageToken) || (listed?.unreachable !== undefined &&
+      (!Array.isArray(listed.unreachable) || listed.unreachable.length))) jobUnconfirmed();
+  if (!listed || typeof listed !== 'object') jobUnconfirmed();
+  if (listed.tasks === undefined || (Array.isArray(listed.tasks) && !listed.tasks.length)) return undefined;
+  if (!Array.isArray(listed.tasks) || listed.tasks.length !== 1 || normalize(listed.tasks[0]?.name) !== task)
+    jobUnconfirmed();
+  const direct = await api(endpoint + task);
+  const attemptTime = Date.parse(run.attemptedAt);
+  const matches = value =>
+    normalize(value?.name) === task && validGeneration(value) &&
+    Object.hasOwn(value, 'createTime') && isMediaRecoveryTaskIdentity(value) &&
+    Date.parse(value.createTime) >= attemptTime && Date.parse(value.createTime) < plan.expiresAt &&
+    refersTo(value.job, plan.job.name) && refersTo(value.execution, run.execution) &&
+    [undefined, 0].includes(value.index) && [undefined, 0].includes(value.retried) &&
+    Number.isFinite(Date.parse(value.startTime)) &&
+    Date.parse(value.startTime) >= Date.parse(value.createTime) &&
+    !value.completionTime && !value.lastAttemptResult &&
+    exactTaskSpec(value, plan.job.template.template, true);
+  const fromList = listed.tasks[0];
+  if (!matches(direct) || !matches(fromList) || direct.createTime !== fromList.createTime ||
+      direct.uid !== fromList.uid || direct.startTime !== fromList.startTime ||
+      String(direct.generation) !== String(fromList.generation) ||
+      !isDeepStrictEqual(direct.containers, fromList.containers) ||
+      !isDeepStrictEqual(direct.volumes, fromList.volumes)) jobUnconfirmed();
+  return {
+    executionGeneration: String(execution.generation),
+    task,
+    taskCreateTime: direct.createTime,
+    taskGeneration: String(direct.generation),
+    taskUid: direct.uid ?? null,
+  };
 }

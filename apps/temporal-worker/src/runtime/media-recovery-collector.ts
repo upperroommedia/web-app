@@ -1,3 +1,4 @@
+import { mediaRecoveryTaskAttestationPath } from './media-recovery-task-attestation-reader';
 import { matchMediaRecoveryJobRun } from './media-recovery-job-witness';
 import { diagnosticComputeIdentity } from './worker-witness';
 /** Historical GET-only recovery episode collector. It grants no polling, signal,
@@ -93,6 +94,15 @@ async function collect(o: Options, deadline: number) {
           (typeof kinds)[number],
           any
         >;
+        if (p.taskAttestationPublicKey) {
+          const cert = await tx.get(db.doc(mediaRecoveryTaskAttestationPath(id)));
+          const proof = facts.Startup.taskAttestation;
+          if (!cert.exists || !cert.createTime?.isEqual(cert.updateTime!) ||
+              !proof || proof.digest !== hash(cert.data()) ||
+              !op.mediaRecoveryTaskAttestation || op.mediaRecoveryTaskAttestation.certificateSHA256 !== proof.digest ||
+              proof.seconds !== cert.createTime.seconds || proof.nanoseconds !== cert.createTime.nanoseconds ||
+              hash(facts.ReplacementStartup.taskAttestation ?? null) !== hash(proof)) fail();
+        }
         const c = op.cloudMediaRecovery,
           j = facts.Journal,
           start = op.mediaRecoveryWorkflowStart,
@@ -313,7 +323,8 @@ async function collectWithEpisodeReader(
     [f.Startup, old, old.context.intentSHA256],
     [f.ReplacementStartup, k, derived],
   ]) {
-    exact(startup, 'bundle,capacity,intentSHA256,kernel,kind,observedAt,operationId,schemaVersion,worker');
+    exact(startup, 'bundle,capacity,intentSHA256,kernel,kind,observedAt,operationId,schemaVersion,' +
+      (p.taskAttestationPublicKey ? 'taskAttestation,' : '') + 'worker');
     exact(startup.bundle, 'buildId,bundleBytes,bundleSHA256,schemaVersion');
     exact(startup.kernel, 'birthDigest,operationId');
     if (

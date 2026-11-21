@@ -1,6 +1,9 @@
 import { isDeepStrictEqual } from 'node:util';
 import type { DurableMediaRecoveryJobIdentity } from '@upperroom/orchestration/job-store';
 import { isMediaRecoveryTaskCreateTime } from '@upperroom/orchestration/media-recovery-task-identity';
+import type { Firestore } from 'firebase-admin/firestore';
+import { mediaRecoveryTaskAttestationKey } from './media-recovery-task-attestation';
+import { awaitMediaRecoveryTaskAttestation } from './media-recovery-task-attestation-reader';
 import { GoogleAuth } from 'google-auth-library';
 import { readCloudRunMetadata } from './cloud-run-witness';
 import { mediaJobPhase, tagMediaJobFailure, type MediaJobLaunchPhase } from './media-job-launch-failure';
@@ -21,7 +24,8 @@ type MediaRecoveryJobIdentity = DurableMediaRecoveryJobIdentity;
 export type { MediaRecoveryJobIdentity };
 
 export function hasCloudRunJobBinding(env: NodeJS.ProcessEnv) {
-  return env.TEMPORAL_MEDIA_RECOVERY_COMPUTE !== undefined || platformFields.some((key) => env[key] !== undefined);
+  return env.TEMPORAL_MEDIA_RECOVERY_COMPUTE !== undefined || env.TEMPORAL_MEDIA_RECOVERY_ATTESTATION_MODE !== undefined ||
+    env.TEMPORAL_MEDIA_RECOVERY_ATTESTATION_KEY !== undefined || platformFields.some((key) => env[key] !== undefined);
 }
 
 const deny = (): never => {
@@ -32,6 +36,7 @@ const normalize = (value: unknown) =>
 const refersTo = (value: unknown, name: string) => normalize(value) === name || value === name.split('/').at(-1);
 
 export function mediaRecoveryJobBinding(buildId: string, env: NodeJS.ProcessEnv) {
+  mediaRecoveryTaskAttestationKey(env);
   const operationId = env.TEMPORAL_MEDIA_RECOVERY_OPERATION;
   const execution = env.CLOUD_RUN_EXECUTION;
   const job = operationId && 'urm-media-recovery-' + operationId.replaceAll('-', '');
@@ -184,7 +189,9 @@ export function verifyMediaRecoveryJobIdentity(
   };
 }
 
-export async function loadMediaRecoveryJobIdentity(buildId: string, env: NodeJS.ProcessEnv) {
+export async function loadMediaRecoveryJobIdentity(
+  buildId: string, env: NodeJS.ProcessEnv, attestationDb?: () => Promise<Firestore>
+) {
   const binding = mediaRecoveryJobBinding(buildId, env);
   try {
     const metadata = (phase: Extract<MediaJobLaunchPhase, `metadata-${string}`>, path: string) =>
@@ -195,6 +202,13 @@ export async function loadMediaRecoveryJobIdentity(buildId: string, env: NodeJS.
       metadata('metadata-account', 'instance/service-accounts/default/email'),
       metadata('metadata-instance', 'instance/id'),
     ]);
+    const trustedKey = mediaRecoveryTaskAttestationKey(env);
+    if (trustedKey) {
+      if (!attestationDb) return deny();
+      return await mediaJobPhase('task-attestation', async () => awaitMediaRecoveryTaskAttestation(
+        await attestationDb(), trustedKey, binding, { projectId, projectNumber, serviceAccount, instanceId }
+      ));
+    }
     const client = await mediaJobPhase('adc-client', () =>
       new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/cloud-platform'] }).getClient());
     const read = (path: string) =>

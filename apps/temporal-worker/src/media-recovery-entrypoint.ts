@@ -1,3 +1,4 @@
+import { observedTaskAttestation } from './runtime/media-recovery-task-attestation-reader';
 import { loadMediaRecoveryRuntimeConfig } from './runtime/media-recovery-config';
 import { loadWorkerWitness } from './runtime/worker-witness';
 import { loadConsumedMediaRecoveryBundle } from './runtime/consumed-workflow-bundle';
@@ -110,7 +111,15 @@ export async function runMediaRecoveryApplication(bindShutdown?: (shutdown: () =
       client.workflowService.describeNamespace({ namespace: config.namespace })
     );
     if (ns.namespaceInfo?.name !== config.namespace) throw new Error('MEDIA_RECOVERY_NAMESPACE_UNCONFIRMED');
-    const witness = await loadWorkerWitness(config.buildId, true);
+    const witness = await loadWorkerWitness(config.buildId, true, process.env, async () => {
+      await import('@upperroom/shared/firebase/firebaseAdmin');
+      const owner = getSharedFirebaseAppOwnership();
+      if (!owner || owner.app.name !== '[DEFAULT]' || owner.app.options.projectId !== config.projectId || !owner.isRegistered())
+        throw new Error('MEDIA_RECOVERY_FIREBASE_OWNER_REQUIRED');
+      ownership = owner;
+      const { getFirestore } = await import('firebase-admin/firestore');
+      return getFirestore(owner.app);
+    });
     if (Boolean(witness.cloudRun) === Boolean(witness.cloudRunJob))
       throw new Error('MEDIA_RECOVERY_CLOUD_WITNESS_REQUIRED');
     const kernel = await reportMediaKernelWitness(witness);
@@ -163,9 +172,11 @@ export async function runMediaRecoveryApplication(bindShutdown?: (shutdown: () =
     validateMediaStartupCapacityEvidence(capacity, registration.cap.plan.createdAt);
     await registration.authorize();
     if (lifecycle.draining) return;
+    const taskAttestation = witness.cloudRunJob && observedTaskAttestation(witness.cloudRunJob);
     const record = {
       schemaVersion: 1,
       kind: 'private-diagnostic-startup-only-no-recovery-proof',
+      ...(taskAttestation ? { taskAttestation } : {}),
       operationId: config.operationId,
       intentSHA256: registration.cap.context.intentSHA256,
       worker: witness,

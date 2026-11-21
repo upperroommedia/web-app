@@ -4,6 +4,7 @@ import type { Firestore, Transaction } from 'firebase-admin/firestore';
 import type { Auth } from 'firebase-admin/auth';
 import type { WorkerWitness } from './worker-witness';
 import { workerReadinessDigest as hash } from './readiness-probe';
+import { recheckMediaRecoveryTaskAttestation } from './media-recovery-task-attestation-reader';
 import { matchMediaRecoveryJobRun } from './media-recovery-job-witness';
 function fail(): never {
   throw new Error('MEDIA_RECOVERY_CAPABILITY_UNCONFIRMED');
@@ -129,6 +130,7 @@ export async function mediaRecoveryKernelContext(
         fail();
       if (!native.runIdentity && !original) throw new PendingMediaRecoveryJobIdentity();
       if (!matchMediaRecoveryJobRun(job, p, native)) fail();
+      await recheckMediaRecoveryTaskAttestation(db, tx, operationId, job, p, op.get('mediaRecoveryTaskAttestation'));
       computeIntent = { jobProviderSHA256: hash(native), jobIdentity: job };
     } else {
       if (

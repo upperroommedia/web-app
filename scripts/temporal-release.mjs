@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { prepareMediaRecoveryTaskAttestation } from './temporal-media-recovery-task-attestation.mjs';
 import { mediaPromotionReceiptPrefixes, confirmRestoredMediaActivationCapsule } from './temporal-restored-media-capsule.mjs';
 import {activateRestoredCloudRunMedia} from './temporal-media-restored-activation.mjs';
 import {saveRestoredMediaActivationCheckpoint} from './temporal-media-restored-checkpoint.mjs';
@@ -506,7 +507,20 @@ await runWithCleanup(
             stdio: ['ignore', 'pipe', 'pipe'],
           }).trim();
         }
-        const api = createReleaseApi({getAccessToken:token});
+        let stagingDiagnosticToken;
+        if (action === 'diagnose-cloud-run-media-recovery' && config.projectId === 'urm-app-staging') {
+          if (!operatorPrincipal.adcAndGcloudAccountMatch) throw new Error('EXACT_STAGING_MEDIA_OPERATOR_TOKEN_REQUIRED');
+          stagingDiagnosticToken = execFileSync('gcloud', ['auth', 'print-access-token', '--account', operatorPrincipal.email], {
+            encoding: 'utf8', timeout: 60000, stdio: ['ignore', 'pipe', 'pipe'],
+          }).trim();
+          const verified = await verifyReleaseOperator(binding, {
+            getAccessToken: async () => ({ access_token: stagingDiagnosticToken }),
+          });
+          if (!verified.adcAndGcloudAccountMatch || verified.subject !== operatorPrincipal.subject ||
+              !verified.subject || verified.email !== operatorPrincipal.email)
+            throw new Error('EXACT_STAGING_MEDIA_OPERATOR_TOKEN_REQUIRED');
+        }
+        const api = createReleaseApi({ getAccessToken: stagingDiagnosticToken ? () => stagingDiagnosticToken : token });
         const appApi = (path, method, body, beforeSend) =>
           api(`https://firebaseapphosting.googleapis.com/v1beta/${path}`, method, body, beforeSend);
         async function settleOperation(operation) {
@@ -1527,9 +1541,11 @@ await runWithCleanup(
               operationId,bindingDigest,releaseId:config.releaseId,role:'media',settings,
               evidenceDigest:preparationArguments.digest,receipts,
             });
+            const attestationDirectory = process.env.TEMPORAL_STAGING_MEDIA_ATTESTATION_DIRECTORY;
             const result=await operation.run({binding,config,firestore,bindingDigest,expectedAuthority,platform,role:operation.role,settings,operationId,releaseId:config.releaseId,
               ...(operation.mode==='restored'?{recoveryOperationId:ids.recovery,runtime:restoredMediaActivationRuntime({options:()=>({firebaseAuth:resources.auth,binding,config,platform,api,firestore,lockRef,controlRef,stateRef,ownedOperation,expectedAuthority,operationId,recoveryOperationId:ids.recovery,bindingDigest,releaseId:config.releaseId,role:'media',settings,evidenceDigest:preparationArguments.digest,receipts})})}:{}),
-              ...(operation.mode==='recovery'?{runtime:Object.freeze({...canonicalMediaRecoveryRuntime,assertSupported:mediaRecoveryJobPreflight({options:mediaRecoveryStopOptions}),drainJob:mediaRecoveryJobDrainage({options:mediaRecoveryStopOptions}),launchJob:mediaRecoveryJobLauncher({options:mediaRecoveryStopOptions,setOwnedOperation:value=>{ownedOperation=value;}}),confirmStopped:mediaRecoveryStoppedConfirmation({options:mediaRecoveryStopOptions}),confirmNeverStarted:mediaRecoveryNeverStartedConfirmation({options:mediaRecoveryStopOptions}),drain:mediaRecoveryDrainage({options:()=>({binding,config,platform,api,firestore,lockRef,controlRef,stateRef,ownedOperation,expectedAuthority,operationId,bindingDigest})}),execute:mediaRecoveryExecution({options:()=>({binding,config,platform,api,firestore,lockRef,controlRef,stateRef,ownedOperation,expectedAuthority,operationId,bindingDigest}),setOwnedOperation:value=>{ownedOperation=value;}}),prepare:mediaRecoveryPreparation({options:()=>({firestore,lockRef,controlRef,stateRef,ownedOperation,expectedAuthority,config,operationId,bindingDigest}),setOwnedOperation:value=>{ownedOperation=value;}})})}:{}),
+              ...(operation.mode==='recovery'?{runtime:Object.freeze({...canonicalMediaRecoveryRuntime,assertSupported:mediaRecoveryJobPreflight({options:mediaRecoveryStopOptions,
+                requireTaskAttestation: !hasSaved || !!currentOperation.get(operation.field)?.plan?.taskAttestationPublicKey}),drainJob:mediaRecoveryJobDrainage({options:mediaRecoveryStopOptions}),prepareTaskAttestation:(id,savedPlan)=>prepareMediaRecoveryTaskAttestation(attestationDirectory,id,savedPlan),launchJob:mediaRecoveryJobLauncher({options:mediaRecoveryStopOptions,attestationDirectory,setOwnedOperation:value=>{ownedOperation=value;}}),confirmStopped:mediaRecoveryStoppedConfirmation({options:mediaRecoveryStopOptions}),confirmNeverStarted:mediaRecoveryNeverStartedConfirmation({options:mediaRecoveryStopOptions}),drain:mediaRecoveryDrainage({options:()=>({binding,config,platform,api,firestore,lockRef,controlRef,stateRef,ownedOperation,expectedAuthority,operationId,bindingDigest})}),execute:mediaRecoveryExecution({options:()=>({binding,config,platform,api,firestore,lockRef,controlRef,stateRef,ownedOperation,expectedAuthority,operationId,bindingDigest}),setOwnedOperation:value=>{ownedOperation=value;}}),prepare:mediaRecoveryPreparation({options:()=>({firestore,lockRef,controlRef,stateRef,ownedOperation,expectedAuthority,config,operationId,bindingDigest}),setOwnedOperation:value=>{ownedOperation=value;}})})}:{}),
               authorizeMutation:async()=> {
                 await assertPoolReceiptsCurrent();
                 return (operation.mode==='recovery'?assertMediaRecoveryAuthority:({controls:assertControlsPromotionAuthority,search:assertSearchPromotionAuthority,email:assertEmailPromotionAuthority,images:assertImagesPromotionAuthority,media:assertMediaPromotionAuthority}[operation.role]))({firestore,lockRef,controlRef,stateRef,ownedOperation,expectedAuthority,config,operationId,bindingDigest});
