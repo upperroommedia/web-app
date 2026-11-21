@@ -1,4 +1,4 @@
-import { mediaRecoveryJobAccessPlan, renderMediaRecoveryJob, renderMediaRecoveryJobCreateRequest } from './temporal-media-recovery-job.mjs';
+import { mediaRecoveryJobAccessPlan, renderMediaRecoveryJob, renderMediaRecoveryJobCreateRequest, sameMediaRecoveryTask } from './temporal-media-recovery-job.mjs';
 import {assertStoredMediaDiagnosticDrain,assertFreshMediaDiagnosticDrain} from './temporal-media-diagnostic-drain.mjs';
 import { assertNativeSnapshot, assertNativeSnapshotSuccessor, nativeSnapshotProof, proofDigest as hash } from './temporal-release-runtime.mjs';
 import {prepareCompletedMediaRecoveryCapsule} from './temporal-media-recovery-capsule.mjs';
@@ -209,7 +209,7 @@ export async function saveMediaRecoveryCheckpoint(o) {
           terminal.job !== next.plan.job.name || terminal.jobUid !== run.jobUid ||
           terminal.operation !== run.operation || terminal.execution !== run.execution ||
           terminal.executionUid !== run.executionUid || !digest(terminal.proofSHA256) ||
-          !job || terminal.task !== job.task || terminal.taskUid !== job.taskUid ||
+          !sameMediaRecoveryTask(terminal,job)||
           job.executionUid !== run.executionUid || hash(job) !== hash(original.get('worker.cloudRunJob')) ||
           original.get('stage') !== 'closed' || replacement.get('stage') !== 'closed' ||
           original.get('close.signal') !== 'SIGKILL' || replacement.get('close.signal') !== null ||

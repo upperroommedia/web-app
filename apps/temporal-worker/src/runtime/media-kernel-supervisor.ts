@@ -232,7 +232,8 @@ async function superviseKernel(
     draining = false,
     forwarded = false,
     faultAttempted = false,
-    protocolError = false;
+    protocolError = false,
+    launchAcknowledged = false;
   let forceStopTimer: ReturnType<typeof setTimeout> | undefined;
   const stop = () => {
     draining = true;
@@ -279,6 +280,13 @@ async function superviseKernel(
       await writeOnce(db, ref, state, next, authorized ? cap.authorize : undefined);
       state = next;
     };
+    const send = (message: Record<string, unknown>) =>
+      new Promise<void>((resolve, reject) => {
+        child!.send(message, (error) => {
+          if (error) reject(error);
+          else resolve();
+        });
+      });
     const onMessage = (raw: unknown) => {
       pending = pending
         .then(async () => {
@@ -299,7 +307,7 @@ async function superviseKernel(
             });
             await grant();
             if (draining || exited) fail();
-            child!.send({ kind: 'media-kernel-start', nonce: m.nonce });
+            await send({ kind: 'media-kernel-start', nonce: m.nonce });
             return;
           }
           if (
@@ -312,10 +320,9 @@ async function superviseKernel(
             sameCloud(cap.context.parent, w);
             if (cap.context.parent.instanceId === w.instanceId) fail();
             await put({ ...state, stage: 'running', worker: w });
-            clearTimeout(launchTimer);
             await grant();
             if (draining || exited) fail();
-            child!.send({
+            await send({
               kind: 'media-kernel-witness-ack',
               nonce: m.nonce,
               operationId: cap.context.operationId,
@@ -326,6 +333,9 @@ async function superviseKernel(
                 worker: state.worker,
               }),
             });
+            if (draining || exited || !child!.connected) fail();
+            launchAcknowledged = true;
+            clearTimeout(launchTimer);
             if (recovery)
               await recovery.onRunning(
                 {
@@ -358,6 +368,12 @@ async function superviseKernel(
       child!.on('error', () => {
         protocolError = true;
         stop();
+      });
+      child!.once('disconnect', () => {
+        if (!launchAcknowledged) {
+          protocolError = true;
+          stop();
+        }
       });
       child!.once('exit', () => {
         exited = true;

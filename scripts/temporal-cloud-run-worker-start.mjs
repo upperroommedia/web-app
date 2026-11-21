@@ -1,3 +1,4 @@
+import { isMediaRecoveryTaskIdentity, mediaRecoveryTaskIdentity } from './temporal-media-recovery-job.mjs';
 import { createHash } from 'node:crypto';
 
 const project = 'urm-app-staging';
@@ -303,6 +304,9 @@ export async function readMediaRecoveryJobOrigins({ api, plan, origin }) {
   const execution = job?.execution?.split('/').at(-1);
   const children = ['original', 'replacement'];
   const jobs = `projects/${project}/locations/us-central1/jobs/`;
+  const nativeTask=job?.taskCreateTime!==undefined;
+  const executionLabel=nativeTask?'run.googleapis.com/execution_name':'execution_name';
+  const indexLabel=nativeTask?'run.googleapis.com/task_index':'task_index';
   if (
     !uuid.test(plan?.operationId ?? '') ||
     !job ||
@@ -311,7 +315,9 @@ export async function readMediaRecoveryJobOrigins({ api, plan, origin }) {
     !/^[a-z0-9-]{1,63}$/.test(execution ?? '') ||
     job.execution !== job.job + '/executions/' + execution ||
     !uuid.test(job.executionUid) ||
-    !uuid.test(job.taskUid) ||
+    !isMediaRecoveryTaskIdentity(mediaRecoveryTaskIdentity(job)) ||
+    (nativeTask&&(typeof job.task!=='string'||!job.task.startsWith(job.execution+'/tasks/')||
+      !/^[a-z0-9-]{1,63}$/.test(job.task.slice((job.execution+'/tasks/').length)))) ||
     !/^[a-f0-9]{40}$/.test(plan.buildId) ||
     children.some(
       (child) =>
@@ -330,8 +336,9 @@ export async function readMediaRecoveryJobOrigins({ api, plan, origin }) {
     `resource.labels.project_id = "${project}"`,
     'resource.labels.location = "us-central1"',
     `resource.labels.job_name = "${jobName}"`,
-    `labels.execution_name = "${execution}"`,
-    'labels.task_index = "0"',
+    `labels.${nativeTask?'"'+executionLabel+'"':executionLabel} = "${execution}"`,
+    `labels.${nativeTask?'"'+indexLabel+'"':indexLabel} = "0"`,
+    ...(nativeTask?['labels."run.googleapis.com/task_attempt" = "0"']:[]),
     `timestamp >= "${new Date(from).toISOString()}"`,
     `timestamp <= "${new Date(to).toISOString()}"`,
     'jsonPayload.event = "temporal_media_recovery_worker_started"',
@@ -358,8 +365,9 @@ export async function readMediaRecoveryJobOrigins({ api, plan, origin }) {
       labels?.project_id !== project ||
       labels.location !== 'us-central1' ||
       labels.job_name !== jobName ||
-      entry.labels?.execution_name !== execution ||
-      entry.labels?.task_index !== '0' ||
+      entry.labels?.[executionLabel] !== execution ||
+      entry.labels?.[indexLabel] !== '0' ||
+      (nativeTask&&entry.labels?.['run.googleapis.com/task_attempt']!=='0') ||
       !safeLabel.test(instanceId ?? '') ||
       !safeLabel.test(entry.insertId ?? '') ||
       !Number.isFinite(at) ||
@@ -372,6 +380,7 @@ export async function readMediaRecoveryJobOrigins({ api, plan, origin }) {
       row.job !== job.job ||
       row.executionUid !== job.executionUid ||
       row.taskUid !== job.taskUid ||
+      (nativeTask&&(row.task!==job.task||row.taskCreateTime!==job.taskCreateTime)) ||
       row.workerIdentity !== origin[child].workerIdentity ||
       row.startupSHA256 !== origin[child].startupSHA256
     )

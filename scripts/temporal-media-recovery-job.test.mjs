@@ -142,6 +142,35 @@ test('the original single un-retried task must be complete and joined to the exa
   assert.deepEqual(reads, ['job', 'operation', 'execution', 'task', 'execution']);
 });
 
+test('native Task completion can use the exact creation timestamp when the Task omits UID and GEN2',async()=>{
+  const {maps,options}=fixture();
+  const createTime=new Date(Date.parse(options.run.attemptedAt)+100).toISOString().replace('Z','123Z');
+  options.taskIdentity={name:options.taskIdentity.name,createTime};
+  maps.task.createTime=createTime;
+  delete maps.task.uid;
+  delete maps.task.executionEnvironment;
+  delete maps.task.maxRetries;
+  const native=options.api;
+  let inventory=()=>({tasks:[structuredClone(maps.task)]});
+  options.api=(url,method)=>url.endsWith('/tasks?pageSize=2')?inventory():native(url,method);
+  const terminal=await observeMediaRecoveryJobTermination(options);
+  assert.equal(terminal.taskCreateTime,createTime);
+  assert.equal(Object.hasOwn(terminal,'taskUid'),false);
+  inventory=()=>({tasks:[maps.task],nextPageToken:'another-page'});
+  await assert.rejects(observeMediaRecoveryJobTermination(options),/TERMINATION_UNCONFIRMED/);
+  inventory=()=>({tasks:[{...maps.task,createTime:createTime.replace('123Z','124Z')}]});
+  await assert.rejects(observeMediaRecoveryJobTermination(options),/TERMINATION_UNCONFIRMED/);
+  inventory=()=>({tasks:[maps.task],unreachable:['us-central1']});
+  await assert.rejects(observeMediaRecoveryJobTermination(options),/TERMINATION_UNCONFIRMED/);
+  inventory=()=>({tasks:[{...maps.task,executionEnvironment:'EXECUTION_ENVIRONMENT_GEN1'}]});
+  await assert.rejects(observeMediaRecoveryJobTermination(options),/TERMINATION_UNCONFIRMED/);
+  inventory=()=>({tasks:[{...maps.task,execution:'foreign-execution',retried:1}]});
+  await assert.rejects(observeMediaRecoveryJobTermination(options),/TERMINATION_UNCONFIRMED/);
+  inventory=()=>({tasks:[maps.task]});
+  maps.task.executionEnvironment='EXECUTION_ENVIRONMENT_GEN1';
+  await assert.rejects(observeMediaRecoveryJobTermination(options),/TERMINATION_UNCONFIRMED/);
+});
+
 test('completed Job readback requires both sealed child closures and the original terminal provider facts', async () => {
   const { maps, reads, options } = fixture();
   options.plan.origin = { uid: 'unchanged-normal-pool' };

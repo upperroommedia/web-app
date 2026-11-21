@@ -230,7 +230,7 @@ test('Job capsule retains owned RUN and the unchanged zero pool with both exact 
     execution,
     executionUid: 'original-uid',
     task: execution + '/tasks/index-zero',
-    taskUid: 'exact-task-uid',
+    taskUid: 'fc47dae1-a5f4-4a1a-9f56-569de759ce3d',
   };
   const provider = {
     runIdentity: { stage: 'acknowledged', jobPlanSHA256: hash(job), execution, executionUid: witness.executionUid },

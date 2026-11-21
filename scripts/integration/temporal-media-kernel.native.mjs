@@ -126,12 +126,25 @@ process.on('SIGTERM',()=>process.exit(0));
           await assert.rejects(readFile(marker), { code: 'ENOENT' });
           assert.equal(state.stage, 'born');
         } else if (mode === 'ipc-channel-error') {
+          const startSeen = join(dir, 'start-seen');
           await writeFile(
             entry,
             `const { randomUUID } = require('node:crypto');
+const fs = require('node:fs');
 process.on('SIGTERM', () => process.exit(0));
-process.send({ kind: 'media-kernel-ready', nonce: randomUUID(), pid: process.pid }, () => process.disconnect());
-setInterval(() => {}, 1000);
+const nonce = randomUUID();
+process.once('message', (message) => {
+  if (message.kind !== 'media-kernel-start' || message.nonce !== nonce) process.exit(2);
+  fs.writeFileSync(${JSON.stringify(startSeen)}, String(process.pid));
+  process.disconnect();
+  // If the supervisor misses the disconnect, bound this fixture's child and
+  // leave a durable indication that it exited without supervisor cleanup.
+  setTimeout(() => {
+    fs.writeFileSync(${JSON.stringify(marker)}, 'natural-exit');
+    process.exit(2);
+  }, 1500);
+});
+process.send({ kind: 'media-kernel-ready', nonce, pid: process.pid });
 `
           );
           await assert.rejects(
@@ -142,6 +155,9 @@ setInterval(() => {}, 1000);
               : superviseMediaRecoveryKernel)(db, cap, entry)
           );
           assert.notEqual(state.stage, 'closed');
+          assert.equal(state.stage, 'born');
+          assert.equal(await readFile(startSeen, 'utf8'), String(state.birth.pid));
+          await assert.rejects(readFile(marker), { code: 'ENOENT' });
         } else if (mode === 'ignored-cleanup-signal') {
           await writeFile(
             entry,

@@ -1,4 +1,6 @@
+import { isDeepStrictEqual } from 'node:util';
 import type { DurableMediaRecoveryJobIdentity } from '@upperroom/orchestration/job-store';
+import { isMediaRecoveryTaskCreateTime } from '@upperroom/orchestration/media-recovery-task-identity';
 import { GoogleAuth } from 'google-auth-library';
 import { readCloudRunMetadata } from './cloud-run-witness';
 import { workerReadinessDigest as hash } from './readiness-probe';
@@ -67,7 +69,7 @@ export function mediaRecoveryJobBinding(buildId: string, env: NodeJS.ProcessEnv)
 type Binding = ReturnType<typeof mediaRecoveryJobBinding>;
 type Metadata = { projectId: string; projectNumber: string; serviceAccount: string; instanceId: string };
 
-function assertTaskSpec(template: any, binding: Binding) {
+function assertTaskSpec(template: any, binding: Binding, inheritExecutionEnvironment = false) {
   const [worker] = template?.containers ?? [];
   if (
     template?.containers?.length !== 1 ||
@@ -77,7 +79,8 @@ function assertTaskSpec(template: any, binding: Binding) {
     worker?.args?.length ||
     template.serviceAccount !== binding.runner ||
     ![undefined, 0].includes(template.maxRetries) ||
-    template.executionEnvironment !== 'EXECUTION_ENVIRONMENT_GEN2' ||
+    (template.executionEnvironment !== 'EXECUTION_ENVIRONMENT_GEN2' &&
+      !(inheritExecutionEnvironment && template.executionEnvironment === undefined)) ||
     template.timeout !== '300s' ||
     !Array.isArray(worker.env)
   )
@@ -96,11 +99,26 @@ function assertTaskSpec(template: any, binding: Binding) {
   if (worker.env.some((entry: any) => (platformFields as readonly string[]).includes(entry?.name))) deny();
 }
 
+function listedTaskName(binding: Binding, inventory: any): string {
+  if (
+    !Array.isArray(inventory?.tasks) ||
+    inventory.tasks.length !== 1 ||
+    ![undefined, ''].includes(inventory.nextPageToken) ||
+    (inventory.unreachable !== undefined && (!Array.isArray(inventory.unreachable) || inventory.unreachable.length > 0))
+  )
+    return deny();
+  const name = normalize(inventory.tasks[0]?.name);
+  const prefix = binding.execution + '/tasks/';
+  if (!name?.startsWith(prefix) || !/^[a-z0-9-]{1,63}$/.test(name.slice(prefix.length))) return deny();
+  return name;
+}
+
 export function verifyMediaRecoveryJobIdentity(
   binding: Binding,
   metadata: Metadata,
   execution: any,
-  inventory: any
+  inventory: any,
+  directTask: any
 ): MediaRecoveryJobIdentity {
   if (
     metadata.projectId !== 'urm-app-staging' ||
@@ -108,36 +126,48 @@ export function verifyMediaRecoveryJobIdentity(
     metadata.serviceAccount !== binding.runner ||
     !/^[A-Za-z0-9_-]{1,256}$/.test(metadata.instanceId) ||
     normalize(execution?.name) !== binding.execution ||
-    !uuid.test(execution?.uid) ||
+    typeof execution?.uid !== 'string' ||
+    !uuid.test(execution.uid) ||
     !refersTo(execution.job, binding.job) ||
     execution.taskCount !== 1 ||
     execution.parallelism !== 1 ||
     execution.deleteTime ||
     execution.completionTime ||
-    ![undefined, 0].includes(execution.retriedCount) ||
-    !Array.isArray(inventory?.tasks) ||
-    inventory.tasks.length !== 1 ||
-    inventory.nextPageToken
+    ![undefined, 0].includes(execution.retriedCount)
   )
     deny();
+  const taskName = listedTaskName(binding, inventory);
   const task = inventory.tasks[0];
-  const taskName = normalize(task?.name);
-  const prefix = binding.execution + '/tasks/';
+  assertTaskSpec(execution.template, binding);
+  for (const row of [task, directTask]) {
+    if (
+      normalize(row?.name) !== taskName ||
+      !isMediaRecoveryTaskCreateTime(row.createTime) ||
+      (row.uid !== undefined && (typeof row.uid !== 'string' || !uuid.test(row.uid))) ||
+      typeof row.generation !== 'string' ||
+      !/^[1-9][0-9]*$/.test(row.generation) ||
+      row.observedGeneration !== row.generation ||
+      !refersTo(row.execution, binding.execution) ||
+      !refersTo(row.job, binding.job) ||
+      ![undefined, 0].includes(row.index) ||
+      ![undefined, 0].includes(row.retried) ||
+      row.deleteTime ||
+      row.completionTime ||
+      row.lastAttemptResult
+    )
+      return deny();
+    // Cloud Run can omit this inherited field on a Task. The owning
+    // Execution's template must explicitly declare GEN2.
+    assertTaskSpec(row, binding, true);
+  }
   if (
-    !taskName?.startsWith(prefix) ||
-    !/^[a-z0-9-]{1,63}$/.test(taskName.slice(prefix.length)) ||
-    !uuid.test(task.uid) ||
-    !refersTo(task.execution, binding.execution) ||
-    !refersTo(task.job, binding.job) ||
-    ![undefined, 0].includes(task.index) ||
-    ![undefined, 0].includes(task.retried) ||
-    task.deleteTime ||
-    task.completionTime ||
-    task.lastAttemptResult
+    task.createTime !== directTask.createTime ||
+    task.uid !== directTask.uid ||
+    task.generation !== directTask.generation ||
+    !isDeepStrictEqual(task.containers, directTask.containers) ||
+    !isDeepStrictEqual(task.volumes, directTask.volumes)
   )
     return deny();
-  assertTaskSpec(execution.template, binding);
-  assertTaskSpec(task, binding);
   return {
     projectId: 'urm-app-staging',
     region: 'us-central1',
@@ -145,7 +175,8 @@ export function verifyMediaRecoveryJobIdentity(
     execution: binding.execution,
     executionUid: execution.uid,
     task: taskName,
-    taskUid: task.uid,
+    taskCreateTime: task.createTime,
+    ...(task.uid !== undefined && { taskUid: task.uid }),
     serviceAccount: binding.runner,
     imageDigest: binding.image.split('@')[1],
     instanceId: metadata.instanceId,
@@ -173,11 +204,13 @@ export async function loadMediaRecoveryJobIdentity(buildId: string, env: NodeJS.
       read(binding.execution),
       read(binding.execution + '/tasks?pageSize=2'),
     ]);
+    const directTask = await read(listedTaskName(binding, inventory.data));
     return verifyMediaRecoveryJobIdentity(
       binding,
       { projectId, projectNumber, serviceAccount, instanceId },
       execution.data,
-      inventory.data
+      inventory.data,
+      directTask.data
     );
   } catch {
     return deny();

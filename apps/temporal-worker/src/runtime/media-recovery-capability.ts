@@ -1,3 +1,4 @@
+import { releaseProvenanceDigest } from './release-provenance';
 import type { Firestore, Transaction } from 'firebase-admin/firestore';
 import type { Auth } from 'firebase-admin/auth';
 import type { WorkerWitness } from './worker-witness';
@@ -11,7 +12,7 @@ const domains = ['media', 'publishing', 'images', 'emails', 'accounts', 'bundles
 const stamp = (s: any) => {
   if (!s.exists || !s.createTime || !s.updateTime) fail();
   return {
-    dataDigest: hash(s.data()),
+    dataDigest: releaseProvenanceDigest(s.data()),
     createTime: { seconds: s.createTime.seconds, nanoseconds: s.createTime.nanoseconds },
     updateTime: { seconds: s.updateTime.seconds, nanoseconds: s.updateTime.nanoseconds },
   };

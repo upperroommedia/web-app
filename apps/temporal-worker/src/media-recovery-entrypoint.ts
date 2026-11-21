@@ -200,7 +200,10 @@ export async function runMediaRecoveryApplication(bindShutdown?: (shutdown: () =
           ? {
               job: witness.cloudRunJob.job,
               executionUid: witness.cloudRunJob.executionUid,
-              taskUid: witness.cloudRunJob.taskUid,
+              ...(witness.cloudRunJob.taskUid?{taskUid:witness.cloudRunJob.taskUid}:{}),
+              ...(witness.cloudRunJob.taskCreateTime?{
+                task:witness.cloudRunJob.task,taskCreateTime:witness.cloudRunJob.taskCreateTime,
+              }:{}),
             }
           : {
               pool: witness.cloudRun?.pool,

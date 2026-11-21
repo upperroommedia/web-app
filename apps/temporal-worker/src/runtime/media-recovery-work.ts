@@ -1,3 +1,4 @@
+import { releaseProvenanceDigest } from './release-provenance';
 import { mediaRecoveryPinnedVersion } from './media-recovery-pin';
 export { mediaRecoveryPinnedVersion } from './media-recovery-pin';
 import { Context } from '@temporalio/activity';
@@ -26,7 +27,7 @@ const sha = (b: Buffer) => createHash('sha256').update(b).digest('hex');
 function stamp(s: any) {
   if (!s.exists || !s.createTime || !s.updateTime) fail();
   return {
-    dataDigest: hash(s.data()),
+    dataDigest: releaseProvenanceDigest(s.data()),
     createTime: { seconds: s.createTime.seconds, nanoseconds: s.createTime.nanoseconds },
     updateTime: { seconds: s.updateTime.seconds, nanoseconds: s.updateTime.nanoseconds },
   };

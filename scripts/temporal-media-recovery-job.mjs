@@ -43,14 +43,40 @@ function exactResources(resources, expected) {
   return resources === expected;
 }
 
-function exactTaskSpec(actual, expected) {
+function exactTaskSpec(actual,expected,taskProjection=false) {
   const worker = actual?.containers?.[0];
+  const fields=taskProjection&&!Object.hasOwn(actual??{},'executionEnvironment')
+    ? Object.fromEntries(Object.entries(expected).filter(([key])=>key!=='executionEnvironment'))
+    : expected;
   return (
-    exactResources(actual, expected) &&
+    exactResources(actual, fields) &&
     [worker?.command, worker?.args].every(
       (value) => value === undefined || (Array.isArray(value) && value.length === 0)
     )
   );
+}
+
+export function isMediaRecoveryTaskIdentity(value) {
+  const hasUid=Object.hasOwn(value??{},'uid');
+  const hasCreateTime=Object.hasOwn(value??{},'createTime');
+  if(hasUid&&(typeof value.uid!=='string'||!uuid.test(value.uid)))return false;
+  if(hasCreateTime){
+    if(typeof value.createTime!=='string'||!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/.test(value.createTime))
+      return false;
+    const time=Date.parse(value.createTime);
+    if(!Number.isFinite(time)||new Date(time).toISOString().slice(0,19)!==value.createTime.slice(0,19))return false;
+  }
+  return hasUid||hasCreateTime;
+}
+
+export function mediaRecoveryTaskIdentity({task,taskUid,taskCreateTime}) {
+  return {name:task,...(taskUid===undefined?{}:{uid:taskUid}),...(taskCreateTime===undefined?{}:{createTime:taskCreateTime})};
+}
+
+export function sameMediaRecoveryTask(a,b) {
+  return Boolean(a&&b&&typeof a.task==='string'&&a.task.length>0&&a.task===b.task&&
+    isMediaRecoveryTaskIdentity(mediaRecoveryTaskIdentity(a))&&isMediaRecoveryTaskIdentity(mediaRecoveryTaskIdentity(b))&&
+    a.taskUid===b.taskUid&&a.taskCreateTime===b.taskCreateTime);
 }
 
 function validGeneration(value) {
@@ -140,7 +166,7 @@ export async function observeMediaRecoveryJobTermination({ api, plan, run, taskI
     !/^[A-Za-z0-9_-]{1,200}$/.test(operation.slice((location + '/operations/').length)) ||
     !uuid.test(run?.jobUid) ||
     !uuid.test(run?.executionUid) ||
-    !uuid.test(taskIdentity?.uid) ||
+    !isMediaRecoveryTaskIdentity(taskIdentity) ||
     run?.stage !== 'acknowledged' ||
     run?.jobPlanSHA256 !== proofDigest(plan.job) ||
     !sha.test(run?.intentSHA256) ||
@@ -171,18 +197,31 @@ export async function observeMediaRecoveryJobTermination({ api, plan, run, taskI
       clearTimeout(timer);
     }
   };
-  const [nativeJob, ownedRun, nativeExecution, nativeTask] = await read(job, operation, execution, task);
+  const [nativeJob,ownedRun,nativeExecution,nativeTask,inventory]=await read(job,operation,execution,task,
+    ...(taskIdentity.createTime===undefined?[]:[execution+'/tasks?pageSize=2']));
+  const matchesTask=value=>{
+    const statuses=value?.conditions?.filter(entry=>entry.type==='Completed');
+    const attempt=value?.lastAttemptResult;
+    return normalize(value?.name)===task&&validGeneration(value)&&
+      (taskIdentity.uid===undefined||value.uid===taskIdentity.uid)&&
+      (taskIdentity.createTime===undefined||value.createTime===taskIdentity.createTime)&&
+      (value.uid===undefined||(typeof value.uid==='string'&&uuid.test(value.uid)))&&
+      refersTo(value.job,job)&&refersTo(value.execution,execution)&&
+      [undefined,0].includes(value.index)&&[undefined,0].includes(value.retried)&&
+      [undefined,0].includes(value.maxRetries)&&exactTaskSpec(value,taskSpec,true)&&
+      statuses?.length===1&&statuses[0].state==='CONDITION_SUCCEEDED'&&attempt?.status&&
+      [undefined,0].includes(attempt.status.code)&&[undefined,0].includes(attempt.exitCode)&&
+      !Object.hasOwn(attempt,'termSignal');
+  };
   const stableCompleted = (resource, name, uid) =>
     normalize(resource?.name) === name && resource?.uid === uid && validGeneration(resource);
   const started = Date.parse(nativeTask?.startTime);
   const completed = Date.parse(nativeTask?.completionTime);
   const executionStarted = Date.parse(nativeExecution?.startTime);
   const executionCompleted = Date.parse(nativeExecution?.completionTime);
-  const attempt = nativeTask?.lastAttemptResult;
   const originalClosedAt = Date.parse(custody?.originalClosedAt);
   const replacementClosedAt = Date.parse(custody?.replacementClosedAt);
   const executionStatus = nativeExecution?.conditions?.filter((entry) => entry.type === 'Completed');
-  const taskStatus = nativeTask?.conditions?.filter((entry) => entry.type === 'Completed');
   if (
     !stableCompleted(nativeJob, job, run.jobUid) ||
     !exactResources(nativeJob.template, plan.job.template) ||
@@ -204,20 +243,12 @@ export async function observeMediaRecoveryJobTermination({ api, plan, run, taskI
     executionStatus?.length !== 1 ||
     executionStatus[0].state !== 'CONDITION_SUCCEEDED' ||
     !exactTaskSpec(nativeExecution.template, taskSpec) ||
-    !stableCompleted(nativeTask, task, taskIdentity.uid) ||
-    !refersTo(nativeTask.job, job) ||
-    !refersTo(nativeTask.execution, execution) ||
-    ![undefined, 0].includes(nativeTask.index) ||
-    ![undefined, 0].includes(nativeTask.retried) ||
-    ![undefined, 0].includes(nativeTask.maxRetries) ||
-    !exactTaskSpec(nativeTask, taskSpec) ||
-    taskStatus?.length !== 1 ||
-    taskStatus[0].state !== 'CONDITION_SUCCEEDED' ||
-    !attempt ||
-    !attempt.status ||
-    ![undefined, 0].includes(attempt.status.code) ||
-    ![undefined, 0].includes(attempt.exitCode) ||
-    Object.hasOwn(attempt, 'termSignal') ||
+    !matchesTask(nativeTask) ||
+    (taskIdentity.createTime!==undefined&&(!Array.isArray(inventory?.tasks)||inventory.tasks.length!==1||
+      inventory.nextPageToken||(inventory.unreachable!==undefined&&(!Array.isArray(inventory.unreachable)||inventory.unreachable.length))||
+      !matchesTask(inventory.tasks[0])||inventory.tasks[0].completionTime!==nativeTask.completionTime||
+      inventory.tasks[0].generation!==nativeTask.generation||inventory.tasks[0].uid!==nativeTask.uid||
+      Date.parse(taskIdentity.createTime)<attemptTime||Date.parse(taskIdentity.createTime)>started)) ||
     ![started, completed, executionStarted, executionCompleted].every(Number.isFinite) ||
     attemptTime > executionStarted ||
     executionStarted > started ||
@@ -243,7 +274,8 @@ export async function observeMediaRecoveryJobTermination({ api, plan, run, taskI
     execution,
     executionUid: run.executionUid,
     task,
-    taskUid: taskIdentity.uid,
+    ...(taskIdentity.uid===undefined?{}:{taskUid:taskIdentity.uid}),
+    ...(taskIdentity.createTime===undefined?{}:{taskCreateTime:taskIdentity.createTime}),
     completedAt: nativeTask.completionTime,
   };
   return {
@@ -302,7 +334,7 @@ export async function readCompletedMediaRecoveryJob({ api, firestore, read, caps
       api,
       plan,
       run,
-      taskIdentity: { name: terminal.task, uid: terminal.taskUid },
+      taskIdentity: mediaRecoveryTaskIdentity(terminal),
       custody: {
         originalClosedAt: original.get('close.observedAt'),
         replacementClosedAt: replacement.get('close.observedAt'),
