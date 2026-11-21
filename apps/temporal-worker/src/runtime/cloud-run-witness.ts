@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { GoogleAuth } from 'google-auth-library';
+import { tagMediaJobFailure, type MediaJobLaunchPhase } from './media-job-launch-failure';
 
 import type { DurableCloudRunWorkerIdentity } from '@upperroom/orchestration/job-store';
 export type CloudRunWorkerIdentity = DurableCloudRunWorkerIdentity;
@@ -104,12 +105,17 @@ export function verifyCloudRunWorkerIdentity(
 }
 
 // Fixed platform metadata endpoint only; no caller-supplied URL or redirects.
-export async function readCloudRunMetadata(path: string) {
+export async function readCloudRunMetadata(path: string, phase?: Extract<MediaJobLaunchPhase, `metadata-${string}`>) {
   const response = await fetch(`http://metadata.google.internal/computeMetadata/v1/${path}`, {
     headers: { 'Metadata-Flavor': 'Google' },
     redirect: 'error',
     signal: AbortSignal.timeout(5000),
   });
+  if (!response.ok && phase) {
+    const error = new Error('CLOUD_RUN_WORKER_IDENTITY_MISMATCH');
+    tagMediaJobFailure(phase, { status: response.status }, error);
+    throw error;
+  }
   if (!response.ok || response.headers.get('metadata-flavor') !== 'Google') return fail();
   const value = (await response.text()).trim();
   if (!value || value.length > 512) return fail();

@@ -3,6 +3,7 @@ import type { DurableMediaRecoveryJobIdentity } from '@upperroom/orchestration/j
 import { isMediaRecoveryTaskCreateTime } from '@upperroom/orchestration/media-recovery-task-identity';
 import { GoogleAuth } from 'google-auth-library';
 import { readCloudRunMetadata } from './cloud-run-witness';
+import { mediaJobPhase, tagMediaJobFailure, type MediaJobLaunchPhase } from './media-job-launch-failure';
 import { workerReadinessDigest as hash } from './readiness-probe';
 
 const location = 'projects/urm-app-staging/locations/us-central1';
@@ -186,13 +187,16 @@ export function verifyMediaRecoveryJobIdentity(
 export async function loadMediaRecoveryJobIdentity(buildId: string, env: NodeJS.ProcessEnv) {
   const binding = mediaRecoveryJobBinding(buildId, env);
   try {
+    const metadata = (phase: Extract<MediaJobLaunchPhase, `metadata-${string}`>, path: string) =>
+      mediaJobPhase(phase, () => readCloudRunMetadata(path, phase));
     const [projectId, projectNumber, serviceAccount, instanceId] = await Promise.all([
-      readCloudRunMetadata('project/project-id'),
-      readCloudRunMetadata('project/numeric-project-id'),
-      readCloudRunMetadata('instance/service-accounts/default/email'),
-      readCloudRunMetadata('instance/id'),
+      metadata('metadata-project', 'project/project-id'),
+      metadata('metadata-project-number', 'project/numeric-project-id'),
+      metadata('metadata-account', 'instance/service-accounts/default/email'),
+      metadata('metadata-instance', 'instance/id'),
     ]);
-    const client = await new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/cloud-platform'] }).getClient();
+    const client = await mediaJobPhase('adc-client', () =>
+      new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/cloud-platform'] }).getClient());
     const read = (path: string) =>
       client.request({
         url: 'https://run.googleapis.com/v2/' + path,
@@ -201,10 +205,11 @@ export async function loadMediaRecoveryJobIdentity(buildId: string, env: NodeJS.
         retry: false,
       });
     const [execution, inventory] = await Promise.all([
-      read(binding.execution),
-      read(binding.execution + '/tasks?pageSize=2'),
+      mediaJobPhase('execution-get', () => read(binding.execution)),
+      mediaJobPhase('task-list', () => read(binding.execution + '/tasks?pageSize=2')),
     ]);
-    const directTask = await read(listedTaskName(binding, inventory.data));
+    const taskName = listedTaskName(binding, inventory.data);
+    const directTask = await mediaJobPhase('task-get', () => read(taskName));
     return verifyMediaRecoveryJobIdentity(
       binding,
       { projectId, projectNumber, serviceAccount, instanceId },
@@ -212,8 +217,10 @@ export async function loadMediaRecoveryJobIdentity(buildId: string, env: NodeJS.
       inventory.data,
       directTask.data
     );
-  } catch {
-    return deny();
+  } catch (cause) {
+    const error = new Error('MEDIA_RECOVERY_JOB_IDENTITY_UNCONFIRMED');
+    tagMediaJobFailure('task-identity', cause, error);
+    throw error;
   }
 }
 

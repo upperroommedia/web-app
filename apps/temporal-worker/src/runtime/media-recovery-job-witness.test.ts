@@ -1,8 +1,13 @@
 import { Timestamp } from 'firebase-admin/firestore';
+import { GoogleAuth } from 'google-auth-library';
+import * as cloudMetadata from './cloud-run-witness';
+import { mediaJobParentFailureLine } from './media-job-launch-failure';
+import { superviseMediaRecoveryOriginal } from './media-kernel-supervisor';
 import { releaseProvenanceDigest } from './release-provenance';
 import { createDurableJobStore } from '@upperroom/orchestration/job-store';
 import {
   hasCloudRunJobBinding,
+  loadMediaRecoveryJobIdentity,
   mediaRecoveryJobBinding,
   verifyMediaRecoveryJobIdentity,
 } from './media-recovery-job-witness';
@@ -80,6 +85,76 @@ function fixture() {
   const directTask = { ...structuredClone(task), logUri: 'output-only-direct-field' };
   return { binding, metadata, execution, task, directTask };
 }
+
+test.each(['execution-get', 'task-list', 'task-get', 'task-identity'] as const)(
+  'the real Job witness retains the precise %s failure without retrying',
+  async (phase) => {
+    const saved = process.env;
+    process.env = { ...saved, ...env };
+    delete process.env.TEMPORAL_MEDIA_RECOVERY_CHILD;
+    const row = fixture();
+    const meta: Record<string, string> = {
+      'project/project-id': row.metadata.projectId, 'project/numeric-project-id': row.metadata.projectNumber,
+      'instance/service-accounts/default/email': row.metadata.serviceAccount, 'instance/id': row.metadata.instanceId,
+    };
+    const native = jest.spyOn(cloudMetadata, 'readCloudRunMetadata').mockImplementation(async (path) => meta[path]);
+    const request = jest.fn(async ({ url, retry }: { url: string; retry: boolean }) => {
+      expect(retry).toBe(false);
+      const name = url.slice('https://run.googleapis.com/v2/'.length);
+      const endpoint = name === row.binding.execution ? 'execution-get'
+        : name === row.binding.execution + '/tasks?pageSize=2' ? 'task-list'
+        : name === row.task.name ? 'task-get' : undefined;
+      if (!endpoint) throw new Error('unexpected endpoint');
+      if (endpoint === phase) throw Object.assign(new Error('secret workload url'), { response: { status: 403 } });
+      if (endpoint === 'execution-get') return { data: row.execution };
+      if (endpoint === 'task-list') return { data: { tasks: [row.task] } };
+      return { data: phase === 'task-identity' ? { ...row.directTask, generation: '2' } : row.directTask };
+    });
+    const adc = jest.spyOn(GoogleAuth.prototype, 'getClient').mockResolvedValue({ request } as never);
+    try {
+      const error = await loadMediaRecoveryJobIdentity(buildId, env).then(
+        () => { throw new Error('expected denial'); }, (reason: unknown) => reason);
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toBe('MEDIA_RECOVERY_JOB_IDENTITY_UNCONFIRMED');
+      expect(JSON.parse(mediaJobParentFailureLine(error))).toEqual({
+        event: 'media_recovery_job_parent_start_failed', phase,
+        protocol: phase === 'task-identity' ? 'local' : 'http',
+        code: phase === 'task-identity' ? 'validation-failed' : 403,
+      });
+      expect(native).toHaveBeenCalledTimes(4);
+      expect(adc).toHaveBeenCalledTimes(1);
+      expect(request).toHaveBeenCalledTimes(phase === 'execution-get' || phase === 'task-list' ? 2 : 3);
+    } finally {
+      native.mockRestore(); adc.mockRestore(); process.env = saved;
+    }
+  }
+);
+
+test.each([
+  { commitCode: 7, reconcile: false, phase: 'kernel-create' },
+  { commitCode: 14, reconcile: true, phase: 'kernel-reconcile' },
+])('kernel startup preserves its $phase classification and its original reconciliation rules', async ({ commitCode, reconcile, phase }) => {
+  const saved = process.env;
+  process.env = { ...saved, ...env };
+  delete process.env.TEMPORAL_MEDIA_RECOVERY_CHILD;
+  const get = jest.fn(async () => { throw Object.assign(new Error('secret read response'), { code: 7 }); });
+  const db = {
+    doc: () => ({ get }),
+    runTransaction: jest.fn(async () => { throw Object.assign(new Error('secret commit response'), { code: commitCode }); }),
+  };
+  const onRunning = jest.fn();
+  try {
+    const cap = { context: { operationId, parent: { cloudRunJob: {} } }, authorize: jest.fn(), checkFresh: jest.fn() };
+    const error = await superviseMediaRecoveryOriginal(db as never, cap as never, 'unused', onRunning).then(
+      () => { throw new Error('expected denial'); }, (reason: unknown) => reason);
+    expect(JSON.parse(mediaJobParentFailureLine(error))).toEqual({
+      event: 'media_recovery_job_parent_start_failed', phase, protocol: 'grpc', code: 7,
+    });
+    expect(db.runTransaction).toHaveBeenCalledTimes(1);
+    expect(get).toHaveBeenCalledTimes(reconcile ? 1 : 0);
+    expect(onRunning).not.toHaveBeenCalled();
+  } finally { process.env = saved; }
+});
 
 test('Job configuration and native execution must identify its sole original task', () => {
   const { binding, metadata, execution, task, directTask } = fixture();
