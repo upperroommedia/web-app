@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { prepareMediaRecoveryTaskAttestation } from './temporal-media-recovery-task-attestation.mjs';
+import { prepareMediaRecoveryTaskAttestation, verifyMediaRecoveryTaskAttestation } from './temporal-media-recovery-task-attestation.mjs';
 import { mediaPromotionReceiptPrefixes, confirmRestoredMediaActivationCapsule } from './temporal-restored-media-capsule.mjs';
 import {activateRestoredCloudRunMedia} from './temporal-media-restored-activation.mjs';
 import {saveRestoredMediaActivationCheckpoint} from './temporal-media-restored-checkpoint.mjs';
@@ -30,6 +30,11 @@ import { prepareCloudRunIdentity } from './temporal-prepare-cloud-identity.mjs';
 import { prepareCloudRunScalerAccess } from './temporal-prepare-scaler-access.mjs';
 import { prepareCloudRunRuntimeAccess } from './temporal-prepare-runtime-access.mjs';
 import { prepareCloudRunRuntimeRole } from './temporal-prepare-runtime-role.mjs';
+import { prepareMediaDiagnosticStorage, retireMediaDiagnosticStorageGrant } from './temporal-prepare-media-diagnostic-storage.mjs';
+import { archiveMediaDiagnosticStartedFailure, observeMediaDiagnosticStorageFence } from './temporal-release-cloud-run.mjs';
+import { mediaRecoveryTaskIdentity } from './temporal-media-recovery-job.mjs';
+import { readMediaDiagnosticDurableWork } from './temporal-media-private-inventory.mjs';
+import { saveDiagnosticStoragePreparationCheckpoint, saveDiagnosticStorageRetirementCheckpoint } from './temporal-preparation-checkpoint.mjs';
 import { prepareCloudRunFirestoreAccess } from './temporal-prepare-firestore-access.mjs';
 import { prepareCloudRunSecretAccess } from './temporal-prepare-secret-access.mjs';
 import { prepareCloudRunEventarcAudit } from './temporal-prepare-eventarc-audit.mjs';
@@ -176,6 +181,8 @@ if (
     'prepare-cloud-run-scaler-access',
     'prepare-cloud-run-firestore-access',
     'prepare-cloud-run-runtime-role',
+    'prepare-media-diagnostic-storage',
+    'retire-media-diagnostic-storage-grant',
     'prepare-cloud-run-runtime-access',
     'prepare-cloud-run-eventarc-audit',
     'provider-usage-ready',
@@ -247,6 +254,12 @@ const operatorIdentity = {
   ...(workerHandoff ? { workerHandoff } : {}),
   ...(workerReadiness ? { workerReadiness } : {}),
 };
+const diagnosticStorageAction = ['prepare-media-diagnostic-storage', 'retire-media-diagnostic-storage-grant'].includes(action);
+const sealDiagnosticStorageFailure = args.includes('--seal-media-diagnostic-started-failure');
+if (sealDiagnosticStorageFailure && (action !== 'diagnose-cloud-run-media-recovery' ||
+    !args.includes('--resume-operation') || args.indexOf('--seal-media-diagnostic-started-failure') !==
+      args.lastIndexOf('--seal-media-diagnostic-started-failure')))
+  throw new Error('MEDIA_DIAGNOSTIC_STARTED_FAILURE_RESUME_REQUIRED');
 const poolOperationRoles=Object.freeze({'promote-cloud-run-email':'email','promote-cloud-run-images':'images','promote-cloud-run-media':'media','promote-cloud-run-search':'search','promote-cloud-run-controls':'controls',
  'activate-restored-cloud-run-media':'media','diagnose-cloud-run-media-recovery':'media','bootstrap-stop-cloud-run-media':'media','activate-cloud-run-media-pool':'media','stop-cloud-run-media-activation':'media',
  'bootstrap-stop-cloud-run-images':'images','activate-cloud-run-images-pool':'images','stop-cloud-run-images-activation':'images',
@@ -255,7 +268,7 @@ const poolOperationRoles=Object.freeze({'promote-cloud-run-email':'email','promo
  'bootstrap-stop-cloud-run-controls':'controls','activate-cloud-run-controls-pool':'controls','stop-cloud-run-controls-activation':'controls',
  'bootstrap-stop-cloud-run-orchestration':'orchestration','activate-cloud-run-orchestration-pool':'orchestration','stop-cloud-run-orchestration-activation':'orchestration',
 });
-const preparationArguments = ['activate-restored-cloud-run-media','diagnose-cloud-run-media-recovery','bootstrap-stop-cloud-run-media','activate-cloud-run-media-pool','stop-cloud-run-media-activation','bootstrap-stop-cloud-run-images','activate-cloud-run-images-pool','stop-cloud-run-images-activation','bootstrap-stop-cloud-run-email','activate-cloud-run-email-pool','stop-cloud-run-email-activation','bootstrap-stop-cloud-run-search','activate-cloud-run-search-pool','stop-cloud-run-search-activation','activate-cloud-run-orchestration-pool','stop-cloud-run-orchestration-activation','bootstrap-stop-cloud-run-orchestration','activate-cloud-run-controls-pool','stop-cloud-run-controls-activation','promote-cloud-run-email','promote-cloud-run-images','promote-cloud-run-media','promote-cloud-run-search','promote-cloud-run-controls','bootstrap-stop-cloud-run-controls', 'prepare-cloud-run-dispatch-diagnostic', 'enable-staging-dispatch-wakes', 'activate-cloud-run-dispatch-service', 'prepare-cloud-run-identity', 'prepare-cloud-run-dispatch-service', 'prepare-cloud-run-dispatch-access', 'prepare-stop-cloud-run-dispatch-scheduler', 'prepare-stop-cloud-run-dispatch-eventarc', 'stop-cloud-run-dispatch-wake', 'prepare-cloud-run-pool', 'prepare-cloud-run-secret-access', 'prepare-cloud-run-scaler-access', 'prepare-cloud-run-firestore-access', 'prepare-cloud-run-runtime-role', 'prepare-cloud-run-runtime-access', 'prepare-cloud-run-eventarc-audit'].includes(action) ? {
+const preparationArguments = diagnosticStorageAction || ['activate-restored-cloud-run-media','diagnose-cloud-run-media-recovery','bootstrap-stop-cloud-run-media','activate-cloud-run-media-pool','stop-cloud-run-media-activation','bootstrap-stop-cloud-run-images','activate-cloud-run-images-pool','stop-cloud-run-images-activation','bootstrap-stop-cloud-run-email','activate-cloud-run-email-pool','stop-cloud-run-email-activation','bootstrap-stop-cloud-run-search','activate-cloud-run-search-pool','stop-cloud-run-search-activation','activate-cloud-run-orchestration-pool','stop-cloud-run-orchestration-activation','bootstrap-stop-cloud-run-orchestration','activate-cloud-run-controls-pool','stop-cloud-run-controls-activation','promote-cloud-run-email','promote-cloud-run-images','promote-cloud-run-media','promote-cloud-run-search','promote-cloud-run-controls','bootstrap-stop-cloud-run-controls', 'prepare-cloud-run-dispatch-diagnostic', 'enable-staging-dispatch-wakes', 'activate-cloud-run-dispatch-service', 'prepare-cloud-run-identity', 'prepare-cloud-run-dispatch-service', 'prepare-cloud-run-dispatch-access', 'prepare-stop-cloud-run-dispatch-scheduler', 'prepare-stop-cloud-run-dispatch-eventarc', 'stop-cloud-run-dispatch-wake', 'prepare-cloud-run-pool', 'prepare-cloud-run-secret-access', 'prepare-cloud-run-scaler-access', 'prepare-cloud-run-firestore-access', 'prepare-cloud-run-runtime-role', 'prepare-cloud-run-runtime-access', 'prepare-cloud-run-eventarc-audit'].includes(action) ? {
   role: args[args.indexOf('--identity-role') + 1],
   kind: args[args.indexOf('--identity-kind') + 1],
   proof: args[args.indexOf('--preparation-proof') + 1],
@@ -266,7 +279,7 @@ if (preparationArguments) {
   if (!required.every(flag => args.includes(flag)) ||
     !/^[a-f0-9]{64}$/.test(preparationArguments.digest ?? ''))
     throw new Error('Explicit immutable identity preparation inputs required');
-  if (['activate-restored-cloud-run-media','diagnose-cloud-run-media-recovery','bootstrap-stop-cloud-run-media','activate-cloud-run-media-pool','stop-cloud-run-media-activation','bootstrap-stop-cloud-run-images','activate-cloud-run-images-pool','stop-cloud-run-images-activation','bootstrap-stop-cloud-run-email','activate-cloud-run-email-pool','stop-cloud-run-email-activation','bootstrap-stop-cloud-run-search','activate-cloud-run-search-pool','stop-cloud-run-search-activation','activate-cloud-run-orchestration-pool','stop-cloud-run-orchestration-activation','bootstrap-stop-cloud-run-orchestration','activate-cloud-run-controls-pool','stop-cloud-run-controls-activation','promote-cloud-run-email','promote-cloud-run-images','promote-cloud-run-media','promote-cloud-run-search','promote-cloud-run-controls','bootstrap-stop-cloud-run-controls', 'prepare-cloud-run-dispatch-diagnostic', 'enable-staging-dispatch-wakes', 'activate-cloud-run-dispatch-service', 'prepare-cloud-run-dispatch-service', 'prepare-cloud-run-dispatch-access', 'prepare-stop-cloud-run-dispatch-scheduler', 'prepare-stop-cloud-run-dispatch-eventarc', 'stop-cloud-run-dispatch-wake', 'prepare-cloud-run-pool', 'prepare-cloud-run-secret-access', 'prepare-cloud-run-scaler-access', 'prepare-cloud-run-firestore-access', 'prepare-cloud-run-runtime-role', 'prepare-cloud-run-runtime-access', 'prepare-cloud-run-eventarc-audit'].includes(action)) {
+  if (diagnosticStorageAction || ['activate-restored-cloud-run-media','diagnose-cloud-run-media-recovery','bootstrap-stop-cloud-run-media','activate-cloud-run-media-pool','stop-cloud-run-media-activation','bootstrap-stop-cloud-run-images','activate-cloud-run-images-pool','stop-cloud-run-images-activation','bootstrap-stop-cloud-run-email','activate-cloud-run-email-pool','stop-cloud-run-email-activation','bootstrap-stop-cloud-run-search','activate-cloud-run-search-pool','stop-cloud-run-search-activation','activate-cloud-run-orchestration-pool','stop-cloud-run-orchestration-activation','bootstrap-stop-cloud-run-orchestration','activate-cloud-run-controls-pool','stop-cloud-run-controls-activation','promote-cloud-run-email','promote-cloud-run-images','promote-cloud-run-media','promote-cloud-run-search','promote-cloud-run-controls','bootstrap-stop-cloud-run-controls', 'prepare-cloud-run-dispatch-diagnostic', 'enable-staging-dispatch-wakes', 'activate-cloud-run-dispatch-service', 'prepare-cloud-run-dispatch-service', 'prepare-cloud-run-dispatch-access', 'prepare-stop-cloud-run-dispatch-scheduler', 'prepare-stop-cloud-run-dispatch-eventarc', 'stop-cloud-run-dispatch-wake', 'prepare-cloud-run-pool', 'prepare-cloud-run-secret-access', 'prepare-cloud-run-scaler-access', 'prepare-cloud-run-firestore-access', 'prepare-cloud-run-runtime-role', 'prepare-cloud-run-runtime-access', 'prepare-cloud-run-eventarc-audit'].includes(action)) {
     delete preparationArguments.kind;
     preparationArguments.settings = args[args.indexOf('--pool-settings') + 1];
     preparationArguments.settingsDigest = args[args.indexOf('--pool-settings-sha256') + 1];
@@ -275,11 +288,20 @@ if (preparationArguments) {
       !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(preparationArguments.runnerOperationId ?? ''))
       throw new Error('Explicit immutable pool preparation inputs required');
   }
-  if (Object.hasOwn(poolOperationRoles,action)) {
+  if (diagnosticStorageAction || Object.hasOwn(poolOperationRoles,action)) {
     preparationArguments.receipts=args[args.indexOf('--bootstrap-receipts')+1];
     preparationArguments.receiptsDigest=args[args.indexOf('--bootstrap-receipts-sha256')+1];
-    if(preparationArguments.role!==poolOperationRoles[action]||!args.includes('--bootstrap-receipts')||!args.includes('--bootstrap-receipts-sha256')||
+    if(preparationArguments.role!==(diagnosticStorageAction?'media':poolOperationRoles[action])||!args.includes('--bootstrap-receipts')||!args.includes('--bootstrap-receipts-sha256')||
       !/^[a-f0-9]{64}$/.test(preparationArguments.receiptsDigest??'')) throw new Error('FIXED_CONTROLS_BOOTSTRAP_RECEIPTS_REQUIRED');
+  }
+  if (action === 'diagnose-cloud-run-media-recovery') {
+    const flag = '--diagnostic-storage-preparation-operation';
+    const index = args.indexOf(flag);
+    const id = args[index + 1];
+    if (index >= 0 && (index !== args.lastIndexOf(flag) ||
+        !/^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(id ?? '')))
+      throw new Error('EXACT_MEDIA_DIAGNOSTIC_STORAGE_PREPARATION_REQUIRED');
+    preparationArguments.diagnosticStorageOperation = index >= 0 ? id : null;
   }
   if (['prepare-cloud-run-dispatch-diagnostic', 'enable-staging-dispatch-wakes'].includes(action)) {
     preparationArguments.activationOperationId = args[args.indexOf('--activation-preparation-operation') + 1];
@@ -435,6 +457,8 @@ await runWithCleanup(
       operationVerified = false,
       transitionPending = false,
       diagnosticCompletionProof,
+      diagnosticStorageCompletion,
+      diagnosticStorageFailure,
       poolAbortProof,
       cloudWorkerProbePending = false,
       cloudIdentityPending = false,
@@ -1477,6 +1501,152 @@ await runWithCleanup(
               throw new Error('IDENTITY_PREPARATION_RECEIPT_UNCONFIRMED');
             cloudIdentityPending = false;
             console.log(`Dedicated identity preparation recorded at ${immutableReceipt.path}; no grants or compute activation.`);
+          } else if (diagnosticStorageAction) {
+            requirePhase(state, ['provider-usage-ready']);
+            if (config.environment !== 'staging' || config.projectId !== 'urm-app-staging' ||
+                operatorPrincipal.adcAndGcloudAccountMatch !== true)
+              throw new Error('MEDIA_DIAGNOSTIC_STORAGE_MATCHED_STAGING_ACTOR_REQUIRED');
+            const platform = await readBoundPlatform();
+            validateWorkerCoverage(config, platform);
+            await verifyPreparationEvidence({ ...preparationArguments, path: preparationArguments.proof,
+              platform, binding, google: api });
+            const [settings, ids] = await Promise.all([
+              readPreparationReceipt(preparationArguments.settings, preparationArguments.settingsDigest),
+              readPreparationReceipt(preparationArguments.receipts, preparationArguments.receiptsDigest),
+            ]);
+            const retiring = action === 'retire-media-diagnostic-storage-grant';
+            const failedRetirement = retiring && Object.hasOwn(ids ?? {}, 'failure');
+            const prefixes = {
+              runner: 'temporalCloudIdentityPreparation', scaler: 'temporalCloudIdentityPreparation',
+              pool: 'temporalCloudPoolPreparation', runnerScaler: 'temporalCloudScalerAccessPreparation',
+              scalerTrust: 'temporalCloudScalerAccessPreparation', poolAccess: 'temporalCloudScalerAccessPreparation',
+              firestore: 'temporalCloudFirestoreAccessPreparation', projectRole: 'temporalCloudRuntimeRolePreparation',
+              projectAccess: 'temporalCloudRuntimeAccessPreparation', storageRole: 'temporalCloudRuntimeRolePreparation',
+              storageAccess: 'temporalCloudRuntimeAccessPreparation', bootstrapCycle: 'temporalCloudMediaBootstrapCycle',
+            };
+            const historicalPrefixes = failedRetirement ? {
+              storagePreparation: 'temporalMediaDiagnosticStoragePreparation', failure: 'temporalMediaDiagnosticStartedFailure',
+              certificate: 'temporalMediaRecoveryTaskAttestation', kernel: 'temporalMediaRecoveryKernel',
+              replacement: 'temporalMediaRecoveryReplacementKernel',
+            } : { storagePreparation: 'temporalMediaDiagnosticStoragePreparation',
+              recovery: 'temporalCloudMediaRecovery', capsule: 'temporalMediaRecoveryCapsule',
+              drain: 'temporalMediaRecoveryDrain', ready: 'temporalMediaRecoveryOriginalReady',
+              kernel: 'temporalMediaRecoveryKernel', replacement: 'temporalMediaRecoveryReplacementKernel' };
+            const allowed = retiring ? { ...prefixes, ...historicalPrefixes } : prefixes;
+            const historyIds = failedRetirement ? ['certificate', 'kernel', 'replacement'] :
+              ['capsule', 'drain', 'ready', 'kernel', 'replacement'];
+            if (!ids || Object.keys(ids).sort().join(',') !== Object.keys(allowed).sort().join(',') ||
+                ids.runner !== preparationArguments.runnerOperationId ||
+                new Set(Object.keys(ids).filter(key => !historyIds.includes(key)).map(key => ids[key])).size !==
+                  Object.keys(ids).filter(key => !historyIds.includes(key)).length ||
+                Object.values(ids).some(id => !/^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(id ?? '') || id === operationId) ||
+                (retiring && historyIds.some(key => ids[key] !== (failedRetirement ? ids.failure : ids.recovery))))
+              throw new Error('MEDIA_DIAGNOSTIC_STORAGE_RECEIPTS_REQUIRED');
+            const { receipts, assertCurrent } = await readOwnedPoolOperationReceipts(firestore, prefixes, ids, config.releaseId);
+            const historyRefs = retiring ? Object.entries(historicalPrefixes).map(([key, prefix]) =>
+              firestore.doc(`_control/${prefix}-${ids[key]}`)) : [];
+            const field = retiring ? 'cloudDiagnosticStorageRetirement' : 'cloudDiagnosticStoragePreparation';
+            const prefix = retiring ? 'temporalMediaDiagnosticStorageRetirement' : 'temporalMediaDiagnosticStoragePreparation';
+            const seal = retiring ? saveDiagnosticStorageRetirementCheckpoint : saveDiagnosticStoragePreparationCheckpoint;
+            const apply = retiring ? retireMediaDiagnosticStorageGrant : prepareMediaDiagnosticStorage;
+            const immutableReceipt = firestore.doc(`_control/${prefix}-${operationId}`);
+            const operationDoc = await lockRef.get();
+            assertNativeSnapshot(ownedOperation, operationDoc);
+            let saved = operationDoc.get(field);
+            if (saved) cloudIdentityPending = true;
+            const history = historyRefs.length ? await firestore.getAll(...historyRefs) : [];
+            const historyProofs = history.map(snapshot => snapshot.exists ? nativeSnapshotProof(snapshot) : null);
+            const [preparation, terminal, capsule, drain, ready, kernel, replacement] = history.map(doc => doc.data());
+            let retirementContext = {};
+            if (failedRetirement) {
+              const [prepared, failed, certificate, original, replacement] = history;
+              const record = failed.data();
+              if (!failed.exists || !failed.createTime?.isEqual(failed.updateTime) ||
+                  record?.kind !== 'staging-media-diagnostic-started-failure' || record?.operationId !== ids.failure ||
+                  record.releaseId !== config.releaseId || record.buildId !== platform.workerBuildId ||
+                  !certificate.exists || !original.exists ||
+                  proofDigest(record.preparationProof) !== proofDigest(nativeSnapshotProof(prepared)) ||
+                  proofDigest(record.facts.slice(1, 4)) !== proofDigest(historyProofs.slice(2)))
+                throw new Error('MEDIA_DIAGNOSTIC_STORAGE_FAILED_EPISODE_REQUIRED');
+              retirementContext = { plan: record.plan, failed: { record, certificate: verifyMediaRecoveryTaskAttestation(
+                certificate.data(), record.plan.taskAttestationPublicKey),
+                original: original.data(), replacement: replacement.data() ?? null,
+              } };
+            } else if (retiring) {
+              const { capsuleSHA256, ...data } = capsule;
+              const identity = terminal.identityState;
+              const original = capsule.originalParent;
+              const plan = identity.plan;
+              const worker = replacement.worker;
+              if (capsuleSHA256 !== proofDigest(data) || capsule.releaseId !== config.releaseId ||
+                  capsule.operationId !== ids.recovery || capsule.completionSHA256 !== proofDigest(terminal) ||
+                  capsule.drainSHA256 !== proofDigest(drain) || proofDigest(identity) !== proofDigest(original.cloudMediaRecovery) ||
+                  !history[2].createTime.isEqual(history[2].updateTime) ||
+                  !history[3].createTime.isEqual(history[3].updateTime) ||
+                  !history[2].createTime.isEqual(history[1].createTime) ||
+                  !worker?.cloudRunJob || kernel.stage !== 'closed' || replacement.stage !== 'closed' ||
+                  kernel.close?.descendantsAbsent !== true || replacement.close?.descendantsAbsent !== true ||
+                  kernel.close.observerFailed === true || replacement.close.observerFailed === true ||
+                  kernel.close.signal !== 'SIGKILL' || replacement.close.code !== 0 || replacement.close.signal !== null)
+                throw new Error('MEDIA_DIAGNOSTIC_STORAGE_DRAIN_REQUIRED');
+              retirementContext = { plan, ready, worker, termination: {
+                taskIdentity: mediaRecoveryTaskIdentity(worker.cloudRunJob),
+                custody: { originalClosedAt: kernel.close.observedAt, replacementClosedAt: replacement.close.observedAt },
+                jobRun: original.mediaRecoveryJobProvider.runIdentity, proofSHA256: identity.jobTermination.proofSHA256,
+              } };
+            }
+            const authoritySHA256 = proofDigest({ operationId, bindingDigest, expectedAuthority, receipts, historyProofs });
+            const options = { binding, config, platform, firestore, settings, receipts, api, role: 'media',
+              operationId, releaseId: config.releaseId, evidenceDigest: preparationArguments.digest };
+            const checkedAuthorityIn = async tx => {
+              const [lock, control, checkpoint, ...facts] = await tx.getAll(lockRef, controlRef, stateRef, ...historyRefs);
+              assertNativeSnapshot(ownedOperation, lock);
+              assertNativeSnapshot(expectedAuthority.control, control);
+              assertNativeSnapshot(expectedAuthority.state, checkpoint);
+              facts.forEach((fact, i) => {
+                if (!historyProofs[i]) {
+                  if (fact.exists) throw new Error('MEDIA_DIAGNOSTIC_STORAGE_HISTORY_CHANGED');
+                } else assertNativeSnapshot(historyProofs[i], fact);
+              });
+              if (lock.get('action') !== action || lock.get('operationId') !== operationId ||
+                  lock.get('releaseId') !== config.releaseId || lock.get('bindingDigest') !== bindingDigest ||
+                  control.get('releaseId') !== config.releaseId || checkpoint.get('releaseId') !== config.releaseId ||
+                  control.get('admission') !== 'paused' || checkpoint.get('phase') !== 'provider-usage-ready' ||
+                  config.domains.some(domain => control.get(`domains.${domain}.admission`) !== 'paused'))
+                throw new Error('MEDIA_DIAGNOSTIC_STORAGE_AUTHORITY_CHANGED');
+              await assertCurrent(tx);
+              return retirementContext;
+            };
+            const checkedAuthority = () => firestore.runTransaction(checkedAuthorityIn, { readOnly: true });
+            const result = await apply({
+              operationId, releaseId: config.releaseId, buildId: platform.workerBuildId, bindingDigest,
+              evidenceDigest: preparationArguments.digest, api, saved,
+              ...(failedRetirement ? { preparationReceipt: preparation, failureReceipt: terminal,
+                preparationProof: historyProofs[0], failureProof: historyProofs[1] } :
+                retiring ? { preparationReceipt: preparation, terminalReceipt: terminal,
+                  preparationProof: historyProofs[0], terminalProof: historyProofs[1] } : {}),
+              authorize: async () => ({
+                ...await observeMediaDiagnosticStorageFence(options, checkedAuthority), authoritySHA256,
+              }),
+              save: async (identityState, prior) => {
+                if (proofDigest(saved ?? null) !== proofDigest(prior ?? null))
+                  throw new Error('MEDIA_DIAGNOSTIC_STORAGE_JOURNAL_CHANGED');
+                cloudIdentityPending = true;
+                ownedOperation = await seal({ firestore, lockRef, controlRef, stateRef, immutableReceipt, ownedOperation,
+                  expectedAuthority, config, operationId, bindingDigest, operatorPrincipal, identityState,
+                  assertDomainAuthority: checkedAuthorityIn });
+                saved = identityState;
+              },
+            });
+            const receipt = await immutableReceipt.get();
+            if (!receipt.exists || !receipt.createTime.isEqual(receipt.updateTime) ||
+                receipt.createTime.seconds !== ownedOperation.updateTime.seconds ||
+                receipt.createTime.nanoseconds !== ownedOperation.updateTime.nanoseconds ||
+                receipt.get('bindingDigest') !== bindingDigest || proofDigest(receipt.get('identityState')) !== proofDigest(result))
+              throw new Error('MEDIA_DIAGNOSTIC_STORAGE_RECEIPT_UNCONFIRMED');
+            diagnosticStorageCompletion = { ref: immutableReceipt, proof: nativeSnapshotProof(receipt), field };
+            cloudIdentityPending = false;
+            console.log(`Temporal release ${action} checkpoint saved at ${immutableReceipt.path}.`);
           } else if (Object.hasOwn(poolOperationRoles,action)) {
             requirePhase(state, ['provider-usage-ready']);
             if(config.environment!=='staging'||operatorPrincipal.adcAndGcloudAccountMatch!==true)
@@ -1536,30 +1706,74 @@ await runWithCleanup(
             if(hasSaved)cloudIdentityPending=true;
             const immutableReceipt=firestore.doc(`_control/${operation.prefix}-${operationId}`);
             const creationReceipt=operation.creationPrefix?firestore.doc(`_control/${operation.creationPrefix}-${operationId}`):undefined;
+            let diagnosticStorageCertificate, storagePreparationRef, storagePreparationProof;
+            const assertMediaRecoveryAncestors = async tx => {
+              await assertPoolReceiptsCurrent(tx);
+              if (storagePreparationRef)
+                assertNativeSnapshot(storagePreparationProof, await (tx ? tx.get(storagePreparationRef) : storagePreparationRef.get()));
+            };
             const mediaRecoveryStopOptions = () => ({
               binding,config,platform,api,firestore,lockRef,controlRef,stateRef,ownedOperation,expectedAuthority,
               operationId,bindingDigest,releaseId:config.releaseId,role:'media',settings,
               evidenceDigest:preparationArguments.digest,receipts,
+              assertOriginalRecoveryAuthority: assertMediaRecoveryAncestors,
             });
             const attestationDirectory = process.env.TEMPORAL_STAGING_MEDIA_ATTESTATION_DIRECTORY;
+            const savedRecoveryPlan = hasSaved ? currentOperation.get(operation.field)?.plan : undefined;
+            if (operation.mode === 'recovery' && (attestationDirectory || sealDiagnosticStorageFailure) &&
+                (!savedRecoveryPlan || savedRecoveryPlan.diagnosticStorage)) {
+              const storageOperation = preparationArguments.diagnosticStorageOperation;
+              if (!storageOperation || storageOperation === operationId)
+                throw new Error('EXACT_MEDIA_DIAGNOSTIC_STORAGE_PREPARATION_REQUIRED');
+              const preparation = await firestore.doc(`_control/temporalMediaDiagnosticStoragePreparation-${storageOperation}`).get();
+              const receipt = preparation.data(), state = receipt?.identityState;
+              if (!preparation.exists || !preparation.createTime?.isEqual(preparation.updateTime) ||
+                  receipt.operationId !== storageOperation || receipt.releaseId !== config.releaseId ||
+                  state?.stage !== 'completed' || state.plan?.operationId !== storageOperation ||
+                  state.plan.releaseId !== config.releaseId || state.plan.buildId !== platform.workerBuildId ||
+                  state.plan.evidenceDigest !== preparationArguments.digest || state.plan.bindingDigest !== receipt.bindingDigest ||
+                  proofDigest(receipt.operatorPrincipal ?? null) !== proofDigest(operatorPrincipal))
+                throw new Error('MEDIA_DIAGNOSTIC_STORAGE_PREPARATION_RECEIPT_UNCONFIRMED');
+              diagnosticStorageCertificate = state.certificate;
+              storagePreparationRef = preparation.ref;
+              storagePreparationProof = nativeSnapshotProof(preparation);
+              if (sealDiagnosticStorageFailure) {
+                if (!savedRecoveryPlan?.diagnosticStorage ||
+                    proofDigest(diagnosticStorageCertificate) !== proofDigest(savedRecoveryPlan.diagnosticStorage) ||
+                    proofDigest(storagePreparationProof) !== proofDigest(savedRecoveryPlan.diagnosticStoragePreparationProof))
+                  throw new Error('MEDIA_DIAGNOSTIC_STARTED_FAILURE_RESUME_REQUIRED');
+                diagnosticStorageFailure = await archiveMediaDiagnosticStartedFailure(mediaRecoveryStopOptions(), {
+                  preparationRef: storagePreparationRef, preparationProof: storagePreparationProof,
+                  assertCurrent: assertMediaRecoveryAncestors,
+                });
+                cloudIdentityPending = false;
+                operationVerified = true;
+                console.log(`Terminal started media diagnostic failure recorded at ${diagnosticStorageFailure.ref.path}.`);
+                return;
+              }
+            }
+            if (sealDiagnosticStorageFailure) throw new Error('MEDIA_DIAGNOSTIC_STARTED_FAILURE_RESUME_REQUIRED');
             const result=await operation.run({binding,config,firestore,bindingDigest,expectedAuthority,platform,role:operation.role,settings,operationId,releaseId:config.releaseId,
+              ...(diagnosticStorageCertificate ? { diagnosticStorageCertificate, diagnosticStoragePreparationProof: storagePreparationProof } : {}),
               ...(operation.mode==='restored'?{recoveryOperationId:ids.recovery,runtime:restoredMediaActivationRuntime({options:()=>({firebaseAuth:resources.auth,binding,config,platform,api,firestore,lockRef,controlRef,stateRef,ownedOperation,expectedAuthority,operationId,recoveryOperationId:ids.recovery,bindingDigest,releaseId:config.releaseId,role:'media',settings,evidenceDigest:preparationArguments.digest,receipts})})}:{}),
               ...(operation.mode==='recovery'?{runtime:Object.freeze({...canonicalMediaRecoveryRuntime,assertSupported:mediaRecoveryJobPreflight({options:mediaRecoveryStopOptions,
-                requireTaskAttestation: !hasSaved || !!currentOperation.get(operation.field)?.plan?.taskAttestationPublicKey}),drainJob:mediaRecoveryJobDrainage({options:mediaRecoveryStopOptions}),prepareTaskAttestation:(id,savedPlan)=>prepareMediaRecoveryTaskAttestation(attestationDirectory,id,savedPlan),launchJob:mediaRecoveryJobLauncher({options:mediaRecoveryStopOptions,attestationDirectory,setOwnedOperation:value=>{ownedOperation=value;}}),confirmStopped:mediaRecoveryStoppedConfirmation({options:mediaRecoveryStopOptions}),confirmNeverStarted:mediaRecoveryNeverStartedConfirmation({options:mediaRecoveryStopOptions}),drain:mediaRecoveryDrainage({options:()=>({binding,config,platform,api,firestore,lockRef,controlRef,stateRef,ownedOperation,expectedAuthority,operationId,bindingDigest})}),execute:mediaRecoveryExecution({options:()=>({binding,config,platform,api,firestore,lockRef,controlRef,stateRef,ownedOperation,expectedAuthority,operationId,bindingDigest}),setOwnedOperation:value=>{ownedOperation=value;}}),prepare:mediaRecoveryPreparation({options:()=>({firestore,lockRef,controlRef,stateRef,ownedOperation,expectedAuthority,config,operationId,bindingDigest}),setOwnedOperation:value=>{ownedOperation=value;}})})}:{}),
+                requireTaskAttestation: !hasSaved || !!currentOperation.get(operation.field)?.plan?.taskAttestationPublicKey}),drainJob:mediaRecoveryJobDrainage({options:mediaRecoveryStopOptions}),prepareTaskAttestation:(id,savedPlan)=>prepareMediaRecoveryTaskAttestation(attestationDirectory,id,savedPlan),launchJob:mediaRecoveryJobLauncher({options:mediaRecoveryStopOptions,attestationDirectory,setOwnedOperation:value=>{ownedOperation=value;}}),confirmStopped:mediaRecoveryStoppedConfirmation({options:mediaRecoveryStopOptions}),confirmNeverStarted:mediaRecoveryNeverStartedConfirmation({options:mediaRecoveryStopOptions}),drain:mediaRecoveryDrainage({options:()=>({binding,config,platform,api,firestore,lockRef,controlRef,stateRef,ownedOperation,expectedAuthority,operationId,bindingDigest})}),execute:mediaRecoveryExecution({options:mediaRecoveryStopOptions,setOwnedOperation:value=>{ownedOperation=value;}}),prepare:mediaRecoveryPreparation({options:mediaRecoveryStopOptions,setOwnedOperation:value=>{ownedOperation=value;}})})}:{}),
               authorizeMutation:async()=> {
-                await assertPoolReceiptsCurrent();
+                if (operation.mode === 'recovery') await assertMediaRecoveryAncestors();
+                else await assertPoolReceiptsCurrent();
                 return (operation.mode==='recovery'?assertMediaRecoveryAuthority:({controls:assertControlsPromotionAuthority,search:assertSearchPromotionAuthority,email:assertEmailPromotionAuthority,images:assertImagesPromotionAuthority,media:assertMediaPromotionAuthority}[operation.role]))({firestore,lockRef,controlRef,stateRef,ownedOperation,expectedAuthority,config,operationId,bindingDigest});
               },
               evidenceDigest:preparationArguments.digest,receipts,api:guardedPoolApi,saved:hasSaved?currentOperation.get(operation.field):undefined,
               observeProtection:async scope=>{
                 await assertPoolReceiptsCurrent();
-                return operation.mode==='recovery'?mediaRecoveryProtection({options:()=>({firebaseAuth:resources.auth,binding,config,platform,api,firestore,lockRef,controlRef,stateRef,ownedOperation,expectedAuthority,operationId,bindingDigest,releaseId:config.releaseId,role:'media',settings,evidenceDigest:preparationArguments.digest,receipts})})(scope):verifyCloudRunBootstrapProtection({binding,config,platform,firestore,role:operation.role,operationId,bindingDigest,expectedAuthority,releaseId:config.releaseId});
+                return operation.mode==='recovery'?mediaRecoveryProtection({options:()=>({ ...mediaRecoveryStopOptions(), firebaseAuth:resources.auth })})(scope):verifyCloudRunBootstrapProtection({binding,config,platform,firestore,role:operation.role,operationId,bindingDigest,expectedAuthority,releaseId:config.releaseId});
               },
               observeRegistration:()=>verifyCloudRunBootstrapRegistration({binding,config,platform,firestore,api:guardedPoolApi,role:operation.role,operationId}),
               save:async identityState=>{
                 cloudIdentityPending=true;
                 ownedOperation=await operation.checkpoint({firestore,lockRef,controlRef,stateRef,immutableReceipt,creationReceipt,ownedOperation,
-                  expectedAuthority,config,operationId,bindingDigest,operatorPrincipal,identityState});
+                  expectedAuthority,config,operationId,bindingDigest,operatorPrincipal,identityState,
+                  ...(operation.mode === 'recovery' ? { assertOriginalRecoveryAuthority: assertMediaRecoveryAncestors } : {})});
               }}, operation.mode==='promote'&&operation.role==='media'
                 ? () => {
                     const observationToken = token();
@@ -2522,6 +2736,39 @@ await runWithCleanup(
             )
               throw new Error('Owned release operation changed; retained for inspection');
             if (!canReleaseOwnedOperationLock(lock.data(), operationVerified)) return;
+            if (sealDiagnosticStorageFailure) {
+              if (!diagnosticStorageFailure) throw new Error('MEDIA_DIAGNOSTIC_STARTED_FAILURE_UNCONFIRMED');
+              const { ref, proof } = diagnosticStorageFailure;
+              const receipt = await tx.get(ref);
+              assertNativeSnapshot(proof, receipt);
+              if (receipt.get('operationId') !== operationId || receipt.get('bindingDigest') !== bindingDigest ||
+                  proofDigest(receipt.get('originalAuthority')) !== proofDigest(ownedOperation))
+                throw new Error('MEDIA_DIAGNOSTIC_STARTED_FAILURE_UNCONFIRMED');
+              const [original, replacement] = await tx.getAll(
+                firestore.doc(`_control/temporalMediaRecoveryKernel-${operationId}`),
+                firestore.doc(`_control/temporalMediaRecoveryReplacementKernel-${operationId}`)
+              );
+              const stamps = [original, replacement].map(row => row.exists ? nativeSnapshotProof(row) : null);
+              if (proofDigest(stamps) !== proofDigest(receipt.get('facts').slice(2, 4)))
+                throw new Error('MEDIA_DIAGNOSTIC_STARTED_FAILURE_UNCONFIRMED');
+              const scope = { closedFailure: {
+                workflowId: receipt.get('workflow.workflowId'), runId: receipt.get('workflow.runId'),
+                workers: { 1: original.get('worker'), ...(replacement.exists ? { 2: replacement.get('worker') } : {}) },
+              } };
+              const work = await readMediaDiagnosticDurableWork(firestore, tx, receipt.get('plan'), operationId, scope);
+              if (proofDigest(work) !== receipt.get('closure.durableWorkSHA256'))
+                throw new Error('MEDIA_DIAGNOSTIC_STARTED_FAILURE_WORK_CHANGED');
+            }
+            if (diagnosticStorageAction && (lock.get('cloudDiagnosticStoragePreparation') ||
+                lock.get('cloudDiagnosticStorageRetirement'))) {
+              if (!diagnosticStorageCompletion) throw new Error('MEDIA_DIAGNOSTIC_STORAGE_RECEIPT_UNCONFIRMED');
+              const { ref, proof, field } = diagnosticStorageCompletion;
+              const receipt = await tx.get(ref);
+              assertNativeSnapshot(proof, receipt);
+              if (!lock.updateTime.isEqual(receipt.createTime) ||
+                  proofDigest(receipt.get('identityState')) !== proofDigest(lock.get(field)))
+                throw new Error('MEDIA_DIAGNOSTIC_STORAGE_RECEIPT_UNCONFIRMED');
+            }
             if (action === 'prepare-cloud-run-dispatch-diagnostic' && lock.get('cloudDispatchDiagnostic')) {
               const final = await tx.get(firestore.doc(dispatchDiagnosticCompletionPath(operationId)));
               assertNativeSnapshot(diagnosticCompletionProof, final);

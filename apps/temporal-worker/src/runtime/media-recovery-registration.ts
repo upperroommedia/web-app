@@ -32,12 +32,14 @@ function fail(): never {
 type Options = {
   firestore: Firestore;
   auth: Auth;
-  bucket: Bucket;
   client: Client;
   witness: WorkerWitness;
   operationId: string;
   kernel: unknown;
-  acquire: (ref: MediaJobRef) => Promise<MediaOutcome>;
+  createAcquisition: (cap: Awaited<ReturnType<typeof mediaRecoveryKernelContext>>) => {
+    bucket: Bucket;
+    acquire: (ref: MediaJobRef) => Promise<MediaOutcome>;
+  };
 };
 export async function createMediaRecoveryRegistration(o: Options) {
   const cap = await mediaRecoveryKernelContext(o.firestore, o.auth, o.witness, o.operationId);
@@ -48,7 +50,7 @@ export async function createMediaRecoveryRegistration(o: Options) {
     o.kernel,
     o.witness
   );
-  return registration(o, cap, birth, () =>
+  return registration({ ...o, ...o.createAcquisition(cap) }, cap, birth, () =>
     readMediaRecoveryKernelBirth(o.firestore, o.operationId, cap.context.intentSHA256, o.kernel, o.witness)
   );
 }
@@ -57,14 +59,15 @@ export async function createMediaRecoveryReplacementRegistration(o: Options) {
   const cap = await mediaReplacementCapability(o.firestore, base);
   const read = () => readReplacementBirth(o.firestore, cap, o.kernel, o.witness);
   const birth = await read();
-  const result = await registration(o, cap, birth, read, cap.replacement);
+  const dependencies = o.createAcquisition(cap);
+  const result = await registration({ ...o, ...dependencies }, cap, birth, read, cap.replacement);
   return {
     ...result,
     activities: Object.freeze({
       admitMediaRecoveryWork: async () => fail(),
       acquireMedia: replacementMediaAcquisition({
         db: o.firestore,
-        bucket: o.bucket,
+        bucket: dependencies.bucket,
         client: o.client,
         cap,
         birth,
@@ -74,7 +77,7 @@ export async function createMediaRecoveryReplacementRegistration(o: Options) {
   };
 }
 async function registration(
-  o: Options,
+  o: Options & ReturnType<Options['createAcquisition']>,
   cap: Awaited<ReturnType<typeof mediaRecoveryKernelContext>>,
   birth: any,
   readBirth: () => Promise<any>,
@@ -166,6 +169,7 @@ async function registration(
   return {
     cap,
     birth,
+    bucket: o.bucket,
     authorize,
     activities: Object.freeze({ admitMediaRecoveryWork: producer.admitMediaRecoveryWork, acquireMedia }),
   };

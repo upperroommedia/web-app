@@ -5,6 +5,7 @@ import { proofDigest as hash } from './temporal-release-runtime.mjs';
 import { readMediaRecoveryAncestorAccess, readMediaRecoveryNormalOrigin } from './temporal-bootstrap-pool.mjs';
 import { verifyPreparedPoolMetadata } from './temporal-prepare-cloud-pool.mjs';
 import { observeMediaDiskQuota, assertMediaDiskQuotaFresh } from './temporal-media-disk-quota.mjs';
+import { observeMediaDiagnosticStorage } from './temporal-media-diagnostic-storage.mjs';
 const fail = () => {
   throw new Error('MEDIA_RECOVERY_CYCLE_UNCONFIRMED');
 };
@@ -17,6 +18,8 @@ const freeze = (x) => {
   return x;
 };
 const sha = (x) => typeof x === 'string' && /^[a-f0-9]{64}$/.test(x);
+const immutablePreparation = proof => proof && sha(proof.dataDigest) && proof.createTime &&
+  equal(proof.createTime, proof.updateTime);
 const operation = (x) =>
   typeof x === 'string' &&
   /^projects\/(urm-app-staging|251680231116)\/locations\/us-central1\/operations\/[A-Za-z0-9_-]{1,200}$/.test(x)
@@ -128,6 +131,16 @@ export async function runMediaRecoveryCycle(o) {
   const taskAttestationPublicKey = jobMode && typeof runtime.prepareTaskAttestation === 'function'
     ? runtime.prepareTaskAttestation(o.operationId, state?.plan)
     : undefined;
+  const observeDiagnosticStorage = requireEmpty => observeMediaDiagnosticStorage({
+    api, releaseId: o.releaseId, buildId: ancestors.binding.buildId, requireEmpty,
+  });
+  const legacyAttestedPlan = state?.plan?.taskAttestationPublicKey && !state.plan.diagnosticStorage;
+  if (legacyAttestedPlan && state.stage !== 'completed')
+    throw new Error('MEDIA_RECOVERY_EXISTING_ATTESTED_PLAN_REQUIRES_ORIGINAL_OPERATOR');
+  const diagnosticStorage = taskAttestationPublicKey === undefined || legacyAttestedPlan
+    ? undefined : await observeDiagnosticStorage(!state);
+  if (diagnosticStorage && (!equal(diagnosticStorage, o.diagnosticStorageCertificate) ||
+      !immutablePreparation(o.diagnosticStoragePreparationProof))) fail();
   const proposed = {
     schemaVersion: 1,
     operationId: o.operationId,
@@ -145,6 +158,9 @@ export async function runMediaRecoveryCycle(o) {
     diagnosticTemplate: diagnosticTemplate(ancestors.zeroPlan.body.template, o.operationId),
     contract,
     ...(taskAttestationPublicKey === undefined ? {} : { taskAttestationPublicKey }),
+    ...(diagnosticStorage === undefined ? {} : {
+      diagnosticStorage, diagnosticStoragePreparationProof: o.diagnosticStoragePreparationProof,
+    }),
     createdAt,
     expiresAt: Date.parse(createdAt) + 300000,
   };
@@ -365,6 +381,7 @@ export async function runMediaRecoveryCycle(o) {
       return state;
     }
     const protect = async () => {
+      if (diagnosticStorage && !equal(await observeDiagnosticStorage(false), diagnosticStorage)) fail();
       await checkNormalZero();
       await guard('diagnostic', plan.origin);
       const quota = await observeMediaDiskQuota(ancestors.zeroPlan, api);

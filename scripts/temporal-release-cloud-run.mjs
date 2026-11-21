@@ -1,5 +1,7 @@
 import { observeMediaRecoveryPhasePool } from './temporal-media-recovery-phase-pool.mjs';
 import { mediaRecoveryTaskIdentity, sameMediaRecoveryTask } from './temporal-media-recovery-job.mjs';
+import { verifyMediaRecoveryTaskAttestation } from './temporal-media-recovery-task-attestation.mjs';
+import { observeClosedMediaDiagnosticFailure } from './temporal-media-recovery-native-failure.mjs';
 import { assertWorkerHandoffPromotion } from './temporal-worker-handoff-plan.mjs';
 import { readMediaRecoveryNormalOrigin } from './temporal-bootstrap-pool.mjs';
 import { assertMediaDiskQuotaFresh, observeMediaDiskQuota } from './temporal-media-disk-quota.mjs';
@@ -12,7 +14,7 @@ import {readRestoredMediaRecoveryPlan} from './temporal-restored-media-registrat
 import {scanRestoredMediaInventory} from './temporal-restored-media-inventory.mjs';
 import {readRestoredMediaActivationPool} from './temporal-restored-media-resources.mjs';
 import {assertRestoredMediaActivationAuthority,readRestoredMediaActivationAccess} from './temporal-media-restored-origin.mjs';
-import {scanPrivateMediaInventory} from './temporal-media-private-inventory.mjs';
+import { readMediaDiagnosticDurableWork, scanPrivateMediaInventory } from './temporal-media-private-inventory.mjs';
 import {observeMediaRecoveryProtection} from './temporal-media-recovery-protection.mjs';
 import {observeMediaRecoveryDiagnosticZeroPool,assertMediaZeroPoolSampleFresh,mediaDiagnosticNeverStartedProof} from './temporal-media-stop-confirmation.mjs';
 import {waitForMediaDiagnosticDrain,assertFreshMediaDiagnosticDrain,observeMediaDiagnosticNeverStarted,observeMediaDiagnosticStopEvents} from './temporal-media-diagnostic-drain.mjs';
@@ -117,7 +119,7 @@ export async function readCloudRunOperatorKey(path, expectedSHA256) {
 async function withNativeCloudRunClient({ binding, config, platform, firestore }, observe, purpose) {
   validateCloudRunReleasePlatform(platform);
   if (['FIRESTORE_EMULATOR_HOST', 'FIREBASE_AUTH_EMULATOR_HOST', 'FIREBASE_DATABASE_EMULATOR_HOST',
-    'FIREBASE_STORAGE_EMULATOR_HOST'].some(name => process.env[name]))
+    'FIREBASE_STORAGE_EMULATOR_HOST', 'STORAGE_EMULATOR_HOST'].some(name => process.env[name]))
     throw new Error('CLOUD_RUN_RELEASE_REFUSES_EMULATOR_TRANSPORT');
   const key = await readCloudRunOperatorKey(platform.operatorApiKeyFile, platform.operatorApiKeySHA256);
   const { loadVerifiedRuntimeApplication } = await import('./temporal-release-runtime.mjs');
@@ -989,7 +991,7 @@ function observedMediaRecoveryRoleBinding(o) {
     o.firestore.databaseId !== '(default)' || o.config.projectId !== platform.firebaseProjectId ||
     o.config.environment !== platform.environment || o.config.releaseId !== o.releaseId ||
     o.config.compatibilityCommit !== media.buildId ||
-    ['FIRESTORE_EMULATOR_HOST', 'FIREBASE_AUTH_EMULATOR_HOST', 'FIREBASE_DATABASE_EMULATOR_HOST', 'FIREBASE_STORAGE_EMULATOR_HOST']
+    ['FIRESTORE_EMULATOR_HOST', 'FIREBASE_AUTH_EMULATOR_HOST', 'FIREBASE_DATABASE_EMULATOR_HOST', 'FIREBASE_STORAGE_EMULATOR_HOST', 'STORAGE_EMULATOR_HOST']
       .some((name) => process.env[name])
   ) fail();
   return media;
@@ -1214,6 +1216,142 @@ export const drainCloudRunMediaRecoveryJob = o => withNativeCloudRunClient(o, as
   } while (performance.now() < deadline);
   throw new Error('MEDIA_RECOVERY_JOB_DRAIN_UNCONFIRMED');
 });
+
+/** Dedicated Storage grant changes use fresh normal-zero, native private queue
+ * and compute observations. Historical termination remains separately sealed. */
+export const observeMediaDiagnosticStorageFence = (o, observeAuthority) =>
+  withNativeCloudRunClient(o, async (client, application) => {
+    const wall = Date.now(), monotonic = performance.now();
+    const deadline = wall + 5000;
+    const rpc = fn => client.connection.withDeadline(deadline, fn);
+    const authority = await observeAuthority();
+    const { plan, termination, ready, worker, failed } = authority;
+    if (failed) {
+      const { record, certificate, original, replacement } = failed;
+      const [observed, pool] = await Promise.all([
+        observeClosedMediaDiagnosticFailure({ ...record, api: o.api, application, client, db: o.firestore,
+          certificate, original, replacement }),
+        readMediaRecoveryNormalOrigin(o),
+      ]);
+      if (recoveryHash(observed.workflow) !== recoveryHash(record.workflow) ||
+          recoveryHash(observed.jobTermination) !== recoveryHash(record.jobTermination) ||
+          recoveryHash(await observeAuthority()) !== recoveryHash(authority) ||
+          pool.pool.revision !== plan.origin.revision || pool.pool.etag !== plan.origin.etag ||
+          Date.now() < wall || Date.now() >= deadline || performance.now() - monotonic >= 5000)
+        throw new Error('MEDIA_DIAGNOSTIC_STORAGE_FAILED_EPISODE_CHANGED');
+      return { poolSHA256: recoveryHash(pool.pool), runnerUniqueId: pool.access.runnerUniqueId,
+        observedAt: wall, observedMonotonic: monotonic, failedClosure: {
+          failureSHA256: recoveryHash(record), workflowHistorySHA256: observed.workflow.historySHA256,
+          jobTerminationSHA256: observed.jobTermination.proofSHA256,
+          inventorySHA256: observed.closure.inventorySHA256, computeSHA256: observed.closure.computeSHA256,
+          workflowFailed: true, jobFailed: true, queuesEmpty: true, computeAbsent: true, noPendingOperations: true,
+        } };
+    }
+    const scanPlan = plan ?? { buildId: o.platform.workerBuildId, job: true };
+    const scan = () => scanPrivateMediaInventory({
+      client, db: o.firestore, plan: scanPlan, operationId: plan?.operationId ?? o.operationId,
+      read: fn => fn(), rpc, allowAbsent: !plan, auth: plan ? { ready, worker } : {},
+    });
+    const nativeTermination = async () => {
+      if (!plan) return null;
+      const { jobRun, custody, taskIdentity, proofSHA256 } = termination;
+      const fact = await observeMediaRecoveryJobTermination({ api: o.api, plan, run: jobRun, custody, taskIdentity });
+      if (fact.proofSHA256 !== proofSHA256) throw new Error('MEDIA_DIAGNOSTIC_STORAGE_TERMINATION_CHANGED');
+      return fact.proofSHA256;
+    };
+    const [pool, inventory] = await Promise.all([
+      readMediaRecoveryNormalOrigin(o), scan(),
+      observeNamespaceComputeIsolation(client, o.platform.temporalNamespace, { deadline }),
+      nativeTermination(),
+    ]);
+    if (recoveryHash(await observeAuthority()) !== recoveryHash(authority))
+      throw new Error('MEDIA_DIAGNOSTIC_STORAGE_FENCE_CHANGED');
+    if (inventory.ownedPollers.length || inventory.jobWork?.candidateRows.length !== (plan ? 1 : 0) ||
+        (plan && (pool.pool.revision !== plan.origin.revision || pool.pool.etag !== plan.origin.etag)) ||
+        Date.now() < wall || Date.now() >= deadline || performance.now() - monotonic >= 5000)
+      throw new Error('MEDIA_DIAGNOSTIC_STORAGE_FENCE_UNCONFIRMED');
+    return { poolSHA256: recoveryHash(pool.pool), runnerUniqueId: pool.access.runnerUniqueId,
+      observedAt: wall, observedMonotonic: monotonic };
+  }, 'media-diagnostic-storage-fence');
+
+/** The original lock is still held. This records only a verified started
+ * failure and preserves the provider and SDK journals for later grant retirement. */
+export const archiveMediaDiagnosticStartedFailure = (o, { preparationRef, preparationProof, assertCurrent }) =>
+  withNativeCloudRunClient(o, async (client, application) => {
+    const db = o.firestore;
+    const id = o.operationId;
+    const fail = () => { throw new Error('MEDIA_DIAGNOSTIC_STARTED_FAILURE_UNCONFIRMED'); };
+    const ref = kind => db.doc(`_control/temporalMediaRecovery${kind}-${id}`);
+    const archive = db.doc(`_control/temporalMediaDiagnosticStartedFailure-${id}`);
+    const read = async tx => {
+      const [held, control, state, prepared, start, certificate, original, replacement, pending, success] = await tx.getAll(
+        o.lockRef, o.controlRef, o.stateRef, preparationRef, ref('Start'), ref('TaskAttestation'),
+        ref('Kernel'), ref('ReplacementKernel'), ref('ReplacementIntent'), db.doc(`_control/temporalCloudMediaRecovery-${id}`)
+      );
+      assertNativeSnapshot(o.ownedOperation, held);
+      assertNativeSnapshot(o.expectedAuthority.control, control);
+      assertNativeSnapshot(o.expectedAuthority.state, state);
+      assertNativeSnapshot(preparationProof, prepared);
+      if (held.get('action') !== 'diagnose-cloud-run-media-recovery' || held.get('operationId') !== id ||
+          held.get('releaseId') !== o.releaseId || held.get('bindingDigest') !== o.bindingDigest ||
+          state.get('phase') !== 'provider-usage-ready' || control.get('admission') !== 'paused' ||
+          o.config.domains.some(domain => control.get(`domains.${domain}.admission`) !== 'paused') ||
+          success.exists || !start.exists || !original.exists || (pending.exists && !replacement.exists) ||
+          !certificate.exists || !certificate.createTime.isEqual(certificate.updateTime)) fail();
+      const plan = held.get('cloudMediaRecovery.plan');
+      const provider = held.get('mediaRecoveryJobProvider');
+      const intent = held.get('mediaRecoveryWorkflowStart');
+      if (held.get('cloudMediaRecovery.stage') !== 'prepared' || plan?.operationId !== id || plan.releaseId !== o.releaseId ||
+          !plan.diagnosticStorage || Date.now() <= plan.expiresAt ||
+          held.get('mediaRecoveryTaskAttestation.certificateSHA256') !== recoveryHash(certificate.data()) ||
+          recoveryHash(prepared.get('identityState.certificate')) !== recoveryHash(plan.diagnosticStorage)) fail();
+      await assertCurrent(tx);
+      const closedFailure = { workflowId: `media-recovery-${id}`, runId: start.get('runId'),
+        workers: { 1: original.get('worker'), ...(replacement.exists ? { 2: replacement.get('worker') } : {}) } };
+      const durableWork = await readMediaDiagnosticDurableWork(db, tx, plan, id, { closedFailure });
+      return { plan, provider, intent, start: start.data(),
+        certificate: verifyMediaRecoveryTaskAttestation(certificate.data(), plan.taskAttestationPublicKey),
+        original: original.data(), replacement: replacement.data(),
+        stamps: [start, certificate, original, replacement, pending].map(row => row.exists ? nativeSnapshotProof(row) : null),
+        durableWorkSHA256: recoveryHash(durableWork),
+      };
+    };
+    const native = async facts => {
+      const [observed, pool] = await Promise.all([
+        observeClosedMediaDiagnosticFailure({ ...facts, api: o.api, application, client, db }),
+        readMediaRecoveryNormalOrigin(o),
+      ]);
+      if (pool.pool.revision !== facts.plan.origin.revision || pool.pool.etag !== facts.plan.origin.etag) fail();
+      return observed;
+    };
+    const facts = await db.runTransaction(read, { readOnly: true });
+    const first = await native(facts);
+    const result = await db.runTransaction(async tx => {
+      const wall = Date.now(), mono = performance.now();
+      const [existing, current, second] = await Promise.all([tx.get(archive), read(tx), native(facts)]);
+      if (recoveryHash(current.stamps) !== recoveryHash(facts.stamps) ||
+          current.durableWorkSHA256 !== second.closure.durableWorkSHA256 ||
+          facts.durableWorkSHA256 !== first.closure.durableWorkSHA256 ||
+          recoveryHash(second) !== recoveryHash(first)) fail();
+      const record = {
+        schemaVersion: 1, kind: 'staging-media-diagnostic-started-failure', projectId: 'urm-app-staging',
+        releaseId: o.releaseId, buildId: facts.plan.buildId, bindingDigest: o.bindingDigest, operationId: id,
+        preparationProof, plan: facts.plan, provider: facts.provider, start: facts.start, intent: facts.intent,
+        ...first, originalAuthority: o.ownedOperation, facts: facts.stamps,
+      };
+      if (existing.exists) {
+        if (!existing.createTime.isEqual(existing.updateTime) || recoveryHash(existing.data()) !== recoveryHash(record)) fail();
+        return record;
+      }
+      if (Date.now() < wall || Date.now() - wall >= 5000 || performance.now() - mono >= 5000) fail();
+      tx.create(archive, record);
+      return record;
+    }, { maxAttempts: 1 });
+    const closed = await archive.get();
+    if (!closed.exists || !closed.createTime.isEqual(closed.updateTime) ||
+        recoveryHash(closed.data()) !== recoveryHash(result)) fail();
+    return { ref: archive, proof: nativeSnapshotProof(closed) };
+  }, 'media-diagnostic-started-failure-archive');
 
 /** Read-only namespace/partition drain. Native poller caches may outlive close;
  * only fresh empty native observations permit the immutable drain checkpoint. */

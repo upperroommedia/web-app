@@ -10,6 +10,7 @@ import { CRC32C, type Bucket } from '@google-cloud/storage';
 import { createHash, randomUUID } from 'node:crypto';
 import { createDurableJobStore } from '../../../../packages/orchestration/src/job-store';
 import { computeProcessAudioRequestVersion } from '../../../../packages/contracts/processAudioQueue';
+import { mediaRecoveryBucketName } from './media-recovery-storage';
 import { createActorAuthorization } from './authorization';
 import { workerReadinessDigest as hash } from './readiness-probe';
 import type { WorkerWitness } from './worker-witness';
@@ -126,7 +127,6 @@ export function createMediaRecoveryWorkActivities(o: {
           !('projectId' in db) ||
           db.projectId !== projectId ||
           db.databaseId !== '(default)' ||
-          bucket.name !== 'urm-app-staging.firebasestorage.app' ||
           bucket.storage.retryOptions.autoRetry !== false
         )
           fail();
@@ -201,7 +201,15 @@ export function createMediaRecoveryWorkActivities(o: {
           const start = parent.get('mediaRecoveryWorkflowStart');
           const job = witness.cloudRunJob;
           const provider = parent.get('mediaRecoveryJobProvider');
-          if (job) await recheckMediaRecoveryTaskAttestation(db, tx, operationId, job, p, parent.get('mediaRecoveryTaskAttestation'));
+          if (job)
+            await recheckMediaRecoveryTaskAttestation(
+              db,
+              tx,
+              operationId,
+              job,
+              p,
+              parent.get('mediaRecoveryTaskAttestation')
+            );
           const ownedCompute = job
             ? !cloud &&
               !cycle?.start &&
@@ -250,6 +258,7 @@ export function createMediaRecoveryWorkActivities(o: {
             p.contract?.queue !== MEDIA_RECOVERY_QUEUE ||
             p.contract?.workflowType !== 'MediaRecoveryProbe' ||
             p.contract?.protocol !== 'owned-media-recovery-v1' ||
+            bucket.name !== mediaRecoveryBucketName(p, Boolean(job)) ||
             !ownedCompute ||
             witness.buildId !== p.buildId ||
             start?.stage !== 'attempted' ||

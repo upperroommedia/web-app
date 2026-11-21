@@ -10,6 +10,7 @@ import { workerReadinessDigest as hash } from './readiness-probe';
 import { validateMediaKernelBirthRecord } from './media-kernel-supervisor';
 import { readMediaRecoveryOriginalLineage } from './media-recovery-replacement';
 import { originalMediaArtifacts } from './media-recovery-original-fault';
+import { mediaRecoveryBucketName } from './media-recovery-storage';
 import { mediaRecoveryNativeStart } from './media-recovery-work';
 import { mediaRecoveryPinnedVersion } from './media-recovery-pin';
 import {
@@ -97,11 +98,18 @@ async function collect(o: Options, deadline: number) {
         if (p.taskAttestationPublicKey) {
           const cert = await tx.get(db.doc(mediaRecoveryTaskAttestationPath(id)));
           const proof = facts.Startup.taskAttestation;
-          if (!cert.exists || !cert.createTime?.isEqual(cert.updateTime!) ||
-              !proof || proof.digest !== hash(cert.data()) ||
-              !op.mediaRecoveryTaskAttestation || op.mediaRecoveryTaskAttestation.certificateSHA256 !== proof.digest ||
-              proof.seconds !== cert.createTime.seconds || proof.nanoseconds !== cert.createTime.nanoseconds ||
-              hash(facts.ReplacementStartup.taskAttestation ?? null) !== hash(proof)) fail();
+          if (
+            !cert.exists ||
+            !cert.createTime?.isEqual(cert.updateTime!) ||
+            !proof ||
+            proof.digest !== hash(cert.data()) ||
+            !op.mediaRecoveryTaskAttestation ||
+            op.mediaRecoveryTaskAttestation.certificateSHA256 !== proof.digest ||
+            proof.seconds !== cert.createTime.seconds ||
+            proof.nanoseconds !== cert.createTime.nanoseconds ||
+            hash(facts.ReplacementStartup.taskAttestation ?? null) !== hash(proof)
+          )
+            fail();
         }
         const c = op.cloudMediaRecovery,
           j = facts.Journal,
@@ -323,8 +331,12 @@ async function collectWithEpisodeReader(
     [f.Startup, old, old.context.intentSHA256],
     [f.ReplacementStartup, k, derived],
   ]) {
-    exact(startup, 'bundle,capacity,intentSHA256,kernel,kind,observedAt,operationId,schemaVersion,' +
-      (p.taskAttestationPublicKey ? 'taskAttestation,' : '') + 'worker');
+    exact(
+      startup,
+      'bundle,capacity,intentSHA256,kernel,kind,observedAt,operationId,schemaVersion,' +
+        (p.taskAttestationPublicKey ? 'taskAttestation,' : '') +
+        'worker'
+    );
     exact(startup.bundle, 'buildId,bundleBytes,bundleSHA256,schemaVersion');
     exact(startup.kernel, 'birthDigest,operationId');
     if (
@@ -393,9 +405,9 @@ async function collectWithEpisodeReader(
   )
     fail();
   const bucket = new Storage({ projectId: 'urm-app-staging', retryOptions: { autoRetry: false } }).bucket(
-    'urm-app-staging.firebasestorage.app'
+    mediaRecoveryBucketName(p)
   );
-  if (hash(await originalMediaArtifacts(db, bucket, id)) !== hash(ready.inventory)) fail();
+  if (hash(await originalMediaArtifacts(db, bucket, id, p)) !== hash(ready.inventory)) fail();
   const handle = o.client.workflow.getHandle(ready.workflowId, ready.runId, { followRuns: false });
   const describe = async () => {
     fresh();
@@ -486,7 +498,7 @@ async function collectWithEpisodeReader(
   exact(result, 'grantSHA256,operationId,runId');
   if (result.operationId !== id || result.runId !== ready.runId || result.grantSHA256 !== ready.grantSHA256) fail();
   if (
-    hash(await originalMediaArtifacts(db, bucket, id)) !== hash(ready.inventory) ||
+    hash(await originalMediaArtifacts(db, bucket, id, p)) !== hash(ready.inventory) ||
     (await describe()) !== nativeBefore
   )
     fail();
@@ -553,22 +565,29 @@ export async function collectMediaRecoveryExecution(o: Options) {
  * private journal; this API cannot start, signal, fork, adopt or renew work. */
 export async function waitForMediaRecoveryEpisode(o: Omit<Options, 'image'> & { runId: string }) {
   let active = true;
-  const overall = Date.now() + 90000,
-    pollUntil = Math.min(overall, o.plan.expiresAt + 30000);
-  const boundedRead = async <T>(promise: Promise<T>): Promise<T> => {
-    const end = Math.min(overall, Date.now() + 5000);
+  const started = Date.now();
+  const monotonicStart = performance.now();
+  const now = () => Math.max(Date.now(), started + performance.now() - monotonicStart);
+  const overall = started + 90000;
+  const pollUntil = Math.min(overall, o.plan.expiresAt + 30000);
+  const historical = started >= pollUntil;
+  const deadline = historical ? overall : pollUntil;
+  const boundedRead = async <T>(read: (rpcDeadline: number) => Promise<T>): Promise<T> => {
+    const remaining = Math.min(5000, deadline - now());
+    if (remaining <= 0) fail();
+    const end = now() + remaining;
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       const value = await Promise.race([
-        promise,
+        read(Date.now() + remaining),
         new Promise<never>((_, reject) => {
           timer = setTimeout(
             () => reject(new Error('MEDIA_RECOVERY_COLLECTION_UNCONFIRMED')),
-            Math.max(0, end - Date.now())
+            Math.max(0, end - now())
           );
         }),
       ]);
-      if (Date.now() >= end) fail();
+      if (now() >= end) fail();
       return value;
     } catch {
       active = false;
@@ -581,12 +600,12 @@ export async function waitForMediaRecoveryEpisode(o: Omit<Options, 'image'> & { 
     if (!/^[a-f0-9-]{36}$/.test(o.runId) || !Number.isFinite(pollUntil)) fail();
     const handle = o.client.workflow.getHandle(`media-recovery-${o.operationId}`, o.runId, { followRuns: false });
     let first = true;
-    while (first || Date.now() < pollUntil) {
+    while (first || (!historical && now() < deadline)) {
       first = false;
-      const ready = await boundedRead(
+      const ready = await boundedRead(() =>
         o.db.runTransaction(
           async (tx) => {
-            if (!active || Date.now() >= overall) fail();
+            if (!active || now() >= deadline) fail();
             const paths = [
               '_control/temporalReleaseOperation',
               '_control/temporalRelease',
@@ -647,9 +666,9 @@ export async function waitForMediaRecoveryEpisode(o: Omit<Options, 'image'> & { 
       );
       // One historical GET-only check is always allowed. Incomplete work cannot
       // obtain more polling time after its original window has ended.
-      if (!ready && Date.now() >= pollUntil) fail();
-      const d = await boundedRead(
-        o.client.connection.withDeadline(Math.min(overall, Date.now() + 5000), () => handle.describe())
+      if (historical && !ready) fail();
+      const d = await boundedRead((rpcDeadline) =>
+        o.client.connection.withDeadline(rpcDeadline, () => handle.describe())
       );
       const wi = d.raw.workflowExecutionInfo,
         vi = wi?.versioningInfo,
@@ -663,12 +682,11 @@ export async function waitForMediaRecoveryEpisode(o: Omit<Options, 'image'> & { 
       )
         fail();
       mediaRecoveryPinnedVersion(vi!.versioningOverride, version);
-      if (ready) {
-        if (wi!.status !== 2) fail();
-        return;
-      }
-      if (Date.now() >= pollUntil) fail();
-      await new Promise((r) => setTimeout(r, Math.min(250, pollUntil - Date.now())));
+      // Process closure and Workflow completion arrive through separate systems.
+      // Only the same pinned run completing can finish the original wait.
+      if (ready && wi!.status === 2) return;
+      if (historical || now() >= deadline) fail();
+      await new Promise((r) => setTimeout(r, Math.max(0, Math.min(250, deadline - now()))));
     }
     return fail();
   } catch {

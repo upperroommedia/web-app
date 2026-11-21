@@ -9,6 +9,7 @@ import type { MediaJobRef, MediaOutcome } from '../../../process-audio/src/tempo
 import { workerReadinessDigest as hash } from './readiness-probe';
 import { superviseMediaRecoveryOriginal } from './media-kernel-supervisor';
 import { mediaRecoveryPinnedVersion } from './media-recovery-pin';
+import { mediaRecoveryBucketName, type MediaRecoveryStoragePlan } from './media-recovery-storage';
 import { CRC32C } from '@google-cloud/storage';
 const MEDIA_RECOVERY_DEPLOYMENT = 'urm-worker-media-recovery-staging';
 import type { mediaRecoveryKernelContext } from './media-recovery-capability';
@@ -33,8 +34,18 @@ const digestBytes = (b: Buffer) => createHash('sha256').update(b).digest('hex');
 const path = (kind: string, cap: Capability) => `_control/temporalMediaRecovery${kind}-${cap.context.operationId}`;
 /** All versions, current identities and bytes of BOTH source/processed objects.
  * Fixed diagnostic input only; bounds never permit a business-media download. */
-export async function originalMediaArtifacts(db: Firestore, bucket: Bucket, operationId: string) {
-  if (!/^[a-f0-9-]{36}$/.test(operationId) || bucket.name !== 'urm-app-staging.firebasestorage.app') fail();
+export async function originalMediaArtifacts(
+  db: Firestore,
+  bucket: Bucket,
+  operationId: string,
+  plan?: MediaRecoveryStoragePlan
+) {
+  if (
+    !/^[a-f0-9-]{36}$/.test(operationId) ||
+    (plan && plan.operationId !== operationId) ||
+    bucket.name !== mediaRecoveryBucketName(plan)
+  )
+    fail();
   const id = `media-recovery-${operationId}`,
     prefix = `workflow-audio/${id}/`;
   const request = await bounded(db.doc(`temporalMediaRequests/${id}`).get());
@@ -216,10 +227,13 @@ export function holdOriginalMediaCompletion(o: {
       info.workflowExecution?.workflowId !== `media-recovery-${o.cap.context.operationId}`
     )
       fail();
+    let phase = 'acquire';
     try {
       const result = await o.acquire(ref);
       if (result.kind !== 'ready' || context.cancellationSignal.aborted) fail();
-      const inventory = await originalMediaArtifacts(o.db, o.bucket, o.cap.context.operationId);
+      phase = 'verify-artifacts';
+      const inventory = await originalMediaArtifacts(o.db, o.bucket, o.cap.context.operationId, o.cap.plan);
+      phase = 'verify-workflow';
       const description = await bounded(
         o.client.workflow
           .getHandle(info.workflowExecution!.workflowId, info.workflowExecution!.runId, { followRuns: false })
@@ -236,6 +250,7 @@ export function holdOriginalMediaCompletion(o: {
       )
         fail();
       mediaRecoveryPinnedVersion(vi!.versioningOverride, vi!.deploymentVersion);
+      phase = 'verify-admitted-work';
       await bounded(o.db.runTransaction(o.cap.authorize, { readOnly: true }));
       o.cap.checkFresh();
       const work = (await bounded(o.db.doc(path('Work', o.cap)).get())).data();
@@ -247,6 +262,7 @@ export function holdOriginalMediaCompletion(o: {
       )
         fail();
       if (context.cancellationSignal.aborted) fail();
+      phase = 'verify-pending-attempt';
       const nativeAttempt = await originalPendingAttempt(o.client, o.cap, {
         workflowId: info.workflowExecution!.workflowId,
         runId: info.workflowExecution!.runId,
@@ -269,6 +285,7 @@ export function holdOriginalMediaCompletion(o: {
         inventory,
         observedAt: new Date().toISOString(),
       };
+      phase = 'record-original-readiness';
       await createOnce(o.db, path('OriginalReady', o.cap), record, async (tx) => {
         await o.cap.authorize(tx);
         const current = (await tx.get(o.db.doc(path('Work', o.cap)))).data();
@@ -280,7 +297,16 @@ export function holdOriginalMediaCompletion(o: {
       // still observed, but only actual parent-held SIGKILL can prove this fault.
       await context.cancelled;
       return fail();
-    } catch {
+    } catch (error) {
+      const code = (error as { code?: unknown } | null)?.code;
+      console.warn(
+        JSON.stringify({
+          event: 'temporal_media_recovery_original_fault_unconfirmed',
+          operationId: o.cap.context.operationId,
+          phase,
+          ...(typeof code === 'number' && Number.isSafeInteger(code) && code >= 0 && code <= 599 ? { code } : {}),
+        })
+      );
       return fail();
     }
   };
@@ -330,7 +356,8 @@ export async function superviseOriginalMediaFault(
         Date.parse(ready.observedAt) > Date.now() + 1000
       )
         fail();
-      if (hash(await originalMediaArtifacts(db, bucket, cap.context.operationId)) !== hash(ready.inventory)) fail();
+      if (hash(await originalMediaArtifacts(db, bucket, cap.context.operationId, cap.plan)) !== hash(ready.inventory))
+        fail();
       const nativeBefore = await originalPendingAttempt(client, cap, ready);
       if (hash(nativeBefore.proof) !== hash(ready.nativeAttempt)) fail();
       const attempt = {

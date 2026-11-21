@@ -1,4 +1,5 @@
 import { mediaJobParentFailureLine, mediaJobPhase } from './runtime/media-job-launch-failure';
+import { mediaRecoveryBucketName } from './runtime/media-recovery-storage';
 
 /** Fixed image entrypoint. Supervision is capability-bound to a canonical media
  * start; ordinary workers keep their original in-process entrypoint. */
@@ -98,7 +99,8 @@ async function launchMediaRecoveryApplication() {
     const { Storage } = await mediaJobPhase('dependencies', () => import('@google-cloud/storage'));
     if (process.env.TEMPORAL_MEDIA_RECOVERY_CHILD !== undefined) throw new Error('MEDIA_RECOVERY_PARENT_REQUIRED');
     const parent = await mediaJobPhase('worker-witness', () =>
-      loadWorkerWitness(config.buildId, true, process.env, async () => getFirestore(ownership.app)));
+      loadWorkerWitness(config.buildId, true, process.env, async () => getFirestore(ownership.app))
+    );
     const cap = await mediaJobPhase('capability', () =>
       mediaRecoveryKernelContext(getFirestore(ownership.app), getAuth(ownership.app), parent, config.operationId)
     );
@@ -117,7 +119,7 @@ async function launchMediaRecoveryApplication() {
       return superviseMediaRecoveryReplacementCycle(
         getFirestore(ownership.app),
         new Storage({ projectId: config.projectId, retryOptions: { autoRetry: false } }).bucket(
-          'urm-app-staging.firebasestorage.app'
+          mediaRecoveryBucketName(cap.plan, Boolean(parent.cloudRunJob))
         ),
         cap,
         require('node:path').resolve(__dirname, 'index.js'),

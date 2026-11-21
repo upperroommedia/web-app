@@ -34,12 +34,15 @@ import type {
 import { checkMediaWorkspace, mediaResources, reserveMediaWorkspace } from './resources';
 import { createMediaAuthenticationProbe } from './authentication';
 import {
-  MEDIA_ARTIFACTS,
+  assertMediaArtifactBucket,
+  createMediaUploadRecord,
+  isRecoveryArtifactPath,
+  mediaRecoveryArtifactRecord,
   mediaArtifactId,
   prepareMediaReference,
   prepareMediaReferenceRelease,
   releaseMediaJobArtifacts,
-  writeMediaUploadIntent,
+  type MediaRecoveryArtifactRegistry,
 } from '@upperroom/orchestration/media-artifacts';
 
 type Artifact = { path: string; generation: string; duration: number };
@@ -96,6 +99,8 @@ export interface MediaActivityDependencies {
   firestore: Firestore;
   database: Database;
   bucket: Bucket;
+  /** Supplied by the authenticated finite Job registration for its acquire Activity. */
+  recoveryArtifactRegistry?: MediaRecoveryArtifactRegistry;
   ytdlpPath: string;
   projectJob: (ref: MediaJobRef, projection: MediaJobProjection) => Promise<void>;
   /** Local acquisition only: performs a real authenticated media-byte canary.
@@ -127,6 +132,8 @@ export function storagePathFromMediaUrl(value: string, bucket: string): string {
 /** Private request documents are never serialized into Temporal event history. */
 export function createMediaActivities(dependencies: MediaActivityDependencies): MediaActivities {
   const { firestore: db, database: realtime, bucket } = dependencies;
+  assertMediaArtifactBucket(dependencies.projectId, bucket.name, dependencies.recoveryArtifactRegistry);
+  const recovery = dependencies.recoveryArtifactRegistry && Object.freeze({ ...dependencies.recoveryArtifactRegistry });
   // A successful canary on this worker cannot recover the retained host's
   // authenticated session. Keep that separate protocol unavailable until its
   // original episode, physical admission, native drain and generation are joined.
@@ -140,6 +147,8 @@ export function createMediaActivities(dependencies: MediaActivityDependencies): 
   const validRef = (ref: MediaJobRef) => {
     if (
       ref.projectId !== dependencies.projectId ||
+      (recovery &&
+        (ref.jobId !== 'media-recovery-' + recovery.operationId || ref.sermonId !== ref.jobId || ref.revision !== 1)) ||
       !/^[A-Za-z0-9_-]+$/.test(ref.jobId) ||
       !/^[A-Za-z0-9_-]+$/.test(ref.sermonId) ||
       !/^[a-f0-9]{16}$/.test(ref.requestVersion) ||
@@ -159,6 +168,54 @@ export function createMediaActivities(dependencies: MediaActivityDependencies): 
       computeProcessAudioRequestVersion(request.payload) !== ref.requestVersion
     )
       throw ApplicationFailure.nonRetryable('Media request is missing or inconsistent', 'INVALID_MEDIA_REQUEST');
+    if (recovery) {
+      const seed = 'temporal-diagnostics/media/' + recovery.operationId + '/source.wav';
+      const expectedPayload = { id: ref.jobId, storageFilePath: seed, startTime: 0, duration: 1 };
+      const generation = (value: unknown) => typeof value === 'string' && /^[1-9][0-9]*$/.test(value);
+      if (
+        !isDeepStrictEqual(request.payload, expectedPayload) ||
+        request.youtubeRenderEpisode !== undefined ||
+        request.sources?.storage?.path !== seed ||
+        !generation(request.sources.storage.generation)
+      )
+        throw ApplicationFailure.nonRetryable(
+          'Invalid private media recovery storage binding',
+          'INVALID_MEDIA_REQUEST'
+        );
+      const versions = Object.entries(request.artifacts ?? {}).map(([stage, artifact]) => {
+        if (
+          (stage !== 'source' && stage !== 'processed') ||
+          !artifact ||
+          typeof artifact.path !== 'string' ||
+          !isRecoveryArtifactPath(recovery, ref.requestVersion, artifact.path, stage) ||
+          !generation(artifact.generation)
+        )
+          throw ApplicationFailure.nonRetryable('Invalid private media artifact', 'INVALID_MEDIA_ARTIFACT');
+        return artifact;
+      });
+      if (versions.length) {
+        const records = await db.getAll(
+          ...versions.map((artifact) => mediaRecoveryArtifactRecord(db, recovery, artifact.path))
+        );
+        if (
+          records.length !== versions.length ||
+          records.some((row, i) => {
+            const artifact = versions[i];
+            return (
+              !row.exists ||
+              row.get('operationId') !== recovery.operationId ||
+              row.get('releaseId') !== recovery.releaseId ||
+              row.get('bucketName') !== recovery.bucketName ||
+              row.get('ownerJobId') !== ref.jobId ||
+              row.get('path') !== artifact.path ||
+              row.get('generation') !== artifact.generation ||
+              row.get('status') !== 'retained'
+            );
+          })
+        )
+          throw ApplicationFailure.nonRetryable('Private media artifact receipt changed', 'INVALID_MEDIA_ARTIFACT');
+      }
+    }
     return request;
   };
   const eligibility = async (ref: MediaJobRef): Promise<MediaOutcome> => {
@@ -342,17 +399,21 @@ export function createMediaActivities(dependencies: MediaActivityDependencies): 
     const file = bucket.file(
       `workflow-audio/${ref.sermonId}/${ref.requestVersion}/${stage}-${randomUUID()}.${format.suffix}`
     );
-    const artifactId = mediaArtifactId(ref.projectId, file.name);
-    await db.runTransaction(async (transaction) => {
+    const artifactRecord = await db.runTransaction(async (transaction) => {
       const request = await transaction.get(requestDoc(ref));
       if (!matches(request.get('ref'), ref)) throw new Error('Media request changed before upload.');
-      writeMediaUploadIntent(transaction, db, {
-        projectId: ref.projectId,
-        sermonId: ref.sermonId,
-        jobId: ref.jobId,
-        path: file.name,
-        createdAt: Date.now(),
-      });
+      return createMediaUploadRecord(
+        transaction,
+        db,
+        {
+          projectId: ref.projectId,
+          sermonId: ref.sermonId,
+          jobId: ref.jobId,
+          path: file.name,
+          createdAt: Date.now(),
+        },
+        recovery ? { registry: recovery, requestVersion: ref.requestVersion, bucketName: bucket.name } : undefined
+      );
     });
     await uploadMediaStream(
       path,
@@ -364,7 +425,7 @@ export function createMediaActivities(dependencies: MediaActivityDependencies): 
           metadata: {
             jobId: ref.jobId,
             requestVersion: ref.requestVersion,
-            firebaseStorageDownloadTokens: randomUUID(),
+            ...(recovery ? {} : { firebaseStorageDownloadTokens: randomUUID() }),
           },
         },
       }),
@@ -377,7 +438,7 @@ export function createMediaActivities(dependencies: MediaActivityDependencies): 
       keep = await db.runTransaction(async (transaction) => {
         const snapshot = await transaction.get(requestDoc(ref));
         const current = snapshot.data() as PrivateRequest | undefined;
-        transaction.update(db.collection(MEDIA_ARTIFACTS).doc(artifactId), {
+        transaction.update(artifactRecord, {
           generation: artifact.generation,
           status: 'retained',
         });
@@ -389,8 +450,9 @@ export function createMediaActivities(dependencies: MediaActivityDependencies): 
     } finally {
       // An ambiguous database commit must never delete an artifact its receipt may reference.
       if (keep === false) {
-        await file.delete({ ifGenerationMatch: metadata.generation, ignoreNotFound: true });
-        await db.collection(MEDIA_ARTIFACTS).doc(artifactId).update({ status: 'deleted', deletedAt: Date.now() });
+        const losingFile = recovery ? bucket.file(file.name, { generation: String(metadata.generation) }) : file;
+        await losingFile.delete({ ifGenerationMatch: metadata.generation, ignoreNotFound: true });
+        await artifactRecord.update({ status: 'deleted', deletedAt: Date.now() });
       }
     }
   };

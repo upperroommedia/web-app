@@ -6,6 +6,7 @@ import type { WorkerWitness } from './worker-witness';
 import { workerReadinessDigest as hash } from './readiness-probe';
 import { recheckMediaRecoveryTaskAttestation } from './media-recovery-task-attestation-reader';
 import { matchMediaRecoveryJobRun } from './media-recovery-job-witness';
+import { mediaRecoveryBucketName } from './media-recovery-storage';
 function fail(): never {
   throw new Error('MEDIA_RECOVERY_CAPABILITY_UNCONFIRMED');
 }
@@ -109,6 +110,7 @@ export async function mediaRecoveryKernelContext(
     )
       fail();
     const job = witness.cloudRunJob;
+    if (p.diagnosticStorage !== undefined) mediaRecoveryBucketName(p, true);
     let computeIntent;
     if (job) {
       const native = op.get('mediaRecoveryJobProvider');

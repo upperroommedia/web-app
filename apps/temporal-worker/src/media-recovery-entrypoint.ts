@@ -1,5 +1,6 @@
 import { observedTaskAttestation } from './runtime/media-recovery-task-attestation-reader';
 import { loadMediaRecoveryRuntimeConfig } from './runtime/media-recovery-config';
+import { mediaRecoveryBucketName } from './runtime/media-recovery-storage';
 import { loadWorkerWitness } from './runtime/worker-witness';
 import { loadConsumedMediaRecoveryBundle } from './runtime/consumed-workflow-bundle';
 import { reportMediaKernelWitness } from './runtime/media-kernel-supervisor';
@@ -114,7 +115,12 @@ export async function runMediaRecoveryApplication(bindShutdown?: (shutdown: () =
     const witness = await loadWorkerWitness(config.buildId, true, process.env, async () => {
       await import('@upperroom/shared/firebase/firebaseAdmin');
       const owner = getSharedFirebaseAppOwnership();
-      if (!owner || owner.app.name !== '[DEFAULT]' || owner.app.options.projectId !== config.projectId || !owner.isRegistered())
+      if (
+        !owner ||
+        owner.app.name !== '[DEFAULT]' ||
+        owner.app.options.projectId !== config.projectId ||
+        !owner.isRegistered()
+      )
         throw new Error('MEDIA_RECOVERY_FIREBASE_OWNER_REQUIRED');
       ownership = owner;
       const { getFirestore } = await import('firebase-admin/firestore');
@@ -142,26 +148,32 @@ export async function runMediaRecoveryApplication(bindShutdown?: (shutdown: () =
     if (getFirebaseStorageBucket() !== 'urm-app-staging.firebasestorage.app')
       throw new Error('MEDIA_RECOVERY_BUCKET_UNCONFIRMED');
     const { createRuntimeActivities } = await import('./runtime/activities');
-    const db = getFirestore(ownership.app),
-      auth = getAuth(ownership.app),
-      bucket = new Storage({ projectId: config.projectId, retryOptions: { autoRetry: false } }).bucket(
-        'urm-app-staging.firebasestorage.app'
-      );
-    const production = createRuntimeActivities(config.projectId, ['urm-media'], client, witness);
-    const media = production.queues['urm-media'];
-    if (!('acquireMedia' in media)) throw new Error('MEDIA_RECOVERY_MEDIA_FACTORY_REQUIRED');
+    const db = getFirestore(ownership.app);
+    const auth = getAuth(ownership.app);
     const replacement = process.env.TEMPORAL_MEDIA_RECOVERY_CHILD === 'replacement';
     const registration = await (replacement
       ? createMediaRecoveryReplacementRegistration
       : createMediaRecoveryRegistration)({
       firestore: db,
       auth,
-      bucket,
       client,
       witness,
       operationId: config.operationId,
       kernel,
-      acquire: media.acquireMedia,
+      createAcquisition: (cap) => {
+        const bucket = new Storage({ projectId: config.projectId, retryOptions: { autoRetry: false } }).bucket(
+          mediaRecoveryBucketName(cap.plan, Boolean(witness.cloudRunJob))
+        );
+        const isolated = cap.plan.diagnosticStorage && {
+          bucket,
+          operationId: config.operationId,
+          releaseId: cap.plan.releaseId,
+        };
+        const runtime = createRuntimeActivities(config.projectId, ['urm-media'], client, witness, isolated);
+        const media = runtime.queues['urm-media'];
+        if (!('acquireMedia' in media)) throw new Error('MEDIA_RECOVERY_MEDIA_FACTORY_REQUIRED');
+        return { bucket, acquire: media.acquireMedia };
+      },
     });
     const capacity = await runMediaFilesystemCanary(
       () => lifecycle.draining,
@@ -211,10 +223,13 @@ export async function runMediaRecoveryApplication(bindShutdown?: (shutdown: () =
           ? {
               job: witness.cloudRunJob.job,
               executionUid: witness.cloudRunJob.executionUid,
-              ...(witness.cloudRunJob.taskUid?{taskUid:witness.cloudRunJob.taskUid}:{}),
-              ...(witness.cloudRunJob.taskCreateTime?{
-                task:witness.cloudRunJob.task,taskCreateTime:witness.cloudRunJob.taskCreateTime,
-              }:{}),
+              ...(witness.cloudRunJob.taskUid ? { taskUid: witness.cloudRunJob.taskUid } : {}),
+              ...(witness.cloudRunJob.taskCreateTime
+                ? {
+                    task: witness.cloudRunJob.task,
+                    taskCreateTime: witness.cloudRunJob.taskCreateTime,
+                  }
+                : {}),
             }
           : {
               pool: witness.cloudRun?.pool,
@@ -240,7 +255,7 @@ export async function runMediaRecoveryApplication(bindShutdown?: (shutdown: () =
           ? registration.activities.acquireMedia
           : holdOriginalMediaCompletion({
               db,
-              bucket,
+              bucket: registration.bucket,
               client,
               cap: registration.cap,
               birth: registration.birth,
