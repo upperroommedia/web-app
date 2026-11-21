@@ -1,5 +1,6 @@
 import { isDeepStrictEqual } from 'node:util';
-import { isMediaRecoveryTaskCreateTime, type DurableMediaRecoveryJobIdentity } from '@upperroom/orchestration/job-store';
+import type { DurableMediaRecoveryJobIdentity } from '@upperroom/orchestration/job-store';
+import { isMediaRecoveryTaskCreateTime } from '@upperroom/orchestration/media-recovery-task-identity';
 import { GoogleAuth } from 'google-auth-library';
 import { readCloudRunMetadata } from './cloud-run-witness';
 import { workerReadinessDigest as hash } from './readiness-probe';
