@@ -43,6 +43,7 @@ jest.mock('@temporalio/client', () => ({
 }));
 jest.mock('./index', () => ({ startWorkerProcess: mockNormal }));
 import { launchApplicationWorker } from './launcher';
+import { mediaJobParentFailureLine } from './runtime/media-job-launch-failure';
 beforeEach(() => {
   jest.clearAllMocks();
   mockRegistered = true;
@@ -65,6 +66,24 @@ test('denied private capability has no normal fallback or child', async () => {
   expect(mockSupervise).not.toHaveBeenCalled();
   expect(mockNormal).not.toHaveBeenCalled();
   expect(mockDelete).toHaveBeenCalledTimes(1);
+});
+test('a finite Job parent retains a sanitized capability denial and cleans up before any child launch', async () => {
+  const saved = process.env;
+  process.env = { ...saved, FIREBASE_PROJECT_ID: 'urm-app-staging', TEMPORAL_MEDIA_RECOVERY_COMPUTE: 'cloud-run-job-v1' };
+  delete process.env.TEMPORAL_MEDIA_RECOVERY_CHILD;
+  try {
+    const error = new Error('private document and token');
+    mockCap.mockRejectedValueOnce(error);
+    await expect(launchApplicationWorker()).rejects.toBe(error);
+    expect(JSON.parse(mediaJobParentFailureLine(error))).toEqual({
+      event: 'media_recovery_job_parent_start_failed', phase: 'capability', protocol: 'local', code: 'unknown',
+    });
+    expect(mockCap).toHaveBeenCalledTimes(1);
+    expect(mockSupervise).not.toHaveBeenCalled();
+    expect(mockNormal).not.toHaveBeenCalled();
+    expect(mockClose).toHaveBeenCalledTimes(1);
+    expect(mockDelete).toHaveBeenCalledTimes(1);
+  } finally { process.env = saved; }
 });
 test('private parent cleanup independently attempts app deletion after Firestore cleanup rejects', async () => {
   mockClose.mockRejectedValueOnce(new Error('CONTROLLED_CLEANUP_FAILURE'));

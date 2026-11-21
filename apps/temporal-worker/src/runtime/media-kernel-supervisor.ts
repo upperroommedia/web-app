@@ -3,6 +3,7 @@ import { fork, type ChildProcess } from 'node:child_process';
 import type { DocumentReference, Firestore } from 'firebase-admin/firestore';
 import { diagnosticComputeIdentity, type WorkerWitness } from './worker-witness';
 import { workerReadinessDigest as digest } from './readiness-probe';
+import { mediaJobPhase, tagMediaJobFailure } from './media-job-launch-failure';
 const fail = (): never => {
   throw new Error('MEDIA_KERNEL_SUPERVISION_UNCONFIRMED');
 };
@@ -104,7 +105,8 @@ async function writeOnce(
   ref: DocumentReference,
   expected: any,
   next: any,
-  authorize?: (tx: any) => Promise<void>
+  authorize?: (tx: any) => Promise<void>,
+  initialJobBirth = false
 ) {
   try {
     await db.runTransaction(
@@ -123,10 +125,19 @@ async function writeOnce(
     );
   } catch (e) {
     const code = Number((e as { code?: unknown })?.code);
-    if ([3, 5, 6, 7, 9, 11, 12, 16].includes(code)) return fail();
+    if ([3, 5, 6, 7, 9, 11, 12, 16].includes(code)) {
+      if (!initialJobBirth) return fail();
+      const denied = new Error('MEDIA_KERNEL_SUPERVISION_UNCONFIRMED');
+      tagMediaJobFailure('kernel-create', e, denied);
+      throw denied;
+    }
     // Same in-memory parent only: unknown commit acknowledgement is exact GET-only.
-    const current = await ref.get();
-    if (!current.exists || digest(current.data()) !== digest(next)) fail();
+    const reconcile = async () => {
+      const current = await ref.get();
+      if (!current.exists || digest(current.data()) !== digest(next)) fail();
+    };
+    if (initialJobBirth) await mediaJobPhase('kernel-reconcile', reconcile);
+    else await reconcile();
   }
 }
 async function readKernelBirth(
@@ -252,8 +263,12 @@ async function superviseKernel(
   const signals: NodeJS.Signals[] = ['SIGTERM', 'SIGINT', 'SIGQUIT', 'SIGUSR2'];
   signals.forEach((s) => process.on(s, stop));
   try {
-    await writeOnce(db, ref, undefined, state, cap.authorize);
-    await grant();
+    const initialJobBirth = Boolean(recovery && !recovery.replacementIntent && cap.context.parent.cloudRunJob);
+    if (initialJobBirth)
+      await mediaJobPhase('kernel-create', () => writeOnce(db, ref, undefined, state, cap.authorize, true));
+    else await writeOnce(db, ref, undefined, state, cap.authorize);
+    if (initialJobBirth) await mediaJobPhase('kernel-authorize', grant);
+    else await grant();
     if (draining) fail();
     if (
       state.intent.parentPid !== process.pid ||

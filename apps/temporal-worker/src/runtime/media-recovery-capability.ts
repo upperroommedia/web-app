@@ -1,4 +1,5 @@
 import { releaseProvenanceDigest } from './release-provenance';
+import { mediaJobPhase, tagMediaJobFailure } from './media-job-launch-failure';
 import type { Firestore, Transaction } from 'firebase-admin/firestore';
 import type { Auth } from 'firebase-admin/auth';
 import type { WorkerWitness } from './worker-witness';
@@ -41,8 +42,10 @@ export async function mediaRecoveryKernelContext(
     `_control/temporalMediaRecoveryJournal-${operationId}`,
   ].map((p) => db.doc(p));
   let original: any;
+  let initialRead = true;
   const read = async (tx: Transaction) => {
-    const [op, c, s, journal] = await Promise.all(refs.map((r) => tx.get(r))),
+    const documents = () => Promise.all(refs.map((r) => tx.get(r)));
+    const [op, c, s, journal] = await (initialRead ? mediaJobPhase('capability-firestore', documents) : documents()),
       cycle = op.get('cloudMediaRecovery'),
       p = cycle?.plan,
       start = cycle?.start,
@@ -213,9 +216,13 @@ export async function mediaRecoveryKernelContext(
       { name: 'TEMPORAL_MEDIA_RECOVERY_OPERATION', value: operationId }
     );
     if (hash(template) !== hash(p.diagnosticTemplate)) fail();
-    const actor = await auth.getUserByEmail(op.get('operatorPrincipal.email'));
-    if (actor.disabled || actor.customClaims?.role !== 'admin' || actor.email !== op.get('operatorPrincipal.email'))
-      fail();
+    const readActor = async () => {
+      const actor = await auth.getUserByEmail(op.get('operatorPrincipal.email'));
+      if (actor.disabled || actor.customClaims?.role !== 'admin' || actor.email !== op.get('operatorPrincipal.email'))
+        fail();
+      return actor;
+    };
+    const actor = await (initialRead ? mediaJobPhase('capability-auth', readActor) : readActor());
     const intent = {
       kind: 'canonical-private-media-worker-v1',
       operationId,
@@ -235,9 +242,14 @@ export async function mediaRecoveryKernelContext(
   for (;;) {
     try {
       await db.runTransaction(read, { readOnly: true });
+      initialRead = false;
       break;
     } catch (error) {
-      if (!(error instanceof PendingMediaRecoveryJobIdentity)) throw error;
+      if (!(error instanceof PendingMediaRecoveryJobIdentity)) {
+        // Transaction setup/commit can reject outside the callback's document reads.
+        tagMediaJobFailure('capability-firestore', error, error, 'grpc');
+        throw error;
+      }
       if (performance.now() - began >= 25000) fail();
       await new Promise((resolve) => setTimeout(resolve, 250));
     }

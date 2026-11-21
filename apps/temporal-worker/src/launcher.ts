@@ -1,7 +1,12 @@
+import { mediaJobParentFailureLine, mediaJobPhase } from './runtime/media-job-launch-failure';
+
 /** Fixed image entrypoint. Supervision is capability-bound to a canonical media
  * start; ordinary workers keep their original in-process entrypoint. */
 export async function launchApplicationWorker() {
-  const { isMediaRecoveryConfiguration } = await import('./runtime/media-recovery-config');
+  const { isMediaRecoveryConfiguration } = await mediaJobPhase(
+    'dependencies',
+    () => import('./runtime/media-recovery-config')
+  );
   if (isMediaRecoveryConfiguration()) return launchMediaRecoveryApplication();
   if (
     process.env.FIREBASE_PROJECT_ID === 'urm-app-staging' &&
@@ -58,54 +63,66 @@ export async function launchApplicationWorker() {
   await startWorkerProcess();
 }
 if (require.main === module)
-  void launchApplicationWorker().catch(() => {
+  void launchApplicationWorker().catch((error) => {
     process.exitCode = 1;
-    console.error('Application worker launch failed.');
+    console.error(mediaJobParentFailureLine(error));
   });
 
 /** Explicit private branch; no expired/missing capability falls back to normal. */
 async function launchMediaRecoveryApplication() {
-  const { loadMediaRecoveryRuntimeConfig } = await import('./runtime/media-recovery-config');
-  const config = loadMediaRecoveryRuntimeConfig();
-  await import('@upperroom/shared/firebase/firebaseAdmin');
-  const { getSharedFirebaseAppOwnership } = await import('@upperroom/shared/firebase/firebaseAdminOwnership');
-  const ownership = getSharedFirebaseAppOwnership();
-  if (!ownership || ownership.app.options.projectId !== config.projectId || !ownership.isRegistered())
-    throw new Error('MEDIA_RECOVERY_FIREBASE_OWNER_REQUIRED');
+  const config = await mediaJobPhase('config', async () => {
+    const { loadMediaRecoveryRuntimeConfig } = await import('./runtime/media-recovery-config');
+    return loadMediaRecoveryRuntimeConfig();
+  });
+  const ownership = await mediaJobPhase('firebase-bootstrap', async () => {
+    await import('@upperroom/shared/firebase/firebaseAdmin');
+    const { getSharedFirebaseAppOwnership } = await import('@upperroom/shared/firebase/firebaseAdminOwnership');
+    const owner = getSharedFirebaseAppOwnership();
+    if (!owner || owner.app.options.projectId !== config.projectId || !owner.isRegistered())
+      throw new Error('MEDIA_RECOVERY_FIREBASE_OWNER_REQUIRED');
+    return owner;
+  });
   let parentConnection: import('@temporalio/client').Connection | undefined;
   try {
-    const { getFirestore } = await import('firebase-admin/firestore'),
-      { getAuth } = await import('firebase-admin/auth');
-    const { loadWorkerWitness } = await import('./runtime/worker-witness');
-    const { mediaRecoveryKernelContext } = await import('./runtime/media-recovery-capability');
-    const { superviseMediaRecoveryReplacementCycle } = await import('./runtime/media-recovery-replacement');
-    const { Storage } = await import('@google-cloud/storage');
+    const { getFirestore } = await mediaJobPhase('dependencies', () => import('firebase-admin/firestore')),
+      { getAuth } = await mediaJobPhase('dependencies', () => import('firebase-admin/auth'));
+    const { loadWorkerWitness } = await mediaJobPhase('dependencies', () => import('./runtime/worker-witness'));
+    const { mediaRecoveryKernelContext } = await mediaJobPhase(
+      'dependencies',
+      () => import('./runtime/media-recovery-capability')
+    );
+    const { superviseMediaRecoveryReplacementCycle } = await mediaJobPhase(
+      'dependencies',
+      () => import('./runtime/media-recovery-replacement')
+    );
+    const { Storage } = await mediaJobPhase('dependencies', () => import('@google-cloud/storage'));
     if (process.env.TEMPORAL_MEDIA_RECOVERY_CHILD !== undefined) throw new Error('MEDIA_RECOVERY_PARENT_REQUIRED');
-    const parent = await loadWorkerWitness(config.buildId, true);
-    const cap = await mediaRecoveryKernelContext(
-      getFirestore(ownership.app),
-      getAuth(ownership.app),
-      parent,
-      config.operationId
+    const parent = await mediaJobPhase('worker-witness', () => loadWorkerWitness(config.buildId, true));
+    const cap = await mediaJobPhase('capability', () =>
+      mediaRecoveryKernelContext(getFirestore(ownership.app), getAuth(ownership.app), parent, config.operationId)
     );
-    const { Client, Connection } = await import('@temporalio/client');
-    parentConnection = await Connection.connect({
-      address: config.address,
-      tls: config.tls,
-      apiKey: config.apiKey,
-      interceptors: [],
-      channelArgs: { 'grpc.enable_retries': 0 },
+    const { Client, Connection } = await mediaJobPhase('dependencies', () => import('@temporalio/client'));
+    parentConnection = await mediaJobPhase('temporal-connect', () =>
+      Connection.connect({
+        address: config.address,
+        tls: config.tls,
+        apiKey: config.apiKey,
+        interceptors: [],
+        channelArgs: { 'grpc.enable_retries': 0 },
+      })
+    );
+    const result = await mediaJobPhase('supervisor', () => {
+      const parentClient = new Client({ connection: parentConnection, namespace: config.namespace });
+      return superviseMediaRecoveryReplacementCycle(
+        getFirestore(ownership.app),
+        new Storage({ projectId: config.projectId, retryOptions: { autoRetry: false } }).bucket(
+          'urm-app-staging.firebasestorage.app'
+        ),
+        cap,
+        require('node:path').resolve(__dirname, 'index.js'),
+        parentClient
+      );
     });
-    const parentClient = new Client({ connection: parentConnection, namespace: config.namespace });
-    const result = await superviseMediaRecoveryReplacementCycle(
-      getFirestore(ownership.app),
-      new Storage({ projectId: config.projectId, retryOptions: { autoRetry: false } }).bucket(
-        'urm-app-staging.firebasestorage.app'
-      ),
-      cap,
-      require('node:path').resolve(__dirname, 'index.js'),
-      parentClient
-    );
     if (result.code !== 0) process.exitCode = 1;
   } finally {
     try {
