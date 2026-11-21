@@ -1,3 +1,4 @@
+import { sameMediaRecoveryTask } from './temporal-media-recovery-job.mjs';
 import { proofDigest as hash, assertNativeSnapshot } from './temporal-release-runtime.mjs';
 
 const fail = () => {
@@ -145,8 +146,7 @@ export async function prepareCompletedMediaRecoveryCapsule(o, tx, parent, next, 
       hash(original) !== hash(replacement) ||
       original.execution !== run.execution ||
       original.executionUid !== run.executionUid ||
-      original.task !== next.jobTermination.task ||
-      original.taskUid !== next.jobTermination.taskUid
+      !sameMediaRecoveryTask(original,next.jobTermination)
     )
       fail();
   }

@@ -44,10 +44,16 @@ export interface DurableMediaRecoveryJobIdentity {
   execution: string;
   executionUid: string;
   task: string;
-  taskUid: string;
+  taskUid?: string;
+  taskCreateTime?: string;
   serviceAccount: string;
   imageDigest: string;
   instanceId: string;
+}
+export function isMediaRecoveryTaskCreateTime(value: unknown): value is string {
+  if(typeof value!=='string'||!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/.test(value)) return false;
+  const time=Date.parse(value);
+  return Number.isFinite(time)&&new Date(time).toISOString().slice(0,19)===value.slice(0,19);
 }
 export interface DurableWorkerWitness {
   instanceId: string;
@@ -146,13 +152,17 @@ function validateExecution(value: DurableActivityExecution, projectId: string): 
         'execution',
         'executionUid',
         'task',
-        'taskUid',
         'serviceAccount',
         'imageDigest',
         'instanceId',
       ] as const;
-      if (Object.keys(job).length !== fields.length) invalid('Unexpected recovery Job identity detail');
+      if(Object.keys(job).some(key=>!fields.includes(key as (typeof fields)[number])&&key!=='taskUid'&&key!=='taskCreateTime'))
+        invalid('Unexpected recovery Job identity detail');
       for (const key of fields) boundedString(job[key], key);
+      const hasTaskUid=Object.hasOwn(job,'taskUid'),hasTaskCreateTime=Object.hasOwn(job,'taskCreateTime');
+      if((hasTaskUid&&(typeof job.taskUid!=='string'||!uuid.test(job.taskUid)))||
+         (hasTaskCreateTime&&!isMediaRecoveryTaskCreateTime(job.taskCreateTime))||(!hasTaskUid&&!hasTaskCreateTime))
+        invalid('Invalid recovery Job task creation identity');
       if (
         !uuid.test(operation) ||
         !uuid.test(value.worker.instanceId) ||
@@ -172,7 +182,6 @@ function validateExecution(value: DurableActivityExecution, projectId: string): 
         !/^[a-z0-9-]{1,63}$/.test(job.task.split('/').at(-1) ?? '') ||
         job.task.split('/').length !== 10 ||
         !uuid.test(job.executionUid) ||
-        !uuid.test(job.taskUid) ||
         !/^sha256:[a-f0-9]{64}$/.test(job.imageDigest) ||
         !/^[A-Za-z0-9_-]{1,256}$/.test(job.instanceId) ||
         job.serviceAccount !== `tw-m-${value.worker.buildId.slice(0, 20)}@urm-app-staging.iam.gserviceaccount.com` ||

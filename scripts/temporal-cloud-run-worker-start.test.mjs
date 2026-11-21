@@ -275,11 +275,12 @@ test('the registered worker-pool logging descriptor joins only its exact native 
   assert.equal(Object.hasOwn(system[0], 'terminated'), false);
 });
 
-test('Job origins share the exact provider task and instance while retaining distinct child identities', async () => {
+for (const nativeTask of [false,true]) {
+test(`Job origins join both children to the exact native Task ${nativeTask?'creation time':'UID'}`,async()=>{
   const operationId = '1fc647c8-ea06-4fbd-ac05-9d547f5a408f';
   const jobName = 'urm-media-recovery-' + operationId.replaceAll('-', '');
   const job = 'projects/urm-app-staging/locations/us-central1/jobs/' + jobName;
-  const execution = jobName + '-staged';
+  const execution = jobName + '-abcde';
   const at = Date.now() - 10000;
   const date = (plus) => new Date(at + plus).toISOString();
   const plan = { job: { name: job }, operationId, createdAt: date(0), buildId: 'b'.repeat(40) };
@@ -288,7 +289,9 @@ test('Job origins share the exact provider task and instance while retaining dis
       job,
       execution: job + '/executions/' + execution,
       executionUid: 'f862d892-420a-4a11-948a-fddefc5caed0',
-      taskUid: '01a1097a-cc47-45fa-88e1-d2d79199948f',
+      ...(nativeTask?{
+        task:job+'/executions/'+execution+'/tasks/'+execution+'-task0',taskCreateTime:date(500).replace('Z','643Z'),
+      }:{taskUid:'01a1097a-cc47-45fa-88e1-d2d79199948f'}),
     },
     original: {
       workerIdentity: 'media-recovery-14011233-7db3-470a-aa67-809c72c1d998',
@@ -301,20 +304,23 @@ test('Job origins share the exact provider task and instance while retaining dis
       recordedAt: date(4000),
     },
   };
+  const executionLabel=nativeTask?'run.googleapis.com/execution_name':'execution_name';
+  const indexLabel=nativeTask?'run.googleapis.com/task_index':'task_index';
   const entries = ['original', 'replacement'].map((child, index) => ({
     logName: 'projects/urm-app-staging/logs/run.googleapis.com%2Fstdout',
     resource: {
       type: 'cloud_run_job',
       labels: { project_id: 'urm-app-staging', location: 'us-central1', job_name: jobName },
     },
-    labels: { execution_name: execution, task_index: '0', instanceId: 'provider-one' },
+    labels:{[executionLabel]:execution,[indexLabel]:'0',instanceId:'provider-one',
+      ...(nativeTask?{'run.googleapis.com/task_attempt':'0'}:{})},
     timestamp: date(1010 + index * 3000),
     insertId: 'log-' + child,
     jsonPayload: {
       event: 'temporal_media_recovery_worker_started',
       job,
       executionUid: origin.job.executionUid,
-      taskUid: origin.job.taskUid,
+      ...(nativeTask?{task:origin.job.task,taskCreateTime:origin.job.taskCreateTime}:{taskUid:origin.job.taskUid}),
       taskQueue: 'urm-media-kernel-recovery',
       buildId: plan.buildId,
       operationId,
@@ -326,13 +332,22 @@ test('Job origins share the exact provider task and instance while retaining dis
   const api = async (_url, method, body) => {
     assert.equal(method, 'POST');
     assert.match(body.filter, /resource.type = "cloud_run_job"/);
-    assert.match(body.filter, /labels.task_index = "0"/);
+    assert.ok(body.filter.includes(nativeTask?'labels."run.googleapis.com/task_index" = "0"':'labels.task_index = "0"'));
     return { entries };
   };
   assert.equal((await readMediaRecoveryJobOrigins({ api, plan, origin })).original.instanceId, 'provider-one');
   entries[1].labels.instanceId = 'foreign-instance';
   await assert.rejects(readMediaRecoveryJobOrigins({ api, plan, origin }), /START_UNCONFIRMED/);
   entries[1].labels.instanceId = 'provider-one';
-  entries[1].labels.task_index = '1';
+  entries[1].labels[indexLabel] = '1';
   await assert.rejects(readMediaRecoveryJobOrigins({ api, plan, origin }), /START_UNCONFIRMED/);
+  entries[1].labels[indexLabel]='0';
+  if(nativeTask){
+    entries[1].jsonPayload.taskCreateTime=date(501);
+    await assert.rejects(readMediaRecoveryJobOrigins({api,plan,origin}),/START_UNCONFIRMED/);
+    entries[1].jsonPayload.taskCreateTime=origin.job.taskCreateTime;
+    entries[1].labels['run.googleapis.com/task_attempt']='1';
+    await assert.rejects(readMediaRecoveryJobOrigins({api,plan,origin}),/START_UNCONFIRMED/);
+  }
 });
+}

@@ -1,3 +1,4 @@
+import { mediaRecoveryTaskIdentity, sameMediaRecoveryTask } from './temporal-media-recovery-job.mjs';
 import { assertWorkerHandoffPromotion } from './temporal-worker-handoff-plan.mjs';
 import { readMediaRecoveryNormalOrigin } from './temporal-bootstrap-pool.mjs';
 import { assertMediaDiskQuotaFresh, observeMediaDiskQuota } from './temporal-media-disk-quota.mjs';
@@ -1097,7 +1098,7 @@ export const collectCloudRunMediaRecovery=o=>withNativeCloudRunClient(o,async(cl
     if (!task || task.executionUid !== o.jobRun.executionUid || task.execution !== o.jobRun.execution) throw Error();
     try {
       const terminal = await observeMediaRecoveryJobTermination({api:o.api,plan:o.plan,run:o.jobRun,
-        taskIdentity:{name:task.task,uid:task.taskUid},
+        taskIdentity:mediaRecoveryTaskIdentity(task),
         custody:{originalClosedAt:second.cloudOrigin.originalClosedAt,
           replacementClosedAt:second.cloudOrigin.replacementClosedAt}});
       const startup = await readMediaRecoveryJobOrigins({api:o.api,plan:o.plan,origin:second.cloudOrigin});
@@ -1167,7 +1168,7 @@ export const drainCloudRunMediaRecoveryJob = o => withNativeCloudRunClient(o, as
         original.get('close.descendantsAbsent') !== true ||
         replacement.get('close.descendantsAbsent') !== true ||
         original.get('close.observerFailed') === true || replacement.get('close.observerFailed') === true ||
-        job.task !== jobTermination.task || job.taskUid !== jobTermination.taskUid ||
+        !sameMediaRecoveryTask(job,jobTermination)||
         job.execution !== jobRun.execution || job.executionUid !== jobRun.executionUid
       ) throw new Error('MEDIA_RECOVERY_JOB_DRAIN_UNCONFIRMED');
       return {
@@ -1179,7 +1180,7 @@ export const drainCloudRunMediaRecoveryJob = o => withNativeCloudRunClient(o, as
     const binding = await readClosures();
     const terminal = await read(() => observeMediaRecoveryJobTermination({
       api: url => read(() => api(url)), plan, run: jobRun, custody: binding.custody,
-      taskIdentity: { name: binding.job.task, uid: binding.job.taskUid },
+      taskIdentity:mediaRecoveryTaskIdentity(binding.job),
     }));
     if (terminal.proofSHA256 !== jobTermination.proofSHA256)
       throw new Error('MEDIA_RECOVERY_JOB_DRAIN_UNCONFIRMED');
@@ -1658,7 +1659,7 @@ async function collectCloudRunMediaPromotionEvidence(o, stage, client, applicati
   if (terminal) {
     const task = second.cloudOrigin.job;
     const completedAt = Date.parse(terminal.completedAt);
-    if (!task || ['job', 'execution', 'executionUid', 'task', 'taskUid'].some(key => task[key] !== terminal[key]) ||
+    if (!task || ['job','execution','executionUid'].some(key=>task[key]!==terminal[key]) || !sameMediaRecoveryTask(task,terminal) ||
       !Number.isFinite(completedAt) || registeredAt <= completedAt || restoredOrigin.at <= completedAt) throw Error();
   }
   const diagnosticClosure = terminal ? { diagnosticJobTermination: terminal } : {

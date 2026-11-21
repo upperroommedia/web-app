@@ -1,7 +1,7 @@
+import { releaseProvenanceDigest } from './release-provenance';
 /** Fixed historical authorization reader. Current authority and immutable
  * original provenance are independent; no Firestore or parent overlays. */
 import { readRetainedMediaPromotionAuthority, type MediaPromotionAuthorityOptions } from './media-promotion-history';
-import { createHash } from 'node:crypto';
 import type { Firestore } from 'firebase-admin/firestore';
 import type { Client } from '@temporalio/client';
 import { workerReadinessDigest as hash } from './readiness-probe';
@@ -30,26 +30,8 @@ const exact = (v: any, keys: string) => {
 };
 const uuid = (v: any) =>
   typeof v === 'string' && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(v);
-/** Matches the operator proof format at the native snapshot boundary. This is
- * intentionally separate from application receipt hashing. */
-export function releaseProvenanceDigest(value: any): string {
-  const canonical = (v: any): any => {
-    if (v === undefined) return null;
-    if (v && typeof v.toDate === 'function' && Number.isInteger(v.seconds))
-      return { seconds: v.seconds, nanoseconds: v.nanoseconds };
-    if (Array.isArray(v)) return v.map(canonical);
-    if (v && typeof v === 'object')
-      return Object.fromEntries(
-        Object.keys(v)
-          .sort()
-          .map((k) => [k, canonical(v[k])])
-      );
-    return v;
-  };
-  return createHash('sha256')
-    .update(JSON.stringify(canonical(value)))
-    .digest('hex');
-}
+export { releaseProvenanceDigest } from './release-provenance';
+
 const nativeTime = (t: any) => {
   if (
     !t ||

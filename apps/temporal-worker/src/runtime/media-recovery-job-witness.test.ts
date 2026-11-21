@@ -1,3 +1,5 @@
+import { Timestamp } from 'firebase-admin/firestore';
+import { releaseProvenanceDigest } from './release-provenance';
 import { createDurableJobStore } from '@upperroom/orchestration/job-store';
 import {
   hasCloudRunJobBinding,
@@ -64,30 +66,99 @@ function fixture() {
     template,
   };
   const task = {
-    ...structuredClone(template),
-    name: binding.execution + '/tasks/' + env.CLOUD_RUN_EXECUTION + '-0',
-    uid: 'a716b9cb-8b7b-429c-b581-b0ac7d32877b',
+    containers: structuredClone(template.containers),
+    serviceAccount: template.serviceAccount,
+    timeout: template.timeout,
+    name: binding.execution + '/tasks/' + env.CLOUD_RUN_EXECUTION + '-task0',
+    createTime: '2026-11-21T04:53:47.660435Z',
+    generation: '1',
+    observedGeneration: '1',
     job: binding.job,
     execution: binding.execution,
     index: 0,
   };
-  return { binding, metadata, execution, task };
+  const directTask = { ...structuredClone(task), logUri: 'output-only-direct-field' };
+  return { binding, metadata, execution, task, directTask };
 }
 
 test('Job configuration and native execution must identify its sole original task', () => {
-  const { binding, metadata, execution, task } = fixture();
-  expect(verifyMediaRecoveryJobIdentity(binding, metadata, execution, { tasks: [task] })).toEqual({
+  const { binding, metadata, execution, task, directTask } = fixture();
+  expect(verifyMediaRecoveryJobIdentity(binding, metadata, execution, { tasks: [task] }, directTask)).toEqual({
     projectId: metadata.projectId,
     region: 'us-central1',
     job: binding.job,
     execution: binding.execution,
     executionUid: execution.uid,
     task: task.name,
-    taskUid: task.uid,
+    taskCreateTime: task.createTime,
     instanceId: metadata.instanceId,
     imageDigest: 'sha256:' + 'b'.repeat(64),
     serviceAccount: metadata.serviceAccount,
   });
+});
+
+test('retains an optional native UID only when both Task reads carry it', () => {
+  const { binding, metadata, execution, task, directTask } = fixture();
+  const uid = 'a716b9cb-8b7b-429c-b581-b0ac7d32877b';
+  const result = verifyMediaRecoveryJobIdentity(binding, metadata, execution,
+    { tasks: [{ ...task, uid }] }, { ...directTask, uid });
+  expect(result.taskUid).toBe(uid);
+  expect(result.taskCreateTime).toBe(task.createTime);
+  for (const otherUid of [undefined, null, 'not-a-uuid', execution.uid]) {
+    expect(() => verifyMediaRecoveryJobIdentity(binding, metadata, execution,
+      { tasks: [{ ...task, uid }] }, { ...directTask, uid: otherUid })).toThrow('MEDIA_RECOVERY_JOB_IDENTITY_UNCONFIRMED');
+  }
+});
+
+test('requires a complete listing and a matching independently read live Task', () => {
+  const { binding, metadata, execution, task, directTask } = fixture();
+  for (const changed of [
+    { name: binding.execution + '/tasks/other' },
+    { job: 'different-job' },
+    { execution: 'different-execution' },
+    { createTime: undefined },
+    { createTime: '2026-11-21T04:53:47.660435001Z' },
+    { createTime: '2026-11-21T04:53:47.660435000Z' },
+    { generation: '2', observedGeneration: '2' },
+    { observedGeneration: '2' },
+    { index: 1 },
+    { retried: 1 },
+    { completionTime: task.createTime },
+    { lastAttemptResult: { exitCode: 1 } },
+    { containers: [{ ...task.containers[0], env: [...task.containers[0].env, { name: 'NEW', value: 'v' }] }] },
+    { volumes: [{ name: 'other' }] },
+    { executionEnvironment: 'EXECUTION_ENVIRONMENT_GEN1' },
+  ]) {
+    expect(() => verifyMediaRecoveryJobIdentity(binding, metadata, execution, { tasks: [task] },
+      { ...directTask, ...changed })).toThrow('MEDIA_RECOVERY_JOB_IDENTITY_UNCONFIRMED');
+  }
+  for (const changed of [
+    { createTime: '2026-02-30T00:00:00Z' },
+    { createTime: undefined },
+    { generation: '0', observedGeneration: '0' },
+    { observedGeneration: undefined },
+    { uid: 'not-a-native-uuid' },
+  ]) {
+    expect(() => verifyMediaRecoveryJobIdentity(binding, metadata, execution,
+      { tasks: [{ ...task, ...changed }] }, { ...directTask, ...changed })).toThrow('MEDIA_RECOVERY_JOB_IDENTITY_UNCONFIRMED');
+  }
+  for (const partial of [{ nextPageToken: 'more' }, { unreachable: ['us-central1'] }]) {
+    expect(() => verifyMediaRecoveryJobIdentity(binding, metadata, execution,
+      { tasks: [task], ...partial }, directTask)).toThrow('MEDIA_RECOVERY_JOB_IDENTITY_UNCONFIRMED');
+  }
+});
+
+test('only the Task may inherit GEN2 from the exact Execution template', () => {
+  const { binding, metadata, execution, task, directTask } = fixture();
+  const gen2 = { executionEnvironment: 'EXECUTION_ENVIRONMENT_GEN2' };
+  const observed = verifyMediaRecoveryJobIdentity(binding, metadata, execution,
+    { tasks: [{ ...task, ...gen2 }] }, { ...directTask, ...gen2 });
+  expect(observed.taskCreateTime).toBe(task.createTime);
+  for (const executionEnvironment of [undefined, null, 'EXECUTION_ENVIRONMENT_GEN1']) {
+    expect(() => verifyMediaRecoveryJobIdentity(binding, metadata,
+      { ...execution, template: { ...execution.template, executionEnvironment } },
+      { tasks: [{ ...task, ...gen2 }] }, { ...directTask, ...gen2 })).toThrow('MEDIA_RECOVERY_JOB_IDENTITY_UNCONFIRMED');
+  }
 });
 
 test.each([
@@ -105,25 +176,30 @@ test.each([
 });
 
 test('provider identity cannot be substituted by another project, task or command', () => {
-  const { binding, metadata, execution, task } = fixture();
+  const { binding, metadata, execution, task, directTask } = fixture();
   for (const [m, e, inventory] of [
     [{ ...metadata, projectNumber: '1' }, execution, { tasks: [task] }],
     [{ ...metadata, serviceAccount: 'other' }, execution, { tasks: [task] }],
     [metadata, { ...execution, retriedCount: 1 }, { tasks: [task] }],
     [metadata, execution, { tasks: [task, { ...task }] }],
+    [metadata, execution, { tasks: [{ ...task, name: binding.execution + '/tasks/../other' }] }],
+    [metadata, execution, { tasks: [{ ...task, name: binding.execution + '/tasks/task?fields=name' }] }],
     [metadata, execution, { tasks: [{ ...task, execution: 'another-execution' }] }],
     [metadata, execution, { tasks: [{ ...task, completionTime: '2026-11-18T19:02:06.000Z' }] }],
     [metadata, execution, { tasks: [{ ...task, containers: [{ ...task.containers[0], args: ['wrong'] }] }] }],
   ] as const) {
-    expect(() => verifyMediaRecoveryJobIdentity(binding, m, e, inventory)).toThrow(
+    expect(() => verifyMediaRecoveryJobIdentity(binding, m, e, inventory, directTask)).toThrow(
       'MEDIA_RECOVERY_JOB_IDENTITY_UNCONFIRMED'
     );
   }
+  expect(() => verifyMediaRecoveryJobIdentity(binding, metadata, execution, { tasks: [task] }, undefined)).toThrow(
+    'MEDIA_RECOVERY_JOB_IDENTITY_UNCONFIRMED'
+  );
 });
 
 test('the Job witness still needs the paused operation’s acknowledged original execution', async () => {
-  const { binding, metadata, execution, task } = fixture();
-  const job = verifyMediaRecoveryJobIdentity(binding, metadata, execution, { tasks: [task] });
+  const { binding, metadata, execution, task, directTask } = fixture();
+  const job = verifyMediaRecoveryJobIdentity(binding, metadata, execution, { tasks: [task] }, directTask);
   const releaseId = 'staging-release';
   const bindingDigest = 'c'.repeat(64);
   const createdAt = new Date(Date.now() - 1000).toISOString();
@@ -182,9 +258,10 @@ test('the Job witness still needs the paused operation’s acknowledged original
       ])
     ),
   };
-  const state = { releaseId, phase: 'provider-usage-ready' };
+  const state={releaseId,phase:'provider-usage-ready',providerUsage:{observedAt:new Timestamp(1795236188,810273000)}};
+  expect(hash(state)).not.toBe(releaseProvenanceDigest(state));
   const time = { seconds: 1, nanoseconds: 0 };
-  const stamp = (row: unknown) => ({ dataDigest: hash(row), createTime: time, updateTime: time });
+  const stamp = (row: unknown) => ({ dataDigest: releaseProvenanceDigest(row), createTime: time, updateTime: time });
   const jobPlanSHA256 = hash(plan.job);
   const run = {
     stage: 'acknowledged',
@@ -276,7 +353,7 @@ test('the Job witness still needs the paused operation’s acknowledged original
       operationId
     );
   };
-  expect((await begin()).context.parent.cloudRunJob?.taskUid).toBe(task.uid);
+  expect((await begin()).context.parent.cloudRunJob?.taskCreateTime).toBe(task.createTime);
   original = {
     ...original,
     mediaRecoveryJobProvider: {
@@ -288,8 +365,8 @@ test('the Job witness still needs the paused operation’s acknowledged original
 });
 
 test('durable execution accepts this witness only for the private acquire Activity', async () => {
-  const { binding, metadata, execution, task } = fixture();
-  const job = verifyMediaRecoveryJobIdentity(binding, metadata, execution, { tasks: [task] });
+  const { binding, metadata, execution, task, directTask } = fixture();
+  const job = verifyMediaRecoveryJobIdentity(binding, metadata, execution, { tasks: [task] }, directTask);
   const readSentinel = new Error('after shape validation');
   const store = createDurableJobStore({
     projectId: 'urm-app-staging',
