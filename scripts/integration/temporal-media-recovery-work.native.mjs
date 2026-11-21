@@ -361,15 +361,17 @@ test(
             createMediaRecoveryRegistration({
               firestore: db,
               auth,
-              bucket: selected,
               client,
               witness,
               operationId: op,
               kernel,
-              acquire: async (ref) => {
-                productionCalls++;
-                return media.acquireMedia(ref);
-              },
+              createAcquisition: () => ({
+                bucket: selected,
+                acquire: async (ref) => {
+                  productionCalls++;
+                  return media.acquireMedia(ref);
+                },
+              }),
             })
           );
           assert.deepEqual(Object.keys(registered.activities).sort(), ['acquireMedia', 'admitMediaRecoveryWork']);

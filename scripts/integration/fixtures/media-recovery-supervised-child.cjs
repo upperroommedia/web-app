@@ -112,12 +112,11 @@ for (const sig of ['SIGTERM', 'SIGINT', 'SIGQUIT', 'SIGUSR2']) process.on(sig, r
   const r = await (replacement ? createMediaRecoveryReplacementRegistration : createMediaRecoveryRegistration)({
     firestore: db,
     auth,
-    bucket,
     client,
     witness,
     operationId,
     kernel: link,
-    acquire: production.acquireMedia,
+    createAcquisition: () => ({ bucket, acquire: production.acquireMedia }),
   });
   // CONTROLLED image/capacity metadata only. The joint test still does not run
   // index.js, an immutable image, a native 64GiB allocation or Cloud Run.
