@@ -150,6 +150,40 @@ test('historical completed episode reconciles after the original polling window 
   await expect(waitForMediaRecoveryEpisode(f.options)).resolves.toBeUndefined();
   expect(f.describe).toHaveBeenCalledTimes(1);
 });
+test('waits for the pinned Workflow to close after the replacement process has drained', async () => {
+  const f = waitingFixture();
+  const readCompleted = f.describe.getMockImplementation()!;
+  f.describe.mockImplementationOnce(async () => {
+    const complete = await readCompleted();
+    return {
+      raw: { workflowExecutionInfo: { ...complete.raw.workflowExecutionInfo, status: 1 } },
+    };
+  });
+  await expect(waitForMediaRecoveryEpisode(f.options)).resolves.toBeUndefined();
+  expect(f.describe).toHaveBeenCalledTimes(2);
+});
+test('rejects a native completion read that returns after the original polling window', async () => {
+  jest.useFakeTimers();
+  try {
+    const f = waitingFixture();
+    f.options.plan.expiresAt = Date.now() - 29500;
+    const readCompleted = f.describe.getMockImplementation()!;
+    f.describe.mockImplementationOnce(async () => {
+      const complete = await readCompleted();
+      return { raw: { workflowExecutionInfo: { ...complete.raw.workflowExecutionInfo, status: 1 } } };
+    });
+    f.describe.mockImplementationOnce(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      return readCompleted();
+    });
+    const result = waitForMediaRecoveryEpisode(f.options).catch((error: unknown) => error);
+    await jest.advanceTimersByTimeAsync(551);
+    expect(await result).toEqual(new Error('MEDIA_RECOVERY_COLLECTION_UNCONFIRMED'));
+    expect(f.describe).toHaveBeenCalledTimes(2);
+  } finally {
+    jest.useRealTimers();
+  }
+});
 test.each(['never-settled', 'late-settlement'])(
   'GET-only episode wait bounds stalled native transactions / %s',
   async (mode) => {

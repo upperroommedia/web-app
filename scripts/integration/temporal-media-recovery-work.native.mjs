@@ -732,10 +732,12 @@ test(
           const { waitForMediaRecoveryEpisode } = require(fileURLToPath(
             new URL('../../apps/temporal-worker/src/runtime/media-recovery-collector.ts', import.meta.url)
           ));
+          stage = 'joint-supervised-recovery/expect-pending-replacement';
           assert.equal(
             (await bounded(db.doc(`_control/temporalMediaRecoveryReplacementCompleted-${op}`).get())).exists,
             false
           );
+          stage = 'joint-supervised-recovery/capture-episode-authority';
           episodeWait = waitForMediaRecoveryEpisode({
             db,
             client,
@@ -833,6 +835,7 @@ test(
             'start-confirmed-ack-loss',
           ].includes(mode)
         ) {
+          stage = `${mode}/workflow-result`;
           const result = await bounded(handle.result(), 45000);
           assert.equal(result.runId, handle.firstExecutionRunId);
           if (mode === 'normal') {
@@ -849,6 +852,7 @@ test(
           }
 
           if (mode === 'joint-supervised-recovery') {
+            stage = 'joint-supervised-recovery/exact-process-closure';
             assert.deepEqual(await bounded(supervised, 30000), { code: 0, signal: null });
             assert.equal(
               (await bounded(db.doc(`_control/temporalMediaRecoveryReplacementKernel-${op}`).get())).get(
@@ -864,6 +868,7 @@ test(
               (await bounded(db.doc(`_control/temporalMediaRecoveryReplacementAdoption-${op}`).get())).get('attempt'),
               2
             );
+            stage = 'joint-supervised-recovery/pinned-episode-closure';
             await bounded(episodeWait, 30000);
             stage = 'joint-supervised-recovery/GET-only-collector';
             const { collectMediaRecoveryExecution } = require(fileURLToPath(
