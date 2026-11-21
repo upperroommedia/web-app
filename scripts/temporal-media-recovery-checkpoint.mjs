@@ -15,7 +15,9 @@ export async function assertMediaRecoveryAuthority(o) {
   );
 }
 async function authority(o, tx) {
-  const [parent, control, state] = await Promise.all([o.lockRef, o.controlRef, o.stateRef].map((r) => tx.get(r)));
+  const [parent, control, state] = await Promise.all([
+    ...[o.lockRef, o.controlRef, o.stateRef].map(r => tx.get(r)), o.assertOriginalRecoveryAuthority?.(tx),
+  ]);
   assertNativeSnapshot(o.ownedOperation, parent);
   assertNativeSnapshot(o.expectedAuthority.control, control);
   assertNativeSnapshot(o.expectedAuthority.state, state);
@@ -379,6 +381,53 @@ export async function saveMediaRecoveryJobJournal(o, before, next) {
     return hash({ ...parent.data(), mediaRecoveryJobProvider: next });
   }, { maxAttempts: 1 });
   return assertNativeSnapshotSuccessor(stampBefore, proposedDigest, await o.lockRef.get());
+}
+
+/** Bind the sole signed Task witness to the exact original paused release and
+ * acknowledged Job. Keep the provider journal's historical shape intact. */
+export async function checkpointMediaRecoveryTaskAttestation(o) {
+  const ref = o.firestore.doc(`_control/temporalMediaRecoveryTaskAttestation-${o.operationId}`);
+  const arming = o.firestore.doc(`_control/temporalMediaRecoveryJournal-${o.operationId}`);
+  const fresh = () => {
+    if (!Number.isFinite(o.sampledAt) || performance.now() < o.sampledAt ||
+        performance.now() - o.sampledAt > 5000 || Date.now() >= o.plan.expiresAt) fail();
+  };
+  const observed = await o.firestore.runTransaction(async tx => {
+    const parent = await authority(o, tx);
+    const [journal, certificate] = await Promise.all([tx.get(arming), tx.get(ref)]);
+    const plan = o.plan, cycle = parent.get('cloudMediaRecovery'), pointer = parent.get('mediaRecoveryTaskAttestation');
+    const record = journal.data(), armingSHA256 = hash(record ?? null);
+    if (!plan.taskAttestationPublicKey || cycle?.stage !== 'prepared' || hash(cycle.plan) !== hash(plan) ||
+        hash(parent.get('mediaRecoveryJobProvider') ?? null) !== hash(o.provider) ||
+        o.provider.runIdentity?.stage !== 'acknowledged' || cycle.prepared?.proofSHA256 !== armingSHA256 ||
+        !journal.exists || !journal.createTime?.isEqual(journal.updateTime) ||
+        record?.scope !== 'arming-only-no-execution-authority' || record.planSHA256 !== hash(plan) ||
+        hash(record.authority) !== hash(o.expectedAuthority) ||
+        parent.get('mediaRecoveryJournalAttempt.stage') !== 'completed' ||
+        parent.get('mediaRecoveryJournalAttempt.recordSHA256') !== armingSHA256) fail();
+    if (pointer !== undefined || certificate.exists) {
+      const published = hash(certificate.data() ?? null);
+      if (!certificate.exists || !certificate.createTime?.isEqual(certificate.updateTime) ||
+          hash(pointer ?? null) !== hash({ certificateSHA256: published }) || o.record) fail();
+      return { armingSHA256, published };
+    }
+    if (!o.record) return { armingSHA256 };
+    const workers = await Promise.all(['Kernel', 'Startup'].map(kind =>
+      tx.get(o.firestore.doc(`_control/temporalMediaRecovery${kind}-${o.operationId}`))));
+    if (parent.get('mediaRecoveryWorkflowStart') !== undefined || workers.some(worker => worker.exists) ||
+        o.record.payload?.armingSHA256 !== armingSHA256) fail();
+    fresh();
+    const next = { certificateSHA256: hash(o.record) };
+    tx.create(ref, o.record);
+    tx.update(o.lockRef, { mediaRecoveryTaskAttestation: next });
+    return { parentDigest: hash({ ...parent.data(), mediaRecoveryTaskAttestation: next }) };
+  }, o.record ? { maxAttempts: 1 } : { readOnly: true });
+  if (!o.record) return observed;
+  const [parent, certificate] = await o.firestore.getAll(o.lockRef, ref);
+  const ownedOperation = assertNativeSnapshotSuccessor(o.ownedOperation, observed.parentDigest, parent);
+  if (!certificate.exists || !certificate.createTime?.isEqual(certificate.updateTime) ||
+      !certificate.createTime.isEqual(parent.updateTime) || hash(certificate.data()) !== hash(o.record)) fail();
+  return { ownedOperation };
 }
 
 /** Private ARMING journal only. This grants no Workflow/Activity or restart

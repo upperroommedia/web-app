@@ -125,6 +125,9 @@ export async function runMediaRecoveryCycle(o) {
   const createdAt = state?.plan?.createdAt ?? new Date().toISOString();
   const jobMode = typeof runtime.launchJob === 'function';
   if (jobMode && typeof runtime.drainJob !== 'function') fail();
+  const taskAttestationPublicKey = jobMode && typeof runtime.prepareTaskAttestation === 'function'
+    ? runtime.prepareTaskAttestation(o.operationId, state?.plan)
+    : undefined;
   const proposed = {
     schemaVersion: 1,
     operationId: o.operationId,
@@ -141,6 +144,7 @@ export async function runMediaRecoveryCycle(o) {
     normalTemplate: ancestors.zeroPlan.body.template,
     diagnosticTemplate: diagnosticTemplate(ancestors.zeroPlan.body.template, o.operationId),
     contract,
+    ...(taskAttestationPublicKey === undefined ? {} : { taskAttestationPublicKey }),
     createdAt,
     expiresAt: Date.parse(createdAt) + 300000,
   };
@@ -367,7 +371,7 @@ export async function runMediaRecoveryCycle(o) {
       await checkNormalZero();
       assertMediaDiskQuotaFresh(quota);
     };
-    const provider = await runtime.launchJob({ plan, protect });
+    const provider = await runtime.launchJob({ plan, protect, checkNormalZero });
     const jobRun = provider?.runIdentity;
     if (!jobRun || jobRun.stage !== 'acknowledged' || jobRun.jobPlanSHA256 !== hash(plan.job)) fail();
     await checkNormalZero();

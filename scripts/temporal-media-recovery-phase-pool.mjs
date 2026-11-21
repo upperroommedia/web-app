@@ -185,12 +185,21 @@ export async function observeMediaRecoveryPhasePool(o) {
           { readOnly: true }
         )
       );
-    const cycle = await authority(),
-      p = o.plan,
-      expected = mediaRecoveryPhaseExpectation(p, o.phase, o.pool, cycle);
-    const ancestors = await read(() =>
-      readMediaRecoveryAncestorAccess({ ...o, role: 'media', releaseId: o.config.releaseId, saved: undefined })
-    );
+    const p=o.plan;
+    const fixedJobPool=p.job&&o.phase==='diagnostic';
+    if(fixedJobPool&&(!/^projects\/urm-app-staging\/locations\/us-central1\/workerPools\/urm-worker-media-[a-f0-9]{20}$/.test(p.name)||
+       !p.origin?.revision?.startsWith(p.name+'/revisions/')||p.origin.revision.slice((p.name+'/revisions/').length).includes('/')))fail();
+    const preflight = await Promise.allSettled([
+      authority(),
+      read(() => readMediaRecoveryAncestorAccess({
+        ...o,role:'media',releaseId:o.config.releaseId,saved:undefined,observeProtection:fail,
+      })),
+      fixedJobPool?read(()=>o.api(`https://run.googleapis.com/v2/${p.name}`)):undefined,
+      fixedJobPool?read(()=>o.api(`https://run.googleapis.com/v2/${p.origin.revision}`)):undefined,
+    ]);
+    for(const result of preflight) if(result.status==='rejected')throw result.reason;
+    const [cycle,ancestors,earlyPool,earlyRevision] = preflight.map(result=>result.value);
+    const expected=mediaRecoveryPhaseExpectation(p,o.phase,o.pool,cycle);
     if (
       p.operationId !== o.operationId ||
       p.bindingDigest !== o.bindingDigest ||
@@ -217,7 +226,7 @@ export async function observeMediaRecoveryPhasePool(o) {
       (['diagnostic', 'start', 'stop', 'restore'].includes(o.phase) && expected.stage === 'completed')
     )
       fail();
-    const resource = await read(() => o.api(`https://run.googleapis.com/v2/${p.name}`));
+    const resource = fixedJobPool ? earlyPool : await read(() => o.api(`https://run.googleapis.com/v2/${p.name}`));
     const beforeTemplate =
       o.phase === 'diagnostic' ? p.normalTemplate : o.phase === 'completed' ? p.normalTemplate : p.diagnosticTemplate;
     const beforeCount = expected.before.desiredManualInstanceCount;
@@ -227,7 +236,7 @@ export async function observeMediaRecoveryPhasePool(o) {
         resource,
         { manualInstanceCount: count }
       );
-      const rev = await read(() => o.api(`https://run.googleapis.com/v2/${v.revision}`));
+      const rev = fixedJobPool ? earlyRevision : await read(() => o.api(`https://run.googleapis.com/v2/${v.revision}`));
       const same = (a, b) =>
         Array.isArray(a)
           ? Array.isArray(b) && a.length === b.length && a.every((v, i) => same(v, b[i]))
@@ -297,7 +306,11 @@ export async function observeMediaRecoveryPhasePool(o) {
       const { etag, revisionUid, ...native } = observed;
       if (!equal(response, native)) fail();
     }
-    if (hash(await authority()) !== hash(cycle)) fail();
+    const final=await Promise.allSettled([
+      authority(),fixedJobPool?read(()=>o.api(`https://run.googleapis.com/v2/${p.name}`)):undefined,
+    ]);
+    for(const result of final)if(result.status==='rejected')throw result.reason;
+    if(hash(final[0].value)!==hash(cycle)||(fixedJobPool&&!equal(resource,final[1].value)))fail();
     fresh();
     return {
       schemaVersion: 1,

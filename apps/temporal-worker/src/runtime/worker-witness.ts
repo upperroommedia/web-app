@@ -1,3 +1,4 @@
+import type { Firestore } from 'firebase-admin/firestore';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { request } from 'node:https';
@@ -13,9 +14,11 @@ export function diagnosticComputeIdentity(witness: WorkerWitness) {
 
 const serviceAccountDirectory = '/var/run/secrets/kubernetes.io/serviceaccount';
 /** Kubernetes identities are private execution witnesses, never workflow arguments. */
-export async function loadWorkerWitness(buildId: string, required: boolean, env = process.env): Promise<WorkerWitness> {
+export async function loadWorkerWitness(
+  buildId: string, required: boolean, env = process.env, attestationDb?: () => Promise<Firestore>
+): Promise<WorkerWitness> {
   const witness: WorkerWitness = { instanceId: randomUUID(), buildId };
-  if (hasCloudRunJobBinding(env)) return { ...witness, cloudRunJob: await loadMediaRecoveryJobIdentity(buildId, env) };
+  if (hasCloudRunJobBinding(env)) return { ...witness, cloudRunJob: await loadMediaRecoveryJobIdentity(buildId, env, attestationDb) };
   if (env.TEMPORAL_WORKER_HOSTING === 'cloud-run') {
     if (env.TEMPORAL_WORKER_POD_UID || env.TEMPORAL_CLUSTER_ID) throw new Error('Mixed worker hosting identities');
     return { ...witness, cloudRun: await loadCloudRunWorkerIdentity(buildId, env) };

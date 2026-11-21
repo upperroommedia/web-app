@@ -1,3 +1,4 @@
+import { mediaRecoveryTaskAttestationPath } from './media-recovery-task-attestation-reader';
 import { releaseProvenanceDigest } from './release-provenance';
 /** Fixed historical authorization reader. Current authority and immutable
  * original provenance are independent; no Firestore or parent overlays. */
@@ -198,6 +199,7 @@ async function readSnapshot(
           'operatorPrincipal',
           'releaseId',
           ...(jobMode ? ['mediaRecoveryJobProvider'] : []),
+          ...(p.taskAttestationPublicKey ? ['mediaRecoveryTaskAttestation'] : []),
         ]
           .sort()
           .join(',')
@@ -216,7 +218,20 @@ async function readSnapshot(
         (typeof kinds)[number],
         any
       >;
-      if (!Array.isArray(v.facts) || v.facts.length !== kinds.length) fail();
+      if (!Array.isArray(v.facts) || v.facts.length !== kinds.length + (p.taskAttestationPublicKey ? 1 : 0)) fail();
+      if (p.taskAttestationPublicKey) {
+        const cert = await tx.get(o.db.doc(mediaRecoveryTaskAttestationPath(id)));
+        if (!cert.exists || !cert.createTime?.isEqual(cert.updateTime!)) fail();
+        const dataSHA256 = releaseProvenanceDigest(cert.data());
+        const proof = { digest: dataSHA256, seconds: cert.createTime!.seconds,
+          nanoseconds: cert.createTime!.nanoseconds };
+        if (releaseProvenanceDigest({
+          path: cert.ref.path, dataSHA256, createTime: nativeTime(cert.createTime), updateTime: nativeTime(cert.updateTime),
+        }) !== releaseProvenanceDigest(v.facts.at(-1)) ||
+            original.mediaRecoveryTaskAttestation?.certificateSHA256 !== dataSHA256 ||
+            hash(facts.Startup.taskAttestation ?? null) !== hash(proof) ||
+            hash(facts.ReplacementStartup.taskAttestation ?? null) !== hash(proof)) fail();
+      }
       for (let i = 0; i < kinds.length; i++) {
         const s = snaps[i + 6],
           expected = {

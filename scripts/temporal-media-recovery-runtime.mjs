@@ -1,7 +1,7 @@
-import {observeMediaRecoveryPhasePool} from './temporal-media-recovery-phase-pool.mjs';
 import {assertCloudRunMediaRecoverySupported,startCloudRunMediaRecovery,collectCloudRunMediaRecovery,drainCloudRunMediaRecovery,drainCloudRunMediaRecoveryJob,confirmCloudRunMediaRecoveryNeverStarted,readCloudRunMediaRecoveryStopEvents,protectCloudRunMediaRecovery} from './temporal-release-cloud-run.mjs';
 import { prepareMediaRecoveryJournal, readMediaRecoveryJobJournal, saveMediaRecoveryJobJournal } from './temporal-media-recovery-checkpoint.mjs';
 import { advanceMediaRecoveryJob, assertMediaRecoveryJobAccess } from './temporal-media-recovery-job.mjs';
+import { attestMediaRecoveryTask } from './temporal-media-recovery-task-attestation.mjs';
 /** The unsupported legacy diagnostic has no provider record for its original instance exit. */
 const unavailable = async () => {
   throw new Error('CLOUD_RUN_MEDIA_DIAGNOSTIC_RUNTIME_UNAVAILABLE');
@@ -18,13 +18,15 @@ export const canonicalMediaRecoveryRuntime = Object.freeze({
   confirmNeverStarted: unavailable,
 });
 
-export const mediaRecoveryJobPreflight = (o) => () => assertCloudRunMediaRecoverySupported(o.options());
+export const mediaRecoveryJobPreflight = o => () =>
+  assertCloudRunMediaRecoverySupported({ ...o.options(), requireTaskAttestation: o.requireTaskAttestation });
 
 /** Job producer uses the paused release's durable provider journal. The
  * controller must supply the fresh isolation/normal-pool fence before send. */
 export function mediaRecoveryJobLauncher(o) {
-  return async ({ plan, protect }) => {
-    if (typeof protect !== 'function') throw new Error('MEDIA_RECOVERY_JOB_PROTECTION_REQUIRED');
+  return async ({ plan, protect, checkNormalZero }) => {
+    if (typeof protect !== 'function' || typeof checkNormalZero !== 'function')
+      throw new Error('MEDIA_RECOVERY_JOB_PROTECTION_REQUIRED');
     let saved = await readMediaRecoveryJobJournal({ ...o.options(), plan });
     // Children may already be polling after this receipt. The empty-queue
     // launch fence applies only to the original provider mutations.
@@ -36,10 +38,11 @@ export function mediaRecoveryJobLauncher(o) {
         jobUid: saved.runIdentity.jobUid,
       });
       await readMediaRecoveryJobJournal({ ...o.options(), plan });
-      return saved;
-    }
-    return advanceMediaRecoveryJob({
+    } else saved = await advanceMediaRecoveryJob({
       api: o.options().api, plan, saved,
+      observeAcknowledgedRun: plan.taskAttestationPublicKey
+        ? () => Promise.all([checkNormalZero(), readMediaRecoveryJobJournal({ ...o.options(), plan })])
+        : undefined,
       fence: async () => {
         await protect();
         await readMediaRecoveryJobJournal({ ...o.options(), plan });
@@ -50,6 +53,13 @@ export function mediaRecoveryJobLauncher(o) {
         saved = next;
       },
     });
+    if (plan.taskAttestationPublicKey) {
+      await checkNormalZero();
+      await attestMediaRecoveryTask({ directory: o.attestationDirectory, o: o.options(),
+        plan, provider: saved, setOwnedOperation: o.setOwnedOperation });
+      await checkNormalZero();
+    }
+    return saved;
   };
 }
 
@@ -99,8 +109,4 @@ export const mediaRecoveryStoppedConfirmation = (o) => async (scope) => {
 
 
 /** Re-read the native pool and namespace before the provider operation. */
-export const mediaRecoveryProtection=o=>async scope=>{
- const options=o.options();
- const phasePool=await observeMediaRecoveryPhasePool({...options,...scope});
- return protectCloudRunMediaRecovery({...options,...scope,phasePool});
-};
+export const mediaRecoveryProtection = o => scope => protectCloudRunMediaRecovery({ ...o.options(), ...scope });

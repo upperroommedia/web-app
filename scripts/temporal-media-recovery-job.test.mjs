@@ -1,10 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { generateKeyPairSync, sign } from 'node:crypto';
+import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { mediaRecoveryTaskAttestationBytes, prepareMediaRecoveryTaskAttestation } from './temporal-media-recovery-task-attestation.mjs';
 import { nativeSnapshotProof, proofDigest } from './temporal-release-runtime.mjs';
 import {
   advanceMediaRecoveryJob,
   observeMediaRecoveryJobTermination,
   observeMediaRecoveryJobActive,
+  observeMediaRecoveryAttestationTask,
   readCompletedMediaRecoveryJob,
   renderMediaRecoveryJob,
 } from './temporal-media-recovery-job.mjs';
@@ -675,6 +681,8 @@ test('Temporal START can only see the exact active acknowledged Job execution', 
     },
   };
   delete maps.execution.completionTime;
+  delete maps.execution.succeededCount;
+  delete maps.execution.conditions;
   maps.execution.runningCount = 1;
   await observeMediaRecoveryJobActive({ api: options.api, plan: options.plan, run: options.run });
   for (const drift of [
@@ -700,13 +708,13 @@ test('Temporal START can only see the exact active acknowledged Job execution', 
   }
 });
 
-test('the real START producer persists Job binding before the sole Temporal RPC and holds an unknown response', async () => {
+async function assertJobStart({ attested = false, deleteBeforeSend = false } = {}) {
   const { options, maps } = fixture();
   const { plan, run } = options;
   const now = Date.now();
   plan.createdAt = new Date(now - 30000).toISOString();
   plan.expiresAt = Date.parse(plan.createdAt) + 300000;
-  plan.releaseId = 'release';
+  plan.releaseId = 'f2fd6b36-e319-4450-8336-7fe67b4cb79b';
   plan.bindingDigest = 'd'.repeat(64);
   plan.role = 'media';
   plan.contract = {
@@ -725,7 +733,25 @@ test('the real START producer persists Job binding before the sole Temporal RPC 
     revision: plan.name + '/revisions/normal-revision',
     revisionUid: 'original-revision-uid',
   };
-  const stamp = (n) => ({ seconds: 1, nanoseconds: n, toDate: () => new Date(1000) });
+  const stamp = n => ({ seconds: 1, nanoseconds: n, toDate: () => new Date(1000),
+    isEqual: other => other?.seconds === 1 && other?.nanoseconds === n });
+  const createOperation = 'projects/urm-app-staging/locations/us-central1/operations/create';
+  const task = run.execution + '/tasks/' + run.execution.split('/').at(-1) + '-task0';
+  let keys, certificate, kernel, startup;
+  if (attested) {
+    keys = generateKeyPairSync('ed25519');
+    plan.taskAttestationPublicKey = keys.publicKey.export({ type: 'spki', format: 'der' }).toString('base64');
+    plan.job = renderMediaRecoveryJob(plan);
+    run.jobPlanSHA256 = proofDigest(plan.job);
+    maps.job.template = plan.job.template;
+    maps.execution.template = plan.job.template.template;
+    const native = { ...maps.task, ...plan.job.template.template, name: task,
+      createTime: new Date(Date.parse(run.attemptedAt) + 100).toISOString() };
+    delete native.completionTime;
+    delete native.lastAttemptResult;
+    delete native.uid;
+    maps.task = native;
+  }
   let version = 0;
   const snapshot = (data, update = 0) => ({
     exists: data !== undefined,
@@ -786,15 +812,49 @@ test('the real START producer persists Job binding before the sole Temporal RPC 
       recordSHA256: proofDigest(journal),
       attemptedAt: journal.attemptedAt,
     },
-    mediaRecoveryJobProvider: { create: { stage: 'acknowledged' }, run, runIdentity: run },
+    mediaRecoveryJobProvider: { create: { stage: 'acknowledged', operation: createOperation }, run, runIdentity: run },
   };
+  if (attested) {
+    const payload = {
+      operationId: plan.operationId, releaseId: plan.releaseId, bindingDigest: plan.bindingDigest, buildId: plan.buildId,
+      image: plan.image, runner: plan.runner, planSHA256: proofDigest(plan), jobPlanSHA256: run.jobPlanSHA256,
+      armingSHA256: proofDigest(journal), authoritySHA256: proofDigest(expectedAuthority),
+      job: plan.job.name, jobUid: run.jobUid, createOperation, runOperation: run.operation, runIntentSHA256: run.intentSHA256,
+      execution: run.execution, executionUid: run.executionUid, executionGeneration: '1',
+      task, taskCreateTime: maps.task.createTime, taskGeneration: '1', taskUid: null,
+      issuedAt: new Date(now - 1000).toISOString(), expiresAt: plan.expiresAt,
+    };
+    certificate = { payload, signature: sign(null, mediaRecoveryTaskAttestationBytes(payload), keys.privateKey).toString('base64') };
+    const digest = proofDigest(certificate);
+    parent.mediaRecoveryTaskAttestation = { certificateSHA256: digest };
+    const witness = { buildId: plan.buildId, cloudRunJob: {
+      projectId: 'urm-app-staging', region: 'us-central1', job: plan.job.name, execution: run.execution,
+      executionUid: run.executionUid, serviceAccount: plan.runner, imageDigest: plan.image.split('@')[1],
+      task, taskCreateTime: maps.task.createTime, instanceId: 'native-instance',
+    } };
+    kernel = {
+      schemaVersion: 1, stage: 'running', context: { operationId: plan.operationId, intentSHA256: 'a'.repeat(64), parent: witness },
+      intent: {}, birth: { spawnedAt: new Date(now - 5000).toISOString() }, worker: witness,
+    };
+    const { context, intent, birth, worker } = kernel;
+    startup = {
+      schemaVersion: 1, kind: 'private-diagnostic-startup-only-no-recovery-proof', operationId: plan.operationId,
+      intentSHA256: kernel.context.intentSHA256, worker: witness,
+      kernel: { operationId: plan.operationId, birthDigest: proofDigest({ context, intent, birth, worker }) },
+      bundle: { buildId: plan.buildId, bundleSHA256: 'c'.repeat(64) }, capacity: {},
+      observedAt: new Date(now - 2000).toISOString(), taskAttestation: { digest, seconds: 1, nanoseconds: 0 },
+    };
+  }
   const lockRef = { path: '_control/temporalReleaseOperation', get: async () => snapshot(parent, version) };
   const controlRef = { path: '_control/temporalRelease', get: async () => snapshot(control) };
   const stateRef = { path: '_control/temporalReleaseState', get: async () => snapshot(state) };
   const firestore = {
     projectId: 'urm-app-staging',
     databaseId: '(default)',
-    doc: (path) => ({ get: async () => snapshot(path.includes('Journal-') ? journal : undefined) }),
+    doc: path => ({ get: async () => snapshot(
+      path.includes('Journal-') ? journal : path.includes('TaskAttestation-') ? certificate :
+      path.includes('Kernel-') ? kernel : path.includes('Startup-') ? startup : undefined
+    ) }),
     runTransaction: async (fn, settings) => {
       let update;
       const result = await fn({
@@ -808,6 +868,7 @@ test('the real START producer persists Job binding before the sole Temporal RPC 
       if (update) {
         parent = { ...parent, ...update };
         version++;
+        if (deleteBeforeSend && parent.mediaRecoveryWorkflowStart) certificate = undefined;
       }
       return result;
     },
@@ -823,6 +884,8 @@ test('the real START producer persists Job binding before the sole Temporal RPC 
   };
   maps.execution.runningCount = 1;
   delete maps.execution.completionTime;
+  delete maps.execution.succeededCount;
+  delete maps.execution.conditions;
   let sends = 0;
   const client = {
     connection: { withDeadline: async (_deadline, fn) => fn() },
@@ -844,6 +907,8 @@ test('the real START producer persists Job binding before the sole Temporal RPC 
     startMediaRecoveryWorkflow({
       ...options,
       api: (url) => {
+        if (attested && url.endsWith('/tasks?pageSize=2')) return { tasks: [maps.task] };
+        if (attested && url.endsWith(task)) return maps.task;
         if (url.endsWith(plan.name))
           return {
             ...plan.origin,
@@ -871,10 +936,89 @@ test('the real START producer persists Job binding before the sole Temporal RPC 
       prepared,
       jobRun: run,
       client,
-      application: { mediaRecoveryNativeStart() {}, mediaRecoveryPinnedVersion() {} },
+      application: { mediaRecoveryNativeStart() {}, mediaRecoveryPinnedVersion() {}, validateHistoricalMediaRecoveryCapacity() {} },
     });
   await assert.rejects(start(), /START_UNCONFIRMED/);
-  assert.equal(sends, 1);
+  assert.ok(parent.mediaRecoveryWorkflowStart, 'test must reach the native intent transaction');
+  assert.equal(sends, deleteBeforeSend ? 0 : 1);
   await assert.rejects(start(), /START_UNCONFIRMED/);
-  assert.equal(sends, 1);
+  assert.equal(sends, deleteBeforeSend ? 0 : 1);
+}
+
+test('the real START producer persists Job binding before the sole Temporal RPC and holds an unknown response', () =>
+  assertJobStart());
+
+test('the attested START consumes the joined native startup and Task before the sole send', () =>
+  assertJobStart({ attested: true }));
+
+test('a certificate deleted after intent prevents both the first START send and any resend', () =>
+  assertJobStart({ attested: true, deleteBeforeSend: true }));
+
+test('the staged Job pins one operation key before CREATE and preserves legacy Job template bytes', () => {
+  const {options: { plan }} = fixture();
+  const directory = realpathSync(mkdtempSync(join(tmpdir(), 'media-attestation-')));
+  try {
+    assert.equal(prepareMediaRecoveryTaskAttestation(directory, plan.operationId, plan), undefined);
+    assert.deepEqual(renderMediaRecoveryJob(plan), plan.job);
+    const taskAttestationPublicKey = prepareMediaRecoveryTaskAttestation(directory, plan.operationId);
+    const attestedPlan = { ...plan, taskAttestationPublicKey };
+    const env = renderMediaRecoveryJob(attestedPlan).template.template.containers[0].env;
+    assert.deepEqual(env.slice(-2), [
+      { name: 'TEMPORAL_MEDIA_RECOVERY_ATTESTATION_MODE', value: 'operator-ed25519-v1' },
+      { name: 'TEMPORAL_MEDIA_RECOVERY_ATTESTATION_KEY', value: taskAttestationPublicKey },
+    ]);
+    assert.equal(prepareMediaRecoveryTaskAttestation(directory, plan.operationId, attestedPlan), taskAttestationPublicKey);
+    assert.throws(() => renderMediaRecoveryJob({ ...attestedPlan, taskAttestationPublicKey: 'malformed' }));
+    rmSync(join(directory, plan.operationId + '.key'));
+    assert.throws(() => prepareMediaRecoveryTaskAttestation(directory, plan.operationId, attestedPlan));
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('the controller attests the sole running Task by matching the original native execution, list, and direct read', async () => {
+  const { maps, options: { plan, run } } = fixture();
+  const before = Date.parse(run.attemptedAt);
+  plan.expiresAt = before + 300000;
+  const task = run.execution + '/tasks/' + run.execution.split('/').at(-1) + '-task0';
+  maps.job.etag = 'native-job-etag';
+  const execution = { ...maps.execution, runningCount: 1 };
+  delete execution.completionTime;
+  delete execution.succeededCount;
+  delete execution.conditions;
+  const metadata = { '@type': 'type.googleapis.com/google.cloud.run.v2.Execution', name: run.execution, uid: run.executionUid };
+  const direct = { ...maps.task, name: task, createTime: new Date(before + 100).toISOString() };
+  delete direct.uid;
+  delete direct.completionTime;
+  delete direct.lastAttemptResult;
+  delete direct.conditions;
+  delete direct.executionEnvironment;
+  let listed = { tasks: [structuredClone(direct)] };
+  const resources = new Map([[plan.job.name, maps.job], [run.execution, execution], [task, direct],
+    [run.operation, { name: run.operation, metadata }]]);
+  const api = async url => {
+    const native = new URL(url);
+    assert.equal(native.origin, 'https://run.googleapis.com');
+    if (native.pathname.endsWith('/tasks')) {
+      assert.equal(native.searchParams.get('pageSize'), '2');
+      return listed;
+    }
+    const result = resources.get(native.pathname.slice(4));
+    assert.ok(result);
+    return result;
+  };
+  assert.deepEqual(await observeMediaRecoveryAttestationTask({ api, plan, run }), {
+    executionGeneration: '1', task, taskCreateTime: direct.createTime, taskGeneration: '1', taskUid: null,
+  });
+  listed.nextPageToken = false;
+  await assert.rejects(observeMediaRecoveryAttestationTask({ api, plan, run }));
+  delete listed.nextPageToken;
+  listed.tasks[0].containers[0].unreviewedField = true;
+  await assert.rejects(observeMediaRecoveryAttestationTask({ api, plan, run }));
+  listed = { tasks: [structuredClone(direct)] };
+  execution.conditions = [{ type: 'Completed', state: 'CONDITION_FAILED' }];
+  await assert.rejects(observeMediaRecoveryAttestationTask({ api, plan, run }));
+  delete execution.conditions;
+  execution.runningCount = 0;
+  assert.equal(await observeMediaRecoveryAttestationTask({ api, plan, run }), undefined);
 });

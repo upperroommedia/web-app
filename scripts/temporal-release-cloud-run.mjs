@@ -1,3 +1,4 @@
+import { observeMediaRecoveryPhasePool } from './temporal-media-recovery-phase-pool.mjs';
 import { mediaRecoveryTaskIdentity, sameMediaRecoveryTask } from './temporal-media-recovery-job.mjs';
 import { assertWorkerHandoffPromotion } from './temporal-worker-handoff-plan.mjs';
 import { readMediaRecoveryNormalOrigin } from './temporal-bootstrap-pool.mjs';
@@ -1005,6 +1006,8 @@ export async function assertCloudRunMediaRecoverySupported(o) {
     const original = await readMediaRecoveryNormalOrigin(options);
     if (original.binding.poolName !== media.poolName || original.binding.image !== media.image) failRecovery();
     await withNativeCloudRunClient(o, async (client, application) => {
+      if (o.requireTaskAttestation &&
+          application.mediaRecoveryTaskAttestationMode !== 'operator-ed25519-v1') failRecovery();
       await createMediaRecoveryImageReplayObserver({
         image: media.image, buildId: media.buildId, operationId: o.operationId,
         bindingDigest: o.bindingDigest, evidenceDigest: o.evidenceDigest, historyToJSON: application.historyToJSON,
@@ -1283,6 +1286,11 @@ export const observeCloudRunMediaIdleStartup=o=>withNativeCloudRunClient(o,async
  * pending separate native platform evidence and restored-origin activation. */
 export const protectCloudRunMediaRecovery=o=>withNativeCloudRunClient(o,async(client,application)=>{
  try{
+  const phaseStarted=performance.now();
+  if(o.plan.job&&o.phase==='diagnostic'){
+   return await observeMediaRecoveryProtection({...o,client,observeNormalPool:()=>observeMediaRecoveryPhasePool(o)});
+  }
+  const phasePool=await observeMediaRecoveryPhasePool(o);
   const began=Date.now(),monotonic=performance.now();
   const fresh=()=>{if(Date.now()-began<0||Date.now()-began>=5000||performance.now()-monotonic<0||performance.now()-monotonic>=5000)throw Error();};
   const read=async fn=>{let timer;try{fresh();const value=await Promise.race([Promise.resolve().then(()=>{fresh();return fn();}),new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('MEDIA_RECOVERY_PHASE_PROTECTION_UNCONFIRMED')),Math.max(1,5000-(Date.now()-began)));})]);fresh();return value;}finally{clearTimeout(timer);}};
@@ -1291,11 +1299,13 @@ export const protectCloudRunMediaRecovery=o=>withNativeCloudRunClient(o,async(cl
   if(o.phase==='start'){
    const startup=await read(()=>o.firestore.doc(`_control/temporalMediaRecoveryStartup-${o.operationId}`).get());
    const image=startup.exists?await createMediaRecoveryImageReplayObserver({image:o.plan.image,buildId:o.plan.buildId,operationId:o.operationId,bindingDigest:o.bindingDigest,evidenceDigest:o.plan.evidenceDigest,historyToJSON:application.historyToJSON}):undefined;
-   readIdle=()=>application.collectMediaRecoveryIdleStartup({db:o.firestore,auth:o.firebaseAuth,operationId:o.operationId,plan:o.plan,phasePool:o.phasePool,expectedRootSHA256:o.ownedOperation.dataDigest,expectedControlSHA256:o.expectedAuthority.control.dataDigest,expectedStateSHA256:o.expectedAuthority.state.dataDigest,...(image?{image:{bundleSHA256:image.bundleSHA256,tools:image.tools}}:{})});
+   readIdle=()=>application.collectMediaRecoveryIdleStartup({db:o.firestore,auth:o.firebaseAuth,operationId:o.operationId,plan:o.plan,phasePool,expectedRootSHA256:o.ownedOperation.dataDigest,expectedControlSHA256:o.expectedAuthority.control.dataDigest,expectedStateSHA256:o.expectedAuthority.state.dataDigest,...(image?{image:{bundleSHA256:image.bundleSHA256,tools:image.tools}}:{})});
   }
-  const result=await observeMediaRecoveryProtection({...o,client,readIdle});
+  const result=await observeMediaRecoveryProtection({...o,client,phasePool,readIdle});
   await read(()=>assertMediaRecoveryAuthority(o));
-  if(!Number.isFinite(Date.parse(result.observedAt))||Math.abs(Date.now()-Date.parse(result.observedAt))>=5000||Math.abs(Date.now()-Date.parse(o.phasePool.observedAt))>=5000)throw Error();
+  const phaseAge=performance.now()-phaseStarted;
+  if(!Number.isFinite(Date.parse(result.observedAt))||Math.abs(Date.now()-Date.parse(result.observedAt))>=5000||
+     Math.abs(Date.now()-Date.parse(phasePool.observedAt))>=5000||phaseAge<0||phaseAge>=5000)throw Error();
   fresh();
   return result;
  }catch{throw new Error('MEDIA_RECOVERY_PHASE_PROTECTION_UNCONFIRMED');}

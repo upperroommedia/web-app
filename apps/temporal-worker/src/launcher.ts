@@ -97,7 +97,8 @@ async function launchMediaRecoveryApplication() {
     );
     const { Storage } = await mediaJobPhase('dependencies', () => import('@google-cloud/storage'));
     if (process.env.TEMPORAL_MEDIA_RECOVERY_CHILD !== undefined) throw new Error('MEDIA_RECOVERY_PARENT_REQUIRED');
-    const parent = await mediaJobPhase('worker-witness', () => loadWorkerWitness(config.buildId, true));
+    const parent = await mediaJobPhase('worker-witness', () =>
+      loadWorkerWitness(config.buildId, true, process.env, async () => getFirestore(ownership.app)));
     const cap = await mediaJobPhase('capability', () =>
       mediaRecoveryKernelContext(getFirestore(ownership.app), getAuth(ownership.app), parent, config.operationId)
     );
