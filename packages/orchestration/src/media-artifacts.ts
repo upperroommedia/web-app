@@ -26,15 +26,101 @@ export const mediaReferenceId = (type: string, id: string, slot = '') =>
     .update(JSON.stringify([type, id, slot]))
     .digest('hex');
 
-/** Register before upload so even an upload/receipt acknowledgement failure remains discoverable. */
-export function writeMediaUploadIntent(
+/** The finite worker obtains this binding from its authenticated release plan. */
+export interface MediaRecoveryArtifactRegistry {
+  readonly operationId: string;
+  readonly releaseId: string;
+  readonly bucketName: string;
+}
+
+const recoveryUuid = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
+export function assertMediaArtifactBucket(
+  projectId: string,
+  bucketName: string,
+  registry?: MediaRecoveryArtifactRegistry
+) {
+  if (registry === undefined) {
+    if (bucketName?.startsWith('urm-app-staging-mr-')) throw new Error('Private media artifact registry required.');
+    return;
+  }
+  if (
+    !registry ||
+    projectId !== 'urm-app-staging' ||
+    !recoveryUuid.test(registry.releaseId) ||
+    !recoveryUuid.test(registry.operationId) ||
+    registry.operationId === registry.releaseId ||
+    bucketName !== registry.bucketName ||
+    bucketName !== 'urm-app-staging-mr-' + registry.releaseId.replaceAll('-', '')
+  )
+    throw new Error('Invalid private media artifact registry.');
+}
+
+export function isRecoveryArtifactPath(
+  registry: MediaRecoveryArtifactRegistry,
+  requestVersion: string,
+  path: string,
+  stage: 'source' | 'processed'
+) {
+  const prefix = 'workflow-audio/media-recovery-' + registry.operationId + '/' + requestVersion + '/' + stage + '-';
+  const suffix = stage === 'source' ? '.wav' : '.mp3';
+  return (
+    /^[a-f0-9]{16}$/.test(requestVersion) &&
+    path.startsWith(prefix) &&
+    path.endsWith(suffix) &&
+    recoveryUuid.test(path.slice(prefix.length, -suffix.length))
+  );
+}
+
+export function mediaRecoveryArtifactRecord(
+  firestore: Firestore,
+  registry: MediaRecoveryArtifactRegistry,
+  path: string
+) {
+  return firestore
+    .doc('_control/temporalMediaRecoveryArtifacts-' + registry.operationId)
+    .collection('artifacts')
+    .doc(mediaArtifactId('urm-app-staging', path));
+}
+
+type UploadIntent = { projectId: string; sermonId: string; jobId: string; path: string; createdAt: number };
+
+/** Historical callers receive the same artifact ID and use the ordinary registry. */
+export function writeMediaUploadIntent(transaction: Transaction, firestore: Firestore, input: UploadIntent) {
+  return createMediaUploadRecord(transaction, firestore, input).id;
+}
+
+/** Register before upload. Later retain/delete receipts use this exact reference. */
+export function createMediaUploadRecord(
   transaction: Transaction,
   firestore: Firestore,
-  input: { projectId: string; sermonId: string; jobId: string; path: string; createdAt: number }
+  input: UploadIntent,
+  recovery?: { registry: MediaRecoveryArtifactRegistry; requestVersion: string; bucketName: string }
 ) {
   const id = mediaArtifactId(input.projectId, input.path);
-  const artifact = firestore.collection(MEDIA_ARTIFACTS).doc(id);
+  const registry = recovery?.registry;
+  if (recovery) {
+    assertMediaArtifactBucket(input.projectId, recovery.bucketName, recovery.registry);
+    if (
+      input.jobId !== 'media-recovery-' + recovery.registry.operationId ||
+      input.sermonId !== input.jobId ||
+      !(['source', 'processed'] as const).some((stage) =>
+        isRecoveryArtifactPath(recovery.registry, recovery.requestVersion, input.path, stage)
+      )
+    )
+      throw new Error('Private media artifact path is outside the admitted job.');
+  }
+  const artifact = registry
+    ? mediaRecoveryArtifactRecord(firestore, registry, input.path)
+    : firestore.collection(MEDIA_ARTIFACTS).doc(id);
+  const jobs = registry
+    ? firestore.doc('_control/temporalMediaRecoveryArtifacts-' + registry.operationId).collection('jobs')
+    : firestore.collection('temporalMediaJobArtifacts');
+  const jobIndex = jobs.doc(input.jobId).collection('artifacts').doc(id);
+  const custody = registry
+    ? { operationId: registry.operationId, releaseId: registry.releaseId, bucketName: registry.bucketName }
+    : {};
   transaction.create(artifact, {
+    ...custody,
     projectId: input.projectId,
     sermonId: input.sermonId,
     path: input.path,
@@ -45,16 +131,15 @@ export function writeMediaUploadIntent(
     eligibleAfter: input.createdAt + MEDIA_RETENTION_MS,
   });
   transaction.create(artifact.collection('references').doc(mediaReferenceId('media_job', input.jobId)), {
+    ...custody,
     projectId: input.projectId,
     type: 'media_job',
     jobId: input.jobId,
     state: 'active',
     createdAt: input.createdAt,
   });
-  transaction.set(firestore.collection('temporalMediaJobArtifacts').doc(input.jobId).collection('artifacts').doc(id), {
-    artifactId: id,
-  });
-  return id;
+  transaction.set(jobIndex, { ...custody, artifactId: id });
+  return artifact;
 }
 
 /** Preparation performs reads only; caller executes all returned writes after completing every read. */

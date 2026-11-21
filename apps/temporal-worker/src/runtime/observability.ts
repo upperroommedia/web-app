@@ -1,5 +1,21 @@
 import * as Sentry from '@sentry/node';
-import { Runtime } from '@temporalio/worker';
+import { DefaultLogger, Runtime } from '@temporalio/worker';
+
+function mediaRecoveryLogger() {
+  class MediaRecoveryLogger extends DefaultLogger {
+    override log(
+      level: Parameters<DefaultLogger['log']>[0],
+      message: string,
+      metadata?: Parameters<DefaultLogger['log']>[2]
+    ) {
+      if (!metadata) return super.log(level, message);
+      const safeMetadata = { ...metadata };
+      delete safeMetadata.taskToken;
+      super.log(level, message, safeMetadata);
+    }
+  }
+  return new MediaRecoveryLogger('INFO');
+}
 /** Never attach Activity inputs, provider errors, credentials or intent content. */
 export function initializeWorkerObservability(
   projectId: string,
@@ -10,6 +26,7 @@ export function initializeWorkerObservability(
   const runtime = Runtime.install({
     // The application drains dispatch before workers and owns every signal.
     shutdownSignals: [],
+    ...(queues.includes('urm-media-kernel-recovery') ? { logger: mediaRecoveryLogger() } : {}),
     telemetryOptions: {
       metrics: {
         prometheus: {

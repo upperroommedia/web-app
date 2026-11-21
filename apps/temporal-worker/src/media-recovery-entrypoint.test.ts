@@ -3,7 +3,14 @@ const mockReceiptPaths: string[] = [];
 let mockRegistered = true,
   mockParent = true,
   mockBundleFailure = false,
-  mockCloudWitness = true;
+  mockCloudWitness = true,
+  mockJobWitness = false,
+  mockStorageBound = true;
+const mockReleaseId = '13330954-291f-4a64-bb46-516339a61c91';
+const mockOperationId = '4f69a3b8-75bb-4ad6-adf4-3bb67cccb0d0';
+const mockBucketName = 'urm-app-staging-mr-' + mockReleaseId.replaceAll('-', '');
+const mockOpenBucket = jest.fn((name: string) => ({ name }));
+const mockCreateRuntimeActivities = jest.fn(() => ({ queues: { 'urm-media': { acquireMedia: jest.fn() } } }));
 const mockCode = 'exact-held-private-workflow-code';
 const mockWorker = {
   allowPolling: jest.fn(() => mockEvents.push('allow.polling')),
@@ -38,7 +45,7 @@ jest.mock('./runtime/media-recovery-config', () => ({
   loadMediaRecoveryRuntimeConfig: () => ({
     projectId: 'urm-app-staging',
     buildId: 'a'.repeat(40),
-    operationId: '12345678-1234-1234-1234-123456789abc',
+    operationId: mockOperationId,
     namespace: 'urm-app-staging.qwejt',
     queues: ['urm-media-kernel-recovery'],
     deploymentName: 'urm-worker-media-recovery-staging',
@@ -55,9 +62,16 @@ jest.mock('./runtime/consumed-workflow-bundle', () => ({
 jest.mock('./runtime/worker-witness', () => ({
   loadWorkerWitness: async () => ({
     instanceId: '11111111-1111-4111-8111-111111111111',
-    cloudRun: mockCloudWitness
-      ? { pool: 'controlled-pool', revision: 'controlled-revision', revisionUid: 'controlled-revision-uid' }
-      : undefined,
+    ...(mockCloudWitness && !mockJobWitness
+      ? {
+          cloudRun: {
+            pool: 'controlled-pool',
+            revision: 'controlled-revision',
+            revisionUid: 'controlled-revision-uid',
+          },
+        }
+      : {}),
+    ...(mockJobWitness ? { cloudRunJob: { job: 'controlled-job', executionUid: 'controlled-execution' } } : {}),
   }),
 }));
 jest.mock('./runtime/media-kernel-supervisor', () => ({
@@ -72,7 +86,7 @@ jest.mock('@upperroom/shared/shared/firebaseProjectConfig', () => ({
   getFirebaseStorageBucket: () => 'urm-app-staging.firebasestorage.app',
 }));
 jest.mock('./runtime/activities', () => ({
-  createRuntimeActivities: () => ({ queues: { 'urm-media': { acquireMedia: jest.fn() } } }),
+  createRuntimeActivities: (...args: []) => mockCreateRuntimeActivities(...args),
 }));
 jest.mock('firebase-admin/firestore', () => ({
   getFirestore: () => ({
@@ -92,30 +106,50 @@ jest.mock('firebase-admin/firestore', () => ({
 jest.mock('firebase-admin/auth', () => ({ getAuth: () => ({}) }));
 jest.mock('@google-cloud/storage', () => ({
   Storage: class {
-    bucket() {
-      return {};
+    bucket(name: string) {
+      return mockOpenBucket(name);
     }
   },
 }));
 jest.mock('./runtime/media-recovery-original-fault', () => ({ holdOriginalMediaCompletion: (o: any) => o.acquire }));
+jest.mock('./runtime/media-recovery-task-attestation-reader', () => ({
+  observedTaskAttestation: () => ({ digest: 'd'.repeat(64), seconds: 1, nanoseconds: 0 }),
+}));
 jest.mock('./runtime/media-recovery-registration', () => {
-  const make = async () => ({
-    cap: {
+  const make = async (options: any) => {
+    const cap = {
       authorize: mockAuthorize,
       context: { intentSHA256: 'd'.repeat(64) },
-      plan: { expiresAt: Date.now() + 10000, createdAt: new Date().toISOString() },
-    },
-    activities: mockActivities,
-    authorize: mockAuthorize,
-  });
+      plan: {
+        expiresAt: Date.now() + 10000,
+        createdAt: new Date().toISOString(),
+        operationId: mockOperationId,
+        releaseId: mockReleaseId,
+        ...(mockJobWitness && mockStorageBound
+          ? {
+              job: {},
+              taskAttestationPublicKey: {},
+              diagnosticStorage: {
+                schemaVersion: 1,
+                bucket: mockBucketName,
+                projectNumber: '251680231116',
+                createdAt: '2026-11-21T16:00:00Z',
+                preparationSHA256: 'c'.repeat(64),
+              },
+            }
+          : {}),
+      },
+    };
+    return { cap, bucket: options.createAcquisition(cap).bucket, activities: mockActivities, authorize: mockAuthorize };
+  };
   return {
-    createMediaRecoveryRegistration: async () => {
+    createMediaRecoveryRegistration: async (options: any) => {
       mockEvents.push('original.registration');
-      return make();
+      return make(options);
     },
-    createMediaRecoveryReplacementRegistration: async () => {
+    createMediaRecoveryReplacementRegistration: async (options: any) => {
       mockEvents.push('replacement.registration');
-      return make();
+      return make(options);
     },
   };
 });
@@ -172,8 +206,32 @@ beforeEach(() => {
   mockParent = true;
   mockBundleFailure = false;
   mockCloudWitness = true;
+  mockJobWitness = false;
+  mockStorageBound = true;
   process.env.TEMPORAL_MEDIA_RECOVERY_CHILD = 'original';
   process.send = (() => true) as typeof process.send;
+});
+
+test.each(['original', 'replacement'])('finite %s selects only the attested synthetic bucket', async (child) => {
+  mockJobWitness = true;
+  process.env.TEMPORAL_MEDIA_RECOVERY_CHILD = child;
+  await runMediaRecoveryApplication();
+  expect(mockOpenBucket.mock.calls).toEqual([[mockBucketName]]);
+  expect(mockCreateRuntimeActivities).toHaveBeenCalledWith(
+    'urm-app-staging',
+    ['urm-media'],
+    expect.anything(),
+    expect.objectContaining({ cloudRunJob: expect.anything() }),
+    { bucket: { name: mockBucketName }, operationId: mockOperationId, releaseId: mockReleaseId }
+  );
+});
+
+test('a finite task with no sealed storage binding cannot open a bucket or poll', async () => {
+  mockJobWitness = true;
+  mockStorageBound = false;
+  await expect(runMediaRecoveryApplication()).rejects.toThrow('MEDIA_RECOVERY_STORAGE_BINDING_UNCONFIRMED');
+  expect(mockOpenBucket).not.toHaveBeenCalled();
+  expect(mockCreate).not.toHaveBeenCalled();
 });
 afterEach(() => {
   delete process.env.TEMPORAL_MEDIA_RECOVERY_CHILD;

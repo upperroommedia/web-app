@@ -322,7 +322,10 @@ export function replacementMediaAcquisition(o: {
         fail();
       await bounded(o.db.runTransaction(o.cap.authorize, { readOnly: true }));
       o.cap.checkFresh();
-      if (hash(await originalMediaArtifacts(o.db, o.bucket, o.cap.context.operationId)) !== hash(original.inventory))
+      if (
+        hash(await originalMediaArtifacts(o.db, o.bucket, o.cap.context.operationId, o.cap.plan)) !==
+        hash(original.inventory)
+      )
         fail();
       const pendingFresh = await pendingReplacement(o.client, o.cap, o.birth.value.worker);
       await bounded(o.db.runTransaction(o.cap.authorize, { readOnly: true }));
@@ -331,7 +334,7 @@ export function replacementMediaAcquisition(o: {
       if (c.cancellationSignal.aborted) fail();
       const result = await o.acquire(ref);
       if (result.kind !== 'ready' || c.cancellationSignal.aborted) fail();
-      const after = await originalMediaArtifacts(o.db, o.bucket, o.cap.context.operationId);
+      const after = await originalMediaArtifacts(o.db, o.bucket, o.cap.context.operationId, o.cap.plan);
       if (hash(after) !== hash(original.inventory)) fail();
       const value = {
         schemaVersion: 1,
@@ -475,7 +478,7 @@ export async function superviseMediaRecoveryReplacementCycle(
                 )?.activityTaskStartedEventAttributes;
                 if (start?.attempt !== 2 || start.identity !== `media-recovery-${state.worker.instanceId}`) fail();
                 if (
-                  hash(await originalMediaArtifacts(db, bucket, base.context.operationId)) !==
+                  hash(await originalMediaArtifacts(db, bucket, base.context.operationId, base.plan)) !==
                   hash(cap.replacement.ready.inventory)
                 )
                   fail();

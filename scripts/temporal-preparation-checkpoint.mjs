@@ -6,7 +6,7 @@ import { mediaPoolPreSendAbortReason, mediaPoolSendFenceVersion } from './tempor
  * A new diagnostic intent can also use exact readback before its first START.
  */
 async function saveCheckpoint({ firestore, lockRef, controlRef, stateRef,
-  immutableReceipt, creationReceipt, poolAbortReceipt, ownedOperation, expectedAuthority, config, operationId, bindingDigest, operatorPrincipal, identityState, kind }) {
+  immutableReceipt, creationReceipt, poolAbortReceipt, ownedOperation, expectedAuthority, config, operationId, bindingDigest, operatorPrincipal, identityState, kind, assertDomainAuthority }) {
   const [field, action] = { mediaPromotion:['cloudMediaPromotion','promote-cloud-run-media'], imagesPromotion:['cloudImagesPromotion','promote-cloud-run-images'], emailPromotion:['cloudEmailPromotion','promote-cloud-run-email'], searchPromotion:['cloudSearchPromotion','promote-cloud-run-search'],controlsPromotion:['cloudControlsPromotion','promote-cloud-run-controls'], mediaCycle:['cloudMediaBootstrapCycle','bootstrap-stop-cloud-run-media'],mediaActivation:['cloudMediaActivation','activate-cloud-run-media-pool'],mediaAbort:['cloudMediaActivationStop','stop-cloud-run-media-activation'], imagesCycle:['cloudImagesBootstrapCycle','bootstrap-stop-cloud-run-images'],imagesActivation:['cloudImagesActivation','activate-cloud-run-images-pool'],imagesAbort:['cloudImagesActivationStop','stop-cloud-run-images-activation'], emailCycle:['cloudEmailBootstrapCycle','bootstrap-stop-cloud-run-email'],emailActivation:['cloudEmailActivation','activate-cloud-run-email-pool'],emailAbort:['cloudEmailActivationStop','stop-cloud-run-email-activation'], searchCycle:['cloudSearchBootstrapCycle','bootstrap-stop-cloud-run-search'],searchActivation:['cloudSearchActivation','activate-cloud-run-search-pool'],searchAbort:['cloudSearchActivationStop','stop-cloud-run-search-activation'], orchestrationCycle:['cloudOrchestrationBootstrapCycle','bootstrap-stop-cloud-run-orchestration'], orchestrationActivation:['cloudOrchestrationActivation','activate-cloud-run-orchestration-pool'], orchestrationAbort:['cloudOrchestrationActivationStop','stop-cloud-run-orchestration-activation'], poolActivation: ['cloudControlsActivation','activate-cloud-run-controls-pool'], poolAbort: ['cloudControlsActivationStop','stop-cloud-run-controls-activation'], bootstrapCycle: ['cloudPoolBootstrapCycle', 'bootstrap-stop-cloud-run-controls'], dispatchActivation: ['cloudDispatchActivation', 'activate-cloud-run-dispatch-service'], identity: ['cloudIdentityPreparation', 'prepare-cloud-run-identity'],
     dispatchWakes: ['cloudBusinessDispatchWakes', 'enable-staging-dispatch-wakes'],
     eventarcCycle: ['cloudDispatchEventarcCycle', 'prepare-stop-cloud-run-dispatch-eventarc'],
@@ -18,6 +18,8 @@ async function saveCheckpoint({ firestore, lockRef, controlRef, stateRef,
     pool: ['cloudPoolPreparation', 'prepare-cloud-run-pool'], secret: ['cloudSecretAccessPreparation', 'prepare-cloud-run-secret-access'],
     runtimeAccess: ['cloudRuntimeAccessPreparation', 'prepare-cloud-run-runtime-access'],
     runtimeRole: ['cloudRuntimeRolePreparation', 'prepare-cloud-run-runtime-role'],
+    diagnosticStorage: ['cloudDiagnosticStoragePreparation', 'prepare-media-diagnostic-storage'],
+    diagnosticStorageRetirement: ['cloudDiagnosticStorageRetirement', 'retire-media-diagnostic-storage-grant'],
     firestore: ['cloudFirestoreAccessPreparation', 'prepare-cloud-run-firestore-access'],
     scaler: ['cloudScalerAccessPreparation', 'prepare-cloud-run-scaler-access'] }[kind] ?? [];
   if (!field) throw new Error('PREPARATION_KIND_REQUIRED');
@@ -62,6 +64,10 @@ async function saveCheckpoint({ firestore, lockRef, controlRef, stateRef,
     assertNativeSnapshot(ownedOperation, current);
     assertNativeSnapshot(expectedAuthority.control, control);
     assertNativeSnapshot(expectedAuthority.state, state);
+    if (kind === 'diagnosticStorage' || kind === 'diagnosticStorageRetirement') {
+      if (typeof assertDomainAuthority !== 'function') throw new Error('MEDIA_DIAGNOSTIC_STORAGE_AUTHORITY_REQUIRED');
+      await assertDomainAuthority(tx);
+    }
     if (control.get('releaseId') !== config.releaseId || state.get('releaseId') !== config.releaseId ||
       control.get('admission') !== 'paused' || state.get('phase') !== 'provider-usage-ready' ||
       config.domains.some(domain => control.get(`domains.${domain}.admission`) !== 'paused') ||
@@ -174,6 +180,10 @@ export const saveRuntimeRolePreparationCheckpoint = options => saveCheckpoint({ 
 
 export const saveRuntimeAccessPreparationCheckpoint = options => saveCheckpoint({ ...options, kind: 'runtimeAccess' });
 
+export const saveDiagnosticStoragePreparationCheckpoint = options => saveCheckpoint({ ...options, kind: 'diagnosticStorage' });
+
+export const saveDiagnosticStorageRetirementCheckpoint = options => saveCheckpoint({ ...options, kind: 'diagnosticStorageRetirement' });
+
 export const saveDispatchServicePreparationCheckpoint = options => saveCheckpoint({ ...options, kind: 'service' });
 
 export const saveDispatchAccessPreparationCheckpoint = options => saveCheckpoint({ ...options, kind: 'dispatchAccess' });
@@ -258,30 +268,24 @@ export async function readOwnedPoolOperationReceipts(firestore, prefixes, ids, r
     id: ids[key],
     ref: firestore.doc(`_control/${prefix}-${ids[key]}`),
   }));
-  const read = (verify) =>
-    firestore.runTransaction(
-      async (tx) => {
-        const rows = await Promise.all(entries.map(({ ref }) => tx.get(ref)));
-        return rows.map((row, index) => {
-          if (
-            !row.exists ||
-            !row.createTime?.isEqual(row.updateTime) ||
-            row.get('operationId') !== entries[index].id ||
-            row.get('releaseId') !== releaseId
-          )
-            throw new Error('OWNED_BOOTSTRAP_RECEIPT_REQUIRED');
-          if (verify) assertNativeSnapshot(verify[index], row);
-          return row;
-        });
-      },
-      { readOnly: true }
-    );
-  const originals = await read();
+  const readRows = async (tx, verify) => {
+    const rows = await Promise.all(entries.map(({ ref }) => tx.get(ref)));
+    return rows.map((row, index) => {
+      if (
+        !row.exists ||
+        !row.createTime?.isEqual(row.updateTime) ||
+        row.get('operationId') !== entries[index].id ||
+        row.get('releaseId') !== releaseId
+      ) throw new Error('OWNED_BOOTSTRAP_RECEIPT_REQUIRED');
+      if (verify) assertNativeSnapshot(verify[index], row);
+      return row;
+    });
+  };
+  const originals = await firestore.runTransaction(tx => readRows(tx), { readOnly: true });
   const proofs = originals.map(nativeSnapshotProof);
   return {
     receipts: Object.fromEntries(entries.map(({ key }, index) => [key, originals[index].data()])),
-    assertCurrent: async () => {
-      await read(proofs);
-    },
+    assertCurrent: tx => tx ? readRows(tx, proofs) :
+      firestore.runTransaction(reader => readRows(reader, proofs), { readOnly: true }),
   };
 }

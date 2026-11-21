@@ -12,8 +12,10 @@ import {
   observeMediaRecoveryJobActive,
   observeMediaRecoveryAttestationTask,
   readCompletedMediaRecoveryJob,
+  mediaRecoveryJobAccessPlan,
   renderMediaRecoveryJob,
 } from './temporal-media-recovery-job.mjs';
+import { readStagingFailedJobNative } from './temporal-media-recovery-native-failure.mjs';
 
 import { readMediaRecoveryJobJournal, saveMediaRecoveryJobJournal } from './temporal-media-recovery-checkpoint.mjs';
 
@@ -146,6 +148,54 @@ test('the original single un-retried task must be complete and joined to the exa
   assert.equal(result.taskUid, options.taskIdentity.uid);
   assert.match(result.proofSHA256, /^[a-f0-9]{64}$/);
   assert.deepEqual(reads, ['job', 'operation', 'execution', 'task', 'execution']);
+});
+
+test('a failed Job and its single failed Task must join the known native operations and complete inventory', async () => {
+  const { maps, options: { plan, run } } = fixture();
+  const where = 'projects/urm-app-staging/locations/us-central1';
+  const creation = where + '/operations/other-create';
+  const task = run.execution + '/tasks/recovery-run-task0';
+  const createTime = new Date(Date.parse(run.attemptedAt) + 100).toISOString();
+  const conditions = [{ type: 'Completed', state: 'CONDITION_FAILED', executionReason: 'NON_ZERO_EXIT_CODE' }];
+  const job = { ...maps.job, etag: 'original-job', executionCount: 1, latestCreatedExecution: { name: run.execution } };
+  const execution = { ...maps.execution, createTime, etag: 'original-execution', conditions, failedCount: 1 };
+  delete execution.succeededCount;
+  const failedTask = { ...maps.task, name: task, createTime, etag: 'original-task', conditions,
+    lastAttemptResult: { exitCode: 1, status: { code: 10 } } };
+  const provider = {
+    jobPlanSHA256: run.jobPlanSHA256, runIdentity: run,
+    create: { stage: 'acknowledged', operation: creation },
+    run: { ...run, request: { body: { etag: job.etag } } },
+    access: { stage: 'completed', plan: mediaRecoveryJobAccessPlan(plan, run.jobUid),
+      outcome: 'acknowledged-write-and-policy-observation' },
+  };
+  const operations = { operations: [] };
+  const native = new Map([
+    [job.name, job],
+    [creation, { name: creation, done: true,
+      response: { ...job, '@type': 'type.googleapis.com/google.cloud.run.v2.Job' } }],
+    [run.operation, { name: run.operation, done: true,
+      error: { code: 10, message: 'Task recovery-run-task0 failed with exit code: 1 and message: The container exited with an error.' },
+      metadata: { '@type': 'type.googleapis.com/google.cloud.run.v2.Execution', name: run.execution } }],
+    [run.execution, execution],
+    [job.name + '/executions?pageSize=100', { executions: [execution] }],
+    [task, failedTask],
+    [run.execution + '/tasks?pageSize=100', { tasks: [failedTask] }],
+    [where + '/operations?filter=done%3Afalse&pageSize=1000', operations],
+  ]);
+  const api = async url => {
+    const key = url.replace('https://run.googleapis.com/v2/', '');
+    assert.ok(native.has(key));
+    return structuredClone(native.get(key));
+  };
+  const result = await readStagingFailedJobNative(api, plan, provider);
+  assert.equal(result.kind, 'job-task-failed');
+  assert.equal(result.task, task);
+  failedTask.retried = 1;
+  await assert.rejects(readStagingFailedJobNative(api, plan, provider), /TERMINAL_FAILURE_UNCONFIRMED/);
+  failedTask.retried = 0;
+  operations.operations.push({ done: false });
+  await assert.rejects(readStagingFailedJobNative(api, plan, provider), /TERMINAL_FAILURE_UNCONFIRMED/);
 });
 
 test('native Task completion can use the exact creation timestamp when the Task omits UID and GEN2',async()=>{
@@ -750,6 +800,7 @@ async function assertJobStart({ attested = false, deleteBeforeSend = false } = {
     delete native.completionTime;
     delete native.lastAttemptResult;
     delete native.uid;
+    delete native.conditions;
     maps.task = native;
   }
   let version = 0;
@@ -1010,6 +1061,29 @@ test('the controller attests the sole running Task by matching the original nati
   assert.deepEqual(await observeMediaRecoveryAttestationTask({ api, plan, run }), {
     executionGeneration: '1', task, taskCreateTime: direct.createTime, taskGeneration: '1', taskUid: null,
   });
+  execution.reconciling = true;
+  direct.reconciling = true;
+  listed.tasks[0].reconciling = true;
+  const reconciling = await observeMediaRecoveryAttestationTask({ api, plan, run });
+  assert.equal(reconciling.taskGeneration, '1');
+  assert.equal(reconciling.executionGeneration, '1');
+  execution.observedGeneration = '0';
+  assert.equal(await observeMediaRecoveryAttestationTask({ api, plan, run }), undefined);
+  execution.generation = [1];
+  execution.observedGeneration = [1];
+  assert.equal(await observeMediaRecoveryAttestationTask({ api, plan, run }), undefined);
+  execution.generation = '1';
+  execution.observedGeneration = '1';
+  listed.tasks[0].conditions = [{ type: 'Completed', state: 'CONDITION_FAILED' }];
+  await assert.rejects(observeMediaRecoveryAttestationTask({ api, plan, run }));
+  delete listed.tasks[0].conditions;
+  listed.tasks[0].observedGeneration = '0';
+  assert.equal(await observeMediaRecoveryAttestationTask({ api, plan, run }), undefined);
+  listed.tasks[0].observedGeneration = '1';
+  const started = direct.startTime;
+  delete direct.startTime;
+  assert.equal(await observeMediaRecoveryAttestationTask({ api, plan, run }), undefined);
+  direct.startTime = started;
   listed.nextPageToken = false;
   await assert.rejects(observeMediaRecoveryAttestationTask({ api, plan, run }));
   delete listed.nextPageToken;

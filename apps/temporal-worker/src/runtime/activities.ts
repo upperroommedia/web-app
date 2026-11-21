@@ -43,7 +43,7 @@ import { createHash } from 'node:crypto';
 import { Context } from '@temporalio/activity';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { getFirebaseImagesBucket } from '@upperroom/shared/shared/firebaseProjectConfig';
-import { Storage } from '@google-cloud/storage';
+import { Storage, type Bucket } from '@google-cloud/storage';
 import { withProviderIndexedTransaction } from '@upperroom/orchestration/provider-transaction';
 import { createDurableJobStore, durableEntityKey } from '@upperroom/orchestration/job-store';
 import type { DurableJobRef, DurableJobStep } from '@upperroom/contracts/temporal';
@@ -94,9 +94,18 @@ export function createRuntimeActivities(
   projectId: string,
   selectedQueues: readonly string[],
   client?: Pick<Client, 'workflow' | 'connection'>,
-  witness?: WorkerWitness
+  witness?: WorkerWitness,
+  diagnosticMedia?: { bucket: Bucket; operationId: string; releaseId: string }
 ) {
   if (firebaseAdmin.app().options.projectId !== projectId) throw new Error('Firebase runtime project mismatch');
+  if (
+    diagnosticMedia &&
+    (projectId !== 'urm-app-staging' ||
+      !witness?.cloudRunJob ||
+      selectedQueues.length !== 1 ||
+      selectedQueues[0] !== 'urm-media')
+  )
+    throw new Error('MEDIA_RECOVERY_STORAGE_BINDING_UNCONFIRMED');
   const db = firebaseAdmin.firestore();
   const executions = new ActivityExecutionContext(client, witness);
   const criticalRepair = createCriticalRepairAuthority({
@@ -476,7 +485,16 @@ export function createRuntimeActivities(
     projectId,
     firestore: db,
     database: firebaseAdmin.database(),
-    bucket: firebaseAdmin.storage().bucket(),
+    bucket: diagnosticMedia?.bucket ?? firebaseAdmin.storage().bucket(),
+    ...(diagnosticMedia
+      ? {
+          recoveryArtifactRegistry: {
+            operationId: diagnosticMedia.operationId,
+            releaseId: diagnosticMedia.releaseId,
+            bucketName: diagnosticMedia.bucket.name,
+          },
+        }
+      : {}),
     ytdlpPath: process.env.YTDLP_PATH || '/usr/local/bin/yt-dlp',
     projectJob: async (ref, value) => {
       const patch = createMediaProjection(await store.loadJob(ref), value, Context.current().info.attempt, Date.now());

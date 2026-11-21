@@ -6,6 +6,7 @@ import { readMediaRecoveryAncestorAccess } from './temporal-bootstrap-pool.mjs';
 import { diagnosticTemplate } from './temporal-media-recovery-cycle.mjs';
 import { verifyPreparedPoolMetadata } from './temporal-prepare-cloud-pool.mjs';
 import { assertStoredMediaDiagnosticDrain } from './temporal-media-diagnostic-drain.mjs';
+import { readRetiredMediaDiagnosticStorage } from './temporal-media-diagnostic-storage.mjs';
 const fail = () => {
   throw new Error('RESTORED_MEDIA_ORIGIN_UNCONFIRMED');
 };
@@ -374,6 +375,9 @@ export async function readRestoredMediaActivationAccess(o) {
       !p.origin.revisionUid
     )
       fail();
+    const diagnosticStorageRetirement = await read(() => readRetiredMediaDiagnosticStorage({
+      db: o.firestore, api: url => o.api(url), plan: p, terminalProof: first.stamps[0],
+    }));
     let pool;
     if (jobMode) {
       if (
@@ -441,7 +445,7 @@ export async function readRestoredMediaActivationAccess(o) {
       pool: normalPool,
       capsuleSHA256,
       provenanceSHA256: hash(first),
-      accessSHA256: hash(access),
+      accessSHA256: diagnosticStorageRetirement ? hash({ access, diagnosticStorageRetirement }) : hash(access),
       observedAt: new Date(sampled).toISOString(),
     };
   } catch {

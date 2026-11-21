@@ -1,4 +1,4 @@
-import { mediaRecoveryJobAccessPlan, renderMediaRecoveryJob, renderMediaRecoveryJobCreateRequest, sameMediaRecoveryTask } from './temporal-media-recovery-job.mjs';
+import { hasCompletedMediaRecoveryJobAccess, mediaRecoveryJobAccessPlan, requiresEmptyAttestedJobPolicy, renderMediaRecoveryJob, renderMediaRecoveryJobCreateRequest, sameMediaRecoveryTask } from './temporal-media-recovery-job.mjs';
 import {assertStoredMediaDiagnosticDrain,assertFreshMediaDiagnosticDrain} from './temporal-media-diagnostic-drain.mjs';
 import { assertNativeSnapshot, assertNativeSnapshotSuccessor, nativeSnapshotProof, proofDigest as hash } from './temporal-release-runtime.mjs';
 import {prepareCompletedMediaRecoveryCapsule} from './temporal-media-recovery-capsule.mjs';
@@ -337,6 +337,10 @@ export async function saveMediaRecoveryJobJournal(o, before, next) {
     if (!changed || hash({ ...(before ?? { jobPlanSHA256: next.jobPlanSHA256 }), [key]: changed }) !== hash(next))
       fail();
     const previous = before?.[key];
+    const noGrant = requiresEmptyAttestedJobPolicy(o.plan);
+    const hasAccess = noGrant
+      ? hasCompletedMediaRecoveryJobAccess(o.plan, before?.access, before?.access?.plan?.jobUid)
+      : before?.access?.stage === 'completed' && before.access.outcome === 'acknowledged-write-and-policy-observation';
     if (key === 'access') {
       const prior = previous?.stage;
       const allowed = {
@@ -346,15 +350,18 @@ export async function saveMediaRecoveryJobJournal(o, before, next) {
         rejected: ['attempted'],
         completed: ['acknowledged', 'attempted', 'planned'],
       };
-      if (before?.create?.stage !== 'acknowledged' || before.run ||
-          hash(changed.plan) !== hash(mediaRecoveryJobAccessPlan(o.plan, changed.plan?.jobUid)) ||
-          !Object.hasOwn(allowed, changed.stage) || !allowed[changed.stage].includes(prior) ||
-          (previous && hash(previous.plan) !== hash(changed.plan)) ||
-          (prior === 'acknowledged' && changed.outcome !== 'acknowledged-write-and-policy-observation'))
-        fail();
+      if (before?.create?.stage !== 'acknowledged' || before.run) fail();
+      if (noGrant) {
+        if (previous || !hasCompletedMediaRecoveryJobAccess(o.plan, changed, changed.plan?.jobUid)) fail();
+      } else if (
+        hash(changed.plan) !== hash(mediaRecoveryJobAccessPlan(o.plan, changed.plan?.jobUid)) ||
+        !Object.hasOwn(allowed, changed.stage) || !allowed[changed.stage].includes(prior) ||
+        (previous && hash(previous.plan) !== hash(changed.plan)) ||
+        (prior === 'acknowledged' && changed.outcome !== 'acknowledged-write-and-policy-observation')
+      ) fail();
     } else if (key === 'runIdentity') {
       if (previous || before?.run?.stage !== 'acknowledged' ||
-          before.access?.stage !== 'completed' || before.access.plan.jobUid !== changed.jobUid ||
+          before.access?.stage !== 'completed' || (noGrant && !hasAccess) || before.access.plan.jobUid !== changed.jobUid ||
           changed.stage !== 'acknowledged' || changed.operation !== before.run.operation ||
           changed.intentSHA256 !== before.run.intentSHA256 || changed.attemptedAt !== before.run.attemptedAt ||
           changed.jobPlanSHA256 !== next.jobPlanSHA256) fail();
@@ -370,9 +377,7 @@ export async function saveMediaRecoveryJobJournal(o, before, next) {
         attemptedAt < Date.parse(o.plan.createdAt) || attemptedAt >= o.plan.expiresAt ||
         changed.intentSHA256 !== hash({ key, request, jobPlanSHA256: next.jobPlanSHA256, attemptedAt: changed.attemptedAt })
       ) fail();
-      if ((key === 'run' && (before?.create?.stage !== 'acknowledged' ||
-          before?.access?.stage !== 'completed' ||
-          before.access.outcome !== 'acknowledged-write-and-policy-observation')) ||
+      if ((key === 'run' && (before?.create?.stage !== 'acknowledged' || !hasAccess)) ||
           (!previous && changed.stage !== 'attempted') ||
           (previous && (previous.stage !== 'attempted' || changed.stage !== 'acknowledged' ||
             hash({ ...previous, stage: 'acknowledged', operation: changed.operation }) !== hash(changed)))) fail();

@@ -10,6 +10,7 @@ import { workerReadinessDigest as hash } from './readiness-probe';
 import { validateMediaKernelBirthRecord } from './media-kernel-supervisor';
 import { readMediaRecoveryOriginalLineage } from './media-recovery-replacement';
 import { originalMediaArtifacts } from './media-recovery-original-fault';
+import { mediaRecoveryBucketName } from './media-recovery-storage';
 import { mediaRecoveryNativeStart } from './media-recovery-work';
 import { mediaRecoveryPinnedVersion } from './media-recovery-pin';
 import {
@@ -97,11 +98,18 @@ async function collect(o: Options, deadline: number) {
         if (p.taskAttestationPublicKey) {
           const cert = await tx.get(db.doc(mediaRecoveryTaskAttestationPath(id)));
           const proof = facts.Startup.taskAttestation;
-          if (!cert.exists || !cert.createTime?.isEqual(cert.updateTime!) ||
-              !proof || proof.digest !== hash(cert.data()) ||
-              !op.mediaRecoveryTaskAttestation || op.mediaRecoveryTaskAttestation.certificateSHA256 !== proof.digest ||
-              proof.seconds !== cert.createTime.seconds || proof.nanoseconds !== cert.createTime.nanoseconds ||
-              hash(facts.ReplacementStartup.taskAttestation ?? null) !== hash(proof)) fail();
+          if (
+            !cert.exists ||
+            !cert.createTime?.isEqual(cert.updateTime!) ||
+            !proof ||
+            proof.digest !== hash(cert.data()) ||
+            !op.mediaRecoveryTaskAttestation ||
+            op.mediaRecoveryTaskAttestation.certificateSHA256 !== proof.digest ||
+            proof.seconds !== cert.createTime.seconds ||
+            proof.nanoseconds !== cert.createTime.nanoseconds ||
+            hash(facts.ReplacementStartup.taskAttestation ?? null) !== hash(proof)
+          )
+            fail();
         }
         const c = op.cloudMediaRecovery,
           j = facts.Journal,
@@ -323,8 +331,12 @@ async function collectWithEpisodeReader(
     [f.Startup, old, old.context.intentSHA256],
     [f.ReplacementStartup, k, derived],
   ]) {
-    exact(startup, 'bundle,capacity,intentSHA256,kernel,kind,observedAt,operationId,schemaVersion,' +
-      (p.taskAttestationPublicKey ? 'taskAttestation,' : '') + 'worker');
+    exact(
+      startup,
+      'bundle,capacity,intentSHA256,kernel,kind,observedAt,operationId,schemaVersion,' +
+        (p.taskAttestationPublicKey ? 'taskAttestation,' : '') +
+        'worker'
+    );
     exact(startup.bundle, 'buildId,bundleBytes,bundleSHA256,schemaVersion');
     exact(startup.kernel, 'birthDigest,operationId');
     if (
@@ -393,9 +405,9 @@ async function collectWithEpisodeReader(
   )
     fail();
   const bucket = new Storage({ projectId: 'urm-app-staging', retryOptions: { autoRetry: false } }).bucket(
-    'urm-app-staging.firebasestorage.app'
+    mediaRecoveryBucketName(p)
   );
-  if (hash(await originalMediaArtifacts(db, bucket, id)) !== hash(ready.inventory)) fail();
+  if (hash(await originalMediaArtifacts(db, bucket, id, p)) !== hash(ready.inventory)) fail();
   const handle = o.client.workflow.getHandle(ready.workflowId, ready.runId, { followRuns: false });
   const describe = async () => {
     fresh();
@@ -486,7 +498,7 @@ async function collectWithEpisodeReader(
   exact(result, 'grantSHA256,operationId,runId');
   if (result.operationId !== id || result.runId !== ready.runId || result.grantSHA256 !== ready.grantSHA256) fail();
   if (
-    hash(await originalMediaArtifacts(db, bucket, id)) !== hash(ready.inventory) ||
+    hash(await originalMediaArtifacts(db, bucket, id, p)) !== hash(ready.inventory) ||
     (await describe()) !== nativeBefore
   )
     fail();

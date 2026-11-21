@@ -89,6 +89,21 @@ function validGeneration(value) {
   );
 }
 
+function validActiveGeneration(value) {
+  // Execution and Task reconciliation can continue while a finite task is
+  // running. The current observed generation still has to match exactly.
+  const generation = v => typeof v === 'string' ? /^[1-9][0-9]*$/.test(v) : Number.isSafeInteger(v) && v > 0;
+  return generation(value?.generation) && generation(value?.observedGeneration) &&
+    String(value.generation) === String(value.observedGeneration) &&
+    [undefined, false, true].includes(value.reconciling) && !value.deleteTime;
+}
+
+function hasNoTerminalTaskCondition(task) {
+  return task.conditions === undefined ||
+    (Array.isArray(task.conditions) && task.conditions.every(condition => condition &&
+      (condition.type !== 'Completed' || !['CONDITION_FAILED', 'CONDITION_SUCCEEDED'].includes(condition.state))));
+}
+
 export function attestationPublicKey(value) {
   if (typeof value !== 'string' || value.length !== 60) fail();
   const der = Buffer.from(value, 'base64');
@@ -394,6 +409,16 @@ function assertOwnedJob(plan, native, expectedUid) {
   return { uid: native.uid, generation: String(native.generation), etag: native.etag };
 }
 
+export function requiresEmptyAttestedJobPolicy(plan) {
+  if (!plan?.diagnosticStorage) return false;
+  const binding = plan.diagnosticStorage;
+  if (plan.role !== 'media' || !uuid.test(plan.releaseId) ||
+      binding.bucket !== 'urm-app-staging-mr-' + plan.releaseId.replaceAll('-', '') ||
+      binding.projectNumber !== '251680231116') jobUnconfirmed();
+  attestationPublicKey(plan.taskAttestationPublicKey);
+  return true;
+}
+
 export function mediaRecoveryJobAccessPlan(plan, jobUid) {
   if (!uuid.test(jobUid) || !isDeepStrictEqual(plan.job, renderMediaRecoveryJob(plan))) jobUnconfirmed();
   return {
@@ -401,7 +426,9 @@ export function mediaRecoveryJobAccessPlan(plan, jobUid) {
     jobPlanSHA256: proofDigest(plan.job),
     jobUid,
     resource: plan.job.name,
-    grants: [{ role: 'roles/run.viewer', members: [`serviceAccount:${plan.runner}`] }],
+    grants: requiresEmptyAttestedJobPolicy(plan)
+      ? []
+      : [{ role: 'roles/run.viewer', members: [`serviceAccount:${plan.runner}`] }],
   };
 }
 
@@ -416,15 +443,37 @@ async function readMediaRecoveryJobPolicy(api, expected) {
   return policy;
 }
 
-export async function assertMediaRecoveryJobAccess({ api, plan, access, jobUid }) {
-  const expected = mediaRecoveryJobAccessPlan(plan, jobUid);
-  if (
-    access?.stage !== 'completed' ||
-    access.outcome !== 'acknowledged-write-and-policy-observation' ||
-    !isDeepStrictEqual(access.plan, expected)
-  )
+function emptyAttestedJobPolicyProof(policy) {
+  if (!policy || Array.isArray(policy) ||
+      Object.keys(policy).some(key => !['version', 'etag', 'bindings'].includes(key)) ||
+      typeof policy.etag !== 'string' || !policy.etag ||
+      (policy.version !== undefined && ![0, 1, 3].includes(policy.version)) ||
+      (policy.bindings !== undefined && (!Array.isArray(policy.bindings) || policy.bindings.length !== 0)))
     jobUnconfirmed();
+  return { observedEtag: policy.etag, policySHA256: proofDigest(policy) };
+}
+
+export function hasCompletedMediaRecoveryJobAccess(plan, access, jobUid) {
+  if (access?.stage !== 'completed' || !uuid.test(jobUid ?? '')) return false;
+  const expected = mediaRecoveryJobAccessPlan(plan, jobUid);
+  if (!isDeepStrictEqual(access.plan, expected)) return false;
+  if (requiresEmptyAttestedJobPolicy(plan))
+    return access.outcome === 'attested-job-empty-direct-policy' &&
+      Object.keys(access).sort().join(',') === 'observedEtag,outcome,plan,policySHA256,stage,verifiedAt' &&
+      typeof access.observedEtag === 'string' && !!access.observedEtag &&
+      sha.test(access.policySHA256 ?? '') && Number.isFinite(Date.parse(access.verifiedAt));
+  return access.outcome === 'acknowledged-write-and-policy-observation';
+}
+
+export async function assertMediaRecoveryJobAccess({ api, plan, access, jobUid }) {
+  if (!hasCompletedMediaRecoveryJobAccess(plan, access, jobUid)) jobUnconfirmed();
+  const expected = access.plan;
   const policy = await readMediaRecoveryJobPolicy(api, expected);
+  if (requiresEmptyAttestedJobPolicy(plan)) {
+    const current = emptyAttestedJobPolicyProof(policy);
+    if (current.observedEtag !== access.observedEtag || current.policySHA256 !== access.policySHA256) jobUnconfirmed();
+    return;
+  }
   if (!isDeepStrictEqual(policy?.bindings, expected.grants) || policy.etag !== access.observedEtag) jobUnconfirmed();
 }
 
@@ -559,24 +608,36 @@ export async function advanceMediaRecoveryJob({ api, plan, saved, save, fence, o
   };
   if (!state.run) {
     const accessPlan = mediaRecoveryJobAccessPlan(plan, current.uid);
-    await prepareFencedPolicyGrant({
-      plan: accessPlan,
-      saved: state.access,
-      save: (access) => put('access', access),
-      readPolicy: () => readMediaRecoveryJobPolicy(api, accessPlan),
-      setPolicy: (body) =>
-        api(jobUrl + ':setIamPolicy', 'POST', body, async () => {
-          fresh();
-          await verifyEmptyJob();
-          await fence(state);
-          fresh();
-        }),
-      verifyPrerequisites: async () => {
+    if (requiresEmptyAttestedJobPolicy(plan)) {
+      if (!state.access) {
         fresh();
+        await verifyEmptyJob();
         await fence(state);
-        return verifyEmptyJob();
-      },
-    });
+        const policy = emptyAttestedJobPolicyProof(await readMediaRecoveryJobPolicy(api, accessPlan));
+        fresh();
+        await put('access', { plan: accessPlan, stage: 'completed', outcome: 'attested-job-empty-direct-policy',
+          ...policy, verifiedAt: new Date().toISOString() });
+      }
+    } else {
+      await prepareFencedPolicyGrant({
+        plan: accessPlan,
+        saved: state.access,
+        save: (access) => put('access', access),
+        readPolicy: () => readMediaRecoveryJobPolicy(api, accessPlan),
+        setPolicy: (body) =>
+          api(jobUrl + ':setIamPolicy', 'POST', body, async () => {
+            fresh();
+            await verifyEmptyJob();
+            await fence(state);
+            fresh();
+          }),
+        verifyPrerequisites: async () => {
+          fresh();
+          await fence(state);
+          return verifyEmptyJob();
+        },
+      });
+    }
   }
   await assertMediaRecoveryJobAccess({ api, plan, access: state.access, jobUid: current.uid });
   const run = await mutate('run', jobUrl + ':run', { etag: created.etag }, async () => {
@@ -627,7 +688,7 @@ export async function advanceMediaRecoveryJob({ api, plan, saved, save, fence, o
 }
 
 /** Active execution guard for the sole Temporal START, distinct from terminal evidence. */
-export async function observeMediaRecoveryJobActive({ api, plan, run, allowProvisioning = false }) {
+async function readMediaRecoveryExecution({ api, plan, run }) {
   if (
     typeof api !== 'function' ||
     !isDeepStrictEqual(plan?.job, renderMediaRecoveryJob(plan)) ||
@@ -640,7 +701,7 @@ export async function observeMediaRecoveryJobActive({ api, plan, run, allowProvi
     jobUnconfirmed();
   const operation = jobOperationName(run.operation);
   const [job, lro, execution] = await Promise.all(
-    [plan.job.name, operation, run.execution].map((resource) => api(endpoint + resource))
+    [plan.job.name, operation, run.execution].map(resource => api(endpoint + resource))
   );
   assertOwnedJob(plan, job, run.jobUid);
   if (
@@ -655,28 +716,35 @@ export async function observeMediaRecoveryJobActive({ api, plan, run, allowProvi
     !refersTo(execution.job, plan.job.name) ||
     execution.deleteTime ||
     execution.completionTime ||
-    execution.conditions?.some(({ type, state }) =>
-      type === 'Completed' && ['CONDITION_FAILED', 'CONDITION_SUCCEEDED'].includes(state)) ||
     execution.parallelism !== 1 ||
     execution.taskCount !== 1 ||
-    ![undefined, 0].includes(execution.retriedCount) ||
-    ![undefined, 0].includes(execution.failedCount) ||
-    ![undefined, 0].includes(execution.cancelledCount) ||
-    ![undefined, 0].includes(execution.succeededCount) ||
+    [execution.retriedCount, execution.failedCount, execution.succeededCount, execution.cancelledCount].some(
+      (count) => count !== undefined && count !== 0
+    ) ||
+    ![undefined, 0, 1].includes(execution.runningCount) ||
+    execution.conditions?.some(
+      ({ type, state }) => type === 'Completed' && ['CONDITION_FAILED', 'CONDITION_SUCCEEDED'].includes(state)
+    ) ||
     !exactTaskSpec(execution.template, plan.job.template.template)
   )
     jobUnconfirmed();
-  if (allowProvisioning && [undefined, 0].includes(execution.runningCount)) return undefined;
-  if (execution.runningCount !== 1) jobUnconfirmed();
-  return execution;
+  return execution.runningCount === 1 ? execution : undefined;
+}
+
+/** Fresh active execution guard for the sole Temporal START. */
+export async function observeMediaRecoveryJobActive(options) {
+  if (!(await readMediaRecoveryExecution(options))) jobUnconfirmed();
 }
 
 /** The controller, using its own read authority, witnesses the native task
  * attached to the original acknowledged execution. */
 export async function observeMediaRecoveryAttestationTask({ api, plan, run }) {
-  const execution = await observeMediaRecoveryJobActive({ api, plan, run, allowProvisioning: true });
+  const execution = await readMediaRecoveryExecution({ api, plan, run });
   if (!execution) return undefined;
-  if (!validGeneration(execution)) jobUnconfirmed();
+  if (!validActiveGeneration(execution)) {
+    if (execution.reconciling === true && !execution.deleteTime) return undefined;
+    jobUnconfirmed();
+  }
   const task = run.execution + '/tasks/' + run.execution.split('/').at(-1) + '-task0';
   const listed = await api(endpoint + run.execution + '/tasks?pageSize=2');
   if (![undefined, ''].includes(listed?.nextPageToken) || (listed?.unreachable !== undefined &&
@@ -685,24 +753,35 @@ export async function observeMediaRecoveryAttestationTask({ api, plan, run }) {
   if (listed.tasks === undefined || (Array.isArray(listed.tasks) && !listed.tasks.length)) return undefined;
   if (!Array.isArray(listed.tasks) || listed.tasks.length !== 1 || normalize(listed.tasks[0]?.name) !== task)
     jobUnconfirmed();
-  const direct = await api(endpoint + task);
+  let direct;
+  try { direct = await api(endpoint + task); } catch (error) {
+    if (error?.status === 404) return undefined;
+    throw error;
+  }
   const attemptTime = Date.parse(run.attemptedAt);
   const matches = value =>
-    normalize(value?.name) === task && validGeneration(value) &&
+    normalize(value?.name) === task && !value.deleteTime &&
     Object.hasOwn(value, 'createTime') && isMediaRecoveryTaskIdentity(value) &&
     Date.parse(value.createTime) >= attemptTime && Date.parse(value.createTime) < plan.expiresAt &&
     refersTo(value.job, plan.job.name) && refersTo(value.execution, run.execution) &&
     [undefined, 0].includes(value.index) && [undefined, 0].includes(value.retried) &&
-    Number.isFinite(Date.parse(value.startTime)) &&
-    Date.parse(value.startTime) >= Date.parse(value.createTime) &&
-    !value.completionTime && !value.lastAttemptResult &&
+    !value.completionTime && !value.lastAttemptResult && hasNoTerminalTaskCondition(value) &&
     exactTaskSpec(value, plan.job.template.template, true);
   const fromList = listed.tasks[0];
   if (!matches(direct) || !matches(fromList) || direct.createTime !== fromList.createTime ||
-      direct.uid !== fromList.uid || direct.startTime !== fromList.startTime ||
-      String(direct.generation) !== String(fromList.generation) ||
-      !isDeepStrictEqual(direct.containers, fromList.containers) ||
+      direct.uid !== fromList.uid || !isDeepStrictEqual(direct.containers, fromList.containers) ||
       !isDeepStrictEqual(direct.volumes, fromList.volumes)) jobUnconfirmed();
+  for (const value of [direct, fromList]) {
+    if (!validActiveGeneration(value)) {
+      if (value.reconciling === true) return undefined;
+      jobUnconfirmed();
+    }
+    if (value.startTime === undefined) return undefined;
+    if (!Number.isFinite(Date.parse(value.startTime)) || Date.parse(value.startTime) < Date.parse(value.createTime))
+      jobUnconfirmed();
+  }
+  if (direct.startTime !== fromList.startTime || String(direct.generation) !== String(fromList.generation))
+    jobUnconfirmed();
   return {
     executionGeneration: String(execution.generation),
     task,

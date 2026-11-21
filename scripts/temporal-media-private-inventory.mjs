@@ -47,6 +47,17 @@ const durableCollections = [
 ];
 
 function assertOwnedDiagnosticActivity(doc, operationId, auth) {
+  if (auth.closedFailure) {
+    const failure = auth.closedFailure;
+    const attempt = doc.get('attempt');
+    if (doc.get('projectId') !== 'urm-app-staging' ||
+        doc.get('jobId') !== `media-recovery-${operationId}` ||
+        doc.get('workflowId') !== failure.workflowId || doc.get('runId') !== failure.runId ||
+        doc.get('activityType') !== 'acquireMedia' || doc.get('activityId') !== 'media-recovery-acquire' ||
+        ![1, 2].includes(attempt) || !failure.workers[attempt] ||
+        hash(failure.workers[attempt]) !== hash(doc.get('worker'))) fail();
+    return;
+  }
   const ready = auth.ready;
   const worker = auth.worker;
   if (
@@ -66,9 +77,7 @@ function assertOwnedDiagnosticActivity(doc, operationId, auth) {
 
 /** The finite Job can retain arbitrarily many terminal receipts. Exhaustive
  * idle counts and candidate-build filters run in one read-only transaction. */
-async function readJobDurableInventory(db, plan, operationId, auth) {
-  return db.runTransaction(
-    async (tx) => {
+export async function readMediaDiagnosticDurableWork(db, tx, plan, operationId, auth) {
       const work = await readTraditionalRetirementWork(db, tx);
       const idleSHA256 = assertTraditionalRetirementWorkIdle(work);
       const matches = await readReleaseCandidateWork(db, tx, plan.buildId);
@@ -78,9 +87,6 @@ async function readJobDurableInventory(db, plan, operationId, auth) {
         return { pathSHA256: hash(doc.ref.path), stamp: stamp(doc) };
       });
       return { idleSHA256, candidateRows };
-    },
-    { readOnly: true }
-  );
 }
 
 /** Private diagnostic inventory mechanics only. Canonical callers authenticate
@@ -284,7 +290,9 @@ export async function scanPrivateMediaInventory({
     }
     cursor = token(page.nextPageToken, tokens);
   } while (cursor);
-  const jobWork = plan.job ? await read(() => readJobDurableInventory(db, plan, o.operationId, auth)) : undefined;
+    const jobWork = plan.job ? await read(() => db.runTransaction(
+      tx => readMediaDiagnosticDurableWork(db, tx, plan, o.operationId, auth), { readOnly: true }
+    )) : undefined;
   const rows = [];
   if (!jobWork)
     for (const collection of durableCollections) {
