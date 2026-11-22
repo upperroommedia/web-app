@@ -295,6 +295,7 @@ function transactionFixture({ race, crash, mode = 'initial-cutover' } = {}) {
     expectedAuthority,
     workerReadiness: undefined,
     hetznerActivation: undefined,
+    mosesActivation: undefined,
     assertNativeSnapshot,
     assertStagingMediaSuccessorLineage,
     resourceBinding: { projectId: 'demo-release-test' },
