@@ -49,11 +49,16 @@ export function renderServerlessWorkerPool(config, settings) {
   serverlessComputeArguments(config); // Reuse exact staging/version/role binding validation.
   if (
     !settings ||
-    Object.keys(settings).some((key) => !['apiKeyVersion', 'runtimeSecrets', 'emailEgressVersion'].includes(key)) ||
+    Object.keys(settings).some((key) => !['apiKeyVersion', 'runtimeSecrets', 'emailEgressVersion', 'youtubeRendererReleaseId'].includes(key)) ||
     !version(settings.apiKeyVersion) ||
     !Array.isArray(settings.runtimeSecrets) ||
     settings.runtimeSecrets.length > 32 ||
-    (settings.emailEgressVersion !== undefined && (config.role !== 'email' || !version(settings.emailEgressVersion)))
+    (settings.emailEgressVersion !== undefined && (config.role !== 'email' || !version(settings.emailEgressVersion))) ||
+    (settings.youtubeRendererReleaseId !== undefined && (
+      config.role !== 'media' || config.projectId !== 'urm-app-staging' ||
+      typeof settings.youtubeRendererReleaseId !== 'string' ||
+      !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(settings.youtubeRendererReleaseId)
+    ))
   )
     throw new Error('Invalid serverless resource settings');
   const allowed = { ...commonSecrets, ...roleSecrets[config.role] };
@@ -117,6 +122,10 @@ export function renderServerlessWorkerPool(config, settings) {
           TEMPORAL_MEDIA_DISK_HEADROOM_BYTES: String(16 * 2 ** 30),
         }
       : {}),
+    ...(settings.youtubeRendererReleaseId ? {
+      TEMPORAL_MEDIA_YOUTUBE_RENDER_TARGET: 'moses',
+      TEMPORAL_MEDIA_YOUTUBE_RENDER_RELEASE_ID: settings.youtubeRendererReleaseId,
+    } : {}),
     ...(config.role === 'email' ? { EMAIL_EGRESS_DESCRIPTOR_PATH: '/run/email/egress.json' } : {}),
   };
   const volumes = [

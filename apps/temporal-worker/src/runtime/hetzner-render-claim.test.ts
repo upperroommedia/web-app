@@ -34,6 +34,7 @@ test('a committed render claim with a lost acknowledgement never issues a second
   };
   const episodeId = '00000000-0000-4000-8000-000000000001';
   const processId = process.pid + 1;
+  const renderRuntime = { runtimeId: '12345678-0000-4000-8000-000000000001', commit: 'a'.repeat(40) };
   let committed = false;
   const execution = {
     get: () => (committed ? episodeId : undefined),
@@ -65,7 +66,7 @@ test('a committed render claim with a lost acknowledgement never issues a second
     },
   } as unknown as Firestore;
   jest.mocked(readPreparedYouTubeEpisodeInTransaction).mockResolvedValue({
-    episode: { id: episodeId, operationId: youtubeAcquisitionId(ref), createdAt: 1 },
+    episode: { id: episodeId, operationId: youtubeAcquisitionId(ref), createdAt: 1, renderRuntime },
     execution,
     root: { get: () => undefined },
   } as unknown as Awaited<ReturnType<typeof readPreparedYouTubeEpisodeInTransaction>>);
@@ -88,9 +89,21 @@ test('a committed render claim with a lost acknowledgement never issues a second
     buildId: 'a'.repeat(40),
     auth: {} as Auth,
     verifiedCallerEmail: 'fixture',
+    runtimeId: renderRuntime.runtimeId,
     assertFresh: jest.fn(),
   };
+  const replacementRuntime = { ...options, runtimeId: '12345678-0000-4000-8000-000000000002' };
+  await expect(claimNativeYouTubeRender(replacementRuntime)).rejects.toThrow('YOUTUBE_RENDER_RUNTIME_MISMATCH');
+  await expect(claimNativeYouTubeRender({ ...options, buildId: 'b'.repeat(40) })).rejects.toThrow(
+    'YOUTUBE_RENDER_RUNTIME_MISMATCH'
+  );
+  await expect(claimNativeYouTubeRender({ ...options, runtimeId: undefined })).rejects.toThrow(
+    'YOUTUBE_RENDER_RUNTIME_MISMATCH'
+  );
+  expect(tx.create).not.toHaveBeenCalled();
+  expect(tx.update).not.toHaveBeenCalled();
   await expect(claimNativeYouTubeRender(options)).rejects.toThrow('fixture commit ACK lost');
+  await expect(claimNativeYouTubeRender(replacementRuntime)).resolves.toEqual({ launch: false });
   await expect(claimNativeYouTubeRender(options)).resolves.toEqual({ launch: false });
   expect(tx.create).toHaveBeenCalledTimes(1);
   expect(tx.update).toHaveBeenCalledWith(execution.ref, { renderClaim: episodeId });

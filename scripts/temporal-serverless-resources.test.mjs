@@ -143,3 +143,17 @@ test('secret grants derive from validated mounted and environment secrets, dedup
     false
   );
 });
+
+test('only a reviewed staging media pool has the Moses release binding and keeps zero as its initial scale', () => {
+  const releaseId = '98f75345-abcd-4e11-8ecd-123456789abc';
+  const configured = { ...settings(), youtubeRendererReleaseId: releaseId };
+  const pool = renderServerlessWorkerPool(config('media'), configured);
+  const env = Object.fromEntries(pool.template.containers[0].env.map(({ name, value }) => [name, value]));
+  assert.equal(pool.scaling.manualInstanceCount, 0);
+  assert.equal(env.TEMPORAL_MEDIA_YOUTUBE_RENDER_TARGET, 'moses');
+  assert.equal(env.TEMPORAL_MEDIA_YOUTUBE_RENDER_RELEASE_ID, releaseId);
+  assert.throws(() => renderServerlessWorkerPool(config('controls'), configured));
+  assert.throws(() =>
+    renderServerlessWorkerPool(config('media'), { ...configured, youtubeRendererReleaseId: 'latest' })
+  );
+});

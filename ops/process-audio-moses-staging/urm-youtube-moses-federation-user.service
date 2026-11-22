@@ -1,0 +1,10 @@
+[Unit]
+Description=Refresh the staging Moses renderer workload credential
+ConditionHost=MosesTheStrong
+ConditionUser=1000
+
+[Service]
+Type=oneshot
+UMask=0077
+NoNewPrivileges=yes
+ExecStart=/usr/bin/python3 %h/.local/share/urm-youtube-moses-staging/renderer/federation.py refresh --key %h/.config/urm-youtube-moses-staging/federation-bootstrap/federation-key.pem --token-dir %h/.config/urm-youtube-moses-staging/federation

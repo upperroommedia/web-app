@@ -20,7 +20,12 @@ import {
 } from './hetzner-acquisition-store';
 import type { MediaJobRef } from './types';
 
-const ORIGIN = 'https://yt-worker-staging.upperroommedia.org';
+import {
+  readYouTubeRenderHeadTarget,
+  readYouTubeRenderTarget,
+  stagingYouTubeRenderOrigins,
+  type YouTubeRenderTarget,
+} from './youtube-render-target';
 const unavailable = () => new Error('YOUTUBE_ACQUISITION_UNAVAILABLE');
 /** Render mutations require explicit staging activation. The earlier
  * acquisition-only path retains its separate resource gate. GET only observes. */
@@ -29,7 +34,11 @@ export function createHetznerAcquisitionRouter(o: {
   auth: Auth;
   bucket: Bucket;
   renderEnabled: boolean;
+  renderTarget?: YouTubeRenderTarget;
+  runtimeId?: string;
 }) {
+  const renderTarget = readYouTubeRenderTarget(o.renderTarget);
+  const origin = stagingYouTubeRenderOrigins[renderTarget];
   const router = Router();
   router.all(
     ['/:operationId/render/:episodeId', '/:operationId/render/authentication/:authenticationId'],
@@ -40,6 +49,10 @@ export function createHetznerAcquisitionRouter(o: {
       }
       const { operationId } = request.params;
       const { authenticationId, episodeId } = request.params as Record<string, string | undefined>;
+      if (renderTarget === 'moses' && authenticationId !== undefined) {
+        response.status(404).json({ error: 'Unavailable.' });
+        return;
+      }
       const attemptId = authenticationId ?? episodeId;
       if (
         typeof operationId !== 'string' ||
@@ -66,12 +79,13 @@ export function createHetznerAcquisitionRouter(o: {
         assertStagingAcquisitionDatabase(o.firestore);
         if (o.bucket.name !== 'urm-app-staging.firebasestorage.app') throw unavailable();
         const original = await o.firestore.doc(`${YOUTUBE_ACQUISITIONS}/${operationId}`).get();
+        if (readYouTubeRenderHeadTarget(original) !== renderTarget) throw unavailable();
         const ref = original.get('ref') as MediaJobRef;
         if (youtubeAcquisitionId(ref) !== operationId) throw unavailable();
         const delegation = readYouTubeAcquisitionOperation(original.data(), ref);
         const verifiedCallerEmail = delegation.preparedBy.serviceAccount;
         await authenticateNativeMediaCaller(request.headers.authorization, {
-          audiences: [ORIGIN],
+          audiences: [origin],
           serviceAccountEmails: [verifiedCallerEmail],
         });
         fresh();
@@ -151,7 +165,7 @@ export function createHetznerAcquisitionRouter(o: {
     }
   );
   router.all('/:operationId', async (request, response) => {
-    if (o.auth.app.options.projectId !== 'urm-app-staging') {
+    if (o.auth.app.options.projectId !== 'urm-app-staging' || renderTarget !== 'hetzner') {
       response.status(404).json({ error: 'Unavailable.' });
       return;
     }
@@ -179,11 +193,12 @@ export function createHetznerAcquisitionRouter(o: {
       const target = o.firestore.doc(`${YOUTUBE_ACQUISITIONS}/${operationId}`);
       const original = await target.get();
       fresh();
+      if (readYouTubeRenderHeadTarget(original) !== renderTarget) throw unavailable();
       const ref = original.get('ref') as MediaJobRef;
       if (youtubeAcquisitionId(ref) !== operationId) throw unavailable();
       const initial = readYouTubeAcquisitionOperation(original.data(), ref);
       await authenticateNativeMediaCaller(request.headers.authorization, {
-        audiences: [ORIGIN],
+        audiences: [origin],
         serviceAccountEmails: [initial.preparedBy.serviceAccount],
       });
       fresh();

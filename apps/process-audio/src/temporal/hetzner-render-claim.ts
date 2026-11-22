@@ -1,3 +1,4 @@
+import { assertYouTubeRenderRuntime } from './youtube-render-target';
 import { isDeepStrictEqual } from 'node:util';
 import type { Auth } from 'firebase-admin/auth';
 import type { DocumentData, Firestore } from 'firebase-admin/firestore';
@@ -38,6 +39,7 @@ export async function claimNativeYouTubeRender(o: {
   verifiedCallerEmail: string;
   processId: number;
   buildId: string;
+  runtimeId?: string;
   episodeId: string;
   assertFresh: () => void;
   onClaimAttempt?: (claim: RenderClaim) => void;
@@ -58,6 +60,7 @@ export async function claimNativeYouTubeRender(o: {
       if (root.get('renderStopped') === true) throw unavailable();
       if (episode.id !== o.episodeId || startedAt < episode.createdAt) throw unavailable();
       if (execution.get('renderClaim') !== undefined) return { launch: false } as const;
+      assertYouTubeRenderRuntime(episode.renderRuntime, o.runtimeId, o.buildId);
       const dispatch = await tx.get(execution.ref.collection('render').doc('dispatch'));
       if (
         !dispatch.exists ||

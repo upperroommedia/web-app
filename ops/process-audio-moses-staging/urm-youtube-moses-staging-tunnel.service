@@ -1,0 +1,14 @@
+[Unit]
+Description=Outbound connector for the Moses staging YouTube renderer
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+ExecStart=%h/.local/share/urm-youtube-moses-staging/cloudflared --no-autoupdate tunnel --config %h/.config/urm-youtube-moses-staging/tunnel.yaml --metrics 127.0.0.1:18083 run
+Restart=on-failure
+RestartSec=10s
+NoNewPrivileges=yes
+UMask=0077
+
+[Install]
+WantedBy=default.target

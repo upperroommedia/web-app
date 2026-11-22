@@ -606,3 +606,119 @@ test.each(['accepted', 'stopped', 'slot-rewritten'] as const)(
     }
   }
 );
+
+test('a Moses render stays on the authorized host across retries and rejects a rewritten route', async () => {
+  const selected = { runtimeId: '12345678-0000-4000-8000-000000000001', commit: 'a'.repeat(40) };
+  const prepareRender = (renderTarget: 'moses' | 'hetzner', renderRuntime?: typeof selected) =>
+    prepareNativeYouTubeEpisode({
+      firestore: db,
+      ref,
+      caller,
+      invocation: nativeInvocation,
+      assertCurrent: current,
+      render: true,
+      renderTarget,
+      renderRuntime,
+    });
+  const id = await prepareRender('moses', selected);
+  await expect(
+    prepareRender('moses', { ...selected, runtimeId: '12345678-0000-4000-8000-000000000002' })
+  ).rejects.toThrow('YOUTUBE_EPISODE_UNCONFIRMED');
+  await expect(prepareRender('moses')).resolves.toBe(id);
+  await expect(prepareRender('hetzner')).rejects.toThrow('YOUTUBE_EPISODE_UNCONFIRMED');
+
+  const readRender = () =>
+    db.runTransaction((tx) =>
+      readPreparedYouTubeEpisodeInTransaction(tx, {
+        firestore: db,
+        ref,
+        verifiedCallerEmail: caller.serviceAccount,
+        render: true,
+      })
+    );
+  await expect(readRender()).resolves.toMatchObject({
+    episode: { id, renderTarget: 'moses', renderRuntime: selected },
+  });
+  await root().update({ renderTarget: 'hetzner' });
+  await expect(readRender()).rejects.toThrow('YOUTUBE_EPISODE_UNCONFIRMED');
+  expect((await root().collection('episodes').get()).size).toBe(1);
+});
+
+test('a closed guest challenge can append one pinned backup without replacing the original authority', async () => {
+  const moses = { runtimeId: '12345678-0000-4000-8000-000000000001', commit: buildId };
+  const hetzner = { ...moses, runtimeId: '12345678-0000-4000-8000-000000000002' };
+  const prepareRender = (renderTarget: 'moses' | 'hetzner', renderRuntime?: typeof moses, guestFailoverFrom?: string) =>
+    prepareNativeYouTubeEpisode({
+      firestore: db,
+      ref,
+      caller,
+      invocation: nativeInvocation,
+      assertCurrent: current,
+      render: true,
+      renderTarget,
+      renderRuntime,
+      guestFailoverFrom,
+    });
+  const id = await prepareRender('moses', moses);
+  const render = root().collection('render');
+  const first = root().collection('episodes').doc(id);
+  const slot = db.doc('temporalYouTubeRenderHosts/staging');
+  await expect(prepareRender('hetzner', hetzner, id)).rejects.toThrow('YOUTUBE_EPISODE_UNCONFIRMED');
+  const startedAt = Date.now();
+  const claim = { schemaVersion: 1, ref, episodeId: id, operationId: root().id, owner, startedAt };
+  await db.runTransaction(async (tx) => {
+    if ((await tx.get(slot)).exists) throw Error('Isolated emulator render slot is occupied');
+    tx.create(slot, youtubeRenderSlot(ref, id));
+    tx.create(render.doc('claim'), claim);
+    tx.create(render.doc('candidate'), {
+      schemaVersion: 1,
+      episodeId: id,
+      ref,
+      owner,
+      startedAt,
+      providerOutcome: 'waiting_auth',
+    });
+    tx.update(root(), { renderClaim: id });
+  });
+  try {
+    await expect(prepareRender('hetzner', hetzner, id)).rejects.toThrow('YOUTUBE_EPISODE_UNCONFIRMED');
+    await db.runTransaction(async (tx) => {
+      const candidate = await tx.get(render.doc('candidate'));
+      tx.create(render.doc('close'), {
+        schemaVersion: 1,
+        episodeId: id,
+        ref,
+        owner,
+        startedAt,
+        close: { outcome: 'completed', processId: owner.processId, closedAt: startedAt, exitCode: 0, exitSignal: null },
+        candidateVersion: candidate.updateTime,
+        ipcAttempted: true,
+      });
+      tx.delete(slot);
+    });
+    const switched = await prepareRender('hetzner', hetzner, id);
+    expect(switched).not.toBe(id);
+    await expect(prepareRender('hetzner')).resolves.toBe(switched);
+    await expect(prepareRender('hetzner', hetzner, id)).rejects.toThrow('YOUTUBE_EPISODE_UNCONFIRMED');
+    const active = await db.runTransaction((tx) =>
+      readPreparedYouTubeEpisodeInTransaction(tx, {
+        firestore: db,
+        ref,
+        render: true,
+        verifiedCallerEmail: caller.serviceAccount,
+      })
+    );
+    expect(active.episode).toMatchObject({
+      id: switched,
+      ordinal: 2,
+      renderTarget: 'hetzner',
+      renderRuntime: hetzner,
+      predecessor: { id, guestFailover: true },
+    });
+    expect(active.root.get('renderTarget')).toBe('moses');
+    expect((await first.get()).get('renderRuntime')).toEqual(moses);
+    expect((await root().collection('episodes').get()).size).toBe(2);
+  } finally {
+    if ((await slot.get()).get('operationId') === root().id) await slot.delete();
+  }
+});

@@ -1,3 +1,4 @@
+import { assertYouTubeRenderRuntime } from './youtube-render-target';
 import { awaitTrackedBrowserRefreshResult, isTrackedBrowserRefreshId } from './hetzner-render-refresh-result';
 import {
   readYouTubeRenderSlot,
@@ -287,6 +288,7 @@ export async function claimRenderAuthentication(
     id: string;
     processId: number;
     buildId: string;
+    runtimeId?: string;
     assertCurrent: (tx: Transaction, ref: MediaJobRef) => Promise<unknown>;
     assertFresh: () => void;
     onClaimAttempt?: (claim: RenderAuthenticationClaim) => void;
@@ -303,6 +305,7 @@ export async function claimRenderAuthentication(
       const claim = intent.ref.collection('facts').doc('claim');
       const previous = await tx.get(claim);
       if (previous.exists || completion.exists) return undefined;
+      assertYouTubeRenderRuntime(original.episode.renderRuntime, o.runtimeId, o.buildId);
       const dispatch = await tx.get(intent.ref.collection('facts').doc('dispatch'));
       if (!immutable(dispatch) || !intent.updateTime!.isEqual(dispatch.get('intentVersion'))) throw denied();
       await requireYouTubeRenderSlot(tx, o.firestore, youtubeRenderSlot(o.ref, original.episode.id, o.id));

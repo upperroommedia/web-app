@@ -65,12 +65,13 @@ import { readOrchestrationHandoffReceipt, readWorkerWakeReadiness, saveWorkerRea
 import { verifyWorkerHandoffVm, validateWorkerHandoffPlan, workerHandoffInput } from './temporal-worker-handoff-plan.mjs';
 import { saveOrchestrationBootstrapCycleCheckpoint, saveOrchestrationActivationCheckpoint, saveOrchestrationActivationStopCheckpoint, saveControlsActivationCheckpoint, saveControlsActivationStopCheckpoint, savePoolBootstrapCycleCheckpoint, saveDispatchActivationCheckpoint, saveDispatchEventarcCycleCheckpoint, saveDispatchSchedulerCycleCheckpoint, saveEventarcAuditPreparationCheckpoint, saveDispatchWakeStopCheckpoint, saveDispatchAccessPreparationCheckpoint, saveDispatchServicePreparationCheckpoint, saveIdentityPreparationCheckpoint, savePoolPreparationCheckpoint, saveSecretAccessPreparationCheckpoint, saveScalerAccessPreparationCheckpoint, saveFirestoreAccessPreparationCheckpoint, saveRuntimeRolePreparationCheckpoint, saveRuntimeAccessPreparationCheckpoint } from './temporal-preparation-checkpoint.mjs';
 // Every step is explicit, revision-fenced, resumable, and leaves admissions paused on failure.
-import { readFile, writeFile, mkdtemp, rm, realpath } from 'node:fs/promises';
+import { lstat, readFile, writeFile, mkdtemp, rm, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { assertHetznerActivationReceipt, confirmLiveHetznerActivation, hetznerActivationPath } from './temporal-hetzner-activation.mjs';
+import { confirmLiveMosesActivation, mosesActivationGrantPath, mosesActivationPath, readMosesNativeReceipt, signMosesActivationGrant, verifyMosesActivation } from './temporal-moses-activation.mjs';
 import { verifyTemporalCallableTransport } from './temporal-callable-access.mjs';
 import { verifyFirebaseRtdbReadiness, validateCloudEvidence } from './temporal-platform.mjs';
 import { resolve } from 'node:path';
@@ -187,6 +188,8 @@ if (
     'prepare-cloud-run-eventarc-audit',
     'provider-usage-ready',
     'take-ownership',
+    'prepare-staging-moses-activation',
+    'record-staging-moses-activation',
     'backend-ready',
     'bootstrap-bundles',
     'bootstrap-search',
@@ -864,6 +867,7 @@ await runWithCleanup(
           if (
             checkpoint.mode !== config.mode ||
             checkpoint.compatibilityCommit !== config.compatibilityCommit ||
+            checkpoint.mosesActivationPolicySHA256 !== (config.mosesActivation ? proofDigest(config.mosesActivation) : undefined) ||
             checkpoint.uiCommit !== config.uiCommit ||
             JSON.stringify(checkpoint.domains) !== JSON.stringify(config.domains)
           )
@@ -881,17 +885,37 @@ await runWithCleanup(
           return { control: validatedControl, state: checkpoint, serverReadTime: control.readTime };
         }
         let hetznerActivation;
-        async function verifyHetznerActivation(control, state) {
+        let mosesActivation;
+        async function verifyYouTubeActivation(control, state) {
           if (config.environment !== 'staging' || !config.domains.includes('media')) return;
           const platform = await readBoundPlatform();
-          if (platform.workerHosting !== 'cloud-run') return;
+          if (platform.workerHosting !== 'cloud-run') {
+            if (config.mosesActivation) throw new Error('Moses requires serverless staging media workers');
+            return;
+          }
           const ref = firestore.doc(hetznerActivationPath(config.releaseId));
           const activation = await ref.get();
           const receipt = assertHetznerActivationReceipt(activation, config,
             state.phase === 'ownership-changed' ? { controlRevision: control.revision } : {});
           if (state.phase !== 'ownership-changed') assertNativeSnapshot(state.hetznerActivation, activation);
-          await confirmLiveHetznerActivation(receipt);
+          await confirmLiveHetznerActivation(receipt, fetch, { requireRenderPin: Boolean(config.mosesActivation) });
           hetznerActivation = { ref, proof: nativeSnapshotProof(activation) };
+          if (config.mosesActivation) {
+            const beforeBackend = state.phase === 'ownership-changed';
+            const { proof } = await verifyMosesActivation({
+              firestore,
+              release: config,
+              expected: {
+                candidateId: config.mosesActivation.candidateId,
+                imageId: config.mosesActivation.imageId,
+                operationId: config.mosesActivation.operationId,
+                ...(beforeBackend && { controlRevision: control.revision }),
+              },
+            });
+            if (!beforeBackend && proofDigest(state.mosesActivation) !== proofDigest(proof))
+              throw new Error('Moses activation checkpoint changed');
+            mosesActivation = { ref: firestore.doc(mosesActivationPath(config.releaseId)), proof };
+          }
         }
         async function transition(revision, phase, update = {}, controlUpdate) {
           let workerFence;
@@ -1045,6 +1069,23 @@ await runWithCleanup(
               assertNativeSnapshot(hetznerActivation.proof, await tx.get(hetznerActivation.ref));
               if (phase === 'backend-ready') update = { ...update, hetznerActivation: hetznerActivation.proof };
             }
+            if (mosesActivation) {
+              assertNativeSnapshot(mosesActivation.proof, await tx.get(mosesActivation.ref));
+              if (phase === 'backend-ready') {
+                if (!hetznerActivation || !currentState.get('workerBuildId')) throw new Error('The renderer pair is incomplete');
+                update = {
+                  ...update,
+                  mosesActivation: mosesActivation.proof,
+                  mediaRenderBinding: {
+                    releaseId: config.releaseId,
+                    workerBuildId: currentState.get('workerBuildId'),
+                    compatibilityCommit: config.compatibilityCommit,
+                    mosesActivation: mosesActivation.proof,
+                    hetznerActivation: hetznerActivation.proof,
+                  },
+                };
+              }
+            }
             if (phase === 'bundles-ready') {
               if (currentState.data().phase !== 'backend-ready' || !update.bundleBootstrapProof)
                 throw new Error('Bundle checkpoint requires current backend-ready and complete artifact proof');
@@ -1069,6 +1110,7 @@ await runWithCleanup(
               authority: expectedAuthority ?? null,
               bundleBootstrapProof: update.bundleBootstrapProof ?? null,
               ...(hetznerActivation && { hetznerActivation: hetznerActivation.proof }),
+              ...(mosesActivation && { mosesActivation: mosesActivation.proof }),
               uiRolloutIdentityMigration: update.uiRolloutIdentityMigration ?? null,
               ...(update.autoRolloutRestoreSHA256 && { autoRolloutRestoreSHA256: update.autoRolloutRestoreSHA256 }),
               createdAt: serverTimestamp(),
@@ -1354,8 +1396,12 @@ await runWithCleanup(
                 appHostingFreezeETag: traffic.etag,
                 maximumLegacyExecutionSeconds: previousFunctionTimeout,
                 ...(providerUsageContinuity ? { providerUsageContinuity } : {}),
+                ...(!config.domains.includes('media') && oldState.get('mediaRenderBinding') && {
+                  mediaRenderBinding: oldState.get('mediaRenderBinding'),
+                }),
                 controlRevision: revision,
                 compatibilityCommit: config.compatibilityCommit,
+                ...(config.mosesActivation && { mosesActivationPolicySHA256: proofDigest(config.mosesActivation) }),
                 uiCommit: config.uiCommit,
                 updatedAt: Date.now(),
               });
@@ -1801,6 +1847,10 @@ await runWithCleanup(
             await verifyPreparationEvidence({ ...preparationArguments, path: preparationArguments.proof,
               platform, binding, google: api });
             const settings = await readPreparationReceipt(preparationArguments.settings, preparationArguments.settingsDigest);
+            const rendererRelease = preparationArguments.role === 'media' && config.mosesActivation
+              ? config.releaseId : undefined;
+            if (settings.youtubeRendererReleaseId !== rendererRelease)
+              throw new Error('Media pool renderer choice differs from the frozen release');
             const runnerReceipt = await firestore.doc(`_control/temporalCloudIdentityPreparation-${preparationArguments.runnerOperationId}`).get();
             if (!runnerReceipt.exists) throw new Error('POOL_RUNNER_PREPARATION_REQUIRED');
             const currentOperation = await lockRef.get();
@@ -2342,6 +2392,80 @@ await runWithCleanup(
             console.log(
               'Ownership changed while paused. Generate real source env files, deploy all backends/kits, then run backend-ready.'
             );
+          } else if (['prepare-staging-moses-activation', 'record-staging-moses-activation'].includes(action)) {
+            requirePhase(state, ['ownership-changed']);
+            if (!config.mosesActivation || config.environment !== 'staging' ||
+                operatorPrincipal.adcAndGcloudAccountMatch !== true ||
+                control.domains.media.owner !== 'temporal' || control.domains.media.admission !== 'paused' ||
+                (await readBoundPlatform()).workerHosting !== 'cloud-run')
+              throw new Error('Moses activation requires current paused staging media authority');
+            function activationFile(flag) {
+              const at = args.indexOf(flag);
+              if (at < 0 || at !== args.lastIndexOf(flag) || !args[at + 1] || args[at + 1].startsWith('--'))
+                throw new Error('Native Moses activation argument is required: ' + flag);
+              return args[at + 1];
+            }
+            const ref = firestore.doc(mosesActivationPath(config.releaseId));
+            const grantRef = firestore.doc(mosesActivationGrantPath(config.releaseId));
+            const slotRef = firestore.doc('temporalYouTubeRenderHosts/staging');
+            const authority = (lock, current, checkpoint, slot) => {
+              assertNativeSnapshot(ownedOperation, lock);
+              assertNativeSnapshot(expectedAuthority.control, current);
+              assertNativeSnapshot(expectedAuthority.state, checkpoint);
+              if (slot.exists) throw new Error('Original staging YouTube host custody is still held');
+            };
+            if (action === 'prepare-staging-moses-activation') {
+              const verification = await readFile(activationFile('--moses-verification-receipt'));
+              const keyPath = activationFile('--moses-guard-key');
+              const keyFile = await lstat(keyPath);
+              if (!keyFile.isFile() || keyFile.nlink !== 1 || (keyFile.mode & 0o777) !== 0o600 ||
+                  keyFile.uid !== process.getuid() || keyFile.size > 4096)
+                throw new Error('Use the private, owned Moses guard key');
+              const payloadPath = activationFile('--moses-guard-payload');
+              const signaturePath = activationFile('--moses-guard-signature');
+              if (payloadPath === signaturePath) throw new Error('Distinct private Moses guard output files required');
+              await queuesEmpty();
+              await legacyCounts();
+              const releaseWorker = await verifyReleaseWorkers(state);
+              if (releaseWorker.workerBuildId !== state.workerBuildId)
+                throw new Error('Reviewed media worker changed before Moses activation');
+              const signed = signMosesActivationGrant({
+                verification, release:config, controlRevision:control.revision,
+                privateKey:await readFile(keyPath), now:Math.floor(Date.now()/1000),
+              });
+              await firestore.runTransaction(async tx => {
+                const [lock, current, checkpoint, slot, grant, prior] =
+                  await tx.getAll(lockRef, controlRef, stateRef, slotRef, grantRef, ref);
+                authority(lock, current, checkpoint, slot);
+                if (grant.exists || prior.exists || Math.floor(Date.now()/1000) >= signed.grant.expiresAt)
+                  throw new Error('Original Moses activation grant is unavailable for a new issue');
+                tx.create(grantRef, { ...signed.grant, sha256:signed.sha256, issuerOperation:operationId,
+                  controlProof:expectedAuthority.control, stateProof:expectedAuthority.state });
+              }, { maxAttempts:1 });
+              await writeFile(payloadPath, signed.payload, { mode:0o600, flag:'wx' });
+              await writeFile(signaturePath, signed.signature, { mode:0o600, flag:'wx' });
+            } else {
+              const receipt = readMosesNativeReceipt(
+                await readFile(activationFile('--moses-native-receipt')), config, control.revision
+              );
+              await confirmLiveMosesActivation(receipt);
+              await firestore.runTransaction(async tx => {
+                const [lock, current, checkpoint, slot, grant, prior] =
+                  await tx.getAll(lockRef, controlRef, stateRef, slotRef, grantRef, ref);
+                authority(lock, current, checkpoint, slot);
+                if (!grant.exists || !grant.createTime?.isEqual(grant.updateTime) ||
+                    grant.get('sha256') !== receipt.claimSHA256 || grant.get('operationId') !== receipt.operationId ||
+                    proofDigest(grant.get('controlProof')) !== proofDigest(expectedAuthority.control) ||
+                    proofDigest(grant.get('stateProof')) !== proofDigest(expectedAuthority.state))
+                  throw new Error('Moses activation did not use the issued staging guard');
+                if (prior.exists) {
+                  if (!prior.createTime?.isEqual(prior.updateTime) || proofDigest(prior.data()) !== proofDigest(receipt))
+                    throw new Error('Original native Moses activation receipt differs');
+                  return;
+                }
+                tx.create(ref, receipt);
+              }, { maxAttempts:1 });
+            }
           } else if (action === 'backend-ready') {
             requirePhase(state, ['ownership-changed']);
             await evidence(config.backendEvidence, control.revision, {
@@ -2367,7 +2491,7 @@ await runWithCleanup(
             }
             await verifyCallableTransport(control, managed);
             await verifyStorageFirestoreRulesAccess();
-            await verifyHetznerActivation(control, state);
+            await verifyYouTubeActivation(control, state);
             await transition(control.revision, 'backend-ready', { backendVerifiedAt: Date.now() });
           } else if (action === 'bootstrap-bundles') {
             if (!config.domains.includes('bundles')) throw new Error('This release does not own bundle regeneration');
@@ -2546,7 +2670,7 @@ await runWithCleanup(
             }
           } else if (action === 'rollout-ui') {
             requirePhase(state, [requiredPreUiPhase(config), 'ui-rollout-started']);
-            await verifyHetznerActivation(control, state);
+            await verifyYouTubeActivation(control, state);
             if (state.phase === 'ui-rollout-started' && !state.uiRolloutIdentity)
               throw new Error(
                 'Old rollout checkpoint lacks immutable identity; read-only reconciliation required before adopting it'
@@ -2567,7 +2691,7 @@ await runWithCleanup(
                 'Reviewed UI build/rollout remains pending; rerun rollout-ui to reconcile the same immutable identity'
               );
             const fresh = await snapshot();
-            await verifyHetznerActivation(fresh.control, fresh.state);
+            await verifyYouTubeActivation(fresh.control, fresh.state);
             await transition(fresh.control.revision, 'ui-ready', {
               uiBuild: result.buildName,
               uiRollout: result.rolloutName,
@@ -2598,7 +2722,7 @@ await runWithCleanup(
             } else validateProviderUsageMarker(config, usage.data(), state.providerUsageEpoch);
             await verifyCallableTransport(control);
             await verifyStorageFirestoreRulesAccess();
-            await verifyHetznerActivation(control, state);
+            await verifyYouTubeActivation(control, state);
             const domains = structuredClone(control.domains);
             for (const domain of config.domains) domains[domain].admission = 'open';
             await verifyUiCommit(state, { requireFrozen: true });

@@ -261,3 +261,26 @@ test('known provider retry is returned to the original native Activity retry pol
   });
   expect(request.mock.calls.map((call) => call[0])).toEqual(['GET']);
 });
+
+test('Moses render transport uses only the fixed staging origin and matching OIDC audience', async () => {
+  const fetcher = jest.spyOn(globalThis, 'fetch').mockResolvedValueOnce(Response.json(state('running')));
+  const episodeId = '1c568522-3456-4789-8abc-123456789abc';
+  const transport = createHetznerAcquisitionTransport(ref.projectId, { episodeId }, 'moses');
+  const operationId = youtubeAcquisitionId(ref);
+  await expect(transport('GET', { operationId, ref }, new AbortController().signal)).resolves.toEqual(state('running'));
+  const origin = 'https://yt-moses-staging.upperroommedia.org';
+  expect(mockGetClient).toHaveBeenLastCalledWith(origin);
+  expect(mockGetHeaders).toHaveBeenLastCalledWith(origin);
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  expect(fetcher).toHaveBeenCalledWith(
+    `${origin}/internal/temporal/youtube/acquisitions/${operationId}/render/${episodeId}`,
+    expect.objectContaining({ method: 'GET', redirect: 'error' })
+  );
+});
+
+test('Moses transport denies the acquisition-only and production paths', () => {
+  expect(() => createHetznerAcquisitionTransport(ref.projectId, 'source', 'moses')).toThrow();
+  expect(() =>
+    createHetznerAcquisitionTransport('urm-app', { episodeId: '1c568522-3456-4789-8abc-123456789abc' }, 'moses')
+  ).toThrow();
+});

@@ -81,6 +81,11 @@ function encodeCookies() {
 }
 
 async function runCase(testCase) {
+  if (testCase.moses) {
+    process.env.PROCESS_AUDIO_TEMPORAL_YOUTUBE_RENDER_TARGET = 'moses';
+  } else {
+    delete process.env.PROCESS_AUDIO_TEMPORAL_YOUTUBE_RENDER_TARGET;
+  }
   process.env.FAKE_YTDLP_SCENARIO = testCase.scenario;
   process.env.YOUTUBE_BROWSER_FALLBACK_URL = testCase.browserFallback ? 'http://browser-fallback:8090/fallback' : '';
   process.env.YOUTUBE_BROWSER_FALLBACK_ENABLED = testCase.browserFallback ? 'true' : 'false';
@@ -301,6 +306,32 @@ const cases = [
       }
     },
   },
+  ...['public_success', 'public_bot_cookie_ok'].map((scenario) => ({
+    name: `moses-guest-only-${scenario}`,
+    kind: 'download',
+    scenario,
+    moses: true,
+    browserFallback: true,
+    useCookiesForPublicVideos: true,
+    browserProfileCookies: true,
+    expectError: scenario !== 'public_success',
+    realtimeDb: {},
+    assert(result, _cookieMeta, artifact) {
+      if (!fs.existsSync(result)) throw new Error('Moses guest download did not create the output');
+      this.assertGuestOnly(artifact);
+    },
+    assertError(_error, _cookieMeta, artifact) {
+      this.assertGuestOnly(artifact);
+    },
+    assertGuestOnly(artifact) {
+      if (
+        !artifact?.attempts?.length ||
+        artifact.attempts.some((attempt) => attempt.hasCookies || !attempt.args.includes('--ignore-config')) ||
+        artifact.youtubeCookieRefreshAttempted
+      )
+        throw new Error('Moses must use only the cookie-free downloader and ignore local yt-dlp configuration');
+    },
+  })),
   {
     name: 'public-download-default-cookie-free',
     kind: 'download',
@@ -975,8 +1006,13 @@ const cases = [
 ];
 
 async function main() {
+  const requested = process.argv.slice(2);
+  const selected = requested.length ? cases.filter(({ name }) => requested.includes(name)) : cases;
+  if (requested.some((name) => !selected.some((testCase) => testCase.name === name))) {
+    throw new Error('Unknown YouTube loop case');
+  }
   const summary = [];
-  for (const testCase of cases) {
+  for (const testCase of selected) {
     process.stdout.write(`[youtube-loop] ${testCase.name}\n`);
     await runCase(testCase);
     summary.push({ name: testCase.name, status: 'ok' });

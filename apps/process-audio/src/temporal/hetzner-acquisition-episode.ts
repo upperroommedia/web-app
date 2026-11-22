@@ -1,5 +1,13 @@
+import {
+  readYouTubeRenderHeadTarget,
+  readYouTubeRenderTarget,
+  readYouTubeRenderRuntime,
+  type YouTubeRenderTarget,
+  type YouTubeRenderRuntime,
+} from './youtube-render-target';
 import { readRenderProfileSeal } from './hetzner-render-profile';
 import { readReadyRenderAuthentication } from './hetzner-render-authentication';
+import { readYouTubeRenderSlot } from './hetzner-render-slot';
 import { readBoundYouTubeRenderReceipt } from './hetzner-render-receipt';
 import { mediaWallTime } from './system-time';
 import type { YouTubeNativeClose } from './hetzner-acquisition-process';
@@ -34,6 +42,7 @@ export interface AcquisitionEpisode {
     releaseHash: string;
     providerHash: string;
     authenticationGeneration?: string;
+    guestFailover?: true;
     authenticationHash?: string;
     archiveWaitHash?: string;
     archiveAuthorizationHash?: string;
@@ -42,6 +51,8 @@ export interface AcquisitionEpisode {
   ref: MediaJobRef;
   preparedBy: AcquisitionPreparer;
   createdAt: number;
+  renderTarget?: YouTubeRenderTarget;
+  renderRuntime?: YouTubeRenderRuntime;
 }
 export interface AcquisitionInvocation {
   workflowId: string;
@@ -147,11 +158,19 @@ async function episodeOriginal(
       return fail();
     const previousIntent = await tx.get(rootRef.collection('episodes').doc(parsed.predecessor.id));
     const previous = intent(previousIntent.data(), parsed.ref);
+    const guestFailover = parsed.predecessor.guestFailover === true;
     if (
+      (!guestFailover &&
+        (!isDeepStrictEqual(previous.renderRuntime, parsed.renderRuntime) ||
+          readYouTubeRenderTarget(previous.renderTarget) !== readYouTubeRenderTarget(parsed.renderTarget))) ||
       previous.ordinal + 1 !== parsed.ordinal ||
       previous.invocation.workflowId !== parsed.invocation.workflowId ||
       previous.invocation.runId !== parsed.invocation.runId ||
-      (parsed.predecessor.authenticationGeneration !== undefined
+      (guestFailover
+        ? previous.invocation.activityId !== parsed.invocation.activityId ||
+          previous.invocation.attempt > parsed.invocation.attempt ||
+          parsed.archiveAttempt !== previous.archiveAttempt
+        : parsed.predecessor.authenticationGeneration !== undefined
         ? previous.invocation.activityId === parsed.invocation.activityId ||
           parsed.archiveAttempt !== previous.archiveAttempt
         : parsed.predecessor.archiveWaitHash === undefined
@@ -168,6 +187,26 @@ async function episodeOriginal(
         : await tx.get(previousIntent.ref.collection('runtime').doc('current'));
     await episodeOriginal(tx, predecessorExecution, previousIntent, previous);
     const root = await tx.get(rootRef);
+    if (guestFailover) {
+      if (
+        root.get('renderProtocol') !== 1 ||
+        root.get('renderHeadTarget') !== 'hetzner' ||
+        previous.renderTarget !== 'moses' ||
+        parsed.renderTarget !== 'hetzner' ||
+        !previous.renderRuntime ||
+        !parsed.renderRuntime ||
+        previous.renderRuntime.commit !== parsed.renderRuntime.commit
+      )
+        return fail();
+      const proof = await readBoundRenderAuthenticationPredecessor(tx, predecessorExecution, previous);
+      if (
+        parsed.predecessor.closeHash !== proof.closeHash ||
+        parsed.predecessor.releaseHash !== proof.closeHash ||
+        parsed.predecessor.providerHash !== proof.candidateHash
+      )
+        return fail();
+      return;
+    }
     if (root.get('renderProtocol') === 1) {
       if (parsed.predecessor.authenticationGeneration !== undefined) {
         const proof = await readBoundRenderAuthentication(tx, predecessorExecution, previous);
@@ -238,8 +277,11 @@ function intent(raw: unknown, ref: MediaJobRef): AcquisitionEpisode {
   const value = raw as AcquisitionEpisode;
   if (
     !value ||
-    Object.keys(value).sort().join(',') !==
-      'archiveAttempt,createdAt,id,invocation,operationId,ordinal,predecessor,preparedBy,ref,schemaVersion' ||
+    ![
+      'archiveAttempt,createdAt,id,invocation,operationId,ordinal,predecessor,preparedBy,ref,schemaVersion',
+      'archiveAttempt,createdAt,id,invocation,operationId,ordinal,predecessor,preparedBy,ref,renderTarget,schemaVersion',
+      'archiveAttempt,createdAt,id,invocation,operationId,ordinal,predecessor,preparedBy,ref,renderRuntime,renderTarget,schemaVersion',
+    ].includes(Object.keys(value).sort().join(',')) ||
     value.schemaVersion !== 1 ||
     !uuid(value.id) ||
     value.operationId !== youtubeAcquisitionId(ref) ||
@@ -257,9 +299,11 @@ function intent(raw: unknown, ref: MediaJobRef): AcquisitionEpisode {
         ![
           'closeHash,id,providerHash,releaseHash',
           'authenticationGeneration,authenticationHash,closeHash,id,providerHash,releaseHash',
+          'closeHash,guestFailover,id,providerHash,releaseHash',
           'archiveAuthorizationHash,archiveWaitHash,closeHash,id,providerHash,releaseHash',
         ].includes(Object.keys(value.predecessor).sort().join(',')) ||
         !uuid(value.predecessor.id) ||
+        (value.predecessor.guestFailover !== undefined && value.predecessor.guestFailover !== true) ||
         !/^[a-f0-9]{64}$/.test(value.predecessor.closeHash) ||
         !/^[a-f0-9]{64}$/.test(value.predecessor.releaseHash) ||
         !/^[a-f0-9]{64}$/.test(value.predecessor.providerHash) ||
@@ -273,6 +317,8 @@ function intent(raw: unknown, ref: MediaJobRef): AcquisitionEpisode {
     value.createdAt < 0
   )
     return fail();
+  readYouTubeRenderTarget(value.renderTarget);
+  readYouTubeRenderRuntime(value.renderRuntime);
   validateAcquisitionPreparer(value.preparedBy);
   invocation(value.invocation);
   return value;
@@ -286,11 +332,28 @@ export async function prepareNativeYouTubeEpisode(o: {
   invocation: AcquisitionInvocation;
   archiveResume?: MediaArchiveWait;
   render?: true;
+  renderTarget?: YouTubeRenderTarget;
+  renderRuntime?: YouTubeRenderRuntime;
+  requireExistingRender?: boolean;
   authenticationGeneration?: string;
+  guestFailoverFrom?: string;
   assertCurrent: (tx: Transaction, ref: MediaJobRef) => Promise<void>;
 }): Promise<string> {
   assertStagingAcquisitionDatabase(o.firestore);
+  const renderTarget = readYouTubeRenderTarget(o.renderTarget);
+  const renderRuntime = readYouTubeRenderRuntime(o.renderRuntime);
+  if (!o.render && (o.renderTarget !== undefined || renderRuntime || o.requireExistingRender)) return fail();
   if (o.authenticationGeneration !== undefined && (!o.render || o.archiveResume || !uuid(o.authenticationGeneration)))
+    return fail();
+  if (
+    o.guestFailoverFrom !== undefined &&
+    (!uuid(o.guestFailoverFrom) ||
+      !o.render ||
+      renderTarget !== 'hetzner' ||
+      !renderRuntime ||
+      o.archiveResume !== undefined ||
+      o.authenticationGeneration !== undefined)
+  )
     return fail();
   const ref = Object.freeze({ ...o.ref }),
     caller = validateAcquisitionPreparer(o.caller);
@@ -306,6 +369,8 @@ export async function prepareNativeYouTubeEpisode(o: {
     ref,
     preparedBy: caller,
     createdAt: mediaWallTime(),
+    ...(renderTarget === 'moses' || renderRuntime ? { renderTarget } : {}),
+    ...(renderRuntime && { renderRuntime }),
   };
   const doc = parent.collection('episodes').doc(episode.id);
   let executionRef = parent;
@@ -332,7 +397,13 @@ export async function prepareNativeYouTubeEpisode(o: {
     if (existing.exists) {
       const execution = await readAcquisitionExecution(tx, existing);
       const current = readYouTubeAcquisitionOperation(execution.data(), ref);
-      if ((existing.get('renderProtocol') === 1) !== (o.render === true) || existing.get('renderStopped') === true)
+      const originalTarget = readYouTubeRenderHeadTarget(existing);
+      const transferring = o.guestFailoverFrom !== undefined;
+      if (
+        (existing.get('renderProtocol') === 1) !== (o.render === true) ||
+        originalTarget !== (transferring ? 'moses' : renderTarget) ||
+        existing.get('renderStopped') === true
+      )
         return fail();
       const saved = execution.get('preparedEpisode');
       if (
@@ -346,10 +417,56 @@ export async function prepareNativeYouTubeEpisode(o: {
       immutable(allowed);
       const parsed = intent(original.data(), ref);
       await episodeOriginal(tx, execution, original, parsed);
-      if (parsed.id !== saved || !isDeepStrictEqual(allowed.data(), { schemaVersion: 1, episode: parsed }))
+      if (
+        parsed.id !== saved ||
+        readYouTubeRenderTarget(parsed.renderTarget) !== originalTarget ||
+        (!transferring && renderRuntime !== undefined && !isDeepStrictEqual(parsed.renderRuntime, renderRuntime)) ||
+        !isDeepStrictEqual(allowed.data(), { schemaVersion: 1, episode: parsed })
+      )
         return fail();
       await o.assertCurrent(tx, ref);
       if (execution.get('unclaimedClose') !== undefined) return fail();
+      if (transferring) {
+        if (
+          parsed.id !== o.guestFailoverFrom ||
+          parsed.ordinal >= 64 ||
+          !parsed.renderRuntime ||
+          parsed.renderRuntime.commit !== renderRuntime?.commit ||
+          parsed.invocation.workflowId !== episode.invocation.workflowId ||
+          parsed.invocation.runId !== episode.invocation.runId ||
+          parsed.invocation.activityId !== episode.invocation.activityId ||
+          parsed.invocation.attempt > episode.invocation.attempt
+        )
+          return fail();
+        // A successful guest provider outcome excludes artifact candidates. The
+        // original parent commits positive process/descendant closure together
+        // with reservation release. A missing or uncertain response proves none of this.
+        const proof = await readBoundRenderAuthenticationPredecessor(tx, execution, parsed);
+        if ((await readYouTubeRenderSlot(tx, o.firestore)).get('operationId') === parent.id) return fail();
+        episode.ordinal = parsed.ordinal + 1;
+        episode.archiveAttempt = parsed.archiveAttempt;
+        episode.predecessor = {
+          id: parsed.id,
+          closeHash: proof.closeHash,
+          releaseHash: proof.closeHash,
+          providerHash: proof.candidateHash,
+          guestFailover: true,
+        };
+        if (!admitRender()) return;
+        tx.create(original.ref.collection('facts').doc('successor'), { schemaVersion: 1, episode });
+        tx.create(doc, episode);
+        tx.create(doc.collection('runtime').doc('current'), {
+          schemaVersion: 1,
+          operationId: parent.id,
+          ref,
+          preparedBy: caller,
+          status: 'prepared',
+          createdAt: episode.createdAt,
+          preparedEpisode: episode.id,
+        });
+        tx.update(parent, { headEpisode: episode.id, renderHeadTarget: 'hetzner' });
+        return;
+      }
       if (isDeepStrictEqual(parsed.invocation, episode.invocation)) {
         selectedEpisodeId = parsed.id;
         return;
@@ -381,6 +498,10 @@ export async function prepareNativeYouTubeEpisode(o: {
           parsed.invocation.activityId === episode.invocation.activityId
         )
           return fail();
+        if (parsed.renderRuntime) {
+          episode.renderRuntime = parsed.renderRuntime;
+          episode.renderTarget = renderTarget;
+        }
         episode.ordinal = parsed.ordinal + 1;
         if (o.authenticationGeneration) {
           const proof = await readBoundRenderAuthentication(tx, execution, parsed);
@@ -503,7 +624,8 @@ export async function prepareNativeYouTubeEpisode(o: {
       created = true;
       return;
     }
-    if (o.archiveResume !== undefined || o.authenticationGeneration !== undefined) return fail();
+    if (o.requireExistingRender || o.archiveResume !== undefined || o.authenticationGeneration !== undefined)
+      return fail();
     await o.assertCurrent(tx, ref);
     if (o.render && !admitRender()) return;
     tx.create(parent, {
@@ -515,6 +637,7 @@ export async function prepareNativeYouTubeEpisode(o: {
       createdAt: episode.createdAt,
       preparedEpisode: episode.id,
       ...(o.render ? { renderProtocol: 1 } : {}),
+      ...(renderTarget === 'moses' ? { renderTarget } : {}),
     });
     tx.create(doc, episode);
     created = true;
@@ -581,6 +704,7 @@ export async function readPreparedYouTubeEpisodeInTransaction(
   await episodeOriginal(tx, execution, original, episode);
   if (
     episode.id !== id ||
+    readYouTubeRenderTarget(episode.renderTarget) !== readYouTubeRenderHeadTarget(root) ||
     !isDeepStrictEqual(episode.preparedBy, current.preparedBy) ||
     !isDeepStrictEqual(allowed.data(), { schemaVersion: 1, episode })
   )

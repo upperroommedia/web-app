@@ -1,3 +1,4 @@
+import { isMosesYouTubeRenderHost } from './temporal/youtube-render-target';
 import { requestRenderBrowserPoToken } from './temporal/hetzner-render-po-token';
 import { activeRenderProfileSnapshot } from './temporal/hetzner-render-profile';
 import { isTrackedBrowserRefreshId, readTrackedBrowserRefreshResult } from './temporal/hetzner-render-refresh-result';
@@ -509,6 +510,7 @@ export function extractMediaUrlBindingDetails(mediaUrl: string | undefined): Med
 }
 
 function shouldUseCookiesForPublicVideos(): boolean {
+  if (isMosesYouTubeRenderHost()) return false;
   if (activeRenderProfileSnapshot()) return true;
   const value = process.env.YTDLP_USE_COOKIES_FOR_PUBLIC_VIDEOS?.trim()?.toLowerCase();
   if (value !== undefined && value !== '') {
@@ -647,6 +649,7 @@ function applyPreferredIpFamilyArgs(args: string[]): void {
 }
 
 function isInProcessBrowserFallbackEnabled(): boolean {
+  if (isMosesYouTubeRenderHost()) return false;
   const explicit = process.env.PROCESS_AUDIO_IN_PROCESS_BROWSER_FALLBACK_ENABLED?.trim()?.toLowerCase();
   if (explicit === '0' || explicit === 'false' || explicit === 'no') return false;
   if (activeRenderProfileSnapshot()) return getInProcessBrowserFallbackStrategy() === 'session_backed';
@@ -658,6 +661,7 @@ function isInProcessBrowserFallbackEnabled(): boolean {
 }
 
 function isBrowserFallbackEnabled(): boolean {
+  if (isMosesYouTubeRenderHost()) return false;
   const explicit = process.env.YOUTUBE_BROWSER_FALLBACK_ENABLED?.trim()?.toLowerCase();
   if (explicit === '0' || explicit === 'false' || explicit === 'no') return false;
   return isInProcessBrowserFallbackEnabled() || getBrowserFallbackTargets().length > 0;
@@ -669,6 +673,7 @@ function normalizeBrowserFallbackUrl(endpoint: string | undefined): string | und
 }
 
 function getFinalResortBrowserFallbackUrl(): string | undefined {
+  if (isMosesYouTubeRenderHost()) return undefined;
   return normalizeBrowserFallbackUrl(process.env.YOUTUBE_FINAL_BROWSER_FALLBACK_URL);
 }
 
@@ -713,6 +718,7 @@ function getBrowserFallbackProfileBucketName(): string | undefined {
 }
 
 function getLocalBrowserProfileDir(): string | undefined {
+  if (isMosesYouTubeRenderHost()) return undefined;
   const value = activeRenderProfileSnapshot()?.directory ?? process.env.PROCESS_AUDIO_BROWSER_PROFILE_DIR?.trim();
   return value || undefined;
 }
@@ -725,16 +731,19 @@ function getLocalBrowserProfileBrowser(): 'chrome' | 'chromium' {
 }
 
 function getBrowserRefreshUrl(): string | undefined {
+  if (isMosesYouTubeRenderHost()) return undefined;
   const value = process.env.PROCESS_AUDIO_BROWSER_REFRESH_URL?.trim();
   return value ? value.replace(/\/+$/, '') : undefined;
 }
 
 function getBrowserRefreshControlDir(): string | undefined {
+  if (isMosesYouTubeRenderHost()) return undefined;
   const value = process.env.PROCESS_AUDIO_BROWSER_REFRESH_CONTROL_DIR?.trim();
   return value || undefined;
 }
 
 function getBrowserPoTokenControlDir(): string | undefined {
+  if (isMosesYouTubeRenderHost()) return undefined;
   const value = activeRenderProfileSnapshot()
     ? process.env.PROCESS_AUDIO_RENDER_BROWSER_POT_CONTROL_DIR?.trim()
     : process.env.PROCESS_AUDIO_BROWSER_POT_CONTROL_DIR?.trim();
@@ -1247,7 +1256,11 @@ function shouldUseBrowserFallbackForGuestFailure(message: string, failureClass: 
 function scopedYtDlpArgs(args: string[]): string[] {
   // yt-dlp can merge a configured --cookies file with browser-extracted cookies.
   // The owned snapshot is the only authenticated input to this operation.
-  return activeRenderProfileSnapshot() && !args.includes('--ignore-config') ? ['--ignore-config', ...args] : args;
+  if (isMosesYouTubeRenderHost() && args.some((arg) => /^--cookies(?:-from-browser)?(?:=|$)/.test(arg)))
+    throw new Error('Moses YouTube extraction cannot use cookies.');
+  return (isMosesYouTubeRenderHost() || activeRenderProfileSnapshot()) && !args.includes('--ignore-config')
+    ? ['--ignore-config', ...args]
+    : args;
 }
 
 async function runCommandWithCapture(
@@ -1447,7 +1460,7 @@ function shouldDisableInnertubeForPoTokenProvider(): boolean {
 }
 
 function ensureProductionPoTokenProviderConfigured(isDevelopment: boolean): void {
-  if (isDevelopment) return;
+  if (isDevelopment || isMosesYouTubeRenderHost()) return;
   if (shouldUseCookiesForPublicVideos()) return;
   if (getPoTokenProviderBaseUrl()) return;
   throw new Error(
@@ -1460,6 +1473,7 @@ async function loadYouTubeCookieContext(
   isDevelopment: boolean,
   log: ReturnType<typeof createLoggerWithContext>
 ): Promise<YouTubeCookieContext> {
+  if (isMosesYouTubeRenderHost()) return { args: [], hasCookies: false, loadedFromRealtimeDb: false, source: 'none' };
   const configuredProfileDir = getLocalBrowserProfileDir();
   if (configuredProfileDir) {
     const browser = getLocalBrowserProfileBrowser();
