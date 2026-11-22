@@ -3,6 +3,11 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { ApplicationFailure } from '@temporalio/common';
 import { GoogleAuth } from 'google-auth-library';
 import type { MediaJobRef, MediaOutcome } from './types';
+import {
+  readYouTubeRenderTarget,
+  stagingYouTubeRenderOrigins,
+  type YouTubeRenderTarget,
+} from './youtube-render-target';
 
 export interface AcquiredYouTubeSource {
   path: string;
@@ -194,13 +199,14 @@ export function createHetznerAcquisitionClient(options: {
   };
 }
 
-/** OIDC to the fixed staging host only; never follows redirects with credentials.
- * Hetzner verifies the signed token and its exact configured audience/SA itself.
+/** OIDC to a fixed staging host. The verified audience matches the destination.
+ * The render service also checks the exact caller recorded in the journal.
  * No caller-supplied origin, service-account key or provider secret is accepted.
  */
 export function createHetznerAcquisitionTransport(
   projectId: string,
-  protocol: 'source' | { episodeId: string } | { authenticationId: string } = 'source'
+  protocol: 'source' | { episodeId: string } | { authenticationId: string } = 'source',
+  target: YouTubeRenderTarget = 'hetzner'
 ): AcquisitionTransport {
   if (projectId !== 'urm-app-staging') throw new Error('Only staging acquisition transport is reviewed');
   if (process.env.GOOGLE_APPLICATION_CREDENTIALS) throw new Error('Acquisition requires a native service identity');
@@ -214,7 +220,9 @@ export function createHetznerAcquisitionTransport(
       : 'episodeId' in protocol
       ? `/render/${attemptId}`
       : `/render/authentication/${attemptId}`;
-  const origin = 'https://yt-worker-staging.upperroommedia.org';
+  const selected = readYouTubeRenderTarget(target);
+  if (protocol === 'source' && selected !== 'hetzner') throw new Error('Only render work can use a second host.');
+  const origin = stagingYouTubeRenderOrigins[selected];
   const auth = new GoogleAuth();
   let clientPromise: ReturnType<GoogleAuth['getIdTokenClient']> | undefined;
   let headersPromise: Promise<Headers> | undefined;

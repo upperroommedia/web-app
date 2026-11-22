@@ -119,6 +119,7 @@ export function planStagingMediaSuccessor({ control, state, operation, providerU
       domains: successor.domains,
       phase: 'ui-frozen',
       compatibilityCommit: successor.compatibilityCommit,
+      ...(successor.mosesActivation && { mosesActivationPolicySHA256: proofDigest(successor.mosesActivation) }),
       uiCommit: successor.uiCommit,
       savedRolloutPolicy: state.savedRolloutPolicy,
       savedUiTraffic: state.savedUiTraffic,

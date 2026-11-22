@@ -1,3 +1,4 @@
+import { assertYouTubeRenderRuntime } from './youtube-render-target';
 import { removeRenderProfileSnapshot } from './hetzner-render-profile';
 import { mkdtemp, realpath, rmdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -23,6 +24,7 @@ export async function executeRenderAuthentication(o: {
   ref: MediaJobRef;
   verifiedCallerEmail: string;
   id: string;
+  runtimeId?: string;
   startSignal: AbortSignal;
   assertStartFresh: () => void;
   onStarted: () => void;
@@ -40,17 +42,19 @@ export async function executeRenderAuthentication(o: {
   };
   fresh();
   const ref = Object.freeze({ ...o.ref });
-  const episodeId = await o.firestore.runTransaction(
+  const episode = await o.firestore.runTransaction(
     async (tx) => {
       const { original, completion, intent } = await readPreparedRenderAuthentication(tx, { ...o, ref });
       if (completion.exists || (await tx.get(intent.ref.collection('facts').doc('claim'))).exists) return undefined;
       await requireYouTubeRenderSlot(tx, o.firestore, youtubeRenderSlot(ref, original.episode.id, o.id));
-      return original.episode.id;
+      return original.episode;
     },
     { maxAttempts: 1 }
   );
-  if (!episodeId) return 'already-claimed' as const;
+  if (!episode) return 'already-claimed' as const;
+  const episodeId = episode.id;
   const buildId = acquisitionHostBuildId();
+  assertYouTubeRenderRuntime(episode.renderRuntime, o.runtimeId, buildId);
   const existingTmp = await realpath(tmpdir());
   fresh();
   const directory = await mkdtemp(join(existingTmp, 'youtube-render-'));

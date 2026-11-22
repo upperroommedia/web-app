@@ -31,7 +31,7 @@ export function assertHetznerActivationReceipt(snapshot, release, expected = {})
   return receipt;
 }
 
-export async function confirmLiveHetznerActivation(receipt, request = fetch) {
+export async function confirmLiveHetznerActivation(receipt, request = fetch, { requireRenderPin = false } = {}) {
   // Each release check must contact the enabled process even if an ingress
   // serves a cached health document for the same runtime.
   const challenge = randomBytes(32).toString('hex');
@@ -48,6 +48,7 @@ export async function confirmLiveHetznerActivation(receipt, request = fetch) {
     health.service !== 'process-audio' ||
     health.releaseChallenge !== challenge ||
     health.temporalYouTubeRenderMode !== 'enabled' ||
+    (requireRenderPin && (health.temporalYouTubeRenderPinProtocol !== 1 || health.temporalYouTubeRenderTarget !== 'hetzner')) ||
     health.temporalYouTubeRuntimeId !== receipt.runtimeId ||
     health.sentryEnabled !== true ||
     health.sentryEnvironment !== 'staging' ||

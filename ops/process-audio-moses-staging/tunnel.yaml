@@ -1,0 +1,7 @@
+tunnel: __TUNNEL_ID__
+credentials-file: __CREDENTIAL_FILE__
+ingress:
+  - hostname: yt-moses-staging.upperroommedia.org
+    path: ^/(healthz|internal/temporal/youtube/acquisitions/ytacq-[a-f0-9]{64}/render/[a-f0-9-]{36})$
+    service: http://127.0.0.1:18082
+  - service: http_status:404

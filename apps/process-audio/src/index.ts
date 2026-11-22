@@ -1,3 +1,5 @@
+import { readYouTubeRenderTarget } from './temporal/youtube-render-target';
+import { tmpdir } from 'node:os';
 import { prepareLegacyMediaAdmission } from '@upperroom/orchestration/legacy-media-execution';
 import {
   sentryEnabled,
@@ -261,12 +263,14 @@ const bucket = firebaseAdmin.storage().bucket();
 const realtimeDB = firebaseAdmin.database();
 const db = firebaseAdmin.firestore();
 const temporalYouTubeRenderMode = process.env.PROCESS_AUDIO_TEMPORAL_YOUTUBE_RENDER || 'off';
+const temporalYouTubeRenderTarget = readYouTubeRenderTarget(process.env.PROCESS_AUDIO_TEMPORAL_YOUTUBE_RENDER_TARGET);
 if (
   !['off', 'verify', 'enabled'].includes(temporalYouTubeRenderMode) ||
+  (temporalYouTubeRenderTarget === 'moses' && temporalYouTubeRenderMode === 'off') ||
   (temporalYouTubeRenderMode !== 'off' &&
     (runtimeProfile !== 'hetzner' || firebaseAdmin.app().options.projectId !== 'urm-app-staging'))
 )
-  throw new Error('Temporal YouTube rendering is restricted to the staging Hetzner runtime.');
+  throw new Error('Temporal YouTube rendering requires an enabled or verification staging render host.');
 const temporalYouTubeRenderEnabled = temporalYouTubeRenderMode === 'enabled';
 const temporalYouTubeRuntimeId = temporalYouTubeRenderEnabled ? randomUUID() : undefined;
 const legacyYouTubeWorkEnabled = temporalYouTubeRenderMode === 'off';
@@ -277,6 +281,8 @@ app.use(
     auth: firebaseAdmin.auth(),
     bucket,
     renderEnabled: temporalYouTubeRenderEnabled,
+    runtimeId: temporalYouTubeRuntimeId,
+    renderTarget: temporalYouTubeRenderTarget,
   })
 );
 
@@ -583,11 +589,24 @@ app.get('/healthz', async (req, res) => {
       res.sendStatus(400);
       return;
     }
+    if (temporalYouTubeRenderTarget === 'moses') {
+      try {
+        const { reserveMediaWorkspace } = await import('./temporal/resources');
+        const release = await reserveMediaWorkspace(tmpdir());
+        release();
+      } catch {
+        res.sendStatus(503);
+        return;
+      }
+    }
     res.status(200).json({
       ok: true,
       service: 'process-audio',
       releaseChallenge,
+      temporalYouTubeRenderPinProtocol: 1,
       temporalYouTubeRenderMode,
+      temporalYouTubeRenderTarget,
+      ...(temporalYouTubeRenderTarget === 'moses' ? { temporalYouTubeGuestOnly: true } : {}),
       temporalYouTubeRuntimeId,
       sentryEnabled,
       sentryEnvironment,
@@ -604,6 +623,7 @@ app.get('/healthz', async (req, res) => {
     revision: process.env.K_REVISION || 'local',
     runtimeProfile,
     temporalYouTubeRenderMode,
+    temporalYouTubeRenderTarget,
     temporalYouTubeRuntimeId,
     youtubeProcessingEnabled,
     sentryEnabled,
@@ -622,7 +642,9 @@ app.get('/healthz', async (req, res) => {
     poTokenProviderConfigured: youtubeProcessingEnabled && !!process.env.YTDLP_POT_PROVIDER_BASE_URL,
     ytDlpJsRuntime: ytDlpJsRuntimeInfo?.runtime ?? null,
     ytDlpUseCookiesForPublicVideos: youtubeProcessingEnabled
-      ? process.env.YTDLP_USE_COOKIES_FOR_PUBLIC_VIDEOS || 'false'
+      ? temporalYouTubeRenderTarget === 'moses'
+        ? 'false'
+        : process.env.YTDLP_USE_COOKIES_FOR_PUBLIC_VIDEOS || 'false'
       : null,
     ytDlpSleepRequestsSeconds,
     ytDlpSleepIntervalSeconds,

@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh the staging Moses renderer workload credential
+
+[Service]
+Type=oneshot
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ReadWritePaths=/etc/urm-youtube-moses-staging
+ExecStart=/usr/bin/python3 /usr/local/libexec/urm-moses-renderer/federation.py refresh --key /etc/urm-youtube-moses-staging/federation-key.pem --token-dir /etc/urm-youtube-moses-staging/federation

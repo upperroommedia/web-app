@@ -140,6 +140,17 @@ export function validateReleaseConfig(config) {
     config.domains.some((d) => !RELEASE_DOMAINS.includes(d))
   )
     throw new Error('Explicit nonduplicate release domains are required');
+  if (config.mosesActivation !== undefined) {
+    const pins = config.mosesActivation;
+    if (
+      config.environment !== 'staging' || config.mode !== 'durable-upgrade' || !config.domains.includes('media') ||
+      !pins || Object.keys(pins).sort().join(',') !== 'candidateId,guardKeySHA256,imageId,operationId,operatorKeySHA256' ||
+      !/^[a-f0-9]{64}$/.test(pins.candidateId) || !/^[a-f0-9]{64}$/.test(pins.guardKeySHA256) ||
+      !/^[a-f0-9]{64}$/.test(pins.operatorKeySHA256) || pins.operatorKeySHA256 === pins.guardKeySHA256 ||
+      !/^sha256:[a-f0-9]{64}$/.test(pins.imageId) ||
+      !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(pins.operationId)
+    ) throw new Error('An exact staging media upgrade and Moses activation pins are required');
+  }
   if (
     config.projectId === 'urm-app-staging' &&
     config.mode === 'initial-cutover' &&

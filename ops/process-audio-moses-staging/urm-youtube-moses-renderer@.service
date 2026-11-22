@@ -1,0 +1,12 @@
+[Unit]
+Description=Run the Moses staging renderer operator (%i)
+ConditionHost=MosesTheStrong
+ConditionUser=1000
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 %h/.local/share/urm-youtube-moses-staging/renderer/renderer.py %i --user-service
+UMask=0077
+NoNewPrivileges=yes
+Restart=no
+TimeoutStartSec=120

@@ -1,0 +1,10 @@
+[Unit]
+Description=Refresh the short-lived staging Moses subject token
+
+[Timer]
+OnBootSec=5s
+OnUnitActiveSec=90s
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target

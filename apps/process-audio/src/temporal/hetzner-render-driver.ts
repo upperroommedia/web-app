@@ -1,3 +1,4 @@
+import { assertYouTubeRenderRuntime } from './youtube-render-target';
 import { removeRenderProfileSnapshot } from './hetzner-render-profile';
 import { mkdtemp, realpath, rmdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -25,6 +26,7 @@ export async function executeCanonicalYouTubeRender(o: {
   ref: MediaJobRef;
   episodeId: string;
   verifiedCallerEmail: string;
+  runtimeId?: string;
   startSignal: AbortSignal;
   assertStartFresh: () => void;
   onStarted: () => void;
@@ -54,6 +56,7 @@ export async function executeCanonicalYouTubeRender(o: {
   );
   if (!episode) return 'already-claimed' as const;
   const buildId = acquisitionHostBuildId();
+  assertYouTubeRenderRuntime(episode.renderRuntime, o.runtimeId, buildId);
   const existingTmp = await realpath(tmpdir());
   fresh();
   const directory = await mkdtemp(join(existingTmp, 'youtube-render-'));

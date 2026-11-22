@@ -1,3 +1,4 @@
+import { isMosesYouTubeRenderHost } from './youtube-render-target';
 import { isDeepStrictEqual } from 'node:util';
 import type { Auth } from 'firebase-admin/auth';
 import type { Database } from 'firebase-admin/database';
@@ -44,6 +45,7 @@ export async function runOwnedYouTubeRender(o: {
   const observe = (observationSignal = signal, checkAuthentication?: 'starting' | 'downloading') =>
     boundedNativeEligibility(() => readOwnedYouTubeRender({ ...o, signal: observationSignal, checkAuthentication }));
   const original = await observe(signal, 'starting');
+  if (isMosesYouTubeRenderHost() && original.authenticationSeal) throw denied();
   const sameAuthority = (current: typeof original) =>
     isDeepStrictEqual(current.claim, original.claim) &&
     isDeepStrictEqual(current.pinnedMergeSources, original.pinnedMergeSources);

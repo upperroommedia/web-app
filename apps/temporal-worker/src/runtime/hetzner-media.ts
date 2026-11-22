@@ -1,4 +1,14 @@
 import {
+  readYouTubeRenderHeadTarget,
+  type YouTubeRenderTarget,
+} from '../../../process-audio/src/temporal/youtube-render-target';
+import {
+  createStagingYouTubeRenderAuthority,
+  createStagingYouTubeRenderSelector,
+  type YouTubeRenderChoice,
+} from './youtube-render-selection';
+import { YOUTUBE_ACQUISITIONS } from '../../../process-audio/src/temporal/hetzner-acquisition-store';
+import {
   reserveYouTubeRenderDispatch,
   retainedYouTubeRenderSlot,
   youtubeRenderSlot,
@@ -13,6 +23,7 @@ import type { MediaJobRef, MediaArchiveWait } from '../../../process-audio/src/t
 import {
   createHetznerAcquisitionClient,
   createHetznerAcquisitionTransport,
+  youtubeAcquisitionId,
 } from '../../../process-audio/src/temporal/hetzner-acquisition';
 import {
   prepareNativeYouTubeEpisode,
@@ -50,17 +61,51 @@ function runtimeBinding(o: RuntimeYouTubeBinding, expected: 'hetzner-v1' | 'hetz
   )
     return fail();
   if (mode !== expected) return undefined;
+  const authority =
+    expected === 'hetzner-render-v1' ? createStagingYouTubeRenderAuthority(process.env, o.firestore) : undefined;
+  const selectNewTarget = authority && createStagingYouTubeRenderSelector(authority.load);
   return async (
     ref: MediaJobRef,
     signal: AbortSignal,
     archiveResume?: MediaArchiveWait,
-    authenticationGeneration?: string
+    authenticationGeneration?: string,
+    guestFailoverFrom?: string
   ) => {
     signal.throwIfAborted();
     const { caller, invocation } = invocationBinding(o, 'acquireMedia');
+    let renderTarget: YouTubeRenderTarget = 'hetzner';
+    let choice: YouTubeRenderChoice | undefined;
+    if (expected === 'hetzner-render-v1') {
+      const existing = await o.firestore.collection(YOUTUBE_ACQUISITIONS).doc(youtubeAcquisitionId(ref)).get();
+      signal.throwIfAborted();
+      if (guestFailoverFrom) {
+        if (!existing.exists || !selectNewTarget || readYouTubeRenderHeadTarget(existing) !== 'moses') return fail();
+        choice = await selectNewTarget(signal, true);
+        renderTarget = choice.target;
+      } else if (existing.exists) renderTarget = readYouTubeRenderHeadTarget(existing);
+      else if (selectNewTarget) {
+        choice = await selectNewTarget(signal);
+        renderTarget = choice.target;
+      }
+      signal.throwIfAborted();
+    }
+    // The preparation transaction joins the saved episode and target again.
+    // If admission raced this read, it cannot authorize a competing host.
     const episodeId = await prepareNativeYouTubeEpisode({
       archiveResume,
-      ...(expected === 'hetzner-render-v1' ? { render: true as const, authenticationGeneration } : {}),
+      ...(expected === 'hetzner-render-v1'
+        ? {
+            render: true as const,
+            authenticationGeneration,
+            guestFailoverFrom,
+            renderTarget,
+            ...(choice
+              ? { renderRuntime: { runtimeId: choice.runtimeId, commit: choice.commit } }
+              : authority
+              ? { requireExistingRender: true }
+              : {}),
+          }
+        : {}),
       invocation,
       firestore: o.firestore,
       ref,
@@ -68,11 +113,15 @@ function runtimeBinding(o: RuntimeYouTubeBinding, expected: 'hetzner-v1' | 'hetz
       assertCurrent: async (tx, bound) => {
         signal.throwIfAborted();
         await o.assertCurrent(tx, bound);
+        if (choice && authority) {
+          const selected = (await authority.read(tx))[choice.target];
+          if (selected.commit !== choice.commit || selected.runtimeId !== choice.runtimeId) return fail();
+        }
         signal.throwIfAborted();
       },
     });
     signal.throwIfAborted();
-    return { caller, episodeId };
+    return { caller, episodeId, renderTarget };
   };
 }
 
@@ -147,46 +196,59 @@ export function createRuntimeYouTubeRender(o: RuntimeYouTubeBinding & { bucket: 
     archiveResume?: MediaArchiveWait,
     authenticationGeneration?: string
   ) => {
-    const { caller, episodeId } = await bind(ref, signal, archiveResume, authenticationGeneration);
-    const verifiedCallerEmail = caller.serviceAccount;
-    const transport = createHetznerAcquisitionTransport(o.projectId, { episodeId });
-    const context = Context.current();
-    const heartbeat = () => context.heartbeat({ stage: 'youtube-render' });
-    const completed = await observeRenderUntilCancelled(o, ref, signal, () =>
-      waitForYouTubeRender({
-        ref,
-        signal,
-        request: transport,
-        heartbeat,
-        authorizeDispatch: () =>
-          reserveYouTubeRenderDispatch({
-            firestore: o.firestore,
-            signal,
-            assertCurrent: (tx) => o.assertCurrent(tx, ref),
-            read: async (tx) => {
-              const { episode, execution, root } = await readPreparedYouTubeEpisodeInTransaction(tx, {
-                ...o,
-                ref,
-                verifiedCallerEmail,
-                render: true,
-              });
-              if (episode.id !== episodeId) return fail();
-              return {
-                dispatch: await tx.get(execution.ref.collection('render').doc('dispatch')),
-                body: { schemaVersion: 1, ref, episodeId: episode.id },
-                slot: youtubeRenderSlot(ref, episode.id),
-                transferFrom: episode.predecessor?.authenticationGeneration
-                  ? retainedYouTubeRenderSlot(ref, episode.predecessor.id, episode.predecessor.authenticationGeneration)
-                  : undefined,
-                active: root.get('renderStopped') !== true && execution.get('renderClaim') === undefined,
-              };
-            },
-          }),
-      })
-    );
-    if (completed === 'cancelled') return { kind: 'cancelled' } as const;
-    const result = await adoptYouTubeRender({ ...o, ref, signal, verifiedCallerEmail, episodeId });
-    if (result.kind !== completed) return fail();
+    const render = async ({ caller, episodeId, renderTarget }: Awaited<ReturnType<typeof bind>>) => {
+      const verifiedCallerEmail = caller.serviceAccount;
+      const transport = createHetznerAcquisitionTransport(o.projectId, { episodeId }, renderTarget);
+      const context = Context.current();
+      const heartbeat = () => context.heartbeat({ stage: 'youtube-render' });
+      const completed = await observeRenderUntilCancelled(o, ref, signal, () =>
+        waitForYouTubeRender({
+          ref,
+          signal,
+          request: transport,
+          heartbeat,
+          authorizeDispatch: () =>
+            reserveYouTubeRenderDispatch({
+              firestore: o.firestore,
+              signal,
+              assertCurrent: (tx) => o.assertCurrent(tx, ref),
+              read: async (tx) => {
+                const { episode, execution, root } = await readPreparedYouTubeEpisodeInTransaction(tx, {
+                  ...o,
+                  ref,
+                  verifiedCallerEmail,
+                  render: true,
+                });
+                if (episode.id !== episodeId) return fail();
+                return {
+                  dispatch: await tx.get(execution.ref.collection('render').doc('dispatch')),
+                  body: { schemaVersion: 1, ref, episodeId: episode.id },
+                  slot: youtubeRenderSlot(ref, episode.id),
+                  transferFrom: episode.predecessor?.authenticationGeneration
+                    ? retainedYouTubeRenderSlot(
+                        ref,
+                        episode.predecessor.id,
+                        episode.predecessor.authenticationGeneration
+                      )
+                    : undefined,
+                  active: root.get('renderStopped') !== true && execution.get('renderClaim') === undefined,
+                };
+              },
+            }),
+        })
+      );
+      if (completed === 'cancelled') return { kind: 'cancelled' } as const;
+      const result = await adoptYouTubeRender({ ...o, ref, signal, verifiedCallerEmail, episodeId });
+      if (result.kind !== completed) return fail();
+      return result;
+    };
+    const original = await bind(ref, signal, archiveResume, authenticationGeneration);
+    let result = await render(original);
+    if (original.renderTarget === 'moses' && result.kind === 'waiting_auth') {
+      const backup = await bind(ref, signal, undefined, undefined, original.episodeId);
+      result = await render(backup);
+    }
+    if (result.kind === 'cancelled') return { kind: 'cancelled' } as const;
     if (result.kind === 'waiting_auth')
       return { kind: 'waiting_auth', recoveryGeneration: null, hostBound: true } as const;
     if (result.kind === 'waiting_archive') return { kind: 'waiting_archive', hostBound: true } as const;
@@ -202,9 +264,14 @@ export function createRuntimeYouTubeRenderAuthentication(o: RuntimeYouTubeBindin
     const context = Context.current(),
       signal = context.cancellationSignal;
     const { caller, invocation } = invocationBinding(o, 'recoverMediaAuthentication');
+    const operation = await o.firestore.collection(YOUTUBE_ACQUISITIONS).doc(youtubeAcquisitionId(ref)).get();
+    if (!operation.exists) return fail();
+    const target = readYouTubeRenderHeadTarget(operation);
+    signal.throwIfAborted();
+    if (target === 'moses') return { ready: false, generation: null };
     const id = await prepareRenderAuthentication({ ...o, ref, caller, invocation, signal });
     const verifiedCallerEmail = caller.serviceAccount;
-    const request = createHetznerAcquisitionTransport(o.projectId, { authenticationId: id });
+    const request = createHetznerAcquisitionTransport(o.projectId, { authenticationId: id }, target);
     const completed = await observeRenderUntilCancelled(o, ref, signal, () =>
       waitForYouTubeRender({
         ref,
