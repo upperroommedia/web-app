@@ -110,8 +110,8 @@ export function createWorkerReadinessActivities(options: {
       const email =
         request.role === 'email'
           ? await (
-              await import('@upperroom/function-kit-firestore-send-email/lib/temporal/provider')
-            ).verifyEmailTransportNoSendBounded(undefined, context.cancellationSignal)
+              await import('@upperroom/function-kit-firestore-send-email/lib/temporal/capture')
+            ).verifyEmailCaptureReadiness(options.firestore, request.nonce, execution.runId, context.cancellationSignal)
           : null;
       const evidence = {
         cloudStorage,

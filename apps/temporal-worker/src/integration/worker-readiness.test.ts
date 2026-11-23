@@ -9,17 +9,10 @@ jest.mock('../runtime/cloud-run-storage-readiness', () => {
     }),
   };
 });
-// Explicit no-network email fixture; local tests do not prove deployed mail authentication.
-jest.mock('@upperroom/function-kit-firestore-send-email/lib/temporal/provider', () => ({
-  verifyEmailTransportNoSendBounded: jest.fn(async () => ({
-    provider: 'smtp',
-    tlsVerified: true,
-    authenticationVerified: true,
-    mailPermissionVerified: false,
-    noMessageSent: true,
-    observedAt: new Date().toISOString(),
-  })),
-}));
+// Fail if staging even loads the live transport adapter.
+jest.mock('@upperroom/function-kit-firestore-send-email/lib/temporal/provider', () => {
+  throw new Error('STAGING_LOADED_LIVE_EMAIL_PROVIDER');
+});
 // Controlled serving-read fixture, alongside the controlled Cloud Run identity.
 // Native SDK execution/Firestore receipts here do NOT prove deployed RTDB access.
 jest.mock('../runtime/cloud-run-rtdb-readiness', () => ({
@@ -48,7 +41,7 @@ test('fresh native role executions persist private witnesses and return only rec
   const port = config.emulators.firestore.port;
   if (!new RegExp(`^(127\\.0\\.0\\.1|localhost):${port}$`).test(process.env.FIRESTORE_EMULATOR_HOST ?? ''))
     throw new Error('Dedicated firebase.test.json emulator harness required');
-  const app = initializeApp({ projectId: 'urm-app-staging' }, `readiness-${randomUUID()}`);
+  const app = initializeApp({ projectId: 'urm-app-staging' });
   const db = getFirestore(app);
   const environment = await createLocalTestEnvironment();
   const workers: Worker[] = [],
@@ -71,6 +64,8 @@ test('fresh native role executions persist private witnesses and return only rec
       instanceId: `native-${role}`,
     },
   });
+  const previousMode = process.env.STAGING_PROVIDER_MODE;
+  process.env.STAGING_PROVIDER_MODE = 'sandbox';
   try {
     for (const role of ['orchestration', 'controls', 'media', 'images', 'email']) {
       const queue = `urm-${role}`;
@@ -166,6 +161,29 @@ test('fresh native role executions persist private witnesses and return only rec
     expect((await db.collection(WORKER_READINESS_COLLECTION).doc(conflictReceipt!.id).get()).get('digest')).toBe(
       conflictReceipt!.digest
     );
+    const email = (await db.collection(WORKER_READINESS_COLLECTION).doc(conflictReceipt!.id).get()).get('email');
+    expect(email).toMatchObject({
+      provider: 'firestore-capture',
+      externalDelivery: false,
+      projectId: 'urm-app-staging',
+      profileId: 'urm-app-staging-mail-capture-v1',
+    });
+    const captureRef = db.collection('_mailSandboxCaptures').doc(email.captureId);
+    const capture = await captureRef.get();
+    expect(capture.get('options.to')).toBe('readiness@recipient.invalid');
+    expect(capture.get('payloadSha256')).toBe(email.payloadSha256);
+    expect(capture.get('externalDelivery')).toBe(false);
+    expect(capture.updateTime).toEqual(capture.createTime);
+    // Existing capture deduplication checks message identity. Readiness must
+    // additionally detect a changed private record even if its hash field survived.
+    await captureRef.update({ externalDelivery: true });
+    const { verifyEmailCaptureReadiness } = await import(
+      '@upperroom/function-kit-firestore-send-email/lib/temporal/capture'
+    );
+    await expect(
+      verifyEmailCaptureReadiness(db, conflictNonce, conflict.firstExecutionRunId, new AbortController().signal)
+    ).rejects.toThrow('EMAIL_CAPTURE_READINESS_UNCONFIRMED');
+    await captureRef.delete();
     const rejectedNonce = randomUUID().replaceAll('-', '');
     ownedNonces.push(rejectedNonce);
     const rejected = await environment.client.workflow.start('WorkerRuntimeProbe', {
@@ -195,6 +213,8 @@ test('fresh native role executions persist private witnesses and return only rec
     await environment.teardown();
     const evidence = await db.collection(WORKER_READINESS_COLLECTION).where('nonce', 'in', ownedNonces).get();
     for (const doc of evidence.docs) await doc.ref.delete();
+    if (previousMode === undefined) delete process.env.STAGING_PROVIDER_MODE;
+    else process.env.STAGING_PROVIDER_MODE = previousMode;
     await db.terminate();
     await deleteApp(app);
   }

@@ -2,7 +2,7 @@
 import { createHash } from 'node:crypto';
 import { getApp, type App } from 'firebase-admin/app';
 import config from '../config';
-import { getFirestore, FieldValue, type Firestore } from 'firebase-admin/firestore';
+import { getFirestore, FieldValue, Timestamp, type Firestore } from 'firebase-admin/firestore';
 import type { ExtendedSendMailOptions } from '../types';
 import { secureMailOptions } from './secure-options';
 
@@ -67,6 +67,7 @@ export function assertEmailCaptureReceiptProfile(
   if ((profile && existing.exists && canonical(pinned) !== canonical(profile)) || (!profile && pinned !== undefined))
     throw new Error('EMAIL_DELIVERY_PROFILE_MISMATCH');
 }
+const captureCollection = '_mailSandboxCaptures';
 export function createMailCapture(db: Firestore, profile: EmailCaptureProfile, app: App = getApp()) {
   // Bind to the initialized Admin client, never a mail document or callable field.
   if (
@@ -94,7 +95,7 @@ export function createMailCapture(db: Firestore, profile: EmailCaptureProfile, a
         payloadSha256 = sha(canonical(options));
       const deliveryTransport: EmailCaptureProvenance = { ...profile, captureId, payloadSha256 };
       if (beforeSend) await beforeSend();
-      const ref = db.collection('_mailSandboxCaptures').doc(captureId);
+      const ref = db.collection(captureCollection).doc(captureId);
       await db.runTransaction(async (tx) => {
         const existing = await tx.get(ref);
         if (existing.exists) {
@@ -130,4 +131,78 @@ export function createMailCapture(db: Firestore, profile: EmailCaptureProfile, a
       /* No transport sockets to close. */
     },
   };
+}
+
+/** The operator controls only the execution identity. No mail fields enter from a request. */
+function readinessFixture(nonce: string, runId: string) {
+  if (!/^[a-f0-9]{32}$/.test(nonce) || !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(runId))
+    throw new Error('EMAIL_CAPTURE_READINESS_ID_INVALID');
+  const identity = sha(`staging-email-readiness-v1:${nonce}:${runId}`);
+  const messageId = `<${identity}@durable.upperroommedia.org>`;
+  const options = secureMailOptions(
+    {
+      messageId,
+      from: 'readiness@sender.invalid',
+      to: 'readiness@recipient.invalid',
+      subject: 'Staging email readiness',
+      text: 'Synthetic private capture for worker release verification.',
+    },
+    messageId
+  );
+  return { messageId, options, captureId: sha(messageId), payloadSha256: sha(canonical(options)) };
+}
+
+export function expectedEmailCaptureReadiness(nonce: string, runId: string) {
+  const { captureId, payloadSha256 } = readinessFixture(nonce, runId);
+  return {
+    provider: 'firestore-capture' as const,
+    projectId: EMAIL_CAPTURE_PROFILE.projectId,
+    profileId: EMAIL_CAPTURE_PROFILE.profileId,
+    captureId,
+    payloadSha256,
+    externalDelivery: false as const,
+  };
+}
+
+/** Inspect only this run's derived private capture, using the caller's SDK identity. */
+export async function readEmailReadinessCapture(db: Firestore, nonce: string, runId: string) {
+  if (!('projectId' in db) || db.projectId !== EMAIL_CAPTURE_PROFILE.projectId || db.databaseId !== '(default)')
+    throw new Error('EMAIL_CAPTURE_PROJECT_MISMATCH');
+  const fixture = readinessFixture(nonce, runId);
+  const captured = await db.collection(captureCollection).doc(fixture.captureId).get();
+  const capturedAt: unknown = captured.get('capturedAt');
+  if (
+    !captured.exists ||
+    Object.keys(captured.data()!).sort().join(',') !==
+      'capturedAt,deliveryProfile,externalDelivery,messageId,options,payloadSha256,schemaVersion' ||
+    captured.get('schemaVersion') !== 1 ||
+    captured.get('externalDelivery') !== false ||
+    captured.get('messageId') !== fixture.messageId ||
+    captured.get('payloadSha256') !== fixture.payloadSha256 ||
+    canonical(captured.get('deliveryProfile')) !== canonical(EMAIL_CAPTURE_PROFILE) ||
+    canonical(captured.get('options')) !== canonical(fixture.options) ||
+    !(capturedAt instanceof Timestamp) ||
+    !captured.createTime?.isEqual(captured.updateTime!)
+  )
+    throw new Error('EMAIL_CAPTURE_READBACK_MISMATCH');
+  return { createdAt: captured.createTime!, capturedAt };
+}
+
+export async function verifyEmailCaptureReadiness(db: Firestore, nonce: string, runId: string, signal: AbortSignal) {
+  const profile = emailCaptureProfile(authoritativeEmailProject(db));
+  if (!profile) throw new Error('EMAIL_STAGING_CAPTURE_REQUIRED');
+  const transport = createMailCapture(db, profile);
+  const fixture = readinessFixture(nonce, runId);
+  const checkCancellation = async () => signal.throwIfAborted();
+  try {
+    await transport.send(fixture.options, checkCancellation);
+    await checkCancellation();
+    await readEmailReadinessCapture(db, nonce, runId);
+    await checkCancellation();
+    return { ...expectedEmailCaptureReadiness(nonce, runId), observedAt: new Date().toISOString() };
+  } catch {
+    throw new Error('EMAIL_CAPTURE_READINESS_UNCONFIRMED');
+  } finally {
+    transport.close();
+  }
 }
