@@ -72,7 +72,7 @@ test('fresh native role executions persist private witnesses and return only rec
     },
   });
   try {
-    for (const role of ['orchestration', 'controls', 'images', 'email']) {
+    for (const role of ['orchestration', 'controls', 'media', 'images', 'email']) {
       const queue = `urm-${role}`;
       const activities = createWorkerReadinessActivities({
         workflowBundle: { schemaVersion: 1, buildId, bundleSHA256: 'f'.repeat(64), bundleBytes: 100 },
@@ -105,12 +105,12 @@ test('fresh native role executions persist private witnesses and return only rec
     const handle = await environment.client.workflow.start<typeof WorkerRuntimeProbe>('WorkerRuntimeProbe', {
       taskQueue: 'urm-orchestration',
       workflowId: `serverless-readiness-${nonce}`,
-      args: [{ projectId: 'urm-app-staging', buildId, nonce, roles: ['orchestration', 'controls'] }],
-      workflowExecutionTimeout: '30 seconds',
+      args: [{ projectId: 'urm-app-staging', buildId, nonce, roles: ['orchestration', 'controls', 'media'] }],
+      workflowExecutionTimeout: '10 minutes',
     });
     const result = await handle.result();
-    expect(Object.keys(result)).toEqual(['orchestration', 'controls']);
-    for (const role of ['orchestration', 'controls']) {
+    expect(Object.keys(result)).toEqual(['orchestration', 'controls', 'media']);
+    for (const role of ['orchestration', 'controls', 'media']) {
       expect(Object.keys(result[role]).sort()).toEqual(['digest', 'id']);
       expect(result[role].id).toMatch(/^[a-f0-9]{64}$/);
       const stored = await db.collection(WORKER_READINESS_COLLECTION).doc(result[role].id).get();
@@ -121,6 +121,20 @@ test('fresh native role executions persist private witnesses and return only rec
       expect(stored.get('attempt')).toBe(1);
     }
     const history = await handle.fetchHistory();
+    const activityCommands = (history.events ?? []).flatMap((event) =>
+      event.activityTaskScheduledEventAttributes ? [event.activityTaskScheduledEventAttributes] : []
+    );
+    expect(activityCommands.map((command) => command.taskQueue?.name)).toEqual([
+      'urm-orchestration',
+      'urm-controls',
+      'urm-media',
+    ]);
+    expect(new Set(activityCommands.map((command) => command.workflowTaskCompletedEventId?.toString())).size).toBe(1);
+    for (const command of activityCommands) {
+      expect(command.scheduleToCloseTimeout?.seconds?.toString()).toBe('240');
+      expect(command.startToCloseTimeout?.seconds?.toString()).toBe('30');
+      expect(command.retryPolicy?.maximumAttempts).toBe(1);
+    }
     const payloads: string[] = [];
     const inspect = (value: unknown): void => {
       if (value instanceof Uint8Array) {
@@ -157,13 +171,12 @@ test('fresh native role executions persist private witnesses and return only rec
     const rejected = await environment.client.workflow.start('WorkerRuntimeProbe', {
       taskQueue: 'urm-orchestration',
       workflowId: `serverless-readiness-${rejectedNonce}`,
-      args: [{ projectId: 'urm-app-staging', buildId, nonce: rejectedNonce, roles: ['images'] }],
+      args: [{ projectId: 'urm-app-staging', buildId, nonce: rejectedNonce, roles: ['controls', 'images'] }],
       workflowExecutionTimeout: '10 seconds',
     });
     await expect(rejected.result()).rejects.toThrow();
-    expect((await db.collection(WORKER_READINESS_COLLECTION).where('nonce', '==', rejectedNonce).get()).empty).toBe(
-      true
-    );
+    const partial = await db.collection(WORKER_READINESS_COLLECTION).where('nonce', '==', rejectedNonce).get();
+    expect(partial.docs.map((row) => [row.get('role'), row.get('attempt')])).toEqual([['controls', 1]]);
     const invalidNonce = randomUUID().replaceAll('-', '');
     ownedNonces.push(invalidNonce);
     const bad = await environment.client.workflow.start('WorkerRuntimeProbe', {
