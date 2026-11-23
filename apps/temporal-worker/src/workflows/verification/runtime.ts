@@ -1,4 +1,4 @@
-import { ApplicationFailure, proxyActivities, workflowInfo } from '@temporalio/workflow';
+import { ApplicationFailure, patched, proxyActivities, workflowInfo } from '@temporalio/workflow';
 import type {
   WorkerReadinessRequest,
   WorkerReadinessReceipt,
@@ -29,14 +29,14 @@ export async function WorkerRuntimeProbe(input: {
     input.roles.some((role) => !roles.includes(role))
   )
     throw ApplicationFailure.nonRetryable('Invalid inert readiness request', 'INVALID_WORKER_READINESS_PROBE');
-  const results: Record<string, WorkerReadinessReceipt> = {};
-  for (const role of input.roles) {
+  const parallel = patched('worker-runtime-probe-parallel-cold-start-v1');
+  const recordRole = async (role: WorkerReadinessRole): Promise<WorkerReadinessReceipt> => {
     const activity = proxyActivities<{
       recordWorkerReadiness(request: WorkerReadinessRequest): Promise<WorkerReadinessReceipt>;
     }>({
       taskQueue: `urm-${role}`,
       startToCloseTimeout: '30 seconds',
-      scheduleToCloseTimeout: '90 seconds',
+      scheduleToCloseTimeout: parallel ? '4 minutes' : '90 seconds',
       retry: { maximumAttempts: 1 },
     });
     const receipt = await activity.recordWorkerReadiness({
@@ -52,7 +52,19 @@ export async function WorkerRuntimeProbe(input: {
       !/^[a-f0-9]{64}$/.test(receipt.digest)
     )
       throw ApplicationFailure.nonRetryable('Invalid private readiness receipt', 'INVALID_WORKER_READINESS_RECEIPT');
-    results[role] = receipt;
+    return receipt;
+  };
+  const results: Record<string, WorkerReadinessReceipt> = {};
+  if (!parallel) {
+    for (const role of input.roles) results[role] = await recordRole(role);
+    return results;
+  }
+
+  // Give each cold pool the same chance to start, then let every attempt settle before closing the probe.
+  const outcomes = await Promise.allSettled(input.roles.map(recordRole));
+  for (const [index, outcome] of outcomes.entries()) {
+    if (outcome.status === 'rejected') throw outcome.reason;
+    results[input.roles[index]] = outcome.value;
   }
   return results;
 }
