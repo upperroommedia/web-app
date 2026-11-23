@@ -9,17 +9,10 @@ jest.mock('../runtime/cloud-run-storage-readiness', () => {
     }),
   };
 });
-// Explicit no-network email fixture; local tests do not prove deployed mail authentication.
-jest.mock('@upperroom/function-kit-firestore-send-email/lib/temporal/provider', () => ({
-  verifyEmailTransportNoSendBounded: jest.fn(async () => ({
-    provider: 'smtp',
-    tlsVerified: true,
-    authenticationVerified: true,
-    mailPermissionVerified: false,
-    noMessageSent: true,
-    observedAt: new Date().toISOString(),
-  })),
-}));
+// Fail if staging even loads the live transport adapter.
+jest.mock('@upperroom/function-kit-firestore-send-email/lib/temporal/provider', () => {
+  throw new Error('STAGING_LOADED_LIVE_EMAIL_PROVIDER');
+});
 // Controlled serving-read fixture, alongside the controlled Cloud Run identity.
 // Native SDK execution/Firestore receipts here do NOT prove deployed RTDB access.
 jest.mock('../runtime/cloud-run-rtdb-readiness', () => ({
@@ -51,8 +44,43 @@ import {
   collectServerlessRoleReadiness,
   reconcileServerlessRoleReadiness,
   collectServerlessReadinessObservations,
+  verifyStagingEmailReceipt,
   type ServerlessRoleBinding,
 } from '../runtime/serverless-release-readiness';
+
+test('staging collector binds only fresh capture evidence to the native execution', async () => {
+  const { expectedEmailCaptureReadiness } = await import(
+    '@upperroom/function-kit-firestore-send-email/lib/temporal/capture'
+  );
+  const nonce = 'a'.repeat(32),
+    runId = randomUUID();
+  const observedAt = new Date().toISOString(),
+    startedAt = Date.parse(observedAt);
+  const valid = { ...expectedEmailCaptureReadiness(nonce, runId), observedAt };
+  const check = (value: unknown) => verifyStagingEmailReceipt(value, nonce, runId, startedAt, observedAt);
+  await expect(check(valid)).resolves.toBeUndefined();
+  for (const invalid of [
+    {
+      provider: 'smtp',
+      authenticationVerified: true,
+      tlsVerified: true,
+      mailPermissionVerified: false,
+      noMessageSent: true,
+      observedAt,
+    },
+    { ...valid, provider: 'sendgrid' },
+    { ...valid, tlsVerified: true },
+    { ...valid, externalDelivery: 'false' },
+    { ...valid, profileId: 'another-profile' },
+    { ...valid, captureId: '0'.repeat(64) },
+    { ...valid, payloadSha256: '0'.repeat(64) },
+    { ...expectedEmailCaptureReadiness(nonce, randomUUID()), observedAt },
+    { ...valid, observedAt: new Date(startedAt - 6000).toISOString() },
+    { ...valid, observedAt: new Date(startedAt + 1).toISOString() },
+    { ...valid, observedAt: [observedAt] },
+  ])
+    await expect(check(invalid)).rejects.toThrow('SERVERLESS_NATIVE_READINESS_UNCONFIRMED');
+});
 
 test('collector joins actual version routing, native activity history and private Firestore receipts', async () => {
   const config = JSON.parse(readFileSync(resolve(__dirname, '../../../../firebase.test.json'), 'utf8'));
@@ -62,7 +90,7 @@ test('collector joins actual version routing, native activity history and privat
     )
   )
     throw new Error('Dedicated emulator required');
-  const app = initializeApp({ projectId: 'urm-app-staging' }, `collector-${randomUUID()}`);
+  const app = initializeApp({ projectId: 'urm-app-staging' });
   const db = getFirestore(app),
     environment = await createLocalTestEnvironment();
   const directory = await realpath(await mkdtemp(join(tmpdir(), 'urm-collector-native-')));
@@ -90,6 +118,8 @@ test('collector joins actual version routing, native activity history and privat
   const resources = new Map<string, unknown>();
   let proof: Awaited<ReturnType<typeof collectServerlessReadinessObservations>> | undefined;
   let lostAckReceiptIds: string[] = [];
+  const previousMode = process.env.STAGING_PROVIDER_MODE;
+  process.env.STAGING_PROVIDER_MODE = 'sandbox';
   try {
     await environment.connection.workflowService.registerNamespace({
       namespace,
@@ -508,6 +538,19 @@ test('collector joins actual version routing, native activity history and privat
       expect(recovery.workflowId).toBe(saved.workflowId);
       expect(recovery.runId).toBe(originalRun.runId);
       expect(recovery.roles.map((role) => role.receipt.id)).toEqual(lostAckReceiptIds);
+      // Leave the native history and digest-bound summary intact. Only the
+      // underlying capture changes, so these failures require an independent read.
+      const email = recovery.roles.find((role) => role.role === 'email')!.email;
+      const ref = db.collection('_mailSandboxCaptures').doc(email.captureId);
+      const record = (await ref.get()).data()!;
+      const checkCapture = () => collectServerlessReadinessObservations({ ...common, savedIntent: saved });
+      await ref.update({ externalDelivery: true });
+      await expect(checkCapture()).rejects.toThrow('SERVERLESS_READINESS_PENDING_RECONCILE_SAVED_INTENT');
+      await ref.delete();
+      await expect(checkCapture()).rejects.toThrow('SERVERLESS_READINESS_PENDING_RECONCILE_SAVED_INTENT');
+      // Exact payload and equal create/update times, but recreated after native completion.
+      await ref.create(record);
+      await expect(checkCapture()).rejects.toThrow('SERVERLESS_READINESS_PENDING_RECONCILE_SAVED_INTENT');
       expect(sent).toHaveBeenCalledTimes(1);
     } finally {
       sent.mockRestore();
@@ -529,8 +572,14 @@ test('collector joins actual version routing, native activity history and privat
     for (const worker of workers) if (worker.getStatus().runState === 'RUNNING') worker.shutdown();
     await Promise.allSettled(running);
     await environment.teardown();
-    for (const id of [...(proof?.roles.map((role) => role.receipt.id) ?? []), ...lostAckReceiptIds])
-      await db.collection(WORKER_READINESS_COLLECTION).doc(id).delete();
+    for (const id of [...(proof?.roles.map((role) => role.receipt.id) ?? []), ...lostAckReceiptIds]) {
+      const receipt = db.collection(WORKER_READINESS_COLLECTION).doc(id);
+      const captureId = (await receipt.get()).get('email.captureId');
+      if (captureId) await db.collection('_mailSandboxCaptures').doc(captureId).delete();
+      await receipt.delete();
+    }
+    if (previousMode === undefined) delete process.env.STAGING_PROVIDER_MODE;
+    else process.env.STAGING_PROVIDER_MODE = previousMode;
     await db.terminate();
     await deleteApp(app);
     await rm(directory, { recursive: true, force: true });

@@ -74,6 +74,37 @@ const fail = (): never => {
 };
 const object = (value: unknown): Record<string, any> =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, any>) : fail();
+export async function verifyStagingEmailReceipt(
+  value: unknown,
+  nonce: string,
+  runId: string,
+  startedAt: number,
+  recordedAt: string
+): Promise<void> {
+  const { expectedEmailCaptureReadiness } = await import(
+    '@upperroom/function-kit-firestore-send-email/lib/temporal/capture'
+  );
+  const { observedAt, ...capture } = object(value);
+  const expected = expectedEmailCaptureReadiness(nonce, runId);
+  if (
+    workerReadinessDigest(capture) !== workerReadinessDigest(expected) ||
+    typeof observedAt !== 'string' ||
+    !Number.isFinite(Date.parse(observedAt)) ||
+    new Date(observedAt).toISOString() !== observedAt ||
+    Date.parse(observedAt) < startedAt - 5000 ||
+    Date.parse(observedAt) > Date.parse(recordedAt)
+  )
+    fail();
+}
+function nativeTimestampNanos(
+  value: { seconds?: { toString(): string } | null; nanos?: number | null } | null | undefined
+): bigint {
+  const seconds = value?.seconds?.toString();
+  const nanos = value?.nanos ?? 0;
+  if (!seconds || !/^[1-9][0-9]{0,11}$/.test(seconds) || !Number.isInteger(nanos) || nanos < 0 || nanos >= 1e9)
+    return fail();
+  return BigInt(seconds) * 1000000000n + BigInt(nanos);
+}
 const normalize = (name: unknown): string =>
   typeof name === 'string' ? name.replace('projects/251680231116/', 'projects/urm-app-staging/') : fail();
 const generation = (value: unknown): string =>
@@ -411,9 +442,7 @@ export async function collectServerlessReadinessObservations(options: {
         .map((e) => [String(e.eventId), e.activityTaskScheduledEventAttributes!])
     );
     const startedActivities = new Map(
-      (history.events ?? [])
-        .filter((e) => e.activityTaskStartedEventAttributes)
-        .map((e) => [String(e.eventId), e.activityTaskStartedEventAttributes!])
+      (history.events ?? []).filter((e) => e.activityTaskStartedEventAttributes).map((e) => [String(e.eventId), e])
     );
     const roles = [];
     if (
@@ -499,22 +528,9 @@ export async function collectServerlessReadinessObservations(options: {
       } else if (evidence.cloudStorage !== null) fail();
 
       if (binding.role === 'email') {
-        const mail = object(evidence.email);
-        if (
-          Object.keys(mail).sort().join(',') !==
-            'authenticationVerified,mailPermissionVerified,noMessageSent,observedAt,provider,tlsVerified' ||
-          !['smtp', 'sendgrid'].includes(mail.provider) ||
-          mail.tlsVerified !== true ||
-          mail.authenticationVerified !== true ||
-          mail.noMessageSent !== true ||
-          mail.mailPermissionVerified !== (mail.provider === 'sendgrid') ||
-          !Number.isFinite(Date.parse(mail.observedAt)) ||
-          Date.parse(mail.observedAt) < startedAt - 5000 ||
-          Date.parse(mail.observedAt) > Date.parse(evidence.observedAt)
-        )
-          fail();
+        await verifyStagingEmailReceipt(evidence.email, nonce, runId, startedAt, evidence.observedAt);
       } else if (evidence.email !== null) fail();
-      const completed = (history.events ?? []).find((e) => {
+      const completedEvent = (history.events ?? []).find((e) => {
         const done = e.activityTaskCompletedEventAttributes;
         const task = done && scheduled.get(String(done.scheduledEventId));
         return (
@@ -522,7 +538,8 @@ export async function collectServerlessReadinessObservations(options: {
           task?.taskQueue?.name === evidence.taskQueue &&
           task?.activityType?.name === 'recordWorkerReadiness'
         );
-      })?.activityTaskCompletedEventAttributes;
+      });
+      const completed = completedEvent?.activityTaskCompletedEventAttributes;
       const payloads = completed?.result?.payloads;
       if (
         !payloads ||
@@ -558,7 +575,8 @@ export async function collectServerlessReadinessObservations(options: {
       )
         fail();
       const observedIdentity = cloudRunPollerIdentity(expected.instanceId, evidence.worker.instanceId);
-      const started = startedActivities.get(String(completed?.startedEventId));
+      const startedEvent = startedActivities.get(String(completed?.startedEventId));
+      const started = startedEvent?.activityTaskStartedEventAttributes;
       if (
         !started ||
         String(started.scheduledEventId) !== String(completed?.scheduledEventId) ||
@@ -568,6 +586,18 @@ export async function collectServerlessReadinessObservations(options: {
           (binding.role !== 'media' || started.identity !== `media-restored-${evidence.worker.instanceId}`))
       )
         fail();
+      if (binding.role === 'email') {
+        const { readEmailReadinessCapture } = await import(
+          '@upperroom/function-kit-firestore-send-email/lib/temporal/capture'
+        );
+        const capture = await readEmailReadinessCapture(options.firestore, nonce, runId);
+        const start = nativeTimestampNanos(startedEvent?.eventTime);
+        const end = nativeTimestampNanos(completedEvent?.eventTime);
+        for (const timestamp of [capture.createdAt, capture.capturedAt]) {
+          const at = nativeTimestampNanos({ seconds: timestamp.seconds, nanos: timestamp.nanoseconds });
+          if (at < start || at > end) fail();
+        }
+      }
       roles.push({
         role: binding.role,
         workflowBundle: evidence.workflowBundle,
