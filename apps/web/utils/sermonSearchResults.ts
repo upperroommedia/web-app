@@ -20,6 +20,12 @@ interface ReconcileAdminSermonSearchResultsOutput {
   }>;
 }
 
+// Media recovery probes deliberately reserve skeletal records in the normal
+// collection. Keep their audit history out of the uploader browse surface.
+function isVisibleSermon(sermon: Sermon | undefined): sermon is Sermon {
+  return Boolean(sermon && (sermon.title?.trim() || !/^media-recovery-[a-f0-9-]{36}$/.test(sermon.id)));
+}
+
 export const reconcileAdminSermonSearchResults = ({
   algoliaHits,
   pendingSermons,
@@ -33,13 +39,13 @@ export const reconcileAdminSermonSearchResults = ({
   // Only server-resolved documents can supply an upload status for indexed hits.
   const hydratedAlgoliaHits = algoliaHits
     .map((sermon) => (resolvedLiveSermonIds.has(sermon.id) ? liveSermonsById[sermon.id] : undefined))
-    .filter((sermon): sermon is Sermon => Boolean(sermon));
+    .filter(isVisibleSermon);
   const hydratedAlgoliaHitsById = new Map(hydratedAlgoliaHits.map((sermon) => [sermon.id, sermon]));
   const algoliaHitsById = new Map(algoliaHits.map((sermon) => [sermon.id, sermon]));
 
   const confirmedVisibleHitIds = new Set(
     algoliaHits
-      .filter((sermon) => resolvedLiveSermonIds.has(sermon.id) && Boolean(liveSermonsById[sermon.id]))
+      .filter((sermon) => resolvedLiveSermonIds.has(sermon.id) && isVisibleSermon(liveSermonsById[sermon.id]))
       .map((sermon) => sermon.id)
   );
 
@@ -47,7 +53,7 @@ export const reconcileAdminSermonSearchResults = ({
     showPendingOverlay && pendingSermonsServerConfirmed
       ? pendingSermons
           .map((sermon) => (resolvedLiveSermonIds.has(sermon.id) ? liveSermonsById[sermon.id] : sermon))
-          .filter((sermon): sermon is Sermon => Boolean(sermon))
+          .filter(isVisibleSermon)
           .filter((sermon) => {
             if (!hasSettledResults) {
               return true;

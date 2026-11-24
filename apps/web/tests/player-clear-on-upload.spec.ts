@@ -1,6 +1,7 @@
 import { routePlayableAudio } from './helpers/ownedAudioFixture';
 import { createMediaTest, expect, test } from './helpers/mediaTest';
-import { seedPlayableSermon, type SeededPlayableSermon } from './helpers/seedPlayableSermon';
+import type { DurableJob } from '@upperroom/contracts/temporal';
+import { getAdminDb, seedPlayableSermon, type SeededPlayableSermon } from './helpers/seedPlayableSermon';
 
 const playingTest = createMediaTest<SeededPlayableSermon>(async (page, usePrepared) => {
   const seededSermon = await seedPlayableSermon();
@@ -90,3 +91,65 @@ test.describe('Player clear on upload / edit routes', () => {
     }
   );
 });
+
+const processingTest = createMediaTest<SeededPlayableSermon>(async (_page, usePrepared) => {
+  const sermon = await seedPlayableSermon();
+  const db = getAdminDb();
+  const sermonRef = db.doc(`sermons/${sermon.id}`);
+  const jobRef = db.doc(`durableJobs/${sermon.id}-processing`);
+  const now = Date.now();
+  const projectId = process.env.GCLOUD_PROJECT ?? 'urm-app';
+  const job: DurableJob = {
+    schemaVersion: 1,
+    jobId: jobRef.id,
+    generation: 1,
+    revision: 1,
+    projectId,
+    kind: 'audio.process',
+    entity: { type: 'sermon', id: sermon.id },
+    workflowId: jobRef.id,
+    requestId: jobRef.id,
+    requestedBy: 'playwright-e2e',
+    state: 'running',
+    createdAt: now,
+    updatedAt: now,
+    steps: [
+      {
+        id: 'transcoding',
+        label: 'Process audio',
+        state: 'running',
+        attempt: 1,
+        progress: { completed: 20, total: 80, unit: 'seconds' },
+      },
+    ],
+    actions: [],
+  };
+  try {
+    const batch = db.batch();
+    batch.update(sermonRef, {
+      'status.audioStatus': 'PROCESSING',
+      searchPending: true,
+      'activeDurableJobs.audio': { jobId: job.jobId, projectId, generation: 1 },
+    });
+    batch.set(jobRef, job);
+    await batch.commit();
+    await usePrepared({ callbackPath: '/admin/sermons', data: sermon });
+  } finally {
+    await jobRef.delete();
+    await sermon.cleanup();
+  }
+});
+
+processingTest(
+  'shows the running stage and measured progress on the sermons list and details',
+  async ({ authenticatedMedia: { page, data: sermon } }) => {
+    const title = page.getByText(sermon.title, { exact: true });
+    const card = page.locator('.MuiCard-root').filter({ has: title });
+    await expect(card.getByText('Process audio 25%', { exact: true })).toBeVisible();
+    await title.click();
+    await expect(page).toHaveURL(new RegExp(`/admin/sermons/${sermon.id}$`));
+    const progress = page.getByTestId('sermon-detail-processing');
+    await expect(progress.getByRole('status')).toContainText('Process audio · 25%');
+    await expect(progress.getByRole('progressbar', { name: 'Process audio' })).toHaveAttribute('aria-valuenow', '25');
+  }
+);

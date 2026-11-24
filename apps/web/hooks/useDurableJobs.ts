@@ -252,6 +252,7 @@ export function useEntityJobSummary(entity: DurableEntityRef, activeRefs?: Recor
     ...status,
     stale: status.stale || (ids.length > 0 && outsideWindow.stale),
     error: status.error ?? outsideWindow.error,
+    jobs: entityJobs,
     job: entityJobs.find((job) => !isDurableJobTerminal(job.state)) ?? entityJobs[0],
   };
 }

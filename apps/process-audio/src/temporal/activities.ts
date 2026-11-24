@@ -493,13 +493,15 @@ export function createMediaActivities(dependencies: MediaActivityDependencies): 
         return { kind: 'ready' };
       }
       const { payload } = request;
-      if ('youtubeUrl' in payload && dependencies.renderYouTube)
+      if ('youtubeUrl' in payload && dependencies.renderYouTube) {
+        await project(ref, 'downloading', 5);
         return dependencies.renderYouTube(
           ref,
           Context.current().cancellationSignal,
           archiveResume,
           authenticationGeneration
         );
+      }
       if ('youtubeUrl' in payload && dependencies.requireRemoteYouTube && !dependencies.acquireYouTubeSource)
         throw ApplicationFailure.nonRetryable(
           'The Cloud Run media worker requires the authorized Hetzner YouTube integration.',
@@ -624,9 +626,31 @@ export function createMediaActivities(dependencies: MediaActivityDependencies): 
             '-nostats',
             output,
           ];
-          await runMediaCommand(getFFmpegPath(), args, signal, (seconds) =>
-            Context.current().heartbeat({ jobId: ref.jobId, stage: 'transcoding', seconds })
-          );
+          const activity = Context.current();
+          let progressUpdate: Promise<void> | undefined;
+          let lastProgressAt = 0;
+          let lastSeconds = 0;
+          try {
+            await runMediaCommand(getFFmpegPath(), args, signal, (seconds) => {
+              activity.heartbeat({ jobId: ref.jobId, stage: 'transcoding', seconds });
+              const now = Date.now();
+              if (signal.aborted || progressUpdate || now - lastProgressAt < 1000 || seconds <= lastSeconds) return;
+              lastProgressAt = now;
+              lastSeconds = seconds;
+              progressUpdate = dependencies
+                .projectJob(ref, {
+                  state: 'running',
+                  stage: 'transcoding',
+                  measuredSeconds: { completed: seconds, total: payload.duration },
+                })
+                .catch(() => activity.log.warn('Media progress projection could not be updated'))
+                .finally(() => {
+                  progressUpdate = undefined;
+                });
+            });
+          } finally {
+            await progressUpdate;
+          }
           await saveArtifact(ref, 'processed', output, await measure(output, signal), signal);
           return { kind: 'ready' };
         });

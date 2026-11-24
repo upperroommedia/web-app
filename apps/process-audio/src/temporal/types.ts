@@ -59,6 +59,7 @@ export interface MediaJobProjection {
   state: 'running' | 'waiting' | 'succeeded' | 'failed' | 'cancelled' | 'superseded';
   stage?: MediaStage;
   progress?: number;
+  measuredSeconds?: { completed: number; total: number };
   reason?: string;
   retryAt?: string;
 }

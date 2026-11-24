@@ -158,6 +158,7 @@ if (sentryDsn) {
 const nextConfig = {
   output: 'standalone',
   outputFileTracingRoot: repoRoot,
+  transpilePackages: ['@upperroom/shared'],
   reactStrictMode: true,
   env: {
     ...(sentryDsn
