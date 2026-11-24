@@ -162,6 +162,7 @@ try {
         .filter((p) => p.endsWith('.mjs'));
       for (const file of [
         ...entries,
+        'apps/temporal-worker/src/runtime/restored-media-boot-policy.json',
         'pnpm-lock.yaml',
         'pnpm-workspace.yaml',
         'packages/contracts/staging-search.json',

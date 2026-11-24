@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { activateRestoredCloudRunMedia, assertRestoredActivationState } from './temporal-media-restored-activation.mjs';
+import { restoredMediaBootV2 } from './temporal-restored-media-boot-policy.mjs';
 import { restoredMediaActivationRuntime } from './temporal-media-restored-runtime.mjs';
 import { proofDigest as hash } from './temporal-release-runtime.mjs';
 import { restoredActivationFixture } from './tests/fixtures/restored-media-activation.mjs';
@@ -155,4 +156,68 @@ test('final pool await cannot renew original registration sample', async () => {
   await assert.rejects(activateRestoredCloudRunMedia(f.options));
   assert.equal(f.saved.disposition, 'stopped');
   assert.equal(f.patches, 2);
+});
+
+test('v2 waits on its named pending START before checking the settled provider phase', async () => {
+  const f = restoredActivationFixture();
+  f.options.bootPolicy = restoredMediaBootV2;
+  const api = f.options.api;
+  let reads = 0;
+  let settled = false;
+  f.options.api = async (...args) => {
+    const response = await api(...args);
+    if (args[1] === 'PATCH') return response;
+    assert.equal(response.name, f.saved.start.nativeOperation);
+    reads++;
+    if (reads === 1) return { name: response.name, done: false };
+    settled = true;
+    return response;
+  };
+  const phase = f.options.runtime.phase;
+  f.options.runtime.phase = async (scope) => {
+    if (scope.transition?.stage === 'acknowledged') assert.ok(settled);
+    return phase(scope);
+  };
+  assert.equal((await activateRestoredCloudRunMedia(f.options)).disposition, 'retained');
+  assert.equal(reads, 2);
+  assert.equal(f.patches, 1);
+});
+
+test('v2 inconclusive registration leaves its original START held and allows same-UUID readback', async () => {
+  const f = restoredActivationFixture();
+  f.options.bootPolicy = restoredMediaBootV2;
+  const phase = f.options.runtime.phase;
+  f.options.runtime.phase = async (scope) => {
+    if (scope.key === 'retained') throw new Error('inconclusive final phase');
+    return phase(scope);
+  };
+  await assert.rejects(activateRestoredCloudRunMedia(f.options), /V2_REGISTRATION_UNCONFIRMED/);
+  assert.equal(f.observations, 1);
+  assert.equal(f.saved.stage, 'started');
+  assert.equal(f.saved.start.stage, 'completed');
+  assert.equal(f.saved.cleanup, undefined);
+  assert.equal(f.patches, 1);
+  f.options.saved = f.saved;
+  f.options.runtime.phase = phase;
+  assert.equal((await activateRestoredCloudRunMedia(f.options)).disposition, 'retained');
+  assert.equal(f.patches, 1);
+});
+
+test('v2 local pre-send GET rejection is not a PATCH rejection and cannot resend', async () => {
+  const f = restoredActivationFixture();
+  f.options.bootPolicy = restoredMediaBootV2;
+  const save = f.options.save;
+  f.options.save = async (state) => {
+    await save(state);
+    if (state.start?.stage !== 'attempted') return;
+    f.options.runtime.quota = async () => {
+      throw Object.assign(new Error('credential settled GET was rejected'), { status: 412 });
+    };
+  };
+  await assert.rejects(activateRestoredCloudRunMedia(f.options));
+  assert.equal(f.saved.start.stage, 'attempted');
+  assert.equal(f.patches, 0);
+  f.options.saved = f.saved;
+  await assert.rejects(activateRestoredCloudRunMedia(f.options));
+  assert.equal(f.patches, 0);
 });

@@ -1,5 +1,6 @@
 import type { Firestore, Transaction } from 'firebase-admin/firestore';
 import type { Auth } from 'firebase-admin/auth';
+import { setTimeout as delay } from 'node:timers/promises';
 import type { WorkerWitness } from './worker-witness';
 import { workerReadinessDigest as hash } from './readiness-probe';
 import { releaseProvenanceDigest } from './media-recovery-history';
@@ -9,6 +10,15 @@ import {
   mediaStartupBudget,
 } from './media-startup-capacity';
 import { readRestoredMediaKernelBirth, validateMediaKernelBirthRecord } from './media-kernel-supervisor';
+import { verifyRestoredMediaBootPool } from './cloud-run-witness';
+import {
+  RESTORED_MEDIA_BOOT_V2_POLICY,
+  RESTORED_MEDIA_BOOT_V2_PROTOCOL,
+  assertRestoredMediaBootEventOrder,
+  makeRestoredMediaBootClock,
+  restoredMediaBootWindow,
+  restoredMediaOuterDeadline,
+} from './restored-media-boot-window';
 const fail = (): never => {
   throw new Error('RESTORED_MEDIA_STARTUP_UNCONFIRMED');
 };
@@ -18,6 +28,8 @@ const uuid = (x: unknown): x is string =>
   typeof x === 'string' && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(x);
 const sha = (x: unknown) => typeof x === 'string' && /^[a-f0-9]{64}$/.test(x);
 const domains = ['media', 'publishing', 'images', 'emails', 'accounts', 'bundles', 'search'];
+const restoredOperationPath = '_control/temporalReleaseOperation';
+const restoredKernelPath = (operationId: string) => `_control/temporalRestoredMediaKernel-${operationId}`;
 async function boundedRead<T>(fn: () => Promise<T>): Promise<T> {
   const at = Date.now(),
     mono = performance.now();
@@ -68,6 +80,13 @@ function parseRestoredMediaStartupIntent(raw: unknown, scope: 'live' | 'historic
     x = object(s.start),
     origin = object(p.origin),
     before = object(x.before);
+  const v2 = p.startup?.protocol === RESTORED_MEDIA_BOOT_V2_PROTOCOL;
+  const startup = {
+    protocol: v2 ? RESTORED_MEDIA_BOOT_V2_PROTOCOL : 'restored-normal-media-kernel-v1',
+    capacity: 'filesystem-allocation-native-audio-and-kernel-v4',
+    ...mediaStartupBudget,
+    ...(v2 && { bootPolicy: RESTORED_MEDIA_BOOT_V2_POLICY }),
+  };
   if (
     op.action !== 'activate-restored-cloud-run-media' ||
     !uuid(op.operationId) ||
@@ -118,12 +137,7 @@ function parseRestoredMediaStartupIntent(raw: unknown, scope: 'live' | 'historic
       `projects/urm-app-staging/locations/us-central1/workerPools/urm-worker-media-${p.buildId.slice(0, 20)}` ||
     typeof before.revision !== 'string' ||
     !before.revision.startsWith(`${before.name}/revisions/`) ||
-    hash(p.startup) !==
-      hash({
-        protocol: 'restored-normal-media-kernel-v1',
-        capacity: 'filesystem-allocation-native-audio-and-kernel-v4',
-        ...mediaStartupBudget,
-      }) ||
+    hash(p.startup) !== hash(startup) ||
     !sha(x.phaseSHA256) ||
     !sha(x.computeSHA256) ||
     !x.quota ||
@@ -151,7 +165,7 @@ function parseRestoredMediaStartupIntent(raw: unknown, scope: 'live' | 'historic
   )
     fail();
   const intent = {
-    kind: 'restored-normal-media-startup-v1',
+    kind: v2 ? 'restored-normal-media-startup-v2' : 'restored-normal-media-startup-v1',
     operationId: p.operationId,
     recoveryOperationId: p.recoveryOperationId,
     releaseId: p.releaseId,
@@ -166,17 +180,62 @@ function parseRestoredMediaStartupIntent(raw: unknown, scope: 'live' | 'historic
       quota: x.quota,
     },
   };
-  return { intent, intentSHA256: hash(intent), plan: p, start: x };
+  return { intent, intentSHA256: hash(intent), plan: p, start: x, v2 };
 }
 /** One original application child only. The distinct path/context gives no
  * diagnostic fault/replacement or original receipt authority. */
-async function kernelContext(db: Firestore, auth: () => Auth, witness: WorkerWitness) {
+async function kernelContext(db: Firestore, auth: () => Auth, witness: WorkerWitness, child = false) {
   if (!('projectId' in db) || db.projectId !== 'urm-app-staging' || db.databaseId !== '(default)') fail();
-  const root = db.doc('_control/temporalReleaseOperation');
-  if ((await boundedRead(() => root.get())).get('action') !== 'activate-restored-cloud-run-media') return undefined;
+  const root = db.doc(restoredOperationPath);
+  const initial = await boundedRead(() => root.get());
+  if (initial.get('action') !== 'activate-restored-cloud-run-media') return undefined;
+  const planned = initial.get('cloudRestoredMediaActivation.plan');
+  const v2 = planned?.startup?.protocol === RESTORED_MEDIA_BOOT_V2_PROTOCOL;
+  let coldClock: (() => void) | undefined;
+  let warmClock: (() => void) | undefined;
+  let arm: { identity: string; window: ReturnType<typeof restoredMediaBootWindow> } | undefined;
+  let attemptedAt: string | undefined;
+  let nativeOperation: string | undefined;
+  let openingIntent: ReturnType<typeof restoredMediaStartupIntent> | undefined;
+  if (v2) {
+    // A recognized v2 parent stays on the restored path while the controller
+    // records the acknowledged START. It cannot fall through to ordinary polling.
+    let candidate = initial;
+    const identity = initial.get('operationId');
+    const planDigest = hash(planned);
+    const first = restoredMediaStartupIntent(initial.data());
+    openingIntent = first;
+    attemptedAt = first.start.attemptedAt;
+    coldClock = makeRestoredMediaBootClock(restoredMediaOuterDeadline(first.start.attemptedAt));
+    while (candidate.get('cloudRestoredMediaActivation.start.stage') === 'attempted') {
+      if (child) fail();
+      coldClock();
+      await delay(500);
+      candidate = await boundedRead(() => root.get());
+      const matched = restoredMediaStartupIntent(candidate.data());
+      if (
+        matched.plan.operationId !== identity ||
+        hash(matched.plan) !== planDigest ||
+        matched.intentSHA256 !== first.intentSHA256 ||
+        hash(stamp(candidate).createTime) !== hash(stamp(initial).createTime)
+      )
+        fail();
+    }
+    const owned = restoredMediaStartupIntent(candidate.data());
+    if (
+      !['acknowledged', 'completed'].includes(owned.start.stage) ||
+      !/^projects\/urm-app-staging\/locations\/us-central1\/operations\/[A-Za-z0-9_-]{1,200}$/.test(
+        owned.start.nativeOperation ?? ''
+      ) ||
+      !witness.cloudRun
+    )
+      fail();
+    nativeOperation = owned.start.nativeOperation;
+    await boundedRead(() => verifyRestoredMediaBootPool(witness.cloudRun!, owned.start.before));
+  }
   let original: any;
   const refs = [root, db.doc('_control/temporalRelease'), db.doc('_control/temporalReleaseState')];
-  const read = async (tx: Transaction) => {
+  const read = async (tx: Transaction, issuedArm?: unknown) => {
     const [op, c, s] = await Promise.all(refs.map((r) => tx.get(r))),
       owned = restoredMediaStartupIntent(op.data()),
       p = owned.plan;
@@ -229,6 +288,19 @@ async function kernelContext(db: Firestore, auth: () => Auth, witness: WorkerWit
     const actor = await auth().getUserByEmail(op.get('operatorPrincipal.email'));
     if (actor.disabled || actor.email !== op.get('operatorPrincipal.email') || actor.customClaims?.role !== 'admin')
       fail();
+    if (
+      owned.v2 !== v2 ||
+      (v2 &&
+        (!['acknowledged', 'completed'].includes(owned.start.stage) ||
+          nativeOperation !== owned.start.nativeOperation ||
+          attemptedAt !== owned.start.attemptedAt ||
+          hash(stamp(op).createTime) !== hash(stamp(initial).createTime) ||
+          owned.intentSHA256 !== openingIntent?.intentSHA256 ||
+          hash(p) !== hash(openingIntent?.plan) ||
+          hash(op.get('operatorPrincipal')) !== hash(initial.get('operatorPrincipal')) ||
+          hash(op.get('operatorIdentity') ?? null) !== hash(initial.get('operatorIdentity') ?? null)))
+    )
+      fail();
     const current = {
       intentSHA256: owned.intentSHA256,
       plan: p,
@@ -239,14 +311,48 @@ async function kernelContext(db: Firestore, auth: () => Auth, witness: WorkerWit
       completionStamp: stamp(done),
       actorUid: actor.uid,
       attemptedAt: owned.start.attemptedAt,
+      ...(v2 && { nativeOperation: owned.start.nativeOperation }),
     };
     if (original && hash(current) !== hash(original)) fail();
     original = current;
+    if (!v2) {
+      if (
+        Date.now() >= Date.parse(owned.start.attemptedAt) + 120000 ||
+        Date.parse(owned.start.attemptedAt) > Date.now() + 5000
+      )
+        fail();
+      return;
+    }
+    coldClock!();
+    const kernel = await tx.get(db.doc(restoredKernelPath(p.operationId)));
+    if (!arm && !issuedArm && !child) {
+      if (kernel.exists) fail();
+      return;
+    }
+    const k = kernel.data() ?? fail();
+    const parent = k.context?.parent;
     if (
-      Date.now() >= Date.parse(owned.start.attemptedAt) + 120000 ||
-      Date.parse(owned.start.attemptedAt) > Date.now() + 5000
+      k.context?.operationId !== p.operationId ||
+      k.context.intentSHA256 !== owned.intentSHA256 ||
+      k.context.protocol !== RESTORED_MEDIA_BOOT_V2_PROTOCOL ||
+      hash(parent?.cloudRun) !== hash(cloud) ||
+      (child ? k.stage !== 'running' || hash(k.worker) !== hash(witness) : hash(parent) !== hash(witness)) ||
+      (issuedArm &&
+        (k.stage !== 'armed' ||
+          hash(k) !== hash(issuedArm) ||
+          !kernel.createTime ||
+          !kernel.updateTime ||
+          !kernel.createTime.isEqual(kernel.updateTime)))
     )
       fail();
+    const native = stamp(kernel).createTime;
+    const evidence = {
+      identity: hash({ intent: k.intent, context: k.context, native }),
+      window: restoredMediaBootWindow(owned.start.attemptedAt, native),
+    };
+    if (arm && hash(arm) !== hash(evidence)) fail();
+    warmClock?.();
+    return evidence;
   };
   const authorize = async (tx: Transaction) => {
     const began = Date.now(),
@@ -254,10 +360,20 @@ async function kernelContext(db: Firestore, auth: () => Auth, witness: WorkerWit
     await boundedRead(() => read(tx));
     if (Date.now() < began || Date.now() - began >= 5000 || performance.now() - mono >= 5000) fail();
   };
-  await boundedRead(() => db.runTransaction(authorize, { readOnly: true }));
+  if (v2 && child) {
+    arm = (await boundedRead(() => db.runTransaction((tx) => read(tx), { readOnly: true }))) ?? fail();
+    warmClock = makeRestoredMediaBootClock(arm.window);
+  } else {
+    await boundedRead(() => db.runTransaction(authorize, { readOnly: true }));
+  }
   const deadline = Date.parse(original.attemptedAt) + 120000,
     monotonicDeadline = performance.now() + Math.max(0, deadline - Date.now());
   const fresh = () => {
+    if (v2) {
+      coldClock!();
+      warmClock?.();
+      return;
+    }
     if (
       Date.now() >= deadline ||
       performance.now() >= monotonicDeadline ||
@@ -274,7 +390,7 @@ async function kernelContext(db: Firestore, auth: () => Auth, witness: WorkerWit
       controlVersion: original.controlVersion,
       stateVersion: original.stateVersion,
       parent: witness,
-      protocol: 'restored-normal-media-kernel-v1',
+      protocol: v2 ? RESTORED_MEDIA_BOOT_V2_PROTOCOL : 'restored-normal-media-kernel-v1',
       actorUid: original.actorUid,
       recoveryOperationId: original.plan.recoveryOperationId,
       capsuleSHA256: original.plan.origin.capsuleSHA256,
@@ -283,12 +399,27 @@ async function kernelContext(db: Firestore, auth: () => Auth, witness: WorkerWit
     checkFresh: fresh,
     plan: original.plan,
     attemptedAt: original.attemptedAt,
+    ...(v2 && {
+      bindArm: async (record: unknown) => {
+        if (child || arm || !witness.cloudRun || !original) fail();
+        await boundedRead(() => verifyRestoredMediaBootPool(witness.cloudRun!, openingIntent?.start.before ?? fail()));
+        arm = (await boundedRead(() => db.runTransaction((tx) => read(tx, record), { readOnly: true }))) ?? fail();
+        warmClock = makeRestoredMediaBootClock(arm.window);
+        fresh();
+      },
+      enrollmentWindow: () => arm?.window ?? fail(),
+    }),
   };
 }
 
-export async function restoredMediaKernelContext(db: Firestore, auth: () => Auth, witness: WorkerWitness) {
+export async function restoredMediaKernelContext(
+  db: Firestore,
+  auth: () => Auth,
+  witness: WorkerWitness,
+  child = false
+) {
   try {
-    return await kernelContext(db, auth, witness);
+    return await kernelContext(db, auth, witness, child);
   } catch {
     return fail();
   }
@@ -308,7 +439,7 @@ export async function recordRestoredMediaStartupCapacity(options: {
 }) {
   try {
     const { firestore: db, witness } = options;
-    const cap = await restoredMediaKernelContext(db, options.auth, witness);
+    const cap = await restoredMediaKernelContext(db, options.auth, witness, true);
     if (!cap) return false;
     if (options.buildId !== cap.plan.buildId || !options.kernel) fail();
     const kernel = await boundedRead(() =>
@@ -317,7 +448,7 @@ export async function recordRestoredMediaStartupCapacity(options: {
     if (
       kernel.value.stage !== 'running' ||
       kernel.value.birth.pid !== process.pid ||
-      kernel.value.context.protocol !== 'restored-normal-media-kernel-v1' ||
+      kernel.value.context.protocol !== cap.context.protocol ||
       kernel.value.context.recoveryOperationId !== cap.plan.recoveryOperationId ||
       kernel.value.context.capsuleSHA256 !== cap.plan.origin.capsuleSHA256
     )
@@ -330,11 +461,17 @@ export async function recordRestoredMediaStartupCapacity(options: {
     const capacity = await (options.canary ?? runMediaFilesystemCanary)(options.isDraining, undefined, undefined, () =>
       boundedRead(() => db.runTransaction(authorize, { readOnly: true }))
     );
-    validateMediaStartupCapacityEvidence(capacity, cap.attemptedAt);
+    const enrollmentWindow = cap.enrollmentWindow?.();
+    validateMediaStartupCapacityEvidence(
+      capacity,
+      enrollmentWindow ? new Date(enrollmentWindow.armAt).toISOString() : cap.attemptedAt
+    );
     cap.checkFresh();
     const evidence = {
       schemaVersion: 1,
-      kind: 'restored-normal-media-startup-capacity-v1',
+      kind: enrollmentWindow
+        ? 'restored-normal-media-startup-capacity-v2'
+        : 'restored-normal-media-startup-capacity-v1',
       operationId: cap.context.operationId,
       recoveryOperationId: cap.plan.recoveryOperationId,
       intentSHA256: cap.context.intentSHA256,
@@ -374,6 +511,14 @@ export async function recordRestoredMediaStartupCapacity(options: {
               witness
             );
             const receiptVersion = stamp(receipt);
+            if (enrollmentWindow)
+              assertRestoredMediaBootEventOrder(enrollmentWindow, [
+                kernel.value.birth.spawnedAt,
+                stamp(current).updateTime,
+                capacity.observedAt,
+                evidence.observedAt,
+                receiptVersion.createTime,
+              ]);
             if (
               hash(receiptVersion.createTime) !== hash(receiptVersion.updateTime) ||
               hash(receipt.data()) !== hash(record) ||

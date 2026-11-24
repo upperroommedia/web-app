@@ -159,3 +159,56 @@ export async function loadCloudRunWorkerIdentity(
     return fail();
   }
 }
+
+type RestoredPoolOrigin = {
+  name: string;
+  uid: string;
+  revision: string;
+  revisionUid: string;
+  generation: string;
+};
+
+/** The existing runner may read this exact pool. A reconciling revision can
+ * host the original supervisor before the provider reports readiness. */
+export async function verifyRestoredMediaBootPool(
+  identity: CloudRunWorkerIdentity,
+  origin: RestoredPoolOrigin
+): Promise<void> {
+  if (
+    identity.projectId !== 'urm-app-staging' ||
+    identity.region !== 'us-central1' ||
+    !isCloudRunWorkerRevision(identity.pool, identity.revision) ||
+    identity.revisionUid !== origin.revisionUid ||
+    !/^[1-9]\d*$/.test(origin.generation)
+  )
+    return fail();
+  const nativePool = `projects/urm-app-staging/locations/us-central1/workerPools/${identity.pool}`;
+  if (origin.name !== nativePool || origin.revision !== `${nativePool}/revisions/${identity.revision}`) return fail();
+  const projectNumber = await readCloudRunMetadata('project/numeric-project-id');
+  if (!/^\d+$/.test(projectNumber)) return fail();
+  const normalize = (name: unknown) =>
+    typeof name === 'string' && name.startsWith(`projects/${projectNumber}/`)
+      ? name.replace(`projects/${projectNumber}/`, 'projects/urm-app-staging/')
+      : name;
+  const client = await new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/cloud-platform'] }).getClient();
+  const response = await client.request({
+    url: `https://run.googleapis.com/v2/${nativePool}`,
+    method: 'GET',
+    timeout: 5000,
+    retry: false,
+  });
+  const pool = record(response.data);
+  const generation = String(BigInt(origin.generation) + 1n);
+  const scaling = record(pool.scaling);
+  if (
+    normalize(pool.name) !== nativePool ||
+    pool.uid !== origin.uid ||
+    pool.deleteTime ||
+    String(pool.generation) !== generation ||
+    String(pool.observedGeneration) !== generation ||
+    normalize(pool.latestCreatedRevision) !== origin.revision ||
+    (scaling.scalingMode !== undefined && scaling.scalingMode !== 'MANUAL') ||
+    scaling.manualInstanceCount !== 1
+  )
+    return fail();
+}

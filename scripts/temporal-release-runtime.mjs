@@ -109,6 +109,7 @@ const operatorInput = (p) =>
   p &&
   (/^(scripts|ops|packages\/contracts)\//.test(p) ||
     [
+      'apps/temporal-worker/src/runtime/restored-media-boot-policy.json',
       'package.json',
       'pnpm-lock.yaml',
       'pnpm-workspace.yaml',
