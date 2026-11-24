@@ -212,7 +212,7 @@ async function absent(child: ChildProcess) {
  * plus group absence is required for a closed fact; never signal a saved PID. */
 async function superviseKernel(
   db: Firestore,
-  cap: NonNullable<Awaited<ReturnType<typeof mediaKernelContext>>>,
+  cap: NonNullable<Awaited<ReturnType<typeof mediaKernelContext>>> & { bindArm?: (record: unknown) => Promise<void> },
   entrypoint: string,
   journalPath: string,
   recovery?: {
@@ -267,6 +267,7 @@ async function superviseKernel(
     if (initialJobBirth)
       await mediaJobPhase('kernel-create', () => writeOnce(db, ref, undefined, state, cap.authorize, true));
     else await writeOnce(db, ref, undefined, state, cap.authorize);
+    if (cap.bindArm) await cap.bindArm(state);
     if (initialJobBirth) await mediaJobPhase('kernel-authorize', grant);
     else await grant();
     if (draining) fail();
@@ -571,7 +572,7 @@ export const readMediaRecoveryReplacementKernelBirth = (
 /** Separate fixed restored-normal lineage; no diagnostic fault/restart hooks. */
 export const superviseRestoredMediaKernel = (
   db: Firestore,
-  cap: NonNullable<Awaited<ReturnType<typeof mediaKernelContext>>>,
+  cap: NonNullable<Awaited<ReturnType<typeof mediaKernelContext>>> & { bindArm?: (record: unknown) => Promise<void> },
   entrypoint: string
 ) =>
   superviseKernel(

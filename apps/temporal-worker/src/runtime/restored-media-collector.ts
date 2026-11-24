@@ -12,6 +12,11 @@ import { validateMediaKernelBirthRecord } from './media-kernel-supervisor';
 import { validateHistoricalMediaRecoveryCapacity } from './media-startup-capacity';
 import { workerReadinessDigest as hash } from './readiness-probe';
 import { releaseProvenanceDigest as proof } from './media-recovery-history';
+import {
+  assertRestoredMediaBootEventOrder,
+  restoredMediaBootWindow,
+  RESTORED_MEDIA_BOOT_V2_PROTOCOL,
+} from './restored-media-boot-window';
 const fail = (): never => {
   throw new Error('RESTORED_MEDIA_STARTUP_READBACK_UNCONFIRMED');
 };
@@ -253,10 +258,13 @@ async function collectStartup(o: Options, scope: 'retained' | 'phase', promotion
       k.context,
       'operationId,intentSHA256,controlVersion,stateVersion,parent,protocol,recoveryOperationId,capsuleSHA256,actorUid'
     );
+    const bootWindow = owned!.v2
+      ? restoredMediaBootWindow(owned!.start.attemptedAt, stamps[5].createTime ?? fail())
+      : undefined;
     if (
       k.schemaVersion !== 1 ||
       !(scope === 'retained' ? ['running'] : ['armed', 'born', 'running', 'closed']).includes(k.stage) ||
-      k.context.protocol !== 'restored-normal-media-kernel-v1' ||
+      k.context.protocol !== (bootWindow ? RESTORED_MEDIA_BOOT_V2_PROTOCOL : 'restored-normal-media-kernel-v1') ||
       k.context.operationId !== p.operationId ||
       k.context.recoveryOperationId !== p.recoveryOperationId ||
       k.context.capsuleSHA256 !== capsuleSHA256 ||
@@ -273,11 +281,12 @@ async function collectStartup(o: Options, scope: 'retained' | 'phase', promotion
         typeof x === 'string' && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(x);
       const attempted = time(owned!.start.attemptedAt),
         intentAt = time(k.intent.createdAt);
+      const deadline = bootWindow?.deadline ?? attempted + 120000;
       if (
         millis(stamps[5].createTime) < attempted - 5000 ||
         millis(stamps[5].createTime) > intentAt + 5000 ||
         millis(stamps[5].updateTime) < millis(stamps[5].createTime) ||
-        (k.stage !== 'closed' && millis(stamps[5].updateTime) > attempted + 125000)
+        (k.stage !== 'closed' && millis(stamps[5].updateTime) > (bootWindow ? deadline : attempted + 125000))
       )
         fail();
       const parent = k.context.parent,
@@ -290,7 +299,7 @@ async function collectStartup(o: Options, scope: 'retained' | 'phase', promotion
         !Number.isSafeInteger(k.intent.parentPid) ||
         k.intent.parentPid <= 0 ||
         intentAt < attempted ||
-        intentAt > attempted + 120000 ||
+        intentAt > (bootWindow?.armAt ?? deadline) ||
         !cloud ||
         cloud.projectId !== 'urm-app-staging' ||
         cloud.region !== 'us-central1' ||
@@ -310,9 +319,10 @@ async function collectStartup(o: Options, scope: 'retained' | 'phase', promotion
           k.birth.pid <= 0 ||
           k.birth.pid === k.intent.parentPid ||
           time(k.birth.spawnedAt) < intentAt ||
-          time(k.birth.spawnedAt) > attempted + 120000
+          time(k.birth.spawnedAt) > deadline
         )
           fail();
+        if (bootWindow) assertRestoredMediaBootEventOrder(bootWindow, [k.birth.spawnedAt]);
       }
       if (['armed', 'born'].includes(k.stage)) {
         if (s) fail();
@@ -354,7 +364,8 @@ async function collectStartup(o: Options, scope: 'retained' | 'phase', promotion
     if (
       digest !== hash(startup) ||
       s.schemaVersion !== 1 ||
-      s.kind !== 'restored-normal-media-startup-capacity-v1' ||
+      s.kind !==
+        (bootWindow ? 'restored-normal-media-startup-capacity-v2' : 'restored-normal-media-startup-capacity-v1') ||
       s.operationId !== p.operationId ||
       s.recoveryOperationId !== p.recoveryOperationId ||
       s.intentSHA256 !== owned!.intentSHA256 ||
@@ -371,7 +382,7 @@ async function collectStartup(o: Options, scope: 'retained' | 'phase', promotion
       intentAt < attempted ||
       born < intentAt ||
       registered < born ||
-      registered > attempted + 120000 ||
+      registered > (bootWindow?.deadline ?? attempted + 120000) ||
       time(s.capacity?.observedAt) > registered ||
       millis(stamps[5].createTime) > millis(stamps[5].updateTime) ||
       (k.stage !== 'closed' && millis(stamps[5].updateTime) > millis(stamps[6].createTime) + 5000) ||
@@ -379,7 +390,19 @@ async function collectStartup(o: Options, scope: 'retained' | 'phase', promotion
       millis(stamps[6].createTime) > registered + 10000
     )
       fail();
-    const capacity = validateHistoricalMediaRecoveryCapacity(s.capacity, owned!.start.attemptedAt, s.observedAt),
+    if (bootWindow)
+      assertRestoredMediaBootEventOrder(bootWindow, [
+        k.birth.spawnedAt,
+        ...(k.stage === 'running' ? [stamps[5].updateTime ?? fail()] : []),
+        s.capacity?.observedAt,
+        s.observedAt,
+        stamps[6].createTime ?? fail(),
+      ]);
+    const capacity = validateHistoricalMediaRecoveryCapacity(
+        s.capacity,
+        bootWindow ? new Date(bootWindow.armAt).toISOString() : owned!.start.attemptedAt,
+        s.observedAt
+      ),
       w = s.worker.cloudRun;
     if (
       !w ||

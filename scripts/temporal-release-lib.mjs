@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 import { createReleaseFirebaseResources } from './temporal-release-resources.mjs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { restoredMediaStartupSettings } from './temporal-restored-media-boot-policy.mjs';
 export const RELEASE_DOMAINS = ['media', 'publishing', 'images', 'emails', 'accounts', 'bundles', 'search'];
 export const CONTROL_PATH = '_control/temporalRelease';
 export function compatibilityLegacyAdmissionCutoffUpdate(control, mode, serverTimestamp) {
@@ -150,6 +151,11 @@ export function validateReleaseConfig(config) {
       !/^sha256:[a-f0-9]{64}$/.test(pins.imageId) ||
       !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(pins.operationId)
     ) throw new Error('An exact staging media upgrade and Moses activation pins are required');
+  }
+  if (config.restoredMediaBootPolicy !== undefined) {
+    if (config.environment !== 'staging' || config.mode !== 'durable-upgrade' || !config.domains.includes('media'))
+      throw new Error('A staging media upgrade is required for restored Media boot v2');
+    restoredMediaStartupSettings(config.restoredMediaBootPolicy);
   }
   if (
     config.projectId === 'urm-app-staging' &&

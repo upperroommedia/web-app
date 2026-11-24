@@ -1,6 +1,7 @@
 import { isDeepStrictEqual as equal } from 'node:util';
 import { proofDigest as hash } from './temporal-release-runtime.mjs';
 import { assertMediaDiskQuotaFresh, assertMediaDiskQuotaProof } from './temporal-media-disk-quota.mjs';
+import { restoredMediaStartupSettings } from './temporal-restored-media-boot-policy.mjs';
 const fail = () => {
   throw new Error('RESTORED_MEDIA_ACTIVATION_UNCONFIRMED');
 };
@@ -56,14 +57,7 @@ export function assertRestoredActivationState(s) {
     !/^[a-f0-9]{40}$/.test(p.buildId) ||
     !/^us-central1-docker.pkg.dev\/urm-app-staging\/.+@sha256:[a-f0-9]{64}$/.test(p.image) ||
     !Number.isFinite(Date.parse(p.createdAt)) ||
-    !equal(p.startup, {
-      protocol: 'restored-normal-media-kernel-v1',
-      capacity: 'filesystem-allocation-native-audio-and-kernel-v4',
-      sourceBytes: 20 * 1024 ** 3,
-      outputBytes: 20 * 1024 ** 3,
-      workspaceBytes: 64 * 1024 ** 3,
-      headroomBytes: 16 * 1024 ** 3,
-    }) ||
+    !equal(p.startup, restoredMediaStartupSettings(p.startup?.bootPolicy)) ||
     !keys(
       p.receiptIds,
       'runner,scaler,pool,runnerScaler,scalerTrust,poolAccess,firestore,projectRole,projectAccess,storageRole,storageAccess,bootstrapCycle,recovery'
@@ -193,14 +187,7 @@ export async function activateRestoredCloudRunMedia(o) {
       receiptIds,
       receiptsSHA256: hash(o.receipts),
       origin,
-      startup: {
-        protocol: 'restored-normal-media-kernel-v1',
-        capacity: 'filesystem-allocation-native-audio-and-kernel-v4',
-        sourceBytes: 20 * 1024 ** 3,
-        outputBytes: 20 * 1024 ** 3,
-        workspaceBytes: 64 * 1024 ** 3,
-        headroomBytes: 16 * 1024 ** 3,
-      },
+      startup: restoredMediaStartupSettings(o.bootPolicy),
       createdAt: new Date().toISOString(),
     };
     await put({ plan, stage: 'planned' });
@@ -213,7 +200,8 @@ export async function activateRestoredCloudRunMedia(o) {
     p.releaseId !== o.releaseId ||
     p.bindingDigest !== o.bindingDigest ||
     p.evidenceDigest !== o.evidenceDigest ||
-    p.receiptsSHA256 !== hash(o.receipts)
+    p.receiptsSHA256 !== hash(o.receipts) ||
+    !equal(p.startup, restoredMediaStartupSettings(o.bootPolicy))
   )
     fail();
   const phase = async (key, x) => {
@@ -249,6 +237,7 @@ export async function activateRestoredCloudRunMedia(o) {
   const scale = async (key, target, before) => {
     let x = state[key];
     if (!x) {
+      const v2Start = key === 'start' && p.startup.bootPolicy;
       if (!equal(await r.readPool({ plan: p, count: 1 - target }), before)) fail();
       const guard = await phase(key, null),
         quota = key === 'start' ? await r.quota({ plan: p }) : undefined;
@@ -268,6 +257,31 @@ export async function activateRestoredCloudRunMedia(o) {
         ...(quota ? { quota } : {}),
       };
       await put({ ...state, stage: key === 'start' ? 'starting' : 'cleaning', [key]: x });
+      const authorizeV2Start = async () => {
+        const wall = Date.now(),
+          mono = performance.now();
+        const outcomes = await Promise.allSettled([
+          phase(key, x),
+          r.readPool({ plan: p, count: 1 - target }),
+          r.quota({ plan: p }),
+        ]);
+        if (outcomes.some((result) => result.status === 'rejected')) fail();
+        const [current, pool, freshQuota] = outcomes.map((result) => result.value);
+        assertMediaDiskQuotaFresh(freshQuota);
+        // The committed attempt binds the semantics, while this post-intent
+        // packet supplies the actual short-lived authority to send.
+        if (
+          current.phaseSHA256 !== x.phaseSHA256 ||
+          current.computeSHA256 !== x.computeSHA256 ||
+          !equal(pool, before) ||
+          freshQuota.quotaSHA256 !== quota.quotaSHA256 ||
+          Date.now() < wall ||
+          Date.now() - wall >= 5000 ||
+          performance.now() - mono >= 5000 ||
+          Date.now() >= Date.parse(x.attemptedAt) + v2Start.outerWindowMs
+        )
+          fail();
+      };
       const fence = async () => {
         if (quota) assertMediaDiskQuotaFresh(quota);
         const g = await phase(key, x);
@@ -285,11 +299,28 @@ export async function activateRestoredCloudRunMedia(o) {
         }
         if (Math.abs(Date.now() - Date.parse(g.observedAt)) >= 5000) fail();
       };
-      await fence();
-      let ack;
+      if (!v2Start) await fence();
+      let ack,
+        authorized = false,
+        entered = false;
       try {
-        ack = await api(request.url, 'PATCH', request.body, fence);
+        ack = await api(
+          request.url,
+          'PATCH',
+          request.body,
+          v2Start
+            ? async () => {
+                if (entered) fail();
+                entered = true;
+                await authorizeV2Start();
+                authorized = true;
+              }
+            : fence
+        );
+        if (v2Start && !authorized) fail();
       } catch (e) {
+        // An error in the local pre-send callback is not a provider rejection.
+        if (v2Start && !authorized) fail();
         if (Number.isInteger(e?.status) && e.status >= 400 && e.status < 500 && ![408, 429].includes(e.status)) {
           await put({ ...state, [key]: { ...x, stage: 'rejected', status: e.status } });
           fail();
@@ -306,16 +337,17 @@ export async function activateRestoredCloudRunMedia(o) {
       fail();
     }
     if (x.stage === 'rejected') fail();
-    await phase(key, x);
+    const v2Start = key === 'start' && p.startup.bootPolicy;
+    if (!v2Start || x.stage === 'completed') await phase(key, x);
     if (x.stage === 'acknowledged') {
-      const end = Date.now() + 30000;
+      const end = v2Start ? Date.parse(x.attemptedAt) + v2Start.outerWindowMs : Date.now() + 30000;
       let result;
       do {
         result = await api(`https://run.googleapis.com/v2/${nativeOperation(x.nativeOperation)}`);
         if (result?.name !== x.nativeOperation) fail();
         if (result.done === true) break;
         if (result.done !== undefined && result.done !== false) fail();
-        await new Promise((resolve) => setTimeout(resolve, 200));
+        await new Promise((resolve) => setTimeout(resolve, v2Start ? 1000 : 200));
       } while (Date.now() < end);
       if (result?.done !== true || result.error) fail();
       const pool = await r.readPool({ plan: p, count: target, nativeResponse: result.response });
@@ -390,6 +422,9 @@ export async function activateRestoredCloudRunMedia(o) {
       await put({ ...state, stage: 'completed', disposition: 'retained', registration });
       return state;
     }
+    // Registration can still be pending after provider readiness. V2 keeps
+    // the original attempt recoverable and needs separate proof for a STOP.
+    if (p.startup.bootPolicy) throw new Error('RESTORED_MEDIA_V2_REGISTRATION_UNCONFIRMED');
     await put({
       ...state,
       stage: 'cleaning',

@@ -1,5 +1,6 @@
 import { proofDigest as hash, assertNativeSnapshot } from './temporal-release-runtime.mjs';
 import { assertRestoredActivationState } from './temporal-media-restored-activation.mjs';
+import { assertRestoredMediaBootChronology, restoredMediaBootV2 } from './temporal-restored-media-boot-policy.mjs';
 const fail = () => {
   throw new Error('RESTORED_MEDIA_PROVENANCE_CAPSULE_UNCONFIRMED');
 };
@@ -98,8 +99,9 @@ export async function prepareRestoredMediaActivationCapsule(o, tx, parent, contr
     k = kernel.data(),
     s = startup.data();
   const start = next.start;
+  const v2 = p.startup?.protocol === restoredMediaBootV2.protocol;
   const intentSHA256 = hash({
-    kind: 'restored-normal-media-startup-v1',
+    kind: v2 ? 'restored-normal-media-startup-v2' : 'restored-normal-media-startup-v1',
     operationId: p.operationId,
     recoveryOperationId: p.recoveryOperationId,
     releaseId: p.releaseId,
@@ -120,12 +122,12 @@ export async function prepareRestoredMediaActivationCapsule(o, tx, parent, contr
     k.context?.intentSHA256 !== intentSHA256 ||
     k.stage !== 'running' ||
     k.schemaVersion !== 1 ||
-    k.context?.protocol !== 'restored-normal-media-kernel-v1' ||
+    k.context?.protocol !== (v2 ? restoredMediaBootV2.protocol : 'restored-normal-media-kernel-v1') ||
     k.context.operationId !== p.operationId ||
     k.context.recoveryOperationId !== p.recoveryOperationId ||
     k.context.capsuleSHA256 !== p.origin.capsuleSHA256 ||
     !k.context.actorUid ||
-    s.kind !== 'restored-normal-media-startup-capacity-v1' ||
+    s.kind !== (v2 ? 'restored-normal-media-startup-capacity-v2' : 'restored-normal-media-startup-capacity-v1') ||
     s.schemaVersion !== 1 ||
     s.operationId !== p.operationId ||
     s.recoveryOperationId !== p.recoveryOperationId ||
@@ -137,6 +139,14 @@ export async function prepareRestoredMediaActivationCapsule(o, tx, parent, contr
     digest !== hash(preimage)
   )
     fail();
+  if (v2)
+    assertRestoredMediaBootChronology(start.attemptedAt, kernel.createTime, [
+      k.birth.spawnedAt,
+      kernel.updateTime,
+      s.capacity?.observedAt,
+      s.observedAt,
+      startup.createTime,
+    ]);
   const originalAuthority = authority(control, state, p.releaseId);
   if (
     k.context.controlVersion !==
