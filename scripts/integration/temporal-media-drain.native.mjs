@@ -229,6 +229,17 @@ test(
         })
       );
       handles.push(h);
+      stage = 'native-open-work-started';
+      const firstTaskDeadline = performance.now() + 15_000;
+      while (!(await rpc(() => h.fetchHistory())).events?.some((event) => event.workflowTaskCompletedEventAttributes)) {
+        if (performance.now() >= firstTaskDeadline)
+          throw Error('Owned drain probe did not finish its first workflow task');
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      assert.deepEqual(await rpc(() => h.query('workerRestartProbe.status')), {
+        state: 'waiting',
+        runId: h.firstExecutionRunId,
+      });
       // Real open private work blocks even after every SDK poller is stopped.
       workers[1].worker.shutdown();
       await bounded(workers[1].running, 10000);

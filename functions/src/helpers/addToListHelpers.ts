@@ -47,6 +47,7 @@ type FrozenListMutationProgram = {
   listId: string;
   writes: FrozenProjectionWrite[];
   expectedRows: ExpectedMediaRow[];
+  verificationRows: Record<string, unknown>[];
 };
 type PendingListCanonicalWrite = { path: string; data: Record<string, unknown>; merge?: boolean };
 export interface PreparedListMutation {
@@ -97,6 +98,7 @@ export async function freezeListMutationProjection(options: {
   let writes: FrozenProjectionWrite[] = [];
   let normalWrites: FrozenProjectionWrite[] = [];
   let expectedRows: ExpectedMediaRow[] = [];
+  let verificationRows: Record<string, unknown>[] = [];
   await runDurableTransaction(db, async (tx) => {
     const physicalMatches = await tx.get(db.collection('lists').where('subsplashId', '==', options.listId).limit(2));
     if (physicalMatches.size !== 1) throw new Error('PUBLISHING_LIST_CANONICAL_SCOPE_AMBIGUOUS');
@@ -341,7 +343,7 @@ export async function freezeListMutationProjection(options: {
         }))
       );
     const retainedIds = new Set(expectedRows.map((row) => row.id));
-    const verificationRows = options.rows.map((row) => {
+    verificationRows = options.rows.map((row) => {
       const retained = Boolean(row.id && retainedIds.has(row.id));
       const embeddedId = row._embedded[row.type]?.id;
       return {
@@ -402,7 +404,14 @@ export async function freezeListMutationProjection(options: {
     });
     frozen.commit();
   });
-  return { operation, step: options.step, listId: options.listId, writes: normalWrites, expectedRows };
+  return {
+    operation,
+    step: options.step,
+    listId: options.listId,
+    writes: normalWrites,
+    expectedRows,
+    verificationRows,
+  };
 }
 
 /** Original ACK remains private even if this original actor can no longer project. */
@@ -413,7 +422,16 @@ export async function commitListMutationProjection(
   receivedFullAcknowledgement = false
 ): Promise<void> {
   if (!program) return;
-  const resolveRowIds = (observed: SubsplashListRow[]): Map<string, string> | undefined => {
+  const { acknowledgedProjectionDigest, bindListRowId, matchesAcknowledgedProviderValue } = await import(
+    '../temporal/publishing/criticalAcknowledgedRepair'
+  );
+  const resolveRowIds = (observed: SubsplashListRow[], complete: boolean): Map<string, string> | undefined => {
+    if (
+      complete &&
+      (!matchesAcknowledgedProviderValue(program.verificationRows, observed) ||
+        observed.some((row) => row.app_key !== '9XTSHD' || row._embedded['source-list']?.id !== program.listId))
+    )
+      return undefined;
     const ids = new Map<string, string>();
     for (const expected of program.expectedRows) {
       const matches = observed.filter(
@@ -434,13 +452,13 @@ export async function commitListMutationProjection(
     }
     return ids;
   };
-  let rowIds = resolveRowIds(rows);
-  if (!rowIds && !receivedFullAcknowledgement) rowIds = resolveRowIds(await getFullListRows(program.listId, token));
+  let rowIds = resolveRowIds(rows, receivedFullAcknowledgement);
+  if (!rowIds && !receivedFullAcknowledgement)
+    rowIds = resolveRowIds(await getFullListRows(program.listId, token), true);
   if (!rowIds) throw new Error('PUBLISHING_LIST_ACK_ROW_ID_UNPROVEN');
   const { default: admin } = await import('@upperroom/shared/firebase/firebaseAdmin');
   const { FieldValue } = await import('firebase-admin/firestore');
   const db = admin.firestore();
-  const { acknowledgedProjectionDigest } = await import('../temporal/publishing/criticalAcknowledgedRepair');
   for (let offset = 0; offset < program.writes.length; offset += 64) {
     const chunk = program.writes.slice(offset, offset + 64);
     await runDurableTransaction(db, async (tx) => {
@@ -458,9 +476,7 @@ export async function commitListMutationProjection(
           throw new Error('PUBLISHING_LIST_CANONICAL_GRAPH_CHANGED');
         const patch = { ...write.patch };
         for (const binding of write.listRowBindings ?? []) {
-          const rowId = rowIds.get(binding.mediaId)!;
-          if (write.mode === 'set') setField(patch, binding.field, rowId);
-          else patch[binding.field] = rowId;
+          bindListRowId(patch, binding, rowIds.get(binding.mediaId)!, write.mode);
         }
         return { write, patch };
       });

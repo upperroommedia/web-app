@@ -1,5 +1,7 @@
 import { JobRegistry, type JobObserver } from '../../context/jobs/jobRegistry';
 import type { DurableJob } from '@upperroom/contracts/temporal';
+import { sermonStatusType } from '../../types/SermonTypes';
+import { getSermonProcessing } from '../../utils/sermonProcessing';
 
 const job = (revision: number, state: DurableJob['state'] = 'running'): DurableJob => ({
   schemaVersion: 1,
@@ -76,5 +78,32 @@ describe('shared durable job observations', () => {
     registry.clear();
     expect(stop).toHaveBeenCalledTimes(1);
     expect(registry.snapshot('uid:scope').jobs).toHaveLength(0);
+  });
+  it('preserves a stopped upload alongside an active publishing job until the source is replaced', () => {
+    const registry = new JobRegistry();
+    let next!: JobObserver;
+    registry.subscribe(
+      'uid:scope',
+      (observer) => {
+        next = observer;
+        return () => undefined;
+      },
+      jest.fn()
+    );
+    const publishing: DurableJob = { ...job(1), jobId: 'publishing', kind: 'sermon.publish', createdAt: 2 };
+    const stopped: DurableJob = { ...job(2, 'cancelled'), jobId: 'stopped', kind: 'upload.create' };
+    const processing = () =>
+      getSermonProcessing(registry.entitySnapshot('uid:scope', stopped.entity).jobs, sermonStatusType.PENDING, false);
+    next([publishing, stopped], false);
+    expect(processing()).toMatchObject({ stopped: true, pending: false, label: 'Upload stopped' });
+    next(
+      [
+        { ...job(3), jobId: 'replacement', kind: 'upload.create', state: 'awaiting_source', createdAt: 3 },
+        publishing,
+        stopped,
+      ],
+      false
+    );
+    expect(processing()).toMatchObject({ stopped: false, pending: true, label: 'Waiting for file' });
   });
 });

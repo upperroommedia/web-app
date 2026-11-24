@@ -33,14 +33,18 @@ export class JobRegistry {
     const selectionKey = `${entity.type}:${entity.id}`;
     const matches = entry.snapshot.jobs.filter((job) => job.entity.type === entity.type && job.entity.id === entity.id);
     const job = matches.find((candidate) => !isDurableJobTerminal(candidate.state)) ?? matches[0];
-    const media =
-      entity.type === 'sermon'
-        ? (['audio.process', 'upload.create'] as const)
-            .map((kind) =>
-              matches.find((candidate) => candidate.kind === kind && !isDurableJobTerminal(candidate.state))
-            )
-            .filter((candidate): candidate is DurableJob => candidate !== undefined && candidate !== job)
-        : [];
+    const media = [];
+    if (entity.type === 'sermon') {
+      const audio = matches.find(
+        (candidate) => candidate.kind === 'audio.process' && !isDurableJobTerminal(candidate.state)
+      );
+      const upload =
+        matches.find((candidate) => candidate.kind === 'upload.create' && !isDurableJobTerminal(candidate.state)) ??
+        matches.find((candidate) => candidate.kind === 'upload.create');
+      for (const candidate of [audio, upload]) {
+        if (candidate && candidate !== job) media.push(candidate);
+      }
+    }
     const selected = job ? [job, ...media] : media;
     const previous = entry.selections.get(selectionKey);
     if (

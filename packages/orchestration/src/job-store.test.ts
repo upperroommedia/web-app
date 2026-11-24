@@ -89,6 +89,20 @@ async function setup(projectId = 'staging') {
 }
 
 describe('durable job store', () => {
+  test('derives a projection from the state committed by the preceding transaction', async () => {
+    const { store } = await setup();
+    const review = { kind: 'external_result_unknown' as const, message: 'Review the destination result.' };
+    expect((await store.loadJob(ref)).attention).toBeUndefined();
+    const prior = store.project(ref, { state: 'needs_attention', attention: review, actions: ['resolve'] });
+    const next = store.project(ref, (current) =>
+      current.attention?.kind === 'external_result_unknown'
+        ? { attention: current.attention, actions: current.actions }
+        : { state: 'waiting_for_auth', actions: ['resume'] }
+    );
+    await prior;
+    await expect(next).resolves.toMatchObject({ state: 'needs_attention', attention: review, actions: ['resolve'] });
+  });
+
   test('admission is write-only and atomically keeps sensitive intent out of public job and history', async () => {
     const { docs, store } = await setup();
     expect((await store.loadIntent<{ privateToken: string }>(ref)).payload.privateToken).toBe('not public');

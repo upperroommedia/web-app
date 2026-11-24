@@ -84,3 +84,26 @@ it('does not claim completion from a stale or unrelated child', () => {
   child = { ...child, entity: { type: 'sermon', id: 'another-sermon' } };
   expect(renderToStaticMarkup(<PlainJobStatus job={source} />)).not.toContain('Complete');
 });
+it('shows measured progress for a confirmed child and removes it on reconnect', () => {
+  const source = job({ kind: 'upload.create', state: 'succeeded', result: { mediaJobId: 'audio' } });
+  child = job({
+    jobId: 'audio',
+    kind: 'audio.process',
+    state: 'running',
+    steps: [
+      {
+        id: 'transcoding',
+        label: 'Process audio',
+        state: 'running',
+        attempt: 1,
+        progress: { completed: 20, total: 80, unit: 'seconds' },
+      },
+    ],
+  });
+  const markup = () => renderToStaticMarkup(<PlainJobStatus job={source} />);
+  expect(markup()).toContain('aria-valuenow="25"');
+  expect(markup()).toContain('Process audio');
+  childStale = true;
+  expect(markup()).not.toContain('aria-valuenow');
+  expect(markup()).toContain('Reconnecting');
+});

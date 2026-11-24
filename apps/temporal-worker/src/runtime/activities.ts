@@ -288,10 +288,7 @@ export function createRuntimeActivities(
         }
       }
     }
-    if (!success) {
-      const job = await store.loadJob(ref);
-      await project(ref, createDomainAttentionProjection(job, id, result));
-    }
+    if (!success) await project(ref, (current) => createDomainAttentionProjection(current, id, result));
   };
   const assertCurrent = async (ref: DurableJobRef) => {
     await store.assertCurrent(ref);

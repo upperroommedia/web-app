@@ -1,4 +1,4 @@
-import type { Firestore, Transaction } from 'firebase-admin/firestore';
+import { Firestore, type Transaction } from 'firebase-admin/firestore';
 let mockDb: Firestore;
 jest.mock('@upperroom/shared/firebase/firebaseAdmin', () => ({
   __esModule: true,
@@ -29,6 +29,7 @@ const row: SubsplashListRow = {
   _embedded: { 'source-list': { id: 'remote' }, 'media-item': { id: 'media' } },
 };
 function fixture(useRealPlanner = false) {
+  const firestoreValidator = new Firestore({ projectId: 'demo-list-projection' });
   const records = new Map<string, Record<string, unknown>>([
     ['lists/root', { id: 'root', subsplashId: 'remote', count: 0, logicalCount: 0, name: 'Root' }],
     ['sermons/sermon', { id: 'sermon', subsplashId: 'media', title: 'Sermon' }],
@@ -106,6 +107,8 @@ function fixture(useRealPlanner = false) {
       records.set(reference.path, data);
     },
     update: (reference: any, patch: Record<string, unknown>) => {
+      // Validate the same field mask as the real transaction without committing a batch.
+      firestoreValidator.batch().update(firestoreValidator.doc(reference.path), patch);
       events.push('write');
       const data = { ...records.get(reference.path) };
       for (const [field, value] of Object.entries(patch)) setField(data, field, value);
@@ -378,6 +381,70 @@ test('the real pre-send planner keeps a shifted provider row and allocates only 
     ).toThrow('Original acknowledged projection proof is required');
   }
 });
+
+test('writes the allocated list row ID into both existing mirrors after one PATCH', async () => {
+  const f = fixture(true);
+  f.records.set('lists/root/listItems/sermon', {
+    id: 'sermon',
+    subsplashId: 'media',
+    uploadStatus: { status: 'NOT_UPLOADED' },
+  });
+  f.records.set('sermons/sermon/sermonLists/root', {
+    id: 'root',
+    subsplashId: 'remote',
+    uploadStatus: { status: 'NOT_UPLOADED' },
+  });
+  (axios as unknown as jest.Mock).mockImplementation(async (config: { method: string }) =>
+    config.method === 'GET'
+      ? { data: { id: 'remote', _embedded: { 'list-rows': [] } } }
+      : { status: 200, data: { _embedded: { 'list-rows': [row] } } }
+  );
+  await f.run(() => patchListRows('remote', [{ ...row, id: undefined }], 'token'));
+  expect((axios as unknown as jest.Mock).mock.calls.filter(([config]) => config.method === 'PATCH')).toHaveLength(1);
+  expect(f.records.get('lists/root/listItems/sermon')).toMatchObject({
+    uploadStatus: { status: 'UPLOADED', listItemId: 'new-row' },
+    physicalPlacement: { listItemId: 'new-row', position: 1, subsplashListId: 'remote' },
+  });
+  expect(f.records.get('sermons/sermon/sermonLists/root')).toMatchObject({
+    uploadStatus: { status: 'UPLOADED', listItemId: 'new-row' },
+  });
+});
+
+test.each(['row replacement', 'wrong parent'] as const)(
+  'rejects a full acknowledgement with %s on an unchanged row',
+  async (contradiction) => {
+    const { f, existing } = fixtureWithExistingRow();
+    const path = 'lists/root/listItems/existing';
+    const original = f.records.get(path)!;
+    f.records.set(path, {
+      ...original,
+      physicalPlacement: {
+        firestoreListId: 'root',
+        subsplashListId: 'remote',
+        listItemId: existing.id,
+        position: 1,
+        overflowDepth: 0,
+      },
+    });
+    const replacement = {
+      ...existing,
+      ...(contradiction === 'row replacement'
+        ? { id: 'foreign-row', _embedded: { ...existing._embedded, 'media-item': { id: 'foreign-media' } } }
+        : { _embedded: { ...existing._embedded, 'source-list': { id: 'foreign-list' } } }),
+    };
+    (axios as unknown as jest.Mock).mockImplementation(async (config: { method: string }) =>
+      config.method === 'GET'
+        ? { data: { id: 'remote', _embedded: { 'list-rows': [existing] } } }
+        : { status: 200, data: { _embedded: { 'list-rows': [replacement, { ...row, position: 2 }] } } }
+    );
+    await expect(f.run(() => patchListRows('remote', [existing, { ...row, id: undefined }], 'token'))).rejects.toThrow(
+      'PUBLISHING_LIST_ACK_ROW_ID_UNPROVEN'
+    );
+    expect((axios as unknown as jest.Mock).mock.calls.filter(([config]) => config.method === 'PATCH')).toHaveLength(1);
+    expect(f.events.slice(f.events.lastIndexOf('ack') + 1)).not.toContain('write');
+    expect(f.records.has('lists/root/listItems/sermon')).toBe(false);
+  }
+);
 
 test.each(['row ID', 'media ID'])(
   'the real planner rejects duplicate %s before sending a provider request',
