@@ -10,17 +10,28 @@ import {
   makeContinueAsNewFunc,
   patched,
   workflowInfo,
+  type ActivityOptions,
 } from '@temporalio/workflow';
 import { assertAttentionContinuation, waitForAttentionResume } from '../attention';
 import type { DurableJobRef } from '../../../../../packages/contracts/temporal';
 import type { ImageActivities } from '../../../../../functions/src/temporal/images/types';
 
-const activities = proxyActivities<Omit<ImageActivities, 'finishImage' | 'getImageDisposition'>>({
+type ImageWork = Omit<ImageActivities, 'finishImage' | 'getImageDisposition'>;
+
+const imageActivityOptions: ActivityOptions = {
   cancellationType: ActivityCancellationType.WAIT_CANCELLATION_COMPLETED,
   startToCloseTimeout: '5 minutes',
   heartbeatTimeout: '30 seconds',
   retry: { initialInterval: '5 seconds', maximumInterval: '5 minutes', maximumAttempts: 8 },
-});
+};
+function imageActivities(): ImageWork {
+  // Existing image histories used their own workflow queue for work. New
+  // starts on orchestration must target the independent Images Activity pool.
+  return proxyActivities<ImageWork>({
+    ...imageActivityOptions,
+    ...(workflowInfo().taskQueue === 'urm-orchestration' && { taskQueue: 'urm-images' }),
+  });
+}
 const controls = proxyActivities<Pick<ImageActivities, 'finishImage' | 'getImageDisposition'>>({
   taskQueue: 'urm-controls',
   startToCloseTimeout: '2 minutes',
@@ -34,6 +45,7 @@ interface ImageAttentionContinuation {
 }
 export async function ImageIngest(ref: DurableJobRef, attention?: ImageAttentionContinuation): Promise<void> {
   assertAttentionContinuation(attention);
+  const activities = imageActivities();
   let resumed = attention?.resumeRequested ?? false;
   setHandler(imageResume, () => {
     resumed = true;
@@ -102,6 +114,7 @@ export async function ImageIngest(ref: DurableJobRef, attention?: ImageAttention
 }
 export async function ImageDelete(ref: DurableJobRef, attention?: ImageAttentionContinuation): Promise<void> {
   assertAttentionContinuation(attention);
+  const activities = imageActivities();
   let resumed = attention?.resumeRequested ?? false;
   setHandler(imageResume, () => {
     resumed = true;
@@ -163,6 +176,7 @@ export async function ImageReceiptReconciliation(
   attention?: ImageAttentionContinuation
 ): Promise<void> {
   assertAttentionContinuation(attention);
+  const activities = imageActivities();
   let resumed = attention?.resumeRequested ?? false;
   setHandler(imageResume, () => {
     resumed = true;

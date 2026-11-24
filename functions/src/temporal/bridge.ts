@@ -691,7 +691,7 @@ export async function submitServerDurableJob(args: {
             ref,
             workflowType,
             workflowId: `${projectId}:${entity.type}:${entity.id}:${ref.jobId}`,
-            taskQueue: args.kind.startsWith('image.') ? 'urm-images' : 'urm-orchestration',
+            taskQueue: 'urm-orchestration',
           };
         if (workflowType === 'MediaArtifactCleanup') dispatch.startArgs = { ref };
         if (args.kind === 'bundle.regenerate') {

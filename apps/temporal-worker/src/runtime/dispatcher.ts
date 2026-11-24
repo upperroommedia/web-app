@@ -78,6 +78,14 @@ function openAuthority(value: unknown): Lease['authority'] {
   if (validDomains) return { releaseId: value.releaseId, revision: Number(value.revision) };
 }
 const args = (value: unknown): unknown[] => (value === undefined ? [] : Array.isArray(value) ? value : [value]);
+const formerStartQueues: ReadonlyMap<string, string> = new Map([
+  ['emailDeliveryWorkflow', 'urm-email'],
+  ['SearchDocument', 'urm-search'],
+  ['SearchBackfill', 'urm-search'],
+  ['ImageIngest', 'urm-images'],
+  ['ImageDelete', 'urm-images'],
+  ['ImageReceiptReconciliation', 'urm-images'],
+]);
 /** Outbox ownership is a lease, never a process-local flag. A lost Temporal acknowledgement
  * is retried with the same Workflow ID; singleton signal handlers deduplicate job references. */
 export class OutboxDispatcher {
@@ -185,6 +193,12 @@ export class OutboxDispatcher {
       const job = (await this.options.db.collection('durableJobs').doc(dispatch.ref.jobId).get()).data();
       if (job && job.projectId !== this.options.projectId) throw new Error('INVALID_JOB_SCOPE');
       if (job && isDurableJobTerminal(job.state)) return;
+      // Pending legacy outbox records retain their job and workflow IDs. A
+      // previously accepted run keeps its original queue under USE_EXISTING.
+      if (typeof dispatch.taskQueue !== 'string' || !dispatch.taskQueue.trim())
+        throw new Error('INVALID_WORKFLOW_QUEUE');
+      const taskQueue =
+        formerStartQueues.get(dispatch.workflowType) === dispatch.taskQueue ? 'urm-orchestration' : dispatch.taskQueue;
       const startArgs = args(dispatch.startArgs ?? dispatch.ref);
       if (dispatch.signal) {
         // The SDK's high-level SignalWithStart chooses a new ID per invocation.
@@ -206,7 +220,7 @@ export class OutboxDispatcher {
           requestId,
           workflowId: dispatch.workflowId,
           workflowType: { name: dispatch.workflowType },
-          taskQueue: { name: dispatch.taskQueue },
+          taskQueue: { name: taskQueue },
           workflowIdReusePolicy: encodeWorkflowIdReusePolicy(WorkflowIdReusePolicy.ALLOW_DUPLICATE),
           workflowIdConflictPolicy: encodeWorkflowIdConflictPolicy(WorkflowIdConflictPolicy.USE_EXISTING),
           input: { payloads: input },
@@ -218,7 +232,7 @@ export class OutboxDispatcher {
         try {
           await this.options.client.workflow.start(dispatch.workflowType, {
             workflowId: dispatch.workflowId,
-            taskQueue: dispatch.taskQueue,
+            taskQueue,
             args: startArgs,
             workflowIdReusePolicy: WorkflowIdReusePolicy.REJECT_DUPLICATE,
             workflowIdConflictPolicy: WorkflowIdConflictPolicy.USE_EXISTING,

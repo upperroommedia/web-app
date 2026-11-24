@@ -18,7 +18,7 @@ export function buildEmailAdmission(
   const workflowId = `email:${projectId}:${jobId}`;
   const actorUid = 'system:email';
   const requestId = `mail:${jobId}`;
-  const dispatch = { workflowType: 'emailDeliveryWorkflow', workflowId, taskQueue: 'urm-email', ref };
+  const dispatch = { workflowType: 'emailDeliveryWorkflow', workflowId, taskQueue: 'urm-orchestration', ref };
   return {
     job: {
       schemaVersion: 1,

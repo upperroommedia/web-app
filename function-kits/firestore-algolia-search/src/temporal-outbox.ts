@@ -86,7 +86,7 @@ export async function enqueueSearchIntent(
     const dispatch = {
       workflowType: input.documentPath ? 'SearchDocument' : 'SearchBackfill',
       workflowId,
-      taskQueue: 'urm-search',
+      taskQueue: 'urm-orchestration',
       ref,
       ...(!input.documentPath ? { startArgs: { ref } } : {}),
     };

@@ -33,6 +33,9 @@ export function observeDispatchCallerAuthorization(binding: Binding,
       if (stopped || active || signal.aborted || !['event', 'scheduler'].includes(route) ||
         headers['x-serverless-authorization'] !== undefined || typeof authorization !== 'string' ||
         authorization.length > 16384 || !/^Bearer [A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(authorization)) return fail();
+      // Eventarc's managed push subscription signs the complete dispatch URL.
+      // The independent Scheduler explicitly uses the service origin.
+      const audience = route === 'event' ? `${binding.audience}/dispatch` : binding.audience;
       const token = authorization.slice(7), started = Date.now(), owned = new AbortController();
       controller = owned;
       const abort = () => owned.abort();
@@ -45,7 +48,7 @@ export function observeDispatchCallerAuthorization(binding: Binding,
       });
       const work = Promise.resolve().then(() => {
         if (owned.signal.aborted) return fail();
-        return verify(token, binding.audience, owned.signal);
+        return verify(token, audience, owned.signal);
       }).finally(() => { if (controller === owned) { active = undefined; controller = undefined; } });
       active = work;
       try {
@@ -54,7 +57,7 @@ export function observeDispatchCallerAuthorization(binding: Binding,
         const subject = route === 'event' ? binding.eventSubject : binding.schedulerSubject;
         const email = `td-${route === 'event' ? 'e' : 's'}-${binding.buildId.slice(0, 20)}@${binding.projectId}.iam.gserviceaccount.com`;
         if (stopped || signal.aborted || owned.signal.aborted || now - started >= timeoutMs || !payload ||
-          payload.aud !== binding.audience || !['accounts.google.com', 'https://accounts.google.com'].includes(payload.iss) ||
+          payload.aud !== audience || !['accounts.google.com', 'https://accounts.google.com'].includes(payload.iss) ||
           payload.sub !== subject || payload.email !== email || payload.email_verified !== true ||
           !Number.isSafeInteger(payload.exp) || payload.exp <= seconds || !Number.isSafeInteger(payload.iat) ||
           payload.iat > seconds + 5 || payload.exp - payload.iat > 3605) fail();

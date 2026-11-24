@@ -546,7 +546,7 @@ export function createRuntimeActivities(
             ref,
             workflowType: 'SearchDocument',
             workflowId: `search:${projectId}:${jobId}`,
-            taskQueue: 'urm-search',
+            taskQueue: 'urm-orchestration',
           },
         });
       });

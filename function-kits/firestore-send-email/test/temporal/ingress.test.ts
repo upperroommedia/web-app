@@ -56,6 +56,7 @@ test('standalone admission protocol matches the actual shared server store', () 
   expect(writes[`durableJobs/${jobId}`]).toEqual(envelope.job);
   expect(writes[`durableJobIntents/${jobId}`]).toEqual(envelope.intent);
   expect(writes[`durableJobOutbox/${jobId}`]).toEqual(envelope.outbox);
+  expect(envelope.outbox.dispatch.taskQueue).toBe('urm-orchestration');
   expect(writes[`durableJobEntities/${envelope.entityKey}`]).toEqual(envelope.entity);
   expect(JSON.stringify(envelope.job)).not.toContain('private');
 });

@@ -61,7 +61,7 @@ function manifest(value: unknown): DispatchDiagnosticManifest {
     !Number.isSafeInteger(m.createdAt) ||
     !Number.isSafeInteger(m.expiresAt) ||
     m.createdAt <= 0 ||
-    m.expiresAt - m.createdAt !== 300000
+    ![300_000, 600_000].includes(m.expiresAt - m.createdAt)
   )
     fail();
   return m;
@@ -275,7 +275,8 @@ export class DispatchDiagnostic {
               workflowId,
               taskQueue: 'urm-orchestration',
               args: [input],
-              workflowExecutionTimeout: '1 minute',
+              // This probe must survive a genuine scale-from-zero worker startup.
+              workflowExecutionTimeout: m.expiresAt - m.createdAt === 600_000 ? '6 minutes' : '1 minute',
               workflowIdConflictPolicy: 'FAIL',
               workflowIdReusePolicy: 'REJECT_DUPLICATE',
               versioningOverride: { pinnedTo: { deploymentName: 'urm-worker-staging', buildId: m.buildId } },

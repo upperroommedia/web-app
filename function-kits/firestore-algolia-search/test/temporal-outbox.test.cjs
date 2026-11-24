@@ -69,7 +69,7 @@ test('duplicate delivery admits one durable job and increments the entity once',
   assert.equal(outbox.nextAttemptAt, 0);
   assert.equal(outbox.leaseExpiresAt, 0);
   assert.equal(outbox.dispatch.workflowType, 'SearchDocument');
-  assert.equal(outbox.dispatch.taskQueue, 'urm-search');
+  assert.equal(outbox.dispatch.taskQueue, 'urm-orchestration');
   assert.equal(JSON.stringify(outbox).includes('old-id'), false, 'history gets references only');
 });
 test('backfill dispatch uses bounded reference argument and no source credentials', async () => {
@@ -77,6 +77,7 @@ test('backfill dispatch uses bounded reference argument and no source credential
   await enqueueSearchIntent(db, { projectId: 'project', instanceId: 'images', requestId: 'backfill-1' });
   const [outbox] = [...db.records].filter(([key]) => key.startsWith('durableJobOutbox/')).map(([, value]) => value);
   assert.equal(outbox.dispatch.workflowType, 'SearchBackfill');
+  assert.equal(outbox.dispatch.taskQueue, 'urm-orchestration');
   assert.deepEqual(outbox.dispatch.startArgs, { ref: outbox.dispatch.ref });
 });
 test('paused, missing and legacy-owned controls reject fresh Temporal admission atomically', async () => {

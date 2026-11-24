@@ -6,7 +6,7 @@ const binding = { projectId: 'urm-app-staging', buildId,
   audience: `https://urm-dispatch-${buildId.slice(0,20)}-251680231116.us-central1.run.app`,
   eventSubject: '12345678901234567891', schedulerSubject: '12345678901234567892' };
 const payload = (): TokenPayload => ({ iss: 'https://accounts.google.com', sub: binding.eventSubject,
-  aud: binding.audience, iat: Math.floor(Date.now()/1000)-10, exp: Math.floor(Date.now()/1000)+600,
+  aud: `${binding.audience}/dispatch`, iat: Math.floor(Date.now()/1000)-10, exp: Math.floor(Date.now()/1000)+600,
   email: `td-e-${buildId.slice(0,20)}@urm-app-staging.iam.gserviceaccount.com`, email_verified: true });
 const signal = () => new AbortController().signal;
 const header = { authorization: 'Bearer fixture.header.signature' };
@@ -40,6 +40,30 @@ test.each([{}, {authorization:['Bearer a.b.c']}, {authorization:'Bearer fixture.
  {'x-serverless-authorization':'Bearer stripped'}, {authorization:'Bearer a.b.'}, {authorization:`Bearer ${'x'.repeat(17000)}`}])('unsupported or ambiguous credentials never reach verification',async headers=>{
  const verify=jest.fn().mockResolvedValue(payload());const auth=observeDispatchCallerAuthorization(binding,verify);
  await expect(auth.verify(headers,'event',signal())).rejects.toThrow(/^DISPATCH_CALLER_UNCONFIRMED$/);expect(verify).not.toHaveBeenCalled();await auth.drain();
+});
+test('verifies the full Eventarc destination and the Scheduler origin on their own routes', async () => {
+  const event = payload();
+  const scheduler = {
+    ...event,
+    aud: binding.audience,
+    sub: binding.schedulerSubject,
+    email: `td-s-${buildId.slice(0, 20)}@urm-app-staging.iam.gserviceaccount.com`,
+  };
+  const verify = jest.fn();
+  const authorization = observeDispatchCallerAuthorization(binding, verify);
+  verify.mockResolvedValueOnce(event);
+  await expect(authorization.verify(header, 'event', signal())).resolves.toEqual({ kind: 'event', subject: binding.eventSubject });
+  expect(verify.mock.calls[0][1]).toEqual(`${binding.audience}/dispatch`);
+  verify.mockResolvedValueOnce(scheduler);
+  await expect(authorization.verify(header, 'scheduler', signal())).resolves.toEqual({ kind: 'scheduler', subject: binding.schedulerSubject });
+  expect(verify.mock.calls[1][1]).toEqual(binding.audience);
+  verify.mockResolvedValueOnce({ ...event, aud: binding.audience });
+  await expect(authorization.verify(header, 'event', signal())).rejects.toThrow(/^DISPATCH_CALLER_UNCONFIRMED$/);
+  verify.mockResolvedValueOnce({ ...event, aud: `${binding.audience}/dispatch?__GCP_CloudEventsMode=CE_PUBSUB_BINDING` });
+  await expect(authorization.verify(header, 'event', signal())).rejects.toThrow(/^DISPATCH_CALLER_UNCONFIRMED$/);
+  verify.mockResolvedValueOnce({ ...scheduler, aud: `${binding.audience}/dispatch` });
+  await expect(authorization.verify(header, 'scheduler', signal())).rejects.toThrow(/^DISPATCH_CALLER_UNCONFIRMED$/);
+  await authorization.drain();
 });
 test('route-specific subject prevents an event identity from authorizing Scheduler reconciliation',async()=>{
  const auth=observeDispatchCallerAuthorization(binding,async()=>payload());
