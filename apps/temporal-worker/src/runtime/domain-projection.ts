@@ -75,7 +75,13 @@ export function createDomainAttentionProjection(
     result.mutationSessionId && /^[a-f0-9]{64}$/.test(result.mutationSessionId)
       ? { mutationSessionId: result.mutationSessionId }
       : {};
-  if (!result.cancelOnly && temporary && job.state === 'needs_attention' && job.attention?.stepId !== id) {
+  const soundCloudReconnect = result.code === 'SOUNDCLOUD_RECONNECT_REQUIRED' && result.state === 'blocked';
+  if (
+    !result.cancelOnly &&
+    job.state === 'needs_attention' &&
+    ((temporary && job.attention?.stepId !== id) ||
+      (soundCloudReconnect && job.attention?.kind === 'external_result_unknown'))
+  ) {
     // A retry in another destination cannot hide an unresolved provider receipt.
     return {
       state: 'needs_attention',
@@ -170,7 +176,10 @@ export function createDomainAttentionProjection(
               ? 'remote_drift'
               : unknownAccountAccess || allocationReview || mutableUnresolved || result.state === 'needs_review'
               ? 'external_result_unknown'
+              : soundCloudReconnect
+              ? 'reconnect_provider'
               : 'permission_changed',
+            ...(soundCloudReconnect && { provider: 'soundcloud' as const }),
             stepId: id,
             ...(result.acknowledgementId && /^[a-f0-9]{64}$/.test(result.acknowledgementId)
               ? { acknowledgementId: result.acknowledgementId }
@@ -190,6 +199,8 @@ export function createDomainAttentionProjection(
               ? 'The original provider request may still arrive. Its outcome must be verified before this task can continue.'
               : allocationReview
               ? 'Review the earlier publishing task before this operation can continue.'
+              : soundCloudReconnect
+              ? 'Reconnect SoundCloud, then resume this task.'
               : 'This operation needs review before it can continue.',
           },
         }
@@ -217,6 +228,8 @@ export function createDomainAttentionProjection(
         ? 'Confirming deletion tracking before completing this task.'
         : temporary
         ? 'This step is waiting to retry automatically.'
+        : soundCloudReconnect
+        ? 'Reconnect SoundCloud, then resume this task.'
         : 'Review is required before continuing.',
       retryable: temporary,
     },

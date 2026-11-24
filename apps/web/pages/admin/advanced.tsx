@@ -1,3 +1,4 @@
+import { SANDBOX_SOUNDCLOUD_ORIGIN, SOUNDCLOUD_ADVANCED_PATH } from '@upperroom/shared/shared/soundcloudAuth';
 import { useProviderEnvironment } from '../../context/provider/ProviderEnvironmentContext';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { NextPage } from 'next';
@@ -131,6 +132,9 @@ const AdvancedAdminPage: NextPage & { PageLayout?: React.ComponentType<{ childre
     return `${window.location.origin}${callbackPath}`;
   }, [status?.callbackPath]);
 
+  const useCanonicalSandboxSite =
+    simulation && Boolean(redirectUri) && !redirectUri.startsWith(SANDBOX_SOUNDCLOUD_ORIGIN + '/');
+
   const loadStatus = useCallback(async () => {
     if (!isAdmin || !modeReady) {
       setIsLoadingStatus(false);
@@ -178,6 +182,7 @@ const AdvancedAdminPage: NextPage & { PageLayout?: React.ComponentType<{ childre
   }, [loadStatus, router, router.isReady, router.query.message, router.query.soundcloud]);
 
   const startSoundCloudConnect = useCallback(async () => {
+    if (useCanonicalSandboxSite) return;
     if (!modeReady || !status?.clientId || !redirectUri) {
       setNotice({
         severity: 'error',
@@ -206,7 +211,7 @@ const AdvancedAdminPage: NextPage & { PageLayout?: React.ComponentType<{ childre
       setNotice({ severity: 'error', text: message });
       setIsConnecting(false);
     }
-  }, [redirectUri, status?.clientId, modeReady, simulation]);
+  }, [redirectUri, status?.clientId, modeReady, simulation, useCanonicalSandboxSite]);
 
   const runUpdateAllSpeakerTags = useCallback(async () => {
     if (!canRunScripts) {
@@ -421,28 +426,34 @@ const AdvancedAdminPage: NextPage & { PageLayout?: React.ComponentType<{ childre
               </Stack>
 
               <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} alignItems={{ xs: 'stretch', sm: 'center' }}>
-                <Button
-                  variant="contained"
-                  onClick={startSoundCloudConnect}
-                  disabled={
-                    !isAdmin ||
-                    !modeReady ||
-                    isLoadingStatus ||
-                    isConnecting ||
-                    !status?.configured ||
-                    !status?.clientId
-                  }
-                >
-                  {isConnecting
-                    ? 'Redirecting...'
-                    : simulation
-                    ? status?.connected
-                      ? 'Reconnect simulated account'
-                      : 'Connect simulated account'
-                    : status?.connected
-                    ? 'Reconnect SoundCloud'
-                    : 'Connect SoundCloud'}
-                </Button>
+                {useCanonicalSandboxSite ? (
+                  <Button variant="contained" href={SANDBOX_SOUNDCLOUD_ORIGIN + SOUNDCLOUD_ADVANCED_PATH}>
+                    Open SoundCloud settings on staging
+                  </Button>
+                ) : (
+                  <Button
+                    variant="contained"
+                    onClick={startSoundCloudConnect}
+                    disabled={
+                      !isAdmin ||
+                      !modeReady ||
+                      isLoadingStatus ||
+                      isConnecting ||
+                      !status?.configured ||
+                      !status?.clientId
+                    }
+                  >
+                    {isConnecting
+                      ? 'Redirecting...'
+                      : simulation
+                      ? status?.connected
+                        ? 'Reconnect simulated account'
+                        : 'Connect simulated account'
+                      : status?.connected
+                      ? 'Reconnect SoundCloud'
+                      : 'Connect SoundCloud'}
+                  </Button>
+                )}
                 <Button variant="outlined" onClick={loadStatus} disabled={!isAdmin || isLoadingStatus || isConnecting}>
                   Refresh Status
                 </Button>

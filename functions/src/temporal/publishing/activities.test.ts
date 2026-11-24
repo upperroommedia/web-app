@@ -1,6 +1,7 @@
 jest.mock('./providerReceipts', () => ({ listProviderReceiptsForJob: jest.fn() }));
 import { listProviderReceiptsForJob } from './providerReceipts';
 import { createPublishingActivities } from './activities';
+import { createSoundCloudReconnectRequiredError } from '../../soundcloudAuthErrors';
 import type { PublishingDomainDependencies, PrivatePublishingIntent } from './types';
 
 const intent: PrivatePublishingIntent = {
@@ -156,6 +157,17 @@ describe('publishing activity boundary', () => {
       code: 'PROVIDER_MUTATION_GRAPH_CHANGED_UNSENT',
     });
     expect(deps.mutateLists).toHaveBeenCalledTimes(1);
+  });
+  it('keeps a definitive SoundCloud grant failure actionable without exposing provider error details', async () => {
+    const deps = dependencies();
+    (deps.ensureSoundCloudTrack as jest.Mock).mockRejectedValue(
+      createSoundCloudReconnectRequiredError('private runtime error', { error: 'invalid_grant' })
+    );
+    const ref = { jobId: 'job-1', projectId: 'test' };
+    const result = await createPublishingActivities(deps).ensurePublishingSoundCloud(ref);
+    expect(result).toEqual({ state: 'blocked', code: 'SOUNDCLOUD_RECONNECT_REQUIRED' });
+    expect(deps.recordStep).toHaveBeenCalledWith(ref, 'soundcloud-track', result);
+    expect(JSON.stringify(result)).not.toContain('private');
   });
   it('records completion only after the provider and projection adapter returns', async () => {
     const deps = dependencies();

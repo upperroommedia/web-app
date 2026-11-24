@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { Timestamp } from 'firebase-admin/firestore';
 
 let mockProject = 'urm-app-staging';
@@ -69,7 +70,11 @@ jest.mock('axios', () => {
     }),
   };
 });
-import { getSoundCloudAuthStatus, createSoundCloudAuthorizationSession } from '../soundcloudSecrets';
+import {
+  getSoundCloudAccessToken,
+  getSoundCloudAuthStatus,
+  createSoundCloudAuthorizationSession,
+} from '../soundcloudSecrets';
 import { authenticateSubsplash } from '../subsplashUtils';
 import { STAGING_SANDBOX_PROFILE } from './profile';
 import { getSandboxOAuthConfiguration, sandboxSoundCloudAuthDocumentPath, SANDBOX_SOUNDCLOUD_ORIGIN } from './oauth';
@@ -203,8 +208,27 @@ test('actual SoundCloud status selects synthetic configuration and only the sepa
   assertNoLiveAccess();
 });
 test('actual SoundCloud status recognizes only its private sandbox connection', async () => {
-  mockRecords.set(sandboxSoundCloudAuthDocumentPath(STAGING_SANDBOX_PROFILE), {
-    refreshToken: 'sandbox-private-refresh',
+  const path = sandboxSoundCloudAuthDocumentPath(STAGING_SANDBOX_PROFILE);
+  const refreshToken = 'sandbox-sc-refresh-' + 'c'.repeat(43);
+  const grantPath = path + '/refreshTokens/' + createHash('sha256').update(refreshToken).digest('hex');
+  const accessHash = 'b'.repeat(64);
+  const accessPath = path + '/accessTokens/' + accessHash;
+  mockRecords.set(accessPath, {
+    profileId: STAGING_SANDBOX_PROFILE.profileId,
+    adminUid: 'stage-admin',
+    expiresAt: Timestamp.fromMillis(now - 60_000),
+  });
+  mockRecords.set(grantPath, {
+    accessTokenHash: accessHash,
+    schemaVersion: 1,
+    profileId: STAGING_SANDBOX_PROFILE.profileId,
+    clientId: getSandboxOAuthConfiguration(STAGING_SANDBOX_PROFILE).clientId,
+    kind: 'refresh-token',
+    adminUid: 'stage-admin',
+    expiresAt: Timestamp.fromMillis(now + 60_000),
+  });
+  mockRecords.set(path, {
+    refreshToken,
     connectedByEmail: 'stage-admin@example.invalid',
     connectedAtMillis: now,
   });
@@ -215,8 +239,55 @@ test('actual SoundCloud status recognizes only its private sandbox connection', 
     tokenSource: 'firestore',
     connectedByEmail: 'stage-admin@example.invalid',
   });
+  mockRecords.get(grantPath).expiresAt = Timestamp.fromMillis(now);
+  expect(await getSoundCloudAuthStatus()).toMatchObject({ connected: false, tokenSource: 'firestore' });
+  mockRecords.get(grantPath).expiresAt = Timestamp.fromMillis(now + 60_000);
+  mockRecords.delete(accessPath);
+  expect(await getSoundCloudAuthStatus()).toMatchObject({ connected: false, tokenSource: 'firestore' });
   assertNoLiveAccess();
 });
+test('hosted alias is rejected before taking OAuth effects or storing pending authorization state', async () => {
+  const beforeEffects = jest.fn(async () => undefined);
+  await expect(
+    createSoundCloudAuthorizationSession(
+      {
+        adminUid: 'stage-admin',
+        redirectUri: 'https://web-staging--urm-app-staging.us-central1.hosted.app/auth/soundcloud/callback',
+      },
+      beforeEffects
+    )
+  ).rejects.toMatchObject({ code: 'invalid-argument' });
+  expect(beforeEffects).not.toHaveBeenCalled();
+  expect(mockRecords.size).toBe(0);
+  assertNoLiveAccess();
+});
+
+test('a rejected virtual refresh grant no longer reports a connected SoundCloud account', async () => {
+  const path = sandboxSoundCloudAuthDocumentPath(STAGING_SANDBOX_PROFILE);
+  mockRecords.set(path, { refreshToken: 'sandbox-sc-refresh-' + 'a'.repeat(43), connectedAtMillis: now });
+  await expect(getSoundCloudAccessToken()).rejects.toMatchObject({
+    details: { code: 'SOUNDCLOUD_AUTH_RECONNECT_REQUIRED' },
+  });
+  expect(await getSoundCloudAuthStatus()).toMatchObject({ connected: false, tokenSource: 'firestore' });
+  assertNoLiveAccess();
+});
+
+test('OAuth client rejection does not invalidate the stored refresh grant', async () => {
+  mockProject = 'urm-app';
+  mockAllowProduction = true;
+  delete process.env.STAGING_PROVIDER_MODE;
+  const path = '_integrationAuth/soundcloud';
+  mockRecords.set(path, { refreshToken: 'test-refresh-grant', connectedAtMillis: now });
+  mockWire.mockRejectedValue({ isAxiosError: true, response: { status: 401, data: { error: 'invalid_client' } } });
+
+  await expect(getSoundCloudAccessToken()).rejects.toMatchObject({
+    details: { code: 'SOUNDCLOUD_OAUTH_REQUEST_REJECTED' },
+  });
+  expect(mockRecords.get(path)).not.toHaveProperty('reconnectRequiredAtMillis');
+  expect(await getSoundCloudAuthStatus()).toMatchObject({ connected: true, tokenSource: 'firestore' });
+  expect(globalThis.fetch).not.toHaveBeenCalled();
+});
+
 test('actual authorization session uses synthetic client and approved stage consent with original private PKCE pending state', async () => {
   const beforeEffects = jest.fn(async () => {
     expect(mockRecords.size).toBe(0);

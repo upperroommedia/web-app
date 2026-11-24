@@ -7,7 +7,7 @@ import {
   prepareAcknowledgedProjectionPlan,
   publishingMutationRequestFingerprint,
 } from '../temporal/publishing/durableOperationContext';
-import type { FrozenProjectionWrite } from '../temporal/publishing/criticalAcknowledgedRepair';
+import type { FrozenListRowBinding, FrozenProjectionWrite } from '../temporal/publishing/criticalAcknowledgedRepair';
 import { uploadStatus } from '@upperroom/shared/types/SermonTypes';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type { Transaction } from 'firebase-admin/firestore';
@@ -40,7 +40,14 @@ export const mediaTypes: SubsplashMediaType[] = [
   'event',
 ];
 
-type FrozenListMutationProgram = { operation: string; step: string; listId: string; writes: FrozenProjectionWrite[] };
+type RetainedMediaRow = { id: string; mediaId: string; position: number };
+type FrozenListMutationProgram = {
+  operation: string;
+  step: string;
+  listId: string;
+  writes: FrozenProjectionWrite[];
+  retainedRows: RetainedMediaRow[];
+};
 type PendingListCanonicalWrite = { path: string; data: Record<string, unknown>; merge?: boolean };
 export interface PreparedListMutation {
   listId: string;
@@ -89,6 +96,7 @@ export async function freezeListMutationProjection(options: {
   const db = admin.firestore();
   let writes: FrozenProjectionWrite[] = [];
   let normalWrites: FrozenProjectionWrite[] = [];
+  let retainedRows: RetainedMediaRow[] = [];
   await runDurableTransaction(db, async (tx) => {
     const physicalMatches = await tx.get(db.collection('lists').where('subsplashId', '==', options.listId).limit(2));
     if (physicalMatches.size !== 1) throw new Error('PUBLISHING_LIST_CANONICAL_SCOPE_AMBIGUOUS');
@@ -152,7 +160,10 @@ export async function freezeListMutationProjection(options: {
         .map((row) => row._embedded['media-item']?.id)
         .filter((id): id is string => !!id)
     );
-    const preservedRowIds = new Set(content.map((row) => row.id).filter((id): id is string => !!id));
+    const rowIds = content.map((row) => row.id).filter((id): id is string => !!id);
+    const preservedRowIds = new Set(rowIds);
+    if (preservedRowIds.size !== rowIds.length) throw new Error('PUBLISHING_LIST_ACK_ROW_ID_UNPROVEN');
+    retainedRows = [];
     const unresolved = [...desiredMedia].filter((id) => !byMedia.has(id));
     for (let offset = 0; offset < unresolved.length; offset += 10) {
       const sermons = await tx.get(
@@ -193,6 +204,7 @@ export async function freezeListMutationProjection(options: {
           : { path, mode: 'set', expectedExists: false, expectedFields: {}, patch: created, listRowBindings: bindings }
       );
     };
+    const projectedMedia = new Set<string>();
     for (let index = 0; index < content.length; index++) {
       const row = content[index];
       if (row.type !== 'media-item') continue;
@@ -203,6 +215,8 @@ export async function freezeListMutationProjection(options: {
       }
       const canonical = byMedia.get(mediaId);
       if (!canonical) continue;
+      if (projectedMedia.has(mediaId)) throw new Error('PUBLISHING_LIST_ACK_ROW_ID_UNPROVEN');
+      projectedMedia.add(mediaId);
       const placement = {
         firestoreListId: physical.id,
         subsplashListId: options.listId,
@@ -224,15 +238,33 @@ export async function freezeListMutationProjection(options: {
         Object.entries(placement).every(([key, value]) => previous[key] === value)
       )
         continue;
-      await append(`${root.ref.path}/listItems/${canonical.id}`, fields, canonical.data, [
-        { field: 'uploadStatus.listItemId', requestStep: options.step, listId: options.listId, mediaId },
-        { field: 'physicalPlacement.listItemId', requestStep: options.step, listId: options.listId, mediaId },
-      ]);
+      if (row.id) {
+        if (row.app_key !== '9XTSHD' || row._embedded['source-list']?.id !== options.listId)
+          throw new Error('PUBLISHING_LIST_ACK_ROW_ID_UNPROVEN');
+        retainedRows.push({ id: row.id, mediaId, position: row.position });
+      }
+      const existingId = row.id ? { 'uploadStatus.listItemId': row.id } : {};
+      const allocatedId: FrozenListRowBinding = {
+        field: 'uploadStatus.listItemId',
+        requestStep: options.step,
+        listId: options.listId,
+        mediaId,
+      };
+      await append(
+        `${root.ref.path}/listItems/${canonical.id}`,
+        {
+          ...fields,
+          ...existingId,
+          ...(row.id && { physicalPlacement: { ...placement, listItemId: row.id } }),
+        },
+        canonical.data,
+        row.id ? [] : [allocatedId, { ...allocatedId, field: 'physicalPlacement.listItemId' }]
+      );
       await append(
         `sermons/${canonical.id}/sermonLists/${rootId}`,
-        { 'uploadStatus.status': uploadStatus.UPLOADED },
+        { 'uploadStatus.status': uploadStatus.UPLOADED, ...existingId },
         { ...rootMembershipData, id: rootId },
-        [{ field: 'uploadStatus.listItemId', requestStep: options.step, listId: options.listId, mediaId }]
+        row.id ? [] : [allocatedId]
       );
     }
     for (const existing of projection.docs) {
@@ -310,12 +342,23 @@ export async function freezeListMutationProjection(options: {
           rows: options.rows,
         }))
       );
-    const verificationRows = options.rows.map((row) => ({
-      ...(row.id ? { id: row.id } : {}),
-      type: row.type,
-      position: row.position,
-      ...(row._embedded[row.type]?.id ? { _embedded: { [row.type]: { id: row._embedded[row.type]!.id } } } : {}),
-    }));
+    const retainedIds = new Set(retainedRows.map((row) => row.id));
+    const verificationRows = options.rows.map((row) => {
+      const retained = Boolean(row.id && retainedIds.has(row.id));
+      const embeddedId = row._embedded[row.type]?.id;
+      return {
+        ...(row.id ? { id: row.id } : {}),
+        type: row.type,
+        position: row.position,
+        ...(retained && { app_key: row.app_key }),
+        ...(embeddedId && {
+          _embedded: {
+            [row.type]: { id: embeddedId },
+            ...(retained && { 'source-list': { id: options.listId } }),
+          },
+        }),
+      };
+    });
     const providerFields =
       options.method === 'DELETE'
         ? {}
@@ -361,18 +404,40 @@ export async function freezeListMutationProjection(options: {
     });
     frozen.commit();
   });
-  return { operation, step: options.step, listId: options.listId, writes: normalWrites };
+  return { operation, step: options.step, listId: options.listId, writes: normalWrites, retainedRows };
 }
 
 /** Original ACK remains private even if this original actor can no longer project. */
 export async function commitListMutationProjection(
   program: FrozenListMutationProgram | undefined,
   rows: SubsplashListRow[],
-  token: string
+  token: string,
+  receivedFullAcknowledgement = false
 ): Promise<void> {
   if (!program) return;
   let actualRows = rows;
+  const retainedRowsMatch = (observed: SubsplashListRow[]) =>
+    program.retainedRows.every((proof) => {
+      const matches = observed.filter((row) => row.id === proof.id);
+      const row = matches[0];
+      const matchingMedia = observed.filter(
+        (item) => item.type === 'media-item' && item._embedded['media-item']?.id === proof.mediaId
+      );
+      return (
+        matches.length === 1 &&
+        matchingMedia.length === 1 &&
+        matchingMedia[0] === row &&
+        row.type === 'media-item' &&
+        row.position === proof.position &&
+        row.app_key === '9XTSHD' &&
+        row._embedded['source-list']?.id === program.listId &&
+        row._embedded['media-item']?.id === proof.mediaId
+      );
+    });
+  if (receivedFullAcknowledgement && !retainedRowsMatch(actualRows))
+    throw new Error('PUBLISHING_LIST_ACK_ROW_ID_UNPROVEN');
   if (
+    !retainedRowsMatch(actualRows) ||
     program.writes.some((write) =>
       write.listRowBindings?.some(
         (binding) =>
@@ -383,6 +448,7 @@ export async function commitListMutationProjection(
     )
   )
     actualRows = await getFullListRows(program.listId, token);
+  if (!retainedRowsMatch(actualRows)) throw new Error('PUBLISHING_LIST_ACK_ROW_ID_UNPROVEN');
   const { default: admin } = await import('@upperroom/shared/firebase/firebaseAdmin');
   const { FieldValue } = await import('firebase-admin/firestore');
   const db = admin.firestore();
@@ -410,6 +476,7 @@ export async function commitListMutationProjection(
           if (
             matches.length !== 1 ||
             !matches[0].id ||
+            actualRows.filter((row) => row.id === matches[0].id).length !== 1 ||
             matches[0].app_key !== '9XTSHD' ||
             matches[0]._embedded['source-list']?.id !== binding.listId
           )
@@ -770,7 +837,7 @@ export async function patchListRows(
     });
     const patchedRows = response?._embedded?.['list-rows'];
     if (Array.isArray(patchedRows)) {
-      await commitListMutationProjection(program, patchedRows, token);
+      await commitListMutationProjection(program, patchedRows, token, true);
       return patchedRows as SubsplashListRow[];
     }
 
@@ -778,7 +845,7 @@ export async function patchListRows(
       ...row,
       position: index + 1,
     }));
-    await commitListMutationProjection(program, fallback, token);
+    await commitListMutationProjection(program, program?.retainedRows.length ? [] : fallback, token);
     return fallback;
   } catch (error: unknown) {
     logger.error(`Failed to patch list ${listId}`, getAxiosData(error) ?? error);
@@ -820,5 +887,5 @@ export async function deleteListRow(rowId: string, listId: string, token: string
       return { completion: 'acknowledged', result: null };
     },
   });
-  await commitListMutationProjection(program, remainingRows, token);
+  await commitListMutationProjection(program, program?.retainedRows.length ? [] : remainingRows, token);
 }
