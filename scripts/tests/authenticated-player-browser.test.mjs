@@ -208,7 +208,7 @@ test('real TypeScript media fixture limits routes and rejects foreign or malform
   }
 });
 test('every media case consumes guarded worker authentication and bounded per-case setup', () => {
-  const casesPerSpec = [4, 9, 3];
+  const casesPerSpec = [4, 9, 4];
   for (const [index, spec] of SPECS.entries()) {
     const source = readFileSync(new URL(`../../apps/web/${spec}`, import.meta.url), 'utf8');
     assert.match(source, /import \{[^}]*createMediaTest[^}]*\} from '\.\/helpers\/mediaTest'/);
