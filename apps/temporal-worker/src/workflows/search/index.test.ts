@@ -79,6 +79,45 @@ describe('native search workflow', () => {
       await local.teardown();
     }
   }, 120000);
+  test('a superseded document completes on the original Run through Controls and replays', async () => {
+    const local = await createLocalTestEnvironment();
+    try {
+      const activities = mocks();
+      activities.syncSearchDocument.mockRejectedValueOnce(
+        ApplicationFailure.nonRetryable('A newer generation owns this entity', 'STALE_GENERATION')
+      );
+      const search = await Worker.create({
+        connection: local.nativeConnection,
+        taskQueue: 'urm-search',
+        workflowsPath: require.resolve('./index'),
+        activities: { syncSearchDocument: activities.syncSearchDocument },
+      });
+      const controls = await Worker.create({
+        connection: local.nativeConnection,
+        taskQueue: 'urm-controls',
+        activities: { finishSearch: activities.finishSearch },
+      });
+      await controls.runUntil(() =>
+        search.runUntil(async () => {
+          const handle = await local.client.workflow.start(SearchDocument, {
+            workflowId: 'search-superseded-document',
+            taskQueue: 'urm-search',
+            args: [ref],
+          });
+          await handle.result();
+          expect(activities.syncSearchDocument.mock.calls).toEqual([[ref]]);
+          expect(activities.finishSearch.mock.calls).toEqual([[ref, 'superseded']]);
+          const history = await handle.fetchHistory();
+          expect(history.events?.filter((event) => event.timerStartedEventAttributes)).toEqual([]);
+          expect(history.events?.at(-1)?.workflowExecutionCompletedEventAttributes).toBeDefined();
+          await Worker.runReplayHistory({ workflowsPath: require.resolve('./index') }, history);
+        })
+      );
+    } finally {
+      await local.teardown();
+    }
+  }, 120000);
+
   test('backfill waits for admitted jobs before advancing cursor', async () => {
     const activities = mocks(),
       trace: string[] = [];
