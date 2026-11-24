@@ -43,3 +43,19 @@ test('publishes measured seconds only for the exact running stage and attempt', 
   expect(createMediaProjection({ ...running, state: 'cancel_requested' }, report, 2, 1000)).toBeNull();
   expect(createMediaProjection({ ...running, steps: projection?.steps }, report, 2, 1000)).toBeNull();
 });
+
+test('a remote YouTube render describes acquisition and processing without a synthetic percentage', () => {
+  const projection = createMediaProjection(
+    job,
+    {
+      state: 'running',
+      stage: 'downloading',
+      remoteYouTubeRender: true,
+    },
+    3,
+    1000
+  );
+  const step = projection?.steps?.find(({ id }) => id === 'downloading');
+  expect(step?.label).toBe('Download and process YouTube audio');
+  expect(step?.progress).toBeUndefined();
+});

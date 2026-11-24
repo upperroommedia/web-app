@@ -146,6 +146,7 @@ processingTest(
     const title = page.getByText(sermon.title, { exact: true });
     const card = page.locator('.MuiCard-root').filter({ has: title });
     await expect(card.getByText('Process audio 25%', { exact: true })).toBeVisible();
+    await expect(card.getByRole('progressbar', { name: 'Process audio' })).toHaveAttribute('aria-valuenow', '25');
     await title.click();
     await expect(page).toHaveURL(new RegExp(`/admin/sermons/${sermon.id}$`));
     const progress = page.getByTestId('sermon-detail-processing');

@@ -40,13 +40,13 @@ export const mediaTypes: SubsplashMediaType[] = [
   'event',
 ];
 
-type RetainedMediaRow = { id: string; mediaId: string; position: number };
+type ExpectedMediaRow = { id?: string; mediaId: string; position: number };
 type FrozenListMutationProgram = {
   operation: string;
   step: string;
   listId: string;
   writes: FrozenProjectionWrite[];
-  retainedRows: RetainedMediaRow[];
+  expectedRows: ExpectedMediaRow[];
 };
 type PendingListCanonicalWrite = { path: string; data: Record<string, unknown>; merge?: boolean };
 export interface PreparedListMutation {
@@ -96,7 +96,7 @@ export async function freezeListMutationProjection(options: {
   const db = admin.firestore();
   let writes: FrozenProjectionWrite[] = [];
   let normalWrites: FrozenProjectionWrite[] = [];
-  let retainedRows: RetainedMediaRow[] = [];
+  let expectedRows: ExpectedMediaRow[] = [];
   await runDurableTransaction(db, async (tx) => {
     const physicalMatches = await tx.get(db.collection('lists').where('subsplashId', '==', options.listId).limit(2));
     if (physicalMatches.size !== 1) throw new Error('PUBLISHING_LIST_CANONICAL_SCOPE_AMBIGUOUS');
@@ -163,7 +163,7 @@ export async function freezeListMutationProjection(options: {
     const rowIds = content.map((row) => row.id).filter((id): id is string => !!id);
     const preservedRowIds = new Set(rowIds);
     if (preservedRowIds.size !== rowIds.length) throw new Error('PUBLISHING_LIST_ACK_ROW_ID_UNPROVEN');
-    retainedRows = [];
+    expectedRows = [];
     const unresolved = [...desiredMedia].filter((id) => !byMedia.has(id));
     for (let offset = 0; offset < unresolved.length; offset += 10) {
       const sermons = await tx.get(
@@ -238,11 +238,9 @@ export async function freezeListMutationProjection(options: {
         Object.entries(placement).every(([key, value]) => previous[key] === value)
       )
         continue;
-      if (row.id) {
-        if (row.app_key !== '9XTSHD' || row._embedded['source-list']?.id !== options.listId)
-          throw new Error('PUBLISHING_LIST_ACK_ROW_ID_UNPROVEN');
-        retainedRows.push({ id: row.id, mediaId, position: row.position });
-      }
+      if (row.id && (row.app_key !== '9XTSHD' || row._embedded['source-list']?.id !== options.listId))
+        throw new Error('PUBLISHING_LIST_ACK_ROW_ID_UNPROVEN');
+      expectedRows.push({ id: row.id, mediaId, position: row.position });
       const existingId = row.id ? { 'uploadStatus.listItemId': row.id } : {};
       const allocatedId: FrozenListRowBinding = {
         field: 'uploadStatus.listItemId',
@@ -342,7 +340,7 @@ export async function freezeListMutationProjection(options: {
           rows: options.rows,
         }))
       );
-    const retainedIds = new Set(retainedRows.map((row) => row.id));
+    const retainedIds = new Set(expectedRows.map((row) => row.id));
     const verificationRows = options.rows.map((row) => {
       const retained = Boolean(row.id && retainedIds.has(row.id));
       const embeddedId = row._embedded[row.type]?.id;
@@ -404,7 +402,7 @@ export async function freezeListMutationProjection(options: {
     });
     frozen.commit();
   });
-  return { operation, step: options.step, listId: options.listId, writes: normalWrites, retainedRows };
+  return { operation, step: options.step, listId: options.listId, writes: normalWrites, expectedRows };
 }
 
 /** Original ACK remains private even if this original actor can no longer project. */
@@ -415,40 +413,30 @@ export async function commitListMutationProjection(
   receivedFullAcknowledgement = false
 ): Promise<void> {
   if (!program) return;
-  let actualRows = rows;
-  const retainedRowsMatch = (observed: SubsplashListRow[]) =>
-    program.retainedRows.every((proof) => {
-      const matches = observed.filter((row) => row.id === proof.id);
+  const resolveRowIds = (observed: SubsplashListRow[]): Map<string, string> | undefined => {
+    const ids = new Map<string, string>();
+    for (const expected of program.expectedRows) {
+      const matches = observed.filter(
+        (row) => row.type === 'media-item' && row._embedded['media-item']?.id === expected.mediaId
+      );
       const row = matches[0];
-      const matchingMedia = observed.filter(
-        (item) => item.type === 'media-item' && item._embedded['media-item']?.id === proof.mediaId
-      );
-      return (
-        matches.length === 1 &&
-        matchingMedia.length === 1 &&
-        matchingMedia[0] === row &&
-        row.type === 'media-item' &&
-        row.position === proof.position &&
-        row.app_key === '9XTSHD' &&
-        row._embedded['source-list']?.id === program.listId &&
-        row._embedded['media-item']?.id === proof.mediaId
-      );
-    });
-  if (receivedFullAcknowledgement && !retainedRowsMatch(actualRows))
-    throw new Error('PUBLISHING_LIST_ACK_ROW_ID_UNPROVEN');
-  if (
-    !retainedRowsMatch(actualRows) ||
-    program.writes.some((write) =>
-      write.listRowBindings?.some(
-        (binding) =>
-          !actualRows.some(
-            (row) => row.id && row.type === 'media-item' && row._embedded['media-item']?.id === binding.mediaId
-          )
+      if (
+        matches.length !== 1 ||
+        !row.id ||
+        (expected.id && row.id !== expected.id) ||
+        observed.filter((item) => item.id === row.id).length !== 1 ||
+        row.position !== expected.position ||
+        row.app_key !== '9XTSHD' ||
+        row._embedded['source-list']?.id !== program.listId
       )
-    )
-  )
-    actualRows = await getFullListRows(program.listId, token);
-  if (!retainedRowsMatch(actualRows)) throw new Error('PUBLISHING_LIST_ACK_ROW_ID_UNPROVEN');
+        return undefined;
+      ids.set(expected.mediaId, row.id);
+    }
+    return ids;
+  };
+  let rowIds = resolveRowIds(rows);
+  if (!rowIds && !receivedFullAcknowledgement) rowIds = resolveRowIds(await getFullListRows(program.listId, token));
+  if (!rowIds) throw new Error('PUBLISHING_LIST_ACK_ROW_ID_UNPROVEN');
   const { default: admin } = await import('@upperroom/shared/firebase/firebaseAdmin');
   const { FieldValue } = await import('firebase-admin/firestore');
   const db = admin.firestore();
@@ -470,19 +458,9 @@ export async function commitListMutationProjection(
           throw new Error('PUBLISHING_LIST_CANONICAL_GRAPH_CHANGED');
         const patch = { ...write.patch };
         for (const binding of write.listRowBindings ?? []) {
-          const matches = actualRows.filter(
-            (row) => row.type === 'media-item' && row._embedded['media-item']?.id === binding.mediaId
-          );
-          if (
-            matches.length !== 1 ||
-            !matches[0].id ||
-            actualRows.filter((row) => row.id === matches[0].id).length !== 1 ||
-            matches[0].app_key !== '9XTSHD' ||
-            matches[0]._embedded['source-list']?.id !== binding.listId
-          )
-            throw new Error('PUBLISHING_LIST_ACK_ROW_ID_UNPROVEN');
-          if (write.mode === 'set') setField(patch, binding.field, matches[0].id);
-          else patch[binding.field] = matches[0].id;
+          const rowId = rowIds.get(binding.mediaId)!;
+          if (write.mode === 'set') setField(patch, binding.field, rowId);
+          else patch[binding.field] = rowId;
         }
         return { write, patch };
       });
@@ -845,7 +823,7 @@ export async function patchListRows(
       ...row,
       position: index + 1,
     }));
-    await commitListMutationProjection(program, program?.retainedRows.length ? [] : fallback, token);
+    await commitListMutationProjection(program, [], token);
     return fallback;
   } catch (error: unknown) {
     logger.error(`Failed to patch list ${listId}`, getAxiosData(error) ?? error);
@@ -887,5 +865,5 @@ export async function deleteListRow(rowId: string, listId: string, token: string
       return { completion: 'acknowledged', result: null };
     },
   });
-  await commitListMutationProjection(program, program?.retainedRows.length ? [] : remainingRows, token);
+  await commitListMutationProjection(program, [], token);
 }

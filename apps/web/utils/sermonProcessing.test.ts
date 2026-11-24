@@ -1,6 +1,6 @@
 import type { DurableJob } from '@upperroom/contracts/temporal';
 import { sermonStatusType } from '../types/SermonTypes';
-import { getSermonProcessing } from './sermonProcessing';
+import { confirmedSermonAudioJob, getSermonProcessing } from './sermonProcessing';
 
 const buildDurableJob = (overrides: Partial<DurableJob>): DurableJob => ({
   schemaVersion: 1,
@@ -41,10 +41,50 @@ describe('sermon processing presentation', () => {
     expect(getSermonProcessing([publishing, media], sermonStatusType.PROCESSING, false)).toEqual({
       pending: false,
       processing: true,
+      stopped: false,
       label: 'Process audio',
       percent: 25,
       showBar: true,
     });
+  });
+
+  it('waits for an authoritative sermon status while allowing fresh job progress', () => {
+    expect(getSermonProcessing([], undefined, false)).toMatchObject({
+      pending: false,
+      processing: false,
+      showBar: false,
+    });
+    expect(getSermonProcessing([], sermonStatusType.PROCESSING, false)).toMatchObject({
+      processing: true,
+      showBar: true,
+    });
+    expect(getSermonProcessing([media], undefined, false)).toMatchObject({
+      processing: true,
+      percent: 25,
+    });
+  });
+
+  it('stops showing a pending source after its upload is cancelled or fails', () => {
+    const cancelled = buildDurableJob({ state: 'cancelled' });
+    expect(getSermonProcessing([cancelled], sermonStatusType.PENDING, false)).toMatchObject({
+      pending: false,
+      stopped: true,
+      label: 'Upload stopped',
+      showBar: false,
+    });
+    expect(getSermonProcessing([media, cancelled], sermonStatusType.PENDING, false)).toMatchObject({
+      stopped: false,
+      percent: 25,
+    });
+  });
+
+  it('follows only the exact audio job for the same accepted source and sermon', () => {
+    const source = buildDurableJob({ state: 'succeeded', result: { mediaJobId: 'audio-job' } });
+    const child = { ...media, jobId: 'audio-job' };
+    expect(confirmedSermonAudioJob(source, child)).toBe(child);
+    expect(confirmedSermonAudioJob(source, { ...child, projectId: 'other' })).toBeUndefined();
+    expect(confirmedSermonAudioJob(source, { ...child, entity: { ...child.entity, id: 'other' } })).toBeUndefined();
+    expect(confirmedSermonAudioJob(source, { ...child, jobId: 'other' })).toBeUndefined();
   });
 
   it('shows a stage without a percentage while queued, and discards stale measurements', () => {

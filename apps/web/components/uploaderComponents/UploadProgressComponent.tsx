@@ -14,6 +14,7 @@ import Alert from '@mui/material/Alert';
 import type { DurableAdmissionReceipt, DurableJob } from '@upperroom/contracts/temporal';
 import { AudioSource, AudioTransferProgress } from '../../utils/uploadFile';
 import { useDurableJob } from '../../hooks/useDurableJobs';
+import { confirmedSermonAudioJob } from '../../utils/sermonProcessing';
 import useAuth from '../../context/user/UserContext';
 import { submitDurableCommand } from '../../utils/durableJobs';
 import { JOB_STATE_LABELS } from '../../utils/durableJobPresentation';
@@ -83,16 +84,12 @@ export default function UploadProgressComponent({
     job?.kind === 'upload.create' && typeof job.result?.mediaJobId === 'string' ? job.result.mediaJobId : undefined;
   const audio = useDurableJob(childId);
   const sourceReceived = job?.kind === 'upload.create' && job.state === 'succeeded';
-  const currentJob = sourceReceived ? audio.job : job;
+  const audioJob = confirmedSermonAudioJob(job, audio.job);
+  const currentJob = sourceReceived ? audioJob : job;
   const stale =
     Boolean(receipt?.jobId && (source.stale || source.error)) || Boolean(childId && (audio.stale || audio.error));
   const isComplete = Boolean(
-    !isUploading &&
-      sourceReceived &&
-      audio.job?.kind === 'audio.process' &&
-      audio.job.state === 'succeeded' &&
-      !stale &&
-      !uploadProgress.error
+    !isUploading && sourceReceived && audioJob?.state === 'succeeded' && !stale && !uploadProgress.error
   );
   const isError = Boolean(
     uploadProgress.error || (currentJob && ['failed', 'needs_attention', 'waiting_for_auth'].includes(currentJob.state))

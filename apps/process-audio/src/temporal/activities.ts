@@ -236,7 +236,7 @@ export function createMediaActivities(dependencies: MediaActivityDependencies): 
     await dependencies.assertAuthorized(ref);
     return { kind: 'ready' };
   };
-  const project = async (ref: MediaJobRef, stage: MediaStage, progress: number) => {
+  const project = async (ref: MediaJobRef, stage: MediaStage, progress: number, remoteYouTubeRender?: true) => {
     const projected = await db.runTransaction(async (transaction) => {
       const [sermon, state, job] = await Promise.all([
         transaction.get(sermonDoc(ref)),
@@ -253,7 +253,11 @@ export function createMediaActivities(dependencies: MediaActivityDependencies): 
       return true;
     });
     if (!projected) return;
-    await dependencies.projectJob(ref, { state: 'running', stage });
+    await dependencies.projectJob(ref, {
+      state: 'running',
+      stage,
+      ...(remoteYouTubeRender && { remoteYouTubeRender }),
+    });
     await realtime.ref(`addIntroOutro/${ref.sermonId}`).transaction((current) =>
       current?.revision > ref.revision
         ? undefined
@@ -494,7 +498,7 @@ export function createMediaActivities(dependencies: MediaActivityDependencies): 
       }
       const { payload } = request;
       if ('youtubeUrl' in payload && dependencies.renderYouTube) {
-        await project(ref, 'downloading', 5);
+        await project(ref, 'downloading', 5, true);
         return dependencies.renderYouTube(
           ref,
           Context.current().cancellationSignal,

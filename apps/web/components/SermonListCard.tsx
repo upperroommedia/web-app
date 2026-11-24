@@ -239,6 +239,7 @@ const SermonListCard: FunctionComponent<Props> = ({
   const {
     pending: isPending,
     processing: isProcessing,
+    stopped: isSourceStopped,
     label: processingStageLabel,
     percent: processingProgress,
     showBar: showProcessingBar,
@@ -430,7 +431,21 @@ const SermonListCard: FunctionComponent<Props> = ({
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' });
   };
 
-  const isProcessingProgressIndeterminate = processingProgress === undefined;
+  const processingBar = showProcessingBar && (
+    <LinearProgress
+      aria-label={processingStageLabel}
+      variant={processingProgress === undefined ? 'indeterminate' : 'determinate'}
+      value={processingProgress}
+      sx={{
+        height: 2,
+        borderRadius: 1,
+        overflow: 'hidden',
+        mt: 0.5,
+        bgcolor: alpha(theme.palette.warning.main, 0.15),
+        '& .MuiLinearProgress-bar': { bgcolor: 'warning.main' },
+      }}
+    />
+  );
   const imageSize = isDesktop ? 150 : isTablet ? 90 : 70;
   const sermonImage = currentSermon.images?.find((image) => image.type === 'square');
   const seriesImage =
@@ -660,7 +675,7 @@ const SermonListCard: FunctionComponent<Props> = ({
     ) : null;
 
   const renderProcessingChip = () =>
-    isProcessing ? (
+    isProcessing || isSourceStopped ? (
       <Chip
         label={`${processingStageLabel}${
           processingProgress !== undefined ? ` ${Math.round(processingProgress)}%` : ''
@@ -889,6 +904,7 @@ const SermonListCard: FunctionComponent<Props> = ({
                 </Stack>
 
                 <Stack direction="row" spacing={0.35} alignItems="center" sx={{ minWidth: 0, flexShrink: 1 }}>
+                  {renderPendingChip()}
                   {renderProcessingChip()}
                   {renderErrorIndicator()}
                 </Stack>
@@ -902,6 +918,7 @@ const SermonListCard: FunctionComponent<Props> = ({
                   <Box sx={{ width: 1, minWidth: 0 }} />
                 )}
               </Box>
+              {processingBar}
             </Box>
           ) : (
             <Box
@@ -1030,24 +1047,8 @@ const SermonListCard: FunctionComponent<Props> = ({
                 </Stack>
               </Box>
 
-              {showProcessingBar && (
-                <LinearProgress
-                  variant={isProcessingProgressIndeterminate ? 'indeterminate' : 'determinate'}
-                  value={isProcessingProgressIndeterminate ? undefined : processingProgress}
-                  sx={{
-                    height: 2,
-                    borderRadius: 1,
-                    overflow: 'hidden',
-                    mt: 0.5,
-                    bgcolor: alpha(theme.palette.warning.main, 0.15),
-                    '& .MuiLinearProgress-bar': {
-                      bgcolor: 'warning.main',
-                      borderRadius: 0,
-                    },
-                  }}
-                />
-              )}
-              {latestJob && !isProcessing && (
+              {processingBar}
+              {latestJob && !isProcessing && !isSourceStopped && (
                 <Chip
                   size="small"
                   variant="outlined"

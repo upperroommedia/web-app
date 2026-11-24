@@ -8,6 +8,7 @@ import useAuth from '../../context/user/UserContext';
 import { useDurableJob } from '../../hooks/useDurableJobs';
 import { submitDurableCommand } from '../../utils/durableJobs';
 import { jobStateLabel } from '../../utils/durableJobPresentation';
+import { confirmedSermonAudioJob } from '../../utils/sermonProcessing';
 
 /** Familiar inline status and permitted cancellation, without an operational task card. */
 export default function PlainJobStatus({ job, stale = false }: { job: DurableJob; stale?: boolean }) {
@@ -16,12 +17,7 @@ export default function PlainJobStatus({ job, stale = false }: { job: DurableJob
     job.kind === 'upload.create' && typeof job.result?.mediaJobId === 'string' ? job.result.mediaJobId : undefined;
   const child = useDurableJob(childId);
   const sourceReceived = job.kind === 'upload.create' && job.state === 'succeeded';
-  const displayed =
-    sourceReceived && childId
-      ? child.job?.kind === 'audio.process' && child.job.entity.id === job.entity.id
-        ? child.job
-        : undefined
-      : job;
+  const displayed = sourceReceived ? confirmedSermonAudioJob(job, child.job) : job;
   const outdated = stale || Boolean(childId && (child.stale || child.error));
   const step = displayed?.steps.find((item) => ['running', 'retrying', 'waiting'].includes(item.state));
   const identity = displayed ? `${displayed.jobId}:${displayed.generation}:${displayed.revision}` : '';

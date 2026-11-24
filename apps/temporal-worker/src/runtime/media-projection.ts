@@ -63,7 +63,11 @@ export function createMediaProjection(
     return step;
   });
   if (value.stage && !terminal) {
-    const step = { id: value.stage, label: labels[value.stage], state: 'running' as const, attempt };
+    const label =
+      value.stage === 'downloading' && value.remoteYouTubeRender
+        ? 'Download and process YouTube audio'
+        : labels[value.stage];
+    const step = { id: value.stage, label, state: 'running' as const, attempt };
     const index = steps.findIndex((existing) => existing.id === step.id);
     if (index >= 0) steps[index] = step;
     else steps.push(step);

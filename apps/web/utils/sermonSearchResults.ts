@@ -88,3 +88,15 @@ export const reconcileAdminSermonSearchResults = ({
     ],
   };
 };
+
+/** An open list needs new search results when its confirmed pending overlay
+ * drops a Sermon absent from the current hits. Firestore still verifies hits. */
+export function hasPendingSermonLeavingSearch(
+  previous: ReadonlySet<string>,
+  current: ReadonlySet<string>,
+  visibleHitIds: readonly string[],
+  hidden: ReadonlySet<string>
+) {
+  const hits = new Set(visibleHitIds);
+  return [...previous].some((id) => !current.has(id) && !hits.has(id) && !hidden.has(id));
+}

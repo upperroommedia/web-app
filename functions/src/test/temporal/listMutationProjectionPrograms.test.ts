@@ -422,3 +422,38 @@ test.each(['wrong-media', 'duplicate-media'])(
     expect(f.records.has('lists/root/listItems/sermon')).toBe(false);
   }
 );
+
+test('a wrong position on the last newly allocated row rejects the ACK before the first projection chunk', async () => {
+  const f = fixture(true);
+  // Each new media row projects two documents, so the last row is beyond the first chunk of 64 writes.
+  const expected = Array.from({ length: 33 }, (_, index) => {
+    const mediaId = `media-${index}`;
+    f.records.set(`sermons/sermon-${index}`, { id: `sermon-${index}`, subsplashId: mediaId });
+    return {
+      ...row,
+      id: `row-${index}`,
+      position: index + 1,
+      _embedded: { ...row._embedded, 'media-item': { id: mediaId } },
+    };
+  });
+  const acknowledged = expected.map((item, index) =>
+    index === expected.length - 1 ? { ...item, position: item.position + 1 } : item
+  );
+  const wire = axios as unknown as jest.Mock;
+  wire.mockImplementation(async (request: { method: string }) =>
+    request.method === 'PATCH'
+      ? { status: 200, data: { _embedded: { 'list-rows': acknowledged } } }
+      : { data: { id: 'remote', _embedded: { images: [] } } }
+  );
+
+  await expect(
+    f.run(() => patchListRows('remote', expected.map((item) => ({ ...item, id: undefined })), 'token'))
+  ).rejects.toThrow('PUBLISHING_LIST_ACK_ROW_ID_UNPROVEN');
+  expect(wire.mock.calls.map(([request]) => request.method)).toEqual(['GET', 'PATCH']);
+  expect(f.events).toContain('ack');
+  expect(f.plans).toHaveLength(1);
+  expect(f.records.get('lists/root')).toMatchObject({ count: 0, logicalCount: 0 });
+  expect([...f.records.keys()].filter((path) => path.includes('/listItems/') || path.includes('/sermonLists/'))).toEqual(
+    []
+  );
+});

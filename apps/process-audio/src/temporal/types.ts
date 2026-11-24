@@ -60,6 +60,7 @@ export interface MediaJobProjection {
   stage?: MediaStage;
   progress?: number;
   measuredSeconds?: { completed: number; total: number };
+  remoteYouTubeRender?: true;
   reason?: string;
   retryAt?: string;
 }

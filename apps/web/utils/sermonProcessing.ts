@@ -2,11 +2,24 @@ import { isDurableJobTerminal, type DurableJob } from '@upperroom/contracts/temp
 import { sermonStatusType } from '../types/SermonTypes';
 import { measuredStepPercent } from './durableJobPresentation';
 
-export function getSermonProcessing(jobs: readonly DurableJob[], audioStatus: sermonStatusType, stale: boolean) {
+export function getSermonProcessing(
+  jobs: readonly DurableJob[],
+  audioStatus: sermonStatusType | undefined,
+  stale: boolean
+) {
   const mediaJobs = jobs.filter((job) => job.kind === 'audio.process' || job.kind === 'upload.create');
   const active = mediaJobs.filter((job) => !isDurableJobTerminal(job.state));
   const job = active.find((candidate) => candidate.kind === 'audio.process') ?? active[0];
-  const pending = job?.state === 'awaiting_source' || (!job && audioStatus === sermonStatusType.PENDING);
+  const endedUpload =
+    !job &&
+    !stale &&
+    audioStatus === sermonStatusType.PENDING &&
+    mediaJobs[0]?.kind === 'upload.create' &&
+    ['cancelled', 'superseded', 'failed'].includes(mediaJobs[0].state)
+      ? mediaJobs[0]
+      : undefined;
+  const pending =
+    !endedUpload && (job?.state === 'awaiting_source' || (!job && audioStatus === sermonStatusType.PENDING));
   const processing = Boolean(job && !pending) || (!job && audioStatus === sermonStatusType.PROCESSING);
   const step = job?.steps.find((current) => ['running', 'retrying', 'waiting'].includes(current.state));
   const measuring = !stale && job?.state === 'running' && step?.state === 'running';
@@ -22,7 +35,25 @@ export function getSermonProcessing(jobs: readonly DurableJob[], audioStatus: se
   };
   const label = stale
     ? 'Reconnecting'
-    : (job && labels[job.state]) ?? step?.label ?? (pending ? 'Waiting for file' : 'Processing audio');
+    : endedUpload
+    ? endedUpload.state === 'failed'
+      ? 'Upload failed'
+      : 'Upload stopped'
+    : (job && labels[job.state]) ?? step?.label ?? (pending ? 'Pending processing' : 'Processing audio');
   const showBar = processing && !stale && (!job || job.state === 'running' || job.state === 'queued');
-  return { pending, processing, label, percent, showBar };
+  return { pending, processing, stopped: Boolean(endedUpload), label, percent, showBar };
+}
+
+/** The recorded audio job belongs to this accepted source and this Sermon. */
+export function confirmedSermonAudioJob(source: DurableJob | undefined, audio: DurableJob | undefined) {
+  if (
+    source?.kind === 'upload.create' &&
+    source.state === 'succeeded' &&
+    audio?.kind === 'audio.process' &&
+    audio.jobId === source.result?.mediaJobId &&
+    audio.projectId === source.projectId &&
+    audio.entity.type === source.entity.type &&
+    audio.entity.id === source.entity.id
+  )
+    return audio;
 }

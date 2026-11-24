@@ -1,6 +1,6 @@
 import { createSermon } from '../types/Sermon';
 import { sermonStatusType } from '../types/SermonTypes';
-import { reconcileAdminSermonSearchResults } from './sermonSearchResults';
+import { hasPendingSermonLeavingSearch, reconcileAdminSermonSearchResults } from './sermonSearchResults';
 
 describe('reconcileAdminSermonSearchResults', () => {
   it('hides skeletal media recovery probes even when a stale index hit exists', () => {
@@ -263,4 +263,13 @@ describe('reconcileAdminSermonSearchResults', () => {
     ]);
     expect(result.visiblePendingSermons).toHaveLength(0);
   });
+});
+
+test('refreshes a mounted search only for a removed pending sermon absent from its hits', () => {
+  const earlier = new Set(['new-sermon', 'still-processing']);
+  const now = new Set(['still-processing']);
+  expect(hasPendingSermonLeavingSearch(earlier, now, [], new Set())).toBe(true);
+  expect(hasPendingSermonLeavingSearch(earlier, now, ['new-sermon'], new Set())).toBe(false);
+  expect(hasPendingSermonLeavingSearch(earlier, now, [], new Set(['new-sermon']))).toBe(false);
+  expect(hasPendingSermonLeavingSearch(now, now, [], new Set())).toBe(false);
 });

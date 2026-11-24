@@ -127,7 +127,13 @@ const SermonDetailsPage = () => {
   const sermon = sermonSnapshot?.data();
   const processingEntity = useMemo(() => ({ type: 'sermon' as const, id: sermonId ?? '' }), [sermonId]);
   const { jobs: sermonJobs, stale: sermonJobsStale } = useEntityJobSummary(processingEntity, sermon?.activeDurableJobs);
-  const processing = sermon && getSermonProcessing(sermonJobs, sermon.status.audioStatus, sermonJobsStale);
+  const processing =
+    sermon &&
+    getSermonProcessing(
+      sermonJobs,
+      sermonSnapshot?.metadata.fromCache ? undefined : sermon.status.audioStatus,
+      sermonJobsStale
+    );
   const isAdmin = user?.isAdmin() ?? false;
   const canPublish = user?.canPublish() ?? false;
   const isCurrentlyPlaying = currentSermon?.id === sermonId && playing;
@@ -515,7 +521,7 @@ const SermonDetailsPage = () => {
                       {sermon.title}
                     </Typography>
 
-                    {processing && (processing.pending || processing.processing) && (
+                    {processing && (processing.pending || processing.processing || processing.stopped) && (
                       <Stack spacing={0.75} sx={{ mb: 1.5, maxWidth: 420 }} data-testid="sermon-detail-processing">
                         <Typography variant="body2" fontWeight={600} role="status">
                           {processing.label}
