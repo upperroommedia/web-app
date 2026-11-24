@@ -3,9 +3,14 @@ import { SOUNDCLOUD_AUTH_RECONNECT_REQUIRED_CODE } from '@upperroom/shared/share
 
 type ErrorDetailsRecord = Record<string, unknown>;
 
-export const createSoundCloudReconnectRequiredError = (message: string, details?: unknown): HttpsError =>
+export const createSoundCloudReconnectRequiredError = (
+  message: string,
+  details?: unknown,
+  invalidGrant = false
+): HttpsError =>
   new HttpsError('failed-precondition', message, {
     code: SOUNDCLOUD_AUTH_RECONNECT_REQUIRED_CODE,
+    ...(invalidGrant && { invalidGrant: true }),
     ...(typeof details !== 'undefined' ? { cause: details } : {}),
   });
 

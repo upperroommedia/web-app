@@ -1347,8 +1347,12 @@ export function createDurableJobStore(options: {
       return next;
     });
   }
-  async function project(ref: DurableJobRef, patch: DurableJobPatch): Promise<DurableJob> {
-    return mutate(ref, () => patch);
+  /** A patch derived from job state must use the job read by the write transaction. */
+  async function project(
+    ref: DurableJobRef,
+    patch: DurableJobPatch | ((current: Readonly<DurableJob>) => DurableJobPatch)
+  ): Promise<DurableJob> {
+    return mutate(ref, typeof patch === 'function' ? patch : () => patch);
   }
   async function recordStep(ref: DurableJobRef, step: DurableJobStep): Promise<DurableJob> {
     validateStep(step);

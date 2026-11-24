@@ -69,7 +69,7 @@ test('separate paused diagnostic starts only the fixed pinned original and recon
       image: `registry/worker@sha256:${'d'.repeat(64)}`,
       nonce: 'c'.repeat(32),
       createdAt,
-      expiresAt: createdAt + 300000,
+      expiresAt: createdAt + 600_000,
       controlVersion: diagnosticVersion(await control.get()),
       stateVersion: diagnosticVersion(await state.get()),
       activationDigest: 'e'.repeat(64),
@@ -190,6 +190,7 @@ test('separate paused diagnostic starts only the fixed pinned original and recon
     await outboxRef.update({ startPulseDigest: digest(seeded.pulse('outbox')) });
     const history = await handle.fetchHistory();
     expect(history.events?.filter((e) => e.workflowExecutionStartedEventAttributes)).toHaveLength(1);
+    expect(Number(history.events?.[0].workflowExecutionStartedEventAttributes?.workflowExecutionTimeout?.seconds)).toBe(360);
     expect(
       history.events?.filter(
         (e) =>
@@ -272,7 +273,7 @@ test('separate paused diagnostic starts only the fixed pinned original and recon
       (await db.doc(diagnosticRecordPath(operationId, 'commands')).get()).get('dispatchAcknowledged')
     ).toBeUndefined();
     // A separate commands event has its own pulse, original run and completion proof.
-    const commandsId = randomUUID(), commandsManifest = { ...manifest, operationId: commandsId, nonce: '1'.repeat(32) };
+    const commandsId = randomUUID(), commandsManifest = { ...manifest, operationId: commandsId, nonce: '1'.repeat(32), expiresAt: manifest.createdAt + 300_000 };
     const commandsSeed = pulseState(commandsManifest);
     await db.runTransaction(async tx => {
       tx.update(parent, { operationId: commandsId, cloudDispatchDiagnostic: commandsManifest });

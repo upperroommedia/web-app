@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useHits, useInstantSearch } from 'react-instantsearch';
 import List from '@mui/material/List';
 import Box from '@mui/material/Box';
@@ -15,7 +15,7 @@ import { sermonConverter } from '../types/Sermon';
 import { Sermon } from '../types/SermonTypes';
 import { useCollection } from 'react-firebase-hooks/firestore';
 import { normalizeAlgoliaSermonHit, type AlgoliaSermonHit } from '../utils/algolia/searchRecords';
-import { reconcileAdminSermonSearchResults } from '../utils/sermonSearchResults';
+import { hasPendingSermonLeavingSearch, reconcileAdminSermonSearchResults } from '../utils/sermonSearchResults';
 import useAuth from '../context/user/UserContext';
 
 const FIRESTORE_IN_QUERY_LIMIT = 10;
@@ -156,7 +156,7 @@ interface SearchResultSermonListProps extends BoxProps {
 
 const SearchResultSermonList = ({ hiddenSermonIds = [], ...props }: SearchResultSermonListProps) => {
   const { hits } = useHits();
-  const { status, results, indexUiState } = useInstantSearch();
+  const { status, results, indexUiState, refresh } = useInstantSearch();
   const { currentSermonId, setCurrentSermon } = useAudioPlayer();
   const { user } = useAuth();
   const playing = usePlaybackPlaying();
@@ -198,6 +198,19 @@ const SearchResultSermonList = ({ hiddenSermonIds = [], ...props }: SearchResult
   const hasActiveRefinements = Object.values(refinementList).some((values) => values.length > 0);
   const currentPage = typeof indexUiState.page === 'number' ? indexUiState.page : 0;
   const showPendingOverlay = !indexUiState.query && !hasActiveRefinements && currentPage === 0;
+  const lastServerPending = useRef<{ query: typeof pendingSermonsQuery; ids: Set<string> } | undefined>(undefined);
+  useEffect(() => {
+    if (!pendingSermonsServerConfirmed) return;
+    const current = new Set(pendingSermons.map(({ id }) => id));
+    const previous = lastServerPending.current;
+    lastServerPending.current = { query: pendingSermonsQuery, ids: current };
+    if (
+      previous?.query === pendingSermonsQuery &&
+      hasPendingSermonLeavingSearch(previous.ids, current, visibleHitIds, hiddenSermonIdSet)
+    )
+      refresh();
+  }, [hiddenSermonIdSet, pendingSermons, pendingSermonsQuery, pendingSermonsServerConfirmed, refresh, visibleHitIds]);
+
   const {
     liveSermonsById,
     resolvedIds: resolvedLiveSermonIds,

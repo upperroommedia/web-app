@@ -524,7 +524,7 @@ export function createImageActivities(deps: ImageDependencies): ImageActivities 
               ref: cleanupRef,
               workflowType: 'ImageReceiptReconciliation',
               workflowId: `image-reconcile:${ref.projectId}:${jobId}`,
-              taskQueue: 'urm-images',
+              taskQueue: 'urm-orchestration',
             },
           });
           tx.update(deps.firestore.collection('durableJobs').doc(jobId), { actions: [] });
@@ -1224,7 +1224,7 @@ export async function ensureImageAcknowledgementReview(
         ref: childRef,
         workflowType: 'ImageReceiptReconciliation',
         workflowId: `image-ack-reconcile:${ref.projectId}:${childRef.jobId}`,
-        taskQueue: 'urm-images',
+        taskQueue: 'urm-orchestration',
       },
     });
     binding();

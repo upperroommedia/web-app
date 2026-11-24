@@ -48,6 +48,7 @@ import AvatarWithDefaultImage from './AvatarWithDefaultImage';
 import { useEntityJobSummary } from '../hooks/useDurableJobs';
 import { isDurableJobTerminal } from '@upperroom/contracts/temporal';
 import { jobStateLabel, stoppedRepairMessage } from '../utils/durableJobPresentation';
+import { getSermonProcessing } from '../utils/sermonProcessing';
 
 const ManagePublishingPopup = dynamic(() => import('./ManagePublishingPopup'), { ssr: false });
 
@@ -230,15 +231,20 @@ const SermonListCard: FunctionComponent<Props> = ({
   const isSubsplashComplete = subsplashTotal > 0 && subsplashUploaded === subsplashTotal;
   const isCurrentlyPlaying = audioPlayerCurrentSermonId === currentSermon.id && playing;
   const jobEntity = useMemo(() => ({ type: 'sermon' as const, id: currentSermon.id }), [currentSermon.id]);
-  const { job: latestJob, stale: jobStateStale } = useEntityJobSummary(jobEntity, currentSermon.activeDurableJobs);
+  const {
+    job: latestJob,
+    jobs,
+    stale: jobStateStale,
+  } = useEntityJobSummary(jobEntity, currentSermon.activeDurableJobs);
+  const {
+    pending: isPending,
+    processing: isProcessing,
+    stopped: isSourceStopped,
+    label: processingStageLabel,
+    percent: processingProgress,
+    showBar: showProcessingBar,
+  } = getSermonProcessing(jobs, audioStatus, jobStateStale);
   const activeJob = latestJob && !isDurableJobTerminal(latestJob.state) ? latestJob : undefined;
-  const processingJob =
-    activeJob && (activeJob.kind === 'audio.process' || activeJob.kind === 'upload.create') ? activeJob : undefined;
-  const isProcessing =
-    Boolean(processingJob && processingJob.state !== 'awaiting_source') ||
-    (!latestJob && audioStatus === sermonStatusType.PROCESSING);
-  const isPending =
-    processingJob?.state === 'awaiting_source' || (!latestJob && audioStatus === sermonStatusType.PENDING);
   const [uploader, setUploader] = useState<DirectoryUser | User>();
   const [uploaderLoading, setUploaderLoading] = useState(false);
   const [showUploaderTooltip, setShowUploaderTooltip] = useState(false);
@@ -425,26 +431,21 @@ const SermonListCard: FunctionComponent<Props> = ({
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' });
   };
 
-  const processingStep = activeJob?.steps.find(
-    (step) => step.state === 'running' || step.state === 'retrying' || step.state === 'waiting'
+  const processingBar = showProcessingBar && (
+    <LinearProgress
+      aria-label={processingStageLabel}
+      variant={processingProgress === undefined ? 'indeterminate' : 'determinate'}
+      value={processingProgress}
+      sx={{
+        height: 2,
+        borderRadius: 1,
+        overflow: 'hidden',
+        mt: 0.5,
+        bgcolor: alpha(theme.palette.warning.main, 0.15),
+        '& .MuiLinearProgress-bar': { bgcolor: 'warning.main' },
+      }}
+    />
   );
-  const measured = processingStep?.progress;
-  const processingProgress =
-    measured && measured.total > 0
-      ? Math.min(100, Math.max(0, (measured.completed / measured.total) * 100))
-      : undefined;
-  const processingStageLabel = jobStateStale
-    ? 'Reconnecting'
-    : processingJob?.state === 'needs_attention'
-    ? 'Needs attention'
-    : processingJob?.state === 'waiting_for_auth'
-    ? 'Reconnect provider'
-    : processingJob?.state === 'cancel_requested'
-    ? 'Cancellation requested'
-    : processingJob?.state === 'retrying'
-    ? 'Retrying'
-    : processingStep?.label || (activeJob?.state === 'queued' ? 'Queued' : 'Processing');
-  const isProcessingProgressIndeterminate = processingProgress === undefined;
   const imageSize = isDesktop ? 150 : isTablet ? 90 : 70;
   const sermonImage = currentSermon.images?.find((image) => image.type === 'square');
   const seriesImage =
@@ -674,7 +675,7 @@ const SermonListCard: FunctionComponent<Props> = ({
     ) : null;
 
   const renderProcessingChip = () =>
-    isProcessing ? (
+    isProcessing || isSourceStopped ? (
       <Chip
         label={`${processingStageLabel}${
           processingProgress !== undefined ? ` ${Math.round(processingProgress)}%` : ''
@@ -702,7 +703,7 @@ const SermonListCard: FunctionComponent<Props> = ({
     isPending ? (
       <Chip
         icon={<PendingIcon />}
-        label={processingJob?.state === 'awaiting_source' ? 'Waiting for file' : 'Pending'}
+        label={processingStageLabel}
         size="small"
         color="default"
         variant="outlined"
@@ -903,6 +904,7 @@ const SermonListCard: FunctionComponent<Props> = ({
                 </Stack>
 
                 <Stack direction="row" spacing={0.35} alignItems="center" sx={{ minWidth: 0, flexShrink: 1 }}>
+                  {renderPendingChip()}
                   {renderProcessingChip()}
                   {renderErrorIndicator()}
                 </Stack>
@@ -916,6 +918,7 @@ const SermonListCard: FunctionComponent<Props> = ({
                   <Box sx={{ width: 1, minWidth: 0 }} />
                 )}
               </Box>
+              {processingBar}
             </Box>
           ) : (
             <Box
@@ -1044,27 +1047,8 @@ const SermonListCard: FunctionComponent<Props> = ({
                 </Stack>
               </Box>
 
-              {isProcessing &&
-                activeJob &&
-                !jobStateStale &&
-                ['running', 'queued', 'reconciling'].includes(activeJob.state) && (
-                  <LinearProgress
-                    variant={isProcessingProgressIndeterminate ? 'indeterminate' : 'determinate'}
-                    value={isProcessingProgressIndeterminate ? undefined : processingProgress}
-                    sx={{
-                      height: 2,
-                      borderRadius: 1,
-                      overflow: 'hidden',
-                      mt: 0.5,
-                      bgcolor: alpha(theme.palette.warning.main, 0.15),
-                      '& .MuiLinearProgress-bar': {
-                        bgcolor: 'warning.main',
-                        borderRadius: 0,
-                      },
-                    }}
-                  />
-                )}
-              {latestJob && !isProcessing && (
+              {processingBar}
+              {latestJob && !isProcessing && !isSourceStopped && (
                 <Chip
                   size="small"
                   variant="outlined"
@@ -1091,7 +1075,8 @@ const SermonListCard: FunctionComponent<Props> = ({
                       ? 'Cancelled'
                       : latestJob.state === 'queued'
                       ? 'Queued'
-                      : processingStep?.label || latestJob.state.replaceAll('_', ' ')
+                      : latestJob.steps.find((step) => ['running', 'retrying', 'waiting'].includes(step.state))
+                          ?.label || latestJob.state.replaceAll('_', ' ')
                   }
                   color={
                     stoppedRepairMessage(latestJob)

@@ -29,3 +29,33 @@ test('old callbacks never regress a completed or superseded job', () => {
     createMediaProjection({ ...job, state: 'superseded' }, { state: 'running', stage: 'preparing' }, 3, 1000)
   ).toBeNull();
 });
+test('publishes measured seconds only for the exact running stage and attempt', () => {
+  const report = {
+    state: 'running' as const,
+    stage: 'downloading' as const,
+    measuredSeconds: { completed: 31, total: 60 },
+  };
+  const running = { ...job, revision: 14 };
+  const projection = createMediaProjection(running, report, 2, 1000);
+  expect(projection?.expectedRevision).toBe(14);
+  expect(projection?.steps?.[1].progress).toEqual({ completed: 31, total: 60, unit: 'seconds' });
+  expect(createMediaProjection(running, report, 1, 1000)).toBeNull();
+  expect(createMediaProjection({ ...running, state: 'cancel_requested' }, report, 2, 1000)).toBeNull();
+  expect(createMediaProjection({ ...running, steps: projection?.steps }, report, 2, 1000)).toBeNull();
+});
+
+test('a remote YouTube render describes acquisition and processing without a synthetic percentage', () => {
+  const projection = createMediaProjection(
+    job,
+    {
+      state: 'running',
+      stage: 'downloading',
+      remoteYouTubeRender: true,
+    },
+    3,
+    1000
+  );
+  const step = projection?.steps?.find(({ id }) => id === 'downloading');
+  expect(step?.label).toBe('Download and process YouTube audio');
+  expect(step?.progress).toBeUndefined();
+});

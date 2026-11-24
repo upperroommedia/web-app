@@ -78,12 +78,56 @@ test('rejects wrong-project events and events outside the two outboxes without d
   }
   expect(options.run).not.toHaveBeenCalled();
 });
+test('accepts the exact managed Eventarc push URL and rejects other query strings', async () => {
+  const options = config();
+  const handler = createServerlessDispatchHandler(options);
+  const native = request(handler, { url: '/dispatch?__GCP_CloudEventsMode=CE_PUBSUB_BINDING' });
+  await native.done;
+  expect(native.result().status).toBe(204);
+  for (const url of [
+    '/dispatch?__GCP_CloudEventsMode=other',
+    '/dispatch?__GCP_CloudEventsMode=CE_PUBSUB_BINDING&extra=1',
+    '/reconcile?__GCP_CloudEventsMode=CE_PUBSUB_BINDING',
+  ]) {
+    const call = request(handler, { url });
+    await call.done;
+    expect(call.result().status).toBe(404);
+  }
+  expect(options.run).toHaveBeenCalledTimes(1);
+});
 test('independent scheduled reconciliation recovers missed events without worker polling', async () => {
   const options = config();
   const handler = createServerlessDispatchHandler(options);
   const call = request(handler, { url: '/reconcile', headers: { 'x-cloudscheduler-jobname': options.reconcileJob } });
   await call.done;
   expect(call.result().status).toBe(204);
+  expect(options.run).toHaveBeenCalledTimes(1);
+});
+test('normalizes the native Scheduler job ID after authenticating its caller', async () => {
+  const options = config();
+  const handler = createServerlessDispatchHandler(options);
+  const scheduledAt = '2026-11-24T16:28:00.962296Z';
+  const headers = { 'x-cloudscheduler-jobname': 'dispatch-reconcile', 'x-cloudscheduler-scheduletime': scheduledAt };
+  const accepted = request(handler, { url: '/reconcile', headers });
+  await accepted.done;
+  expect(accepted.result().status).toBe(204);
+  expect(options.run).toHaveBeenCalledWith(
+    expect.anything(),
+    expect.objectContaining({ delivery: { kind: 'scheduler', job: options.reconcileJob, scheduledAt } })
+  );
+  for (const rejected of [
+    { ...headers, 'x-cloudscheduler-jobname': 'other-dispatch-reconcile' },
+    { ...headers, 'x-cloudscheduler-jobname': 'projects/other-project/locations/us-central1/jobs/dispatch-reconcile' },
+    { ...headers, 'x-cloudscheduler-scheduletime': 'invalid' },
+  ]) {
+    const unrelated = request(handler, { url: '/reconcile', headers: rejected });
+    await unrelated.done;
+    expect(unrelated.result().status).toBe(400);
+  }
+  jest.mocked(options.authorization.verify).mockRejectedValueOnce(new Error('Unauthorized Scheduler'));
+  const unauthorized = request(handler, { url: '/reconcile', headers });
+  await unauthorized.done;
+  expect(unauthorized.result().status).toBe(403);
   expect(options.run).toHaveBeenCalledTimes(1);
 });
 test('dispatch failure requests platform retry without exposing private error data', async () => {

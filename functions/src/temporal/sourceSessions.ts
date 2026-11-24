@@ -305,7 +305,7 @@ export function normalizeUploadSource(
         : undefined;
       sermon.numberOfLists = lists.length;
       sermon.numberOfListsUploadedTo = 0;
-      tx.create(db.collection('sermons').doc(sermonId), sermon);
+      tx.create(db.collection('sermons').doc(sermonId), { ...sermon, searchPending: true });
       for (const list of lists) {
         const local = { ...list.data(), id: list.id };
         tx.create(list.ref.collection('listItems').doc(sermonId), { ...sermon, _durableMembershipJobId: ref.jobId });

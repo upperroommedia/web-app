@@ -7,6 +7,7 @@ const mockActivities = {
 };
 const mockCancellation = new Error('cancelled during attention');
 const mockWait = jest.fn();
+const mockPatched = jest.fn();
 const mockContinue = jest.fn();
 const mockMakeContinue = jest.fn((_options: unknown) => mockContinue);
 const mockHandlers = new Map<unknown, () => void>();
@@ -16,6 +17,7 @@ jest.mock('@temporalio/workflow', () => ({
   defineSignal: (name: string) => name,
   setHandler: (name: unknown, handler: () => void) => mockHandlers.set(name, handler),
   proxyActivities: () => mockActivities,
+  patched: (id: string) => mockPatched(id),
   makeContinueAsNewFunc: (options: unknown) => mockMakeContinue(options),
   workflowInfo: () => ({ continueAsNewSuggested: false }),
   isCancellation: (error: unknown) => error === mockCancellation,
@@ -31,8 +33,27 @@ const migrated = new Error('continue-as-new');
 beforeEach(() => {
   jest.clearAllMocks();
   mockHandlers.clear();
+  mockPatched.mockReturnValue(true);
   mockContinue.mockRejectedValue(migrated);
   mockWait.mockRejectedValue(paused);
+});
+
+test('superseded documents settle once without waiting for a resume', async () => {
+  mockActivities.syncSearchDocument.mockRejectedValueOnce({ cause: { type: 'STALE_GENERATION' } });
+  await SearchDocument(ref);
+  expect(mockPatched).toHaveBeenCalledWith('search-document-superseded-v1');
+  expect(mockActivities.syncSearchDocument).toHaveBeenCalledTimes(1);
+  expect(mockActivities.finishSearch).toHaveBeenCalledTimes(1);
+  expect(mockActivities.finishSearch).toHaveBeenCalledWith(ref, 'superseded');
+  expect(mockWait).not.toHaveBeenCalled();
+});
+
+test('a legacy history without the superseded marker retains its attention path', async () => {
+  mockPatched.mockReturnValue(false);
+  mockActivities.syncSearchDocument.mockRejectedValueOnce({ cause: { type: 'STALE_GENERATION' } });
+  await expect(SearchDocument(ref)).rejects.toBe(paused);
+  expect(mockActivities.finishSearch).toHaveBeenCalledWith(ref, 'needs_attention');
+  expect(mockWait).toHaveBeenCalledTimes(1);
 });
 
 test('restored document attention does not retry indexing before a genuine resume', async () => {

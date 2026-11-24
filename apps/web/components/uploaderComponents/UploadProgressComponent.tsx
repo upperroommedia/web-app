@@ -14,6 +14,7 @@ import Alert from '@mui/material/Alert';
 import type { DurableAdmissionReceipt, DurableJob } from '@upperroom/contracts/temporal';
 import { AudioSource, AudioTransferProgress } from '../../utils/uploadFile';
 import { useDurableJob } from '../../hooks/useDurableJobs';
+import { confirmedSermonAudioJob, getSermonProcessing } from '../../utils/sermonProcessing';
 import useAuth from '../../context/user/UserContext';
 import { submitDurableCommand } from '../../utils/durableJobs';
 import { JOB_STATE_LABELS } from '../../utils/durableJobPresentation';
@@ -83,24 +84,25 @@ export default function UploadProgressComponent({
     job?.kind === 'upload.create' && typeof job.result?.mediaJobId === 'string' ? job.result.mediaJobId : undefined;
   const audio = useDurableJob(childId);
   const sourceReceived = job?.kind === 'upload.create' && job.state === 'succeeded';
-  const currentJob = sourceReceived ? audio.job : job;
+  const audioJob = confirmedSermonAudioJob(job, audio.job);
+  const currentJob = sourceReceived ? audioJob : job;
   const stale =
     Boolean(receipt?.jobId && (source.stale || source.error)) || Boolean(childId && (audio.stale || audio.error));
   const isComplete = Boolean(
-    !isUploading &&
-      sourceReceived &&
-      audio.job?.kind === 'audio.process' &&
-      audio.job.state === 'succeeded' &&
-      !stale &&
-      !uploadProgress.error
+    !isUploading && sourceReceived && audioJob?.state === 'succeeded' && !stale && !uploadProgress.error
   );
   const isError = Boolean(
     uploadProgress.error || (currentJob && ['failed', 'needs_attention', 'waiting_for_auth'].includes(currentJob.state))
   );
   const stopped = Boolean(currentJob && ['cancelled', 'superseded'].includes(currentJob.state));
   const fileTransfer = isUploading && audioSource?.type === 'File' && uploadProgress.phase === 'transferring';
-  const isIndeterminate = !fileTransfer;
-  const percent = Number.isFinite(uploadProgress.percent) ? Math.max(0, Math.min(100, uploadProgress.percent)) : 0;
+  const processing = audioJob && getSermonProcessing([audioJob], undefined, stale);
+  const percent = fileTransfer
+    ? Math.max(0, Math.min(100, Number.isFinite(uploadProgress.percent) ? uploadProgress.percent : 0))
+    : !isUploading
+    ? processing?.percent
+    : undefined;
+  const isIndeterminate = percent === undefined;
   const isOpen = isUploading || Boolean(receipt) || uploadProgress.error;
   const canDismiss = !isUploading && !isNavigatingToSermon;
   const showProgress = !isComplete && !isError && !stopped;
@@ -446,7 +448,7 @@ export default function UploadProgressComponent({
                 aria-label={fileTransfer ? 'Audio file transfer' : 'Audio processing'}
                 aria-valuemin={0}
                 aria-valuemax={100}
-                aria-valuenow={fileTransfer ? percent : undefined}
+                aria-valuenow={percent}
                 sx={{
                   position: 'relative',
                   height: 10,

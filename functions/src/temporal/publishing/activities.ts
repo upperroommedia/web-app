@@ -1,3 +1,4 @@
+import { SOUNDCLOUD_AUTH_RECONNECT_REQUIRED_CODE } from '@upperroom/shared/shared/soundcloudAuth';
 import type {
   PrivatePublishingIntent,
   PublishingDomainDependencies,
@@ -131,7 +132,7 @@ export function createPublishingActivities(dependencies: PublishingDomainDepende
         ? 'PROVIDER_CREATE_AMBIGUOUS'
         : detailCode === 'PUBLISHING_SOURCE_CLAIMS_FROZEN'
         ? 'PUBLISHING_SOURCE_CLAIMS_FROZEN'
-        : detailCode === 'SOUNDCLOUD_RECONNECT_REQUIRED'
+        : [SOUNDCLOUD_AUTH_RECONNECT_REQUIRED_CODE, 'SOUNDCLOUD_RECONNECT_REQUIRED'].includes(String(detailCode))
         ? 'SOUNDCLOUD_RECONNECT_REQUIRED'
         : detailCode === 'PUBLISHED_LIST_DRIFT_BLOCKED'
         ? 'PUBLISHING_DRIFT'

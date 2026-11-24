@@ -33,16 +33,30 @@ export class JobRegistry {
     const selectionKey = `${entity.type}:${entity.id}`;
     const matches = entry.snapshot.jobs.filter((job) => job.entity.type === entity.type && job.entity.id === entity.id);
     const job = matches.find((candidate) => !isDurableJobTerminal(candidate.state)) ?? matches[0];
+    const media = [];
+    if (entity.type === 'sermon') {
+      const audio = matches.find(
+        (candidate) => candidate.kind === 'audio.process' && !isDurableJobTerminal(candidate.state)
+      );
+      const upload =
+        matches.find((candidate) => candidate.kind === 'upload.create' && !isDurableJobTerminal(candidate.state)) ??
+        matches.find((candidate) => candidate.kind === 'upload.create');
+      for (const candidate of [audio, upload]) {
+        if (candidate && candidate !== job) media.push(candidate);
+      }
+    }
+    const selected = job ? [job, ...media] : media;
     const previous = entry.selections.get(selectionKey);
     if (
       previous &&
-      previous.jobs[0] === job &&
+      previous.jobs.length === selected.length &&
+      previous.jobs.every((candidate, index) => candidate === selected[index]) &&
       previous.loading === entry.snapshot.loading &&
       previous.stale === entry.snapshot.stale &&
       previous.error === entry.snapshot.error
     )
       return previous;
-    const next = { ...entry.snapshot, jobs: job ? [job] : [] };
+    const next = { ...entry.snapshot, jobs: selected };
     if (entry.selections.size >= 1_000) entry.selections.delete(entry.selections.keys().next().value!);
     entry.selections.set(selectionKey, next);
     return next;

@@ -96,6 +96,50 @@ test('dispatches a stable workflow and acknowledges only after Temporal accepts 
   expect(records['durableJobOutbox/a'].state).toBe('dispatched');
   expect(dispatcher.healthy).toBe(true);
 });
+test.each([
+  ['emailDeliveryWorkflow', 'urm-email'],
+  ['SearchDocument', 'urm-search'],
+  ['SearchBackfill', 'urm-search'],
+  ['ImageIngest', 'urm-images'],
+  ['ImageDelete', 'urm-images'],
+  ['ImageReceiptReconciliation', 'urm-images'],
+])('dispatches pending %s work on the workflow queue with the original workflow ID', async (workflowType, oldQueue) => {
+  const legacy = { ...dispatch, workflowType, taskQueue: oldQueue };
+  const records = {
+    'durableJobOutbox/a': pending({ dispatch: legacy }),
+    'durableJobOutbox/b': pending({ dispatch: legacy, state: 'dispatched' }),
+  };
+  const { dispatcher, workflow } = harness(records);
+  await dispatcher.tick();
+  expect(workflow.start).toHaveBeenCalledTimes(1);
+  expect(workflow.start).toHaveBeenCalledWith(
+    workflowType,
+    expect.objectContaining({ workflowId: legacy.workflowId, taskQueue: 'urm-orchestration', args: [ref] })
+  );
+  expect(records['durableJobOutbox/a'].dispatch.taskQueue).toBe(oldQueue);
+});
+
+test('preserves a different explicit queue for a known workflow type', async () => {
+  const records = {
+    'durableJobOutbox/a': pending({
+      dispatch: { ...dispatch, workflowType: 'SearchDocument', taskQueue: 'explicit-search' },
+    }),
+  };
+  const { dispatcher, workflow } = harness(records);
+  await dispatcher.tick();
+  expect(workflow.start).toHaveBeenCalledWith(
+    'SearchDocument',
+    expect.objectContaining({ taskQueue: 'explicit-search' })
+  );
+});
+test('a missing queue cannot default to orchestration for an unknown workflow type', async () => {
+  const records = { 'durableJobOutbox/a': pending({ dispatch: { ...dispatch, taskQueue: undefined } }) };
+  const { dispatcher, workflow } = harness(records);
+  await dispatcher.tick();
+  expect(workflow.start).not.toHaveBeenCalled();
+  expect(records['durableJobOutbox/a'].state).toBe('pending');
+});
+
 test('recovers an expired lease and safely confirms an ambiguous previous start', async () => {
   const records = { 'durableJobOutbox/a': pending({ state: 'dispatching', leaseExpiresAt: 900, leaseToken: 'old' }) };
   const { dispatcher, workflow } = harness(records);

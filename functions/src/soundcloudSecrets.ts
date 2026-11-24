@@ -22,6 +22,8 @@ import { providerEgressRelayTokenSecret } from './providerRelay';
 import { currentSandboxProfile } from './providerSandbox/http';
 import {
   getSandboxOAuthConfiguration,
+  isSandboxSoundCloudRefreshGrantUsable,
+  SANDBOX_SOUNDCLOUD_ORIGIN,
   sandboxSoundCloudAuthDocumentPath,
   buildSandboxSoundCloudAuthorizeUrl,
 } from './providerSandbox/oauth';
@@ -56,6 +58,7 @@ export type SoundCloudAuthState = {
   refreshLeaseExpiresAtMillis?: number;
   updatedAtMillis?: number;
   oauthExchangeOwner?: string;
+  reconnectRequiredAtMillis?: number;
 };
 
 type RefreshGrantResponse = {
@@ -165,6 +168,7 @@ const isAccessTokenFresh = (
 ): state is SoundCloudAuthState => {
   return Boolean(
     state?.accessToken &&
+      state.reconnectRequiredAtMillis === undefined &&
       state.accessTokenExpiresAtMillis &&
       state.accessTokenExpiresAtMillis - ACCESS_TOKEN_REFRESH_BUFFER_MS > currentTimeMillis
   );
@@ -176,8 +180,10 @@ const sleep = async (durationMs: number): Promise<void> =>
   });
 
 const getSoundCloudSetupError = (): HttpsError =>
-  createSoundCloudReconnectRequiredError(
-    'SoundCloud OAuth is not configured. Set SOUNDCLOUD_CLIENT_ID and SOUNDCLOUD_CLIENT_SECRET, then connect SoundCloud from Admin > Advanced.'
+  new HttpsError(
+    'failed-precondition',
+    'SoundCloud OAuth is not configured. Set SOUNDCLOUD_CLIENT_ID and SOUNDCLOUD_CLIENT_SECRET, then connect SoundCloud from Admin > Advanced.',
+    { code: 'SOUNDCLOUD_OAUTH_CONFIGURATION_REQUIRED' }
   );
 
 const getSoundCloudNotConnectedError = (): HttpsError =>
@@ -347,7 +353,11 @@ const postSoundCloudTokenGrant = async (
       logger.error('SoundCloud token exchange failed', { status, soundCloudError });
 
       if (status === 400 || status === 401) {
-        throw createSoundCloudReconnectRequiredError(invalidGrantMessage, soundCloudError);
+        const invalidGrant = error.code === 'invalid_grant' || soundCloudError?.error === 'invalid_grant';
+        if (invalidGrant) throw createSoundCloudReconnectRequiredError(invalidGrantMessage, soundCloudError, true);
+        throw new HttpsError('failed-precondition', 'SoundCloud rejected the OAuth request.', {
+          code: 'SOUNDCLOUD_OAUTH_REQUEST_REJECTED',
+        });
       }
 
       throw new HttpsError('internal', 'SoundCloud token exchange failed unexpectedly.', soundCloudError);
@@ -377,6 +387,7 @@ const writeTokenState = async (
     accessTokenExpiresAtMillis,
     connectedAtMillis,
     updatedAtMillis,
+    reconnectRequiredAtMillis: FieldValue.delete(),
     refreshLeaseOwner: FieldValue.delete(),
     refreshLeaseExpiresAtMillis: FieldValue.delete(),
   };
@@ -433,6 +444,13 @@ export const createSoundCloudAuthorizationSession = async (
   }
 
   const redirectUri = normalizeRedirectUri(input.redirectUri);
+  const profile = currentSandboxProfile();
+  if (profile && redirectUri !== SANDBOX_SOUNDCLOUD_ORIGIN + SOUND_CLOUD_CALLBACK_PATH) {
+    throw new HttpsError(
+      'invalid-argument',
+      'Open Advanced settings on the canonical staging site to connect SoundCloud.'
+    );
+  }
   const { codeVerifier, codeChallenge } = createPkcePair();
   const state = createOAuthState();
   const createdAtMillis = nowMillis();
@@ -498,7 +516,6 @@ export const createSoundCloudAuthorizationSession = async (
     });
   });
 
-  const profile = currentSandboxProfile();
   if (profile)
     return {
       authorizeUrl: buildSandboxSoundCloudAuthorizeUrl(profile, { redirectUri, state, codeChallenge, clientId }),
@@ -678,12 +695,18 @@ export const getSoundCloudAuthStatus = async (): Promise<SoundCloudAuthStatus> =
   const clientId = getConfiguredClientId();
   const configured = Boolean(clientId && getConfiguredClientSecret());
   const tokenSource = state?.refreshToken ? 'firestore' : bootstrapRefreshToken ? 'secret' : 'none';
+  const sandbox = currentSandboxProfile();
+  const connected =
+    tokenSource !== 'none' &&
+    state?.reconnectRequiredAtMillis === undefined &&
+    (!sandbox ||
+      Boolean(state?.refreshToken && (await isSandboxSoundCloudRefreshGrantUsable(sandbox, state.refreshToken))));
 
   return {
     clientId,
     callbackPath: SOUND_CLOUD_CALLBACK_PATH,
     configured,
-    connected: tokenSource !== 'none',
+    connected,
     tokenSource,
     ...(typeof state?.accessTokenExpiresAtMillis === 'number'
       ? { accessTokenExpiresAtMillis: state.accessTokenExpiresAtMillis }
@@ -714,15 +737,17 @@ const refreshSoundCloudTokens = async (refreshToken: string): Promise<Required<R
   );
 };
 
-const clearRefreshLease = async (leaseOwner: string): Promise<void> => {
+const clearRefreshLease = async (leaseOwner: string, rejectedGrant?: string): Promise<void> => {
   await firebaseAdmin.firestore().runTransaction(async (transaction) => {
     const snapshot = await transaction.get(soundcloudAuthStateRef());
     if (snapshot.data()?.refreshLeaseOwner !== leaseOwner) return;
+    const rejectedCurrentGrant = rejectedGrant !== undefined && snapshot.get('refreshToken') === rejectedGrant;
     transaction.set(
       soundcloudAuthStateRef(),
       {
         refreshLeaseOwner: FieldValue.delete(),
         refreshLeaseExpiresAtMillis: FieldValue.delete(),
+        ...(rejectedCurrentGrant && { reconnectRequiredAtMillis: nowMillis() }),
       },
       { merge: true }
     );
@@ -751,6 +776,7 @@ const acquireRefreshLease = async (
     const state = (snapshot.exists ? (snapshot.data() as SoundCloudAuthState) : null) ?? {};
 
     if (state.oauthExchangeOwner) return { kind: 'wait' as const };
+    if (state.reconnectRequiredAtMillis !== undefined) throw getSoundCloudNotConnectedError();
 
     if (!forceRefresh && isAccessTokenFresh(state, currentTimeMillis)) {
       return { kind: 'token' as const, accessToken: state.accessToken! };
@@ -817,6 +843,7 @@ const resolveSoundCloudAccessToken = async (forceRefresh: boolean): Promise<stri
             refreshToken: refreshedTokens.refresh_token,
             accessTokenExpiresAtMillis: updatedAtMillis + refreshedTokens.expires_in * 1000,
             updatedAtMillis,
+            reconnectRequiredAtMillis: FieldValue.delete(),
             refreshLeaseOwner: FieldValue.delete(),
             refreshLeaseExpiresAtMillis: FieldValue.delete(),
           },
@@ -825,7 +852,13 @@ const resolveSoundCloudAccessToken = async (forceRefresh: boolean): Promise<stri
         return refreshedTokens.access_token;
       });
     } catch (error) {
-      await clearRefreshLease(resolution.leaseOwner);
+      const invalidGrant =
+        error instanceof HttpsError &&
+        error.details &&
+        typeof error.details === 'object' &&
+        'invalidGrant' in error.details &&
+        error.details.invalidGrant === true;
+      await clearRefreshLease(resolution.leaseOwner, invalidGrant ? resolution.refreshToken : undefined);
       throw error;
     }
   }

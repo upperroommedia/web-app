@@ -21,7 +21,7 @@ jest.mock('../firebase/firestore', () => ({
 }));
 jest.mock('react-firebase-hooks/firestore', () => ({ useDocument: () => [undefined, false, undefined] }));
 jest.mock('../utils/createFunction', () => ({ createFunctionV2: jest.fn() }));
-jest.mock('../hooks/useDurableJobs', () => ({ useEntityJobSummary: () => ({ job: undefined, stale: false }) }));
+jest.mock('../hooks/useDurableJobs', () => ({ useEntityJobSummary: () => ({ job: undefined, jobs: [], stale: false }) }));
 jest.mock('../components/UserAvatar', () => ({ __esModule: true, default: () => null }));
 jest.mock('../components/AvatarWithDefaultImage', () => ({ __esModule: true, default: () => null }));
 

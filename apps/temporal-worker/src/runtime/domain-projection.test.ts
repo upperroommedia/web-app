@@ -308,3 +308,22 @@ test.each(['not_started', 'partial'])(
     ).toBeUndefined();
   }
 );
+
+test('a SoundCloud authorization rejection requests reconnect without replacing an earlier unresolved effect', () => {
+  const failed = { state: 'blocked', code: 'SOUNDCLOUD_RECONNECT_REQUIRED' };
+  expect(createDomainAttentionProjection({ kind: 'sermon.publish' }, 'soundcloud-track', failed)).toMatchObject({
+    state: 'needs_attention',
+    actions: ['resume', 'cancel'],
+    attention: { kind: 'reconnect_provider', provider: 'soundcloud', stepId: 'soundcloud-track' },
+  });
+  for (const stepId of ['subsplash-media', 'soundcloud-track']) {
+    const attention = { kind: 'external_result_unknown' as const, stepId, message: 'Review the original request.' };
+    expect(
+      createDomainAttentionProjection(
+        { kind: 'sermon.publish', state: 'needs_attention', attention, actions: ['resolve'] },
+        'soundcloud-track',
+        failed
+      )
+    ).toMatchObject({ attention, actions: ['resolve'] });
+  }
+});

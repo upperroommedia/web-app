@@ -6,6 +6,7 @@ import {
   setHandler,
   continueAsNew,
   makeContinueAsNewFunc,
+  patched,
   proxyActivities,
   sleep,
   workflowInfo,
@@ -65,6 +66,13 @@ export async function SearchDocument(ref: DurableJobRef, attention?: SearchAtten
       if (isCancellation(error)) {
         await CancellationScope.nonCancellable(() => controls.finishSearch(ref, 'cancelled'));
         throw error;
+      }
+      if (
+        (error as { cause?: { type?: string } })?.cause?.type === 'STALE_GENERATION' &&
+        patched('search-document-superseded-v1')
+      ) {
+        await controls.finishSearch(ref, 'superseded');
+        return;
       }
       await controls.finishSearch(ref, 'needs_attention');
       await wait();

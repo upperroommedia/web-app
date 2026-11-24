@@ -16,6 +16,20 @@ describe('durable upload source admission', () => {
     expect(plan.sermon.subsplashId).toBeUndefined();
     expect(plan.sourceUpload?.storagePath).toBe('durable-upload-sources/owner/job-123/source');
   });
+  it('marks both upload types visible before Algolia indexing in the canonical reservation', async () => {
+    for (const source of [input.source, { type: 'youtube', url: 'https://www.youtube.com/watch?v=test' }]) {
+      const plan = normalizeUploadSource({ ...input, source }, 'owner', 'job-123', db);
+      const create = jest.fn();
+      await plan.reserve({ create } as unknown as Parameters<typeof plan.reserve>[0], {
+        jobId: 'job-123',
+        projectId: 'test-project',
+      });
+      expect(create).toHaveBeenCalledWith(
+        { id: plan.sermon.id },
+        expect.objectContaining({ searchPending: true, uploaderId: 'owner' })
+      );
+    }
+  });
   it('rejects missing content fingerprint and unsafe YouTube hosts', () => {
     expect(() =>
       normalizeUploadSource({ ...input, source: { ...input.source, fingerprint: undefined } }, 'owner', 'job-123', db)

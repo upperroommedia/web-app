@@ -6,7 +6,7 @@
  * - Inline publishing status (no popup)
  * - Edit and Delete actions
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
 import Box from '@mui/material/Box';
@@ -17,6 +17,7 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
 import CircularProgress from '@mui/material/CircularProgress';
+import LinearProgress from '@mui/material/LinearProgress';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
 import Divider from '@mui/material/Divider';
@@ -72,7 +73,8 @@ import { reportHandledError } from '../../../utils/reportHandledError';
 import { submitDurableIntent } from '../../../utils/durableJobs';
 import EntityJobHistory from '../../../components/jobs/EntityJobHistory';
 import JobStatusPanel from '../../../components/jobs/JobStatusPanel';
-import { useDurableJob } from '../../../hooks/useDurableJobs';
+import { useDurableJob, useEntityJobSummary } from '../../../hooks/useDurableJobs';
+import { getSermonProcessing } from '../../../utils/sermonProcessing';
 import { getSermonFinalAudioPath } from '../../../utils/uploadUtils';
 
 const getErrorField = (error: unknown, field: 'code' | 'details' | 'message'): string | undefined => {
@@ -123,6 +125,15 @@ const SermonDetailsPage = () => {
     }
   );
   const sermon = sermonSnapshot?.data();
+  const processingEntity = useMemo(() => ({ type: 'sermon' as const, id: sermonId ?? '' }), [sermonId]);
+  const { jobs: sermonJobs, stale: sermonJobsStale } = useEntityJobSummary(processingEntity, sermon?.activeDurableJobs);
+  const processing =
+    sermon &&
+    getSermonProcessing(
+      sermonJobs,
+      sermonSnapshot?.metadata.fromCache ? undefined : sermon.status.audioStatus,
+      sermonJobsStale
+    );
   const isAdmin = user?.isAdmin() ?? false;
   const canPublish = user?.canPublish() ?? false;
   const isCurrentlyPlaying = currentSermon?.id === sermonId && playing;
@@ -510,6 +521,21 @@ const SermonDetailsPage = () => {
                       {sermon.title}
                     </Typography>
 
+                    {processing && (processing.pending || processing.processing || processing.stopped) && (
+                      <Stack spacing={0.75} sx={{ mb: 1.5, maxWidth: 420 }} data-testid="sermon-detail-processing">
+                        <Typography variant="body2" fontWeight={600} role="status">
+                          {processing.label}
+                          {processing.percent !== undefined ? ` · ${processing.percent}%` : ''}
+                        </Typography>
+                        {processing.showBar && (
+                          <LinearProgress
+                            aria-label={processing.label}
+                            variant={processing.percent === undefined ? 'indeterminate' : 'determinate'}
+                            value={processing.percent}
+                          />
+                        )}
+                      </Stack>
+                    )}
                     {sermon.subtitle && (
                       <Typography
                         variant="h6"

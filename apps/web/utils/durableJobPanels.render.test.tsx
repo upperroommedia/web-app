@@ -347,6 +347,38 @@ describe('rendered durable job tracking', () => {
     expect(buttonMarkup(html, 'View Sermon')).toHaveLength(0);
   });
 
+  it.each([false, true])('uses the running audio step measurement after transfer (stale=%s)', (stale) => {
+    const upload = job({ result: { mediaJobId: 'audio' } });
+    const audio = job({
+      jobId: 'audio',
+      kind: 'audio.process',
+      state: 'running',
+      steps: [
+        {
+          id: 'transcoding',
+          label: 'Process audio',
+          state: 'running',
+          attempt: 1,
+          progress: { completed: 20, total: 80, unit: 'seconds' },
+        },
+      ],
+    });
+    useDurableJobMock.mockImplementation((id?: string) => ({
+      ...status(id === 'upload' ? upload : audio),
+      stale: id === 'audio' && stale,
+    }));
+    const html = renderToStaticMarkup(
+      <UploadProgressComponent
+        isUploading={false}
+        audioSource={undefined}
+        uploadProgress={{ phase: 'admitted', percent: 100, message: '', error: false }}
+        receipt={receipt}
+      />
+    );
+    expect(html.includes('aria-valuenow="25"')).toBe(!stale);
+    expect(html).not.toContain('aria-valuenow="100"');
+  });
+
   it('propagates suppressed entity navigation into the single child panel', () => {
     const audio = job({ jobId: 'audio', kind: 'audio.process', state: 'running', actions: ['cancel'] });
     useDurableJobMock.mockImplementation((id?: string) => status(id === 'audio' ? audio : undefined));

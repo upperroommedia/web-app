@@ -99,7 +99,7 @@ export async function enqueueSystemImage(input: {
     dispatch: {
       workflowId: `image:${input.projectId}:${jobId}`,
       workflowType: input.intent.operation === 'ingest' ? 'ImageIngest' : 'ImageDelete',
-      taskQueue: 'urm-images',
+      taskQueue: 'urm-orchestration',
     },
   });
 }

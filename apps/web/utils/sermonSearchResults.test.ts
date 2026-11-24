@@ -1,8 +1,23 @@
 import { createSermon } from '../types/Sermon';
 import { sermonStatusType } from '../types/SermonTypes';
-import { reconcileAdminSermonSearchResults } from './sermonSearchResults';
+import { hasPendingSermonLeavingSearch, reconcileAdminSermonSearchResults } from './sermonSearchResults';
 
 describe('reconcileAdminSermonSearchResults', () => {
+  it('hides skeletal media recovery probes even when a stale index hit exists', () => {
+    const probe = createSermon({ id: 'media-recovery-110b2850-070a-456a-968f-cc52fbdde91d' });
+    const uploaded = createSermon({ id: 'upload-test', title: 'A new sermon', searchPending: true });
+    const result = reconcileAdminSermonSearchResults({
+      algoliaHits: [probe],
+      pendingSermons: [probe, uploaded],
+      pendingSermonsServerConfirmed: true,
+      showPendingOverlay: true,
+      hasSettledResults: true,
+      liveSermonsById: { [probe.id]: probe },
+      resolvedLiveSermonIds: new Set([probe.id]),
+    });
+    expect(result.displayRows.map(({ sermon }) => sermon.id)).toEqual([uploaded.id]);
+  });
+
   it('keeps a pending sermon visible until Algolia results have settled', () => {
     const pendingSermon = createSermon({
       id: 'sermon-pending',
@@ -248,4 +263,13 @@ describe('reconcileAdminSermonSearchResults', () => {
     ]);
     expect(result.visiblePendingSermons).toHaveLength(0);
   });
+});
+
+test('refreshes a mounted search only for a removed pending sermon absent from its hits', () => {
+  const earlier = new Set(['new-sermon', 'still-processing']);
+  const now = new Set(['still-processing']);
+  expect(hasPendingSermonLeavingSearch(earlier, now, [], new Set())).toBe(true);
+  expect(hasPendingSermonLeavingSearch(earlier, now, ['new-sermon'], new Set())).toBe(false);
+  expect(hasPendingSermonLeavingSearch(earlier, now, [], new Set(['new-sermon']))).toBe(false);
+  expect(hasPendingSermonLeavingSearch(now, now, [], new Set())).toBe(false);
 });

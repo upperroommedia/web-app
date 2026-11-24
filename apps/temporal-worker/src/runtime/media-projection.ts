@@ -16,6 +16,30 @@ export function createMediaProjection(
   now: number
 ): DurableJobPatch | null {
   if (['succeeded', 'failed', 'cancelled', 'superseded'].includes(job.state)) return null;
+  if (value.measuredSeconds) {
+    const measurement = value.measuredSeconds;
+    const step = job.steps.find((current) => current.id === value.stage);
+    if (
+      job.state !== 'running' ||
+      !step ||
+      step.state !== 'running' ||
+      step.attempt !== attempt ||
+      !Number.isFinite(measurement.total) ||
+      !Number.isFinite(measurement.completed) ||
+      measurement.total <= 0 ||
+      measurement.completed <= (step.progress?.completed ?? 0)
+    )
+      return null;
+    const progress = {
+      completed: Math.min(measurement.completed, measurement.total),
+      total: measurement.total,
+      unit: 'seconds' as const,
+    };
+    return {
+      expectedRevision: job.revision,
+      steps: job.steps.map((current) => (current === step ? { ...step, progress } : current)),
+    };
+  }
   const state =
     value.state === 'waiting' ? (value.reason === 'authentication' ? 'waiting_for_auth' : 'retrying') : value.state;
   const terminal = ['succeeded', 'failed', 'cancelled', 'superseded'].includes(state);
@@ -39,7 +63,11 @@ export function createMediaProjection(
     return step;
   });
   if (value.stage && !terminal) {
-    const step = { id: value.stage, label: labels[value.stage], state: 'running' as const, attempt };
+    const label =
+      value.stage === 'downloading' && value.remoteYouTubeRender
+        ? 'Download and process YouTube audio'
+        : labels[value.stage];
+    const step = { id: value.stage, label, state: 'running' as const, attempt };
     const index = steps.findIndex((existing) => existing.id === step.id);
     if (index >= 0) steps[index] = step;
     else steps.push(step);

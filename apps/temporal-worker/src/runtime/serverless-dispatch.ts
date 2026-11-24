@@ -5,7 +5,7 @@ export interface DispatchPassContext {
   readonly caller: Readonly<DispatchCaller>;
   /** Delivery metadata is only a selector; it never authorizes a record or proves native delivery. */
   readonly delivery: Readonly<
-    { kind: 'event'; id: string; subject: string } | { kind: 'scheduler'; job: string }
+    { kind: 'event'; id: string; subject: string } | { kind: 'scheduler'; job: string; scheduledAt?: string }
   >;
 }
 
@@ -30,12 +30,11 @@ export function createServerlessDispatchHandler(options: ServerlessDispatchOptio
   const authorizing = new Set<AbortController>();
   const admission = options.admission; // Immutable process configuration; callers cannot flip a prepared instance.
   if (!['urm-app-staging', 'urm-app'].includes(options.projectId)) throw new Error('Invalid dispatch project');
-  if (
-    !new RegExp(`^projects/${options.projectId}/locations/us-central1/jobs/[A-Za-z0-9_-]{1,500}$`).test(
-      options.reconcileJob
-    )
-  )
-    throw new Error('Invalid reconciliation job binding');
+  const reconcileJob = options.reconcileJob;
+  const schedulerJobId = new RegExp(`^projects/${options.projectId}/locations/us-central1/jobs/([A-Za-z0-9_-]{1,500})$`).exec(
+    reconcileJob
+  )?.[1];
+  if (!schedulerJobId) throw new Error('Invalid reconciliation job binding');
   const timeoutMs = options.passTimeoutMs ?? 20000;
   if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 30000) throw new Error('Invalid dispatch deadline');
   let active: AbortController | undefined;
@@ -59,8 +58,10 @@ export function createServerlessDispatchHandler(options: ServerlessDispatchOptio
       return;
     }
     const headers = request.headers;
+    const raw = request.rawHeaders ?? [];
+    const headerCount = (name: string) => raw.filter((value, index) => index % 2 === 0 && value.toLowerCase() === name).length;
     let delivery: DispatchPassContext['delivery'];
-    if (request.url === '/dispatch') {
+    if (request.url === '/dispatch' || request.url === '/dispatch?__GCP_CloudEventsMode=CE_PUBSUB_BINDING') {
       if (
         typeof headers['ce-id'] !== 'string' ||
         !/^[\x21-\x7e]{1,1024}$/.test(headers['ce-id']) ||
@@ -74,18 +75,28 @@ export function createServerlessDispatchHandler(options: ServerlessDispatchOptio
       }
       delivery = Object.freeze({ kind: 'event', id: headers['ce-id'], subject: headers['ce-subject'] });
     } else if (request.url === '/reconcile') {
-      if (headers['x-cloudscheduler-jobname'] !== options.reconcileJob) {
+      // Native Scheduler sends the short ID. Use the validated full resource
+      // internally, and keep the authenticated Scheduler caller check below.
+      const jobHeader = headers['x-cloudscheduler-jobname'];
+      const scheduledAt = headers['x-cloudscheduler-scheduletime'];
+      if (
+        (jobHeader !== schedulerJobId && jobHeader !== reconcileJob) ||
+        headerCount('x-cloudscheduler-jobname') > 1 ||
+        headerCount('x-cloudscheduler-scheduletime') > 1 ||
+        (scheduledAt !== undefined &&
+          (typeof scheduledAt !== 'string' ||
+            !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/.test(scheduledAt) ||
+            !Number.isFinite(Date.parse(scheduledAt))))
+      ) {
         end(400);
         return;
       }
-      delivery = Object.freeze({ kind: 'scheduler', job: options.reconcileJob });
+      delivery = Object.freeze({ kind: 'scheduler', job: reconcileJob, ...(scheduledAt && { scheduledAt }) });
     } else {
       end(404);
       return;
     }
-    const raw = request.rawHeaders ?? [];
-    if (raw.filter((value, index) => index % 2 === 0 && value.toLowerCase() === 'authorization').length > 1 ||
-      raw.filter((value, index) => index % 2 === 0 && value.toLowerCase() === 'x-serverless-authorization').length > 1) {
+    if (headerCount('authorization') > 1 || headerCount('x-serverless-authorization') > 1) {
       end(403); return;
     }
     const authentication = new AbortController();

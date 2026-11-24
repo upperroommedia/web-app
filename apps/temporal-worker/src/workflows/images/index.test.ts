@@ -34,6 +34,53 @@ describe('native image workflow', () => {
   afterAll(async () => {
     await environment?.teardown();
   });
+  test('orchestration routes image processing and finishes on independent activity queues', async () => {
+    const image = mocks();
+    const { getImageDisposition, finishImage, ...work } = image;
+    const orchestration = await Worker.create({
+      connection: environment.nativeConnection,
+      taskQueue: 'urm-orchestration',
+      workflowsPath: require.resolve('./index'),
+    });
+    const images = await Worker.create({
+      connection: environment.nativeConnection,
+      taskQueue: 'urm-images',
+      activities: work,
+    });
+    const controls = await Worker.create({
+      connection: environment.nativeConnection,
+      taskQueue: 'urm-controls',
+      activities: { getImageDisposition, finishImage },
+    });
+    await controls.runUntil(() =>
+      images.runUntil(() =>
+        orchestration.runUntil(async () => {
+          const handle = await environment.client.workflow.start(ImageIngest, {
+            workflowId: 'independent-image-queues',
+            taskQueue: 'urm-orchestration',
+            workflowExecutionTimeout: '20 seconds',
+            args: [ref],
+          });
+          await handle.result();
+          expect(image.commitImage).toHaveBeenCalledTimes(1);
+          expect(finishImage).toHaveBeenCalledWith(ref, 'succeeded');
+          const history = await handle.fetchHistory();
+          const scheduled = (history.events ?? []).flatMap(({ activityTaskScheduledEventAttributes: activity }) =>
+            activity ? [[activity.activityType?.name, activity.taskQueue?.name]] : []
+          );
+          expect(scheduled).toEqual([
+            ['getImageDisposition', 'urm-controls'],
+            ['prepareImage', 'urm-images'],
+            ['allocateImage', 'urm-images'],
+            ['uploadImageBytes', 'urm-images'],
+            ['commitImage', 'urm-images'],
+            ['finishImage', 'urm-controls'],
+          ]);
+          await Worker.runReplayHistory({ workflowsPath: require.resolve('./index') }, history);
+        })
+      )
+    );
+  }, 90_000);
   test('unknown allocation never uploads or publishes before explicit review and history replays', async () => {
     const activities = mocks();
     activities.allocateImage.mockRejectedValueOnce(

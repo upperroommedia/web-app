@@ -3,8 +3,9 @@ import { isDeepStrictEqual } from 'node:util';
 import { Timestamp } from 'firebase-admin/firestore';
 import { onCall, HttpsError, type CallableRequest } from 'firebase-functions/v2/https';
 import { withAdministrativeCredentialSetupLease } from '../temporal/legacyAdmissionLease';
-import type { DocumentSnapshot } from 'firebase-admin/firestore';
+import type { DocumentReference, DocumentSnapshot, Transaction } from 'firebase-admin/firestore';
 import admin from '@upperroom/shared/firebase/firebaseAdmin';
+import { SANDBOX_SOUNDCLOUD_ORIGIN } from '@upperroom/shared/shared/soundcloudAuth';
 import {
   getProviderExecutionProfile,
   sandboxProfileDocumentPath,
@@ -14,7 +15,7 @@ import {
 import { SandboxHttpError } from './types';
 
 export const SANDBOX_SOUNDCLOUD_USER_ID = 9000000000001;
-export const SANDBOX_SOUNDCLOUD_ORIGIN = 'https://staging.uploader.upperroommedia.org';
+export { SANDBOX_SOUNDCLOUD_ORIGIN };
 const CALLBACK = `${SANDBOX_SOUNDCLOUD_ORIGIN}/auth/soundcloud/callback`;
 const ACCESS_SECONDS = 3600;
 const REFRESH_MILLIS = 30 * 24 * 60 * 60 * 1000;
@@ -99,6 +100,46 @@ export function sandboxSoundCloudAuthDocumentPath(profile: SandboxProviderProfil
   assertProfile(profile);
   return `${sandboxProfileDocumentPath(profile)}/auth/soundcloud`;
 }
+async function readLinkedSandboxAccessToken(
+  tx: Transaction,
+  auth: DocumentReference,
+  profile: SandboxProviderProfile,
+  record: Record<string, any>
+): Promise<DocumentReference> {
+  if (typeof record.accessTokenHash !== 'string' || !/^[a-f0-9]{64}$/.test(record.accessTokenHash)) reject();
+  const ref = auth.collection('accessTokens').doc(record.accessTokenHash);
+  const linked = await tx.get(ref);
+  if (!linked.exists || linked.get('adminUid') !== record.adminUid || linked.get('profileId') !== profile.profileId)
+    reject();
+  return ref;
+}
+
+export async function isSandboxSoundCloudRefreshGrantUsable(
+  profile: SandboxProviderProfile,
+  refreshToken: string
+): Promise<boolean> {
+  const db = admin.firestore();
+  const auth = db.doc(sandboxSoundCloudAuthDocumentPath(profile));
+  if (!/^sandbox-sc-refresh-[A-Za-z0-9_-]{43}$/.test(refreshToken)) return false;
+  try {
+    return await db.runTransaction(
+      async (tx) => {
+        const current = await tx.get(auth);
+        if (current.get('refreshToken') !== refreshToken) return false;
+        const snapshot = await tx.get(auth.collection('refreshTokens').doc(hash(refreshToken)));
+        const record = liveRecord(snapshot, profile, 'refresh-token');
+        if (record.clientId !== getSandboxOAuthConfiguration(profile).clientId) return false;
+        await readLinkedSandboxAccessToken(tx, auth, profile, record);
+        return true;
+      },
+      { readOnly: true }
+    );
+  } catch (error) {
+    if (error instanceof SandboxHttpError && error.code === 'invalid_grant') return false;
+    throw error;
+  }
+}
+
 export function buildSandboxSoundCloudAuthorizeUrl(
   profile: SandboxProviderProfile,
   input: { redirectUri: string; state: string; codeChallenge: string; clientId: string }
@@ -231,15 +272,7 @@ export async function exchangeSandboxSoundCloudToken(
       if (!equal(record.stateHash, hash(pending.state)) || pending.sandboxAuthorizationCodeHash !== hash(rawGrant))
         reject();
     } else {
-      if (typeof record.accessTokenHash !== 'string' || !/^[a-f0-9]{64}$/.test(record.accessTokenHash)) reject();
-      oldAccessRef = root.collection('accessTokens').doc(record.accessTokenHash);
-      const oldAccess = await tx.get(oldAccessRef);
-      if (
-        !oldAccess.exists ||
-        oldAccess.get('adminUid') !== record.adminUid ||
-        oldAccess.get('profileId') !== profile.profileId
-      )
-        reject();
+      oldAccessRef = await readLinkedSandboxAccessToken(tx, root, profile, record);
     }
     tx.update(grantRef, { consumedAt: now });
     if (oldAccessRef) tx.update(oldAccessRef, { revokedAt: now });

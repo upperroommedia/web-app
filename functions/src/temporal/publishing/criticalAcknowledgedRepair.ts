@@ -1505,19 +1505,22 @@ export async function validateAcknowledgedProjectionEvidence(
   if (acknowledgedProjectionDigest(plan) !== evidence.digest) fail();
 }
 /** The caller supplies fresh admin/certificate/SDK epoch fencing and indexed writes. Canonical projection and lock release are atomic. */
-function subset(expected: unknown, actual: unknown, key = ''): boolean {
+export function matchesAcknowledgedProviderValue(expected: unknown, actual: unknown, key = ''): boolean {
   if (Array.isArray(expected)) {
     if (!Array.isArray(actual) || expected.length !== actual.length) return false;
     const remaining = [...actual];
     for (const item of expected) {
-      const index = remaining.findIndex((candidate) => subset(item, candidate, key));
+      const index = remaining.findIndex((candidate) => matchesAcknowledgedProviderValue(item, candidate, key));
       if (index < 0) return false;
       remaining.splice(index, 1);
     }
     return true;
   }
   if (plain(expected))
-    return plain(actual) && Object.entries(expected).every(([child, value]) => subset(value, actual[child], child));
+    return (
+      plain(actual) &&
+      Object.entries(expected).every(([child, value]) => matchesAcknowledgedProviderValue(value, actual[child], child))
+    );
   const iso = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/;
   if (
     ['published_at', 'created_at', 'updated_at', 'date', 'starts_at', 'ends_at'].includes(key.split('.').pop()!) &&
@@ -1547,7 +1550,7 @@ export function verifyAcknowledgedProviderObservations(
       verification.expectedState !== 'absent' &&
       (!observed?.body ||
         !Object.entries(verification.expectedProviderFields).every(([key, value]) =>
-          subset(
+          matchesAcknowledgedProviderValue(
             value,
             key
               .split('.')
@@ -1595,7 +1598,7 @@ function put(data: Record<string, unknown>, key: string, value: unknown, remove 
   if (remove) delete cursor[keys[keys.length - 1]];
   else cursor[keys[keys.length - 1]] = value;
 }
-function bindListRowId(
+export function bindListRowId(
   patch: Record<string, unknown>,
   binding: FrozenListRowBinding,
   value: string,
