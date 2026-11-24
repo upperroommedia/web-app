@@ -23,7 +23,6 @@ describe('durable upload source admission', () => {
       await plan.reserve({ create } as unknown as Parameters<typeof plan.reserve>[0], {
         jobId: 'job-123',
         projectId: 'test-project',
-        generation: 1,
       });
       expect(create).toHaveBeenCalledWith(
         { id: plan.sermon.id },
