@@ -64,6 +64,15 @@ async function startFixture(t, mode = 'ok', limits = {}) {
     const first = !fs.existsSync(marker);
     fs.appendFileSync(marker, String(process.pid) + '\\n');
     const mode = ${JSON.stringify(mode)};
+    if (mode === 'section-signaled') {
+      process.kill(process.pid, 'SIGKILL');
+      return;
+    }
+    if (mode === 'section-refused') {
+      process.stdout.write(${data}.subarray(0, 7));
+      process.exitCode = 7;
+      return;
+    }
     if (mode === 'empty') process.exit(0);
     if (mode === 'hang-once' && first) {
       setTimeout(() => process.exit(24), 8000);
@@ -122,6 +131,7 @@ async function startFixture(t, mode = 'ok', limits = {}) {
     server.once('error', reject);
     server.listen(0, '127.0.0.1', resolve);
   });
+  if (mode === 'section-missing-tool') await rm(ytDlpPath);
   const origin = 'http://127.0.0.1:' + server.address().port;
   function post({ body = JSON.stringify({ videoId }), headers = {}, method = 'POST', path = route, signal } = {}) {
     return fetch(origin + path, {
@@ -142,6 +152,26 @@ test('v2 emits only the cookie-free requested section with its native hash and e
   assert.deepEqual(Buffer.from(await response.arrayBuffer()), payload);
   await eventually(async () => (await readdir(scratch)).length === 0, 'Section scratch should close');
 });
+
+test('v2 returns a definitive refusal when the extractor exits and scratch is removed', async t => {
+  const { post, scratch } = await startFixture(t, 'section-refused');
+  const response = await post({ body: sectionBody, path: sectionRoute });
+  assert.equal(response.status, 422);
+  assert.equal(response.headers.has('x-section-duration-seconds'), false);
+  await response.text();
+  assert.deepEqual(await readdir(scratch), []);
+});
+
+for (const mode of ['section-signaled', 'section-missing-tool']) {
+  test('v2 keeps an unconfirmed extractor termination on hold for ' + mode, async t => {
+    const { post, scratch } = await startFixture(t, mode);
+    const response = await post({ body: sectionBody, path: sectionRoute });
+    assert.equal(response.status, 502);
+    assert.equal(response.headers.has('x-section-duration-seconds'), false);
+    await response.text();
+    assert.deepEqual(await readdir(scratch), []);
+  });
+}
 
 test('v2 rejects ambiguous numbers and preserves custody when ffprobe finds the wrong duration', async t => {
   const { post, marker, scratch } = await startFixture(t, 'section-wrong-duration');

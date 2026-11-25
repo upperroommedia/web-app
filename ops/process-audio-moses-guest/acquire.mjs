@@ -22,6 +22,12 @@ class RequestFailure extends Error {
   }
 }
 
+class GuestToolExited extends RequestFailure {
+  constructor() {
+    super(502);
+  }
+}
+
 function failResponse(res, status) {
   if (res.destroyed) return;
   if (res.headersSent) return res.destroy();
@@ -119,7 +125,7 @@ async function runTool(executable, args, directory, signal, consume) {
   let failed = false;
   const closed = new Promise((resolve) => {
     child.once('error', () => { failed = true; });
-    child.once('close', (code) => resolve(code === 0 && !failed));
+    child.once('close', (code, exitSignal) => resolve({ code, exitSignal }));
   });
   function killGroup() {
     if (!child.pid) return;
@@ -134,14 +140,18 @@ async function runTool(executable, args, directory, signal, consume) {
   signal.addEventListener('abort', killGroup, { once: true });
   try {
     await consume(child.stdout);
-    if (!await closed) throw new RequestFailure(502);
-    signal.throwIfAborted();
+    await closed;
   } finally {
     if (child.exitCode === null && child.signalCode === null) killGroup();
     await closed;
     signal.removeEventListener('abort', killGroup);
     await confirmGroupExit(child.pid);
   }
+  signal.throwIfAborted();
+  const { code, exitSignal } = await closed;
+  if (failed || !child.pid || exitSignal !== null) throw new RequestFailure(502);
+  if (code > 0) throw new GuestToolExited();
+  if (code !== 0) throw new RequestFailure(502);
 }
 
 async function acquire(videoId, file, directory, config, signal) {
@@ -172,6 +182,11 @@ async function acquireSection({ videoId, startSeconds, durationSeconds }, direct
   const file = await open(source, 'wx+', 0o600);
   try {
     await acquire(videoId, file, directory, config, signal);
+  } catch (error) {
+    // runTool joins the process group before propagating a known exit. The
+    // request handler also removes scratch before returning this refusal.
+    if (error instanceof GuestToolExited && !signal.aborted) throw new RequestFailure(422);
+    throw error;
   } finally {
     await file.close();
   }
@@ -314,6 +329,9 @@ export function createGuestAudioServer({
         console.error('Guest scratch cleanup failed');
       }
       busy = false;
+    }
+    if (failure === 422 && signal.aborted) {
+      failure = signal.reason?.name === 'TimeoutError' ? 504 : 503;
     }
     if (failure) failResponse(res, failure);
   });
