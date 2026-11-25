@@ -17,7 +17,7 @@ candidate_root="$root/state/deploy-candidates"
 candidate_dir="$candidate_root/$context"
 candidate_tag="upperroom/process-audio-candidate:$context"
 lock_dir="$root/.deploy-lock"
-owner="shadow-${revision:0:12}-$(date -u +%Y%m%dT%H%M%SZ)-$$"
+owner="shadow-${revision:0:12}-$(cat /proc/sys/kernel/random/uuid)"
 test ! -e "$candidate_dir" && test ! -L "$candidate_dir"
 if docker image inspect "$candidate_tag" >/dev/null 2>&1; then exit 2; fi
 network="$prefix"
@@ -50,81 +50,134 @@ export PROCESS_AUDIO_YOUTUBE_AUTH_CANARY_URL="$(config_value PROCESS_AUDIO_YOUTU
 [[ "$PROCESS_AUDIO_YOUTUBE_GUEST_CANARY_URL" =~ ^https://(www\.)?(youtube\.com|youtu\.be)/[^[:space:]]+$ ]]
 [[ "$PROCESS_AUDIO_YOUTUBE_AUTH_CANARY_URL" =~ ^https://(www\.)?(youtube\.com|youtu\.be)/[^[:space:]]+$ ]]
 test "$PROCESS_AUDIO_YOUTUBE_GUEST_CANARY_URL" != "$PROCESS_AUDIO_YOUTUBE_AUTH_CANARY_URL"
-mkdir "$lock_dir"
-printf '%s\n' "$owner" > "$lock_dir/deployment-id"
-printf '%s\n' 'staging-shadow' > "$lock_dir/target-env"
-printf '%s\n' "$(( $(date +%s) + 3600 ))" > "$lock_dir/lease-expires-at"
-dir="$(mktemp -d "$scratch_root/audio-qualification.XXXXXXXX")"
-declare -a owned_containers=()
-owned_network=false
-cleanup() {
-    local status="$?" id
-    trap - EXIT
-    if (( status != 0 )) && [[ -n "${app_id:-}" ]]; then
-        docker inspect --format 'Lab app status={{.State.Status}} exit={{.State.ExitCode}}' "$app_id" >&2 || true
+umask 077
+owner_label="io.upperroom.qualification.owner=$owner"
+dir="$scratch_root/audio-qualification.$owner"
+prepared=''
+prepared_inode=''
+acquired=false
+
+# Both acquisition and publication use one same-filesystem, no-replace rename.
+# A process death leaves either the complete owner record or the complete receipt.
+rename_new() {
+    python3 -I - "$1" "$2" <<'RENAME_PY'
+import ctypes, os, sys
+rename = ctypes.CDLL(None, use_errno=True).renameat2
+if rename(-100, os.fsencode(sys.argv[1]), -100, os.fsencode(sys.argv[2]), 1) != 0:
+    raise OSError(ctypes.get_errno(), 'Could not atomically move qualification directory')
+RENAME_PY
+}
+owns_lock() {
+    [[ ! -L "$lock_dir" && -f "$lock_dir/deployment-id" && "$(cat "$lock_dir/deployment-id")" == "$owner" ]]
+}
+tag_id() {
+    docker image ls --no-trunc --quiet "$candidate_tag"
+}
+close_lab() {
+    owns_lock || return 1
+    local ids id
+    ids="$(docker ps -aq --no-trunc --filter "label=$owner_label")" || return 1
+    for id in $ids; do docker rm -f "$id" >/dev/null || return 1; done
+    ids="$(docker network ls -q --no-trunc --filter "label=$owner_label")" || return 1
+    for id in $ids; do docker network rm "$id" >/dev/null || return 1; done
+    if [[ -e "$dir" || -L "$dir" ]]; then
+        [[ ! -L "$dir" && -d "$dir" && -s "$lock_dir/scratch-inode" ]] || return 1
+        [[ "$(stat -c '%d:%i' "$dir")" == "$(cat "$lock_dir/scratch-inode")" ]] || return 1
+        rm -f -- "$dir/database.jar" "$dir/application-report.json" "$dir/verified-report.json" || return 1
+        rmdir -- "$dir" || return 1
     fi
-    for id in "${owned_containers[@]}"; do docker rm -f "$id" >/dev/null || status=1; done
-    if [[ "$owned_network" == true ]]; then docker network rm "$network" >/dev/null || status=1; fi
-    if [[ "$(snapshot)" != "$before" || "$(cat "$lock_dir/deployment-id")" != "$owner" ]]; then
-        echo 'Serving inventory or shared deployment state changed during qualification' >&2
+}
+rollback_tag() {
+    [[ -f "$lock_dir/tag-creation-attempted" ]] || return 0
+    local current
+    current="$(tag_id)" || return 1
+    [[ -n "$current" ]] || return 0
+    [[ "$current" == "$image" ]] || return 1
+    # Docker can delete the image along with its last tag. Keep the lock and
+    # image for inspection if the original image has no other named reference.
+    local refs ref has_other=false
+    refs="$(docker image inspect --format '{{range .RepoTags}}{{println .}}{{end}}' "$image")" || return 1
+    while IFS= read -r ref; do
+        if [[ -n "$ref" && "$ref" != '<none>:<none>' && "$ref" != "$candidate_tag" ]]; then has_other=true; fi
+    done <<< "$refs"
+    [[ "$has_other" == true ]] || return 1
+    docker image rm "$candidate_tag" >/dev/null || return 1
+    current="$(tag_id)" || return 1
+    [[ -z "$current" ]]
+}
+cleanup() {
+    local status="$?" inventory
+    trap - EXIT
+    trap '' INT TERM HUP
+    if owns_lock; then
+        # The successful path consumes the lock in the same rename that publishes the receipt.
         status=1
+        if ! close_lab || ! rollback_tag || ! inventory="$(snapshot)" ||
+           [[ "$inventory" != "$before" ]] || ! rename_new "$lock_dir" "$prepared"; then
+            echo "Qualification held for operator inspection: $lock_dir (owner $owner)" >&2
+            exit 1
+        fi
+    elif [[ "$acquired" == true && "$(cat "$candidate_dir/deployment-id" 2>/dev/null)" != "$owner" ]]; then
+        echo "Qualification lock changed; inspect owner $owner before reconciling" >&2
+        exit 1
+    fi
+    if [[ -n "$prepared" && -d "$prepared" && ! -L "$prepared" ]]; then
+        [[ -n "$prepared_inode" && "$(stat -c '%d:%i' "$prepared")" == "$prepared_inode" ]] || exit 1
+        find "$prepared" -mindepth 1 -maxdepth 1 -type f -delete || status=1
+        rmdir "$prepared" || status=1
     fi
     if (( status == 0 )); then
-        publish_candidate || status=1
+        (printf 'Qualified deployment context %s at image %s\n' "$context" "$image") || true
     fi
-    rm -f -- "$dir/database.jar" "$dir/application-report.json" "$dir/verified-report.json"
-    rmdir -- "$dir" || status=1
-    if [[ "$(cat "$lock_dir/deployment-id")" == "$owner" ]]; then
-        rm -f -- "$lock_dir/deployment-id" "$lock_dir/target-env" "$lock_dir/lease-expires-at"
-        rmdir -- "$lock_dir" || status=1
-    fi
-    printf 'Qualification resources closed; exit=%s\n' "$status"
     exit "$status"
 }
-publish_candidate() {
-    # The running candidate was checked by ID, the app reports were persisted in an isolated
-    # emulator, and all serving instances survived unchanged. Only now make the image promotable.
-    test -s "$dir/verified-report.json" || return 1
-    mkdir -p "$candidate_root" || return 1
-    test ! -e "$candidate_dir" && test ! -L "$candidate_dir" || return 1
-    if docker image inspect "$candidate_tag" >/dev/null 2>&1; then return 1; fi
-    local pending
-    pending="$(mktemp -d "$candidate_root/.shadow-$context.XXXXXXXX")" || return 1
-    cp "$dir/verified-report.json" "$pending/shadow-qualification.json" || return 1
-    printf '%s\n' "$context" > "$pending/context-sha256" || return 1
-    printf '%s\n' "$revision" > "$pending/source-release-sha" || return 1
-    printf '%s\n' "$image" > "$pending/image-id" || return 1
-    printf '%s\n' "$candidate_tag" > "$pending/image-ref" || return 1
-    printf '%s\n' "$owner" > "$pending/validated-by-deployment" || return 1
-    printf '%s\n' youtube > "$pending/validated-smoke-profile" || return 1
-    date -u +%FT%TZ > "$pending/validated-at" || return 1
-    docker image tag "$image" "$candidate_tag" || return 1
-    test "$(docker image inspect --format '{{.Id}}' "$candidate_tag")" = "$image" || return 1
-    : > "$pending/validated" || return 1
-    mv -T "$pending" "$candidate_dir" || return 1
-    printf 'Qualified deployment context %s at image %s\n' "$context" "$image"
-}
 trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+mkdir -p "$candidate_root"
+test "$(stat -c %d "$root")" = "$(stat -c %d "$candidate_root")"
+prepared="$(mktemp -d "$root/.shadow-acquire.XXXXXXXX")"
+prepared_inode="$(stat -c '%d:%i' "$prepared")"
+printf '%s\n' "$before" > "$prepared/serving-inventory-before"
+printf '%s\n' "$owner" > "$prepared/deployment-id"
+printf '%s\n' staging-shadow > "$prepared/target-env"
+printf '%s\n' "$(( $(date +%s) + 3600 ))" > "$prepared/lease-expires-at"
+printf '%s\n' "$revision" > "$prepared/source-release-sha"
+printf '%s\n' "$context" > "$prepared/context-sha256"
+printf '%s\n' "$image" > "$prepared/image-id"
+printf '%s\n' "$candidate_tag" > "$prepared/image-ref"
+printf '%s\n' "$owner_label" > "$prepared/resource-label"
+printf '%s\n' "$dir" > "$prepared/scratch-path"
+printf '%s\n' "$$" > "$prepared/owner-pid"
+cat /proc/sys/kernel/random/boot_id > "$prepared/owner-boot-id"
+awk '{print $22}' "/proc/$$/stat" > "$prepared/owner-start-ticks"
+rename_new "$prepared" "$lock_dir"
+acquired=true
+test ! -e "$candidate_dir"
+test ! -L "$candidate_dir"
+current_tag="$(tag_id)"
+test -z "$current_tag"
+mkdir -m 0700 -- "$dir"
+stat -c '%d:%i' "$dir" > "$lock_dir/scratch-inode"
 
 cat > "$dir/database.jar"
 test "$(sha256sum "$dir/database.jar" | awk '{print $1}')" = "$jar_hash"
 chmod 0444 "$dir/database.jar"
-docker network create --driver bridge "$network" >/dev/null
-owned_network=true
+docker network create --driver bridge --label "$owner_label" "$network" >/dev/null
 
-db_id="$(docker create --pull=never --name "$db" --network "$network" --network-alias emulated-db \
+db_id="$(docker create --pull=never --label "$owner_label" --name "$db" --network "$network" --network-alias emulated-db \
     --restart no --read-only --tmpfs /tmp:rw,nosuid,nodev,size=64m,mode=1777 --user 1000:1000 \
     --cap-drop ALL --security-opt no-new-privileges --pids-limit 96 --cpus .5 --memory 400m \
     --mount "type=bind,src=$dir/database.jar,dst=/lab-database.jar,readonly" \
     --entrypoint /opt/java/openjdk/bin/java "$java_image" \
     -XX:ActiveProcessorCount=1 -Xms32m -Xmx192m -jar /lab-database.jar --host 0.0.0.0 --port 9000 --single_project_mode Error)"
-owned_containers+=("$db_id")
-provider_id="$(docker create --pull=never --name "$provider" --network "$network" --network-alias private-pot \
+provider_id="$(docker create --pull=never --label "$owner_label" --name "$provider" --network "$network" --network-alias private-pot \
     --restart no --pids-limit 96 --cpus .5 --memory 256m "$provider_image")"
-owned_containers+=("$provider_id")
 docker start "$db_id" "$provider_id" >/dev/null
 
-app_id="$(docker create --pull=never --init --name "$app" --network "$network" --restart no \
+app_id="$(docker create --pull=never --label "$owner_label" --init --name "$app" --network "$network" --restart no \
     --read-only --cap-drop ALL --security-opt no-new-privileges --pids-limit 96 --cpus 1 --memory 768m \
     --tmpfs /tmp:rw,exec,nosuid,nodev,size=256m,uid=1000,gid=1000,mode=0700 --user 1000:1000 \
     --mount "type=bind,src=$root/state/shared-browser-profile,dst=/workspace/shared-browser-profile,readonly" \
@@ -140,7 +193,6 @@ app_id="$(docker create --pull=never --init --name "$app" --network "$network" -
     -e YOUTUBE_BROWSER_FALLBACK_ENABLED=false -e YTDLP_JS_RUNTIME=deno -e YTDLP_POT_PROVIDER_BASE_URL=http://private-pot:4416 \
     -e PROCESS_AUDIO_YOUTUBE_GUEST_CANARY_TIMEOUT_MS=45000 -e PROCESS_AUDIO_YOUTUBE_AUTH_CANARY_TIMEOUT_MS=45000 \
     -e PROCESS_AUDIO_YOUTUBE_GUEST_CANARY_URL -e PROCESS_AUDIO_YOUTUBE_AUTH_CANARY_URL "$image")"
-owned_containers+=("$app_id")
 test "$(docker inspect --format '{{.Image}} {{.HostConfig.ReadonlyRootfs}} {{.HostConfig.NetworkMode}} {{len .HostConfig.PortBindings}}' "$app_id")" = "$image true $network 0"
 test "$(docker inspect --format '{{range .Mounts}}{{.RW}} {{end}}' "$app_id")" = 'false '
 test "$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$app_id" | awk -F= '$1 ~ /^(GOOGLE_APPLICATION_CREDENTIALS|FIREBASE_SERVICE_ACCOUNT_JSON|PROCESS_AUDIO_BROWSER_REFRESH_CONTROL_DIR|PROCESS_AUDIO_BROWSER_POT_CONTROL_DIR|SENTRY_DSN)$/ {n++} END {print n+0}')" = 0
@@ -160,7 +212,7 @@ for i in $(seq 1 55); do
     sleep 2
 done
 test "$(docker exec "$app_id" yt-dlp --version)" = 2026.11.23
-python3 - "$dir/application-report.json" "$dir/verified-report.json" "$image" "$revision" "$context" <<'PY'
+python3 -I - "$dir/application-report.json" "$dir/verified-report.json" "$image" "$revision" "$context" <<'PY'
 from pathlib import Path
 from datetime import datetime, timezone
 import json,sys
@@ -189,3 +241,23 @@ Path(sys.argv[2]).write_text(json.dumps({
 }, sort_keys=True)+"\n")
 print("Application readiness and persisted canary reports passed")
 PY
+
+# The shared lock is the unpublished receipt. Preserve verified evidence, then
+# remove lab resources and confirm serving inventory before creating the tag.
+owns_lock
+cp "$dir/verified-report.json" "$lock_dir/shadow-qualification.json"
+close_lab
+after="$(snapshot)"
+test "$after" = "$before"
+owns_lock
+current_tag="$(tag_id)"
+test -z "$current_tag"
+printf '%s\n' "$owner" > "$lock_dir/validated-by-deployment"
+printf '%s\n' youtube > "$lock_dir/validated-smoke-profile"
+date -u +%FT%TZ > "$lock_dir/validated-at"
+: > "$lock_dir/tag-creation-attempted"
+docker image tag "$image" "$candidate_tag"
+current_tag="$(tag_id)"
+test "$current_tag" = "$image"
+: > "$lock_dir/validated"
+rename_new "$lock_dir" "$candidate_dir"
