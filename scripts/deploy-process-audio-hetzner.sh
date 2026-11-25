@@ -205,6 +205,92 @@ PY
 CANDIDATE_ID="$CANDIDATE_CONTEXT_SHA"
 DEPLOYMENT_ID="${RELEASE_SHA:0:12}-$(date -u +%Y%m%dT%H%M%SZ)-$$"
 
+append_moses_guest_pilot_env() {
+  local env_name="$1" env_file="$2"
+  [[ "$env_name" == production ]] || return 0
+  case "${MOSES_GUEST_AUDIO_ENABLED-false}" in
+    false) return 0 ;;
+    true) ;;
+    *) echo "MOSES_GUEST_AUDIO_ENABLED must be true or false" >&2; return 1 ;;
+  esac
+  if [[ "$TARGET_ENV" != production || "$SMOKE_PROFILE" != youtube || "$production_hostname" != yt-worker.upperroommedia.org ]]; then
+    echo "The Moses pilot requires a production-only YouTube deployment to the production Hetzner worker" >&2
+    return 1
+  fi
+
+  python3 - "$env_file" <<'MOSES_GUEST_ENV_PY'
+import base64
+import datetime
+import os
+import re
+import stat
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+env_file = Path(sys.argv[1])
+origin = 'https://moses-guest.upperroommedia.org'
+audience = 'https://yt-worker.upperroommedia.org/process-audio'
+account = 'moses-guest-task-invoker@urm-app.iam.gserviceaccount.com'
+if os.environ.get('MOSES_GUEST_AUDIO_ORIGIN') != origin:
+    sys.exit('Invalid production Moses pilot setting MOSES_GUEST_AUDIO_ORIGIN')
+for key, expected in (
+    ('PROCESS_AUDIO_MOSES_GUEST_TASK_OIDC_AUDIENCE', audience),
+    ('PROCESS_AUDIO_MOSES_GUEST_TASK_OIDC_SERVICE_ACCOUNT', account),
+):
+    if os.environ.get(key, expected) != expected:
+        sys.exit(f'Invalid production Moses pilot setting {key}')
+if 'MOSES_GUEST_AUDIO_TOKEN' in os.environ:
+    sys.exit('Use a numbered Secret Manager version for the production Moses token')
+
+def setting(key, pattern):
+    value = os.environ.get(key, '')
+    if not re.fullmatch(pattern, value, re.ASCII):
+        sys.exit(f'Invalid production Moses pilot setting {key}')
+    return value
+
+video = setting('MOSES_GUEST_AUDIO_VIDEO_IDS', r'[A-Za-z0-9_-]{11}')
+sermon = setting('PROCESS_AUDIO_MOSES_GUEST_PILOT_SERMON_ID', r'[A-Za-z0-9_-]{1,128}')
+start = setting('PROCESS_AUDIO_MOSES_GUEST_PILOT_NOT_BEFORE', r'\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z')
+try:
+    datetime.datetime.strptime(start, '%Y-%m-%dT%H:%M:%S.%fZ')
+except ValueError:
+    sys.exit('Invalid UTC date for PROCESS_AUDIO_MOSES_GUEST_PILOT_NOT_BEFORE')
+subject = setting('PROCESS_AUDIO_MOSES_GUEST_TASK_OIDC_SUBJECT', r'[1-9][0-9]{20}')
+version = setting('MOSES_GUEST_AUDIO_TOKEN_VERSION', r'[1-9][0-9]{0,18}')
+
+metadata = env_file.lstat()
+if not stat.S_ISREG(metadata.st_mode) or stat.S_IMODE(metadata.st_mode) != 0o600 or metadata.st_uid != os.geteuid():
+    sys.exit('Production worker environment must be a private file owned by the deployment account')
+
+# Read the exact bytes. CLI text formatting and shell substitution can strip invalid trailing bytes.
+with tempfile.TemporaryDirectory(dir=env_file.parent.parent) as private_dir:
+    secret_path = Path(private_dir) / 'token'
+    secret_path.touch(mode=0o600)
+    result = subprocess.run([
+        'gcloud', 'secrets', 'versions', 'access', version, '--secret=MOSES_GUEST_AUDIO_TOKEN',
+        '--project=urm-app', f'--out-file={secret_path}',
+    ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if result.returncode or not secret_path.is_file():
+        sys.exit('Could not read the numbered production Moses token version')
+    token = secret_path.read_bytes()
+if not re.fullmatch(rb'[A-Za-z0-9_-]{43}', token):
+    sys.exit('Production Moses token must be 43 unpadded base64url characters')
+if base64.urlsafe_b64encode(base64.urlsafe_b64decode(token + b'='))[:-1] != token:
+    sys.exit('Production Moses token must contain exactly 32 bytes in canonical unpadded base64url')
+with env_file.open('a', encoding='ascii') as output:
+    output.write(
+        f'MOSES_GUEST_AUDIO_ENABLED=true\nMOSES_GUEST_AUDIO_ORIGIN={origin}\n'
+        f'MOSES_GUEST_AUDIO_VIDEO_IDS={video}\nMOSES_GUEST_AUDIO_TOKEN={token.decode("ascii")}\n'
+        f'PROCESS_AUDIO_MOSES_GUEST_PILOT_SERMON_ID={sermon}\nPROCESS_AUDIO_MOSES_GUEST_PILOT_NOT_BEFORE={start}\n'
+        f'PROCESS_AUDIO_MOSES_GUEST_TASK_OIDC_AUDIENCE={audience}\n'
+        f'PROCESS_AUDIO_MOSES_GUEST_TASK_OIDC_SERVICE_ACCOUNT={account}\n'
+        f'PROCESS_AUDIO_MOSES_GUEST_TASK_OIDC_SUBJECT={subject}\n'
+    )
+MOSES_GUEST_ENV_PY
+}
+
 write_env_file() {
   local env_name="$1"
   local project_id firebase_project_id bucket database_url env_file_name runtime_alert_recipients service_account_json_b64 sentry_dsn admin_base_url public_origin provider_relay_token
@@ -295,9 +381,8 @@ PROCESS_AUDIO_YOUTUBE_AUTH_CANARY_INTERVAL_MS=600000
 PROCESS_AUDIO_YOUTUBE_MEDIA_CANARY_MAX_AGE_MS=900000
 EOF
   chmod 600 "$WORK_DIR/env/$env_file_name"
+  append_moses_guest_pilot_env "$env_name" "$WORK_DIR/env/$env_file_name"
 }
-
-"$ROOT_DIR/scripts/setup-process-audio-hetzner-desktop-bridge.sh"
 
 case "$TARGET_ENV" in
   staging)
@@ -311,6 +396,35 @@ case "$TARGET_ENV" in
     write_env_file production
     ;;
 esac
+
+if [[ "$TARGET_ENV" == production ]]; then
+  # Check before changing the shared desktop bridge, provider, or deployment configuration.
+  # The locked promotion checks the same candidate again before starting the worker.
+  ssh "$SSH_TARGET" "bash -s -- '${REMOTE_DIR}' '${CANDIDATE_ID}' '${SMOKE_PROFILE}'" <<'REMOTE_PRODUCTION_PREFLIGHT'
+set -euo pipefail
+remote_dir="$1"
+candidate_id="$2"
+smoke_profile="$3"
+candidate_dir="${remote_dir}/state/deploy-candidates/${candidate_id}"
+candidate_tag="upperroom/process-audio-candidate:${candidate_id}"
+
+if [[ ! -f "${candidate_dir}/validated" || ! -f "${candidate_dir}/validated-smoke-profile" ||
+      ! -f "${candidate_dir}/context-sha256" || ! -f "${candidate_dir}/image-id" ]] ||
+   [[ "$(cat "${candidate_dir}/validated-smoke-profile")" != "$smoke_profile" ||
+      "$(cat "${candidate_dir}/context-sha256")" != "$candidate_id" ]]; then
+  echo "Production promotion refused: exact candidate has no matching staging validation" >&2
+  exit 1
+fi
+expected_image="$(cat "${candidate_dir}/image-id")"
+if ! [[ "$expected_image" =~ ^sha256:[a-f0-9]{64}$ ]] ||
+   [[ "$(docker image inspect --format '{{.Id}}' "$candidate_tag" 2>/dev/null)" != "$expected_image" ]]; then
+  echo "Production promotion refused: validated image does not match the candidate tag" >&2
+  exit 1
+fi
+REMOTE_PRODUCTION_PREFLIGHT
+fi
+
+"$ROOT_DIR/scripts/setup-process-audio-hetzner-desktop-bridge.sh"
 
 cat > "$WORK_DIR/.env" <<EOF
 PROCESS_AUDIO_STAGING_HOSTNAME=${staging_hostname}
