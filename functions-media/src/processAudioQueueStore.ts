@@ -1,4 +1,7 @@
 import { randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
+import { getProcessAudioTargetUri } from './processAudioService';
+import { MOSES_PILOT_INTENTS_PATH, PilotTaskNotCreated, prepareLegacyMosesPilotTransport, type PilotSendIntent, type PilotTransport } from './legacyMosesGuestPilot';
 import type { Database } from 'firebase-admin/database';
 import { getFunctions, type TaskQueue } from 'firebase-admin/functions';
 import type { AddIntroOutroInputType } from '@upperroom/contracts/addIntroOutro/types';
@@ -18,6 +21,7 @@ import {
   PROCESS_AUDIO_DEFERRED_DISPOSITIONS,
   sanitizeProcessAudioPayload,
   type ProcessAudioSourceType,
+  type MosesGuestPilotMarker,
   type LegacyStoredDeferredYouTubeRequest,
   type StoredDeferredYouTubeRequest,
   type StoredProcessAudioRequestState,
@@ -510,23 +514,225 @@ async function writeDeferredYouTubeRequest(
   await database.ref(`${YOUTUBE_QUEUE_DEFERRED_PATH}/${sanitizedPayload.id}`).set(deferredRequest);
 }
 
+type PilotReceiptPhase = 'prepared' | 'sending' | 'acknowledged' | 'rejected' | 'legacy_sending';
+type PilotReceipt = PilotSendIntent & { phase: PilotReceiptPhase; reason?: string };
+
+// Serial replacements are the only allowed differences from the original reserved row.
+function matchesPendingPilot(value: unknown, pending: Record<string, unknown>): boolean {
+  const row = asRecord(value);
+  if (!row) return false;
+  const { nextPayload, nextRequestVersion, nextUpdatedAt, ...original } = row;
+  if (!isDeepStrictEqual(original, pending)) return false;
+  if (nextPayload === undefined && nextRequestVersion === undefined && nextUpdatedAt === undefined) return true;
+  const next = asRecord(nextPayload);
+  if (!next || next.id !== original.sermonId || typeof next.startTime !== 'number' || typeof next.duration !== 'number' ||
+      (typeof next.youtubeUrl !== 'string' && typeof next.storageFilePath !== 'string') ||
+      typeof nextUpdatedAt !== 'string' || !Number.isFinite(Date.parse(nextUpdatedAt)) ||
+      new Date(nextUpdatedAt).toISOString() !== nextUpdatedAt) return false;
+  const data = next as AddIntroOutroInputType;
+  return isDeepStrictEqual(data, sanitizeProcessAudioPayload(data)) && nextRequestVersion !== original.currentRequestVersion &&
+    computeProcessAudioRequestVersion(data) === nextRequestVersion;
+}
+
+// The permanent receipt survives ordinary request cleanup. Only prepared -> sending
+// grants the right to POST, and only an authenticated provider ACK can publish a marker.
+export async function queueInitialMosesGuestPilot(args: {
+  database: Database;
+  payload: AddIntroOutroInputType;
+  eventId: string;
+  isCurrentCreate: () => Promise<boolean>;
+  isValidLegacySource: (successor?: AddIntroOutroInputType) => Promise<boolean>;
+  targetUri: string;
+}, prepare: () => Promise<PilotTransport> = prepareLegacyMosesPilotTransport): Promise<QueueMutationResult> {
+  const { database, eventId } = args;
+  const payload = sanitizeProcessAudioPayload(args.payload);
+  const requestVersion = computeProcessAudioRequestVersion(payload);
+  const sermonId = payload.id;
+  const sourceType = getProcessAudioSourceType(payload);
+  const unchanged = { action: 'unchanged' as const, requestVersion, sourceType };
+  if (sourceType !== 'youtube') return unchanged;
+
+  // CloudEvent redelivery has the same event ID. Each invocation needs its own exclusion owner.
+  const result = await withProcessAudioQueueClaim(database, sermonId, `moses-pilot:${randomUUID()}`, async () => {
+    const requestRef = database.ref(`${PROCESS_AUDIO_REQUESTS_PATH}/${sermonId}`);
+    const receiptRef = database.ref(`${MOSES_PILOT_INTENTS_PATH}/${sermonId}`);
+    const [request, receipt, lock, deferred, probe, currentCreate] = await Promise.all([
+      requestRef.get(), receiptRef.get(), database.ref(`${PROCESS_AUDIO_LOCKS_PATH}/${sermonId}`).get(),
+      database.ref(`${YOUTUBE_QUEUE_DEFERRED_PATH}/${sermonId}`).get(),
+      database.ref(`${YOUTUBE_QUEUE_STATE_PATH}/probeTaskSermonId`).get(), args.isCurrentCreate(),
+    ]);
+    if (lock.exists() || deferred.exists() || (probe.exists() &&
+        (typeof probe.val() !== 'string' || probe.val() === sermonId))) return unchanged;
+
+    let record: PilotReceipt;
+    if (!receipt.exists()) {
+      if (request.exists()) return unchanged;
+      const queuedAt = getNowIsoString();
+      record = {
+        eventId, requestVersion, queuedAt, nonce: randomUUID(), phase: 'prepared',
+        taskId: computeProcessAudioTaskId(sermonId, requestVersion, `sermon-create:${eventId}:${queuedAt}`),
+      };
+      const reserved = await receiptRef.transaction(current => current === null ? record : undefined, undefined, false);
+      if (!reserved.committed) return unchanged;
+    } else {
+      record = receipt.val();
+      if (record?.eventId !== eventId || record.requestVersion !== requestVersion ||
+          typeof record.queuedAt !== 'string' || !Number.isFinite(Date.parse(record.queuedAt)) ||
+          new Date(record.queuedAt).toISOString() !== record.queuedAt ||
+          typeof record.nonce !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(record.nonce) ||
+          record.taskId !== computeProcessAudioTaskId(sermonId, requestVersion, `sermon-create:${eventId}:${record.queuedAt}`)) return unchanged;
+    }
+    const transition = async (phase: PilotReceiptPhase, reason?: string) => {
+      const next: PilotReceipt = { ...record, phase, ...(reason && { reason }) };
+      const result = await receiptRef.transaction(current => current === null ? null :
+        isDeepStrictEqual(current, record) ? next : undefined, undefined, false);
+      const moved = result.committed && isDeepStrictEqual(result.snapshot.val(), next);
+      if (moved) record = next;
+      return moved;
+    };
+    const { taskId, queuedAt, nonce } = record;
+    const marker: MosesGuestPilotMarker = { eventId, taskId, queuedAt, requestVersion };
+    const intent = { ...marker, nonce };
+    const pending = Object.fromEntries(Object.entries({
+      ...buildProcessAudioRequestState(payload, requestVersion, queuedAt), mosesGuestPilotIntent: marker,
+    }).filter(([, value]) => value !== null)); // RTDB omits null children.
+
+    if (record.phase === 'prepared' && !currentCreate) {
+      if (!await transition('rejected', 'source_changed')) return unchanged;
+    }
+    if (record.phase === 'rejected') return 'legacy';
+    // The original POST may already have reached Cloud Tasks when a newer edit arrives.
+    // Exact readback can settle that incumbent while the edit waits in the normal next slot.
+    if (!currentCreate && !request.child('nextPayload').exists()) return unchanged;
+    if (request.exists() && !matchesPendingPilot(request.val(), pending)) return unchanged;
+    if (!request.exists()) {
+      if (record.phase !== 'prepared') return unchanged;
+      const reserved = await requestRef.transaction(current => current === null ? pending : undefined, undefined, false);
+      if (!reserved.committed) return unchanged;
+    }
+
+    let provider: PilotTransport;
+    try {
+      provider = await prepare();
+    } catch {
+      if (record.phase !== 'prepared') throw new Error('Could not authenticate inspection of the original pilot task.');
+      return await transition('rejected', 'authorization_unavailable') ? 'legacy' : unchanged;
+    }
+    if (record.phase === 'prepared') {
+      // A restart may resume a prepared record long after its original dispatch window.
+      if (Date.now() >= Date.parse(queuedAt) + 25_000) {
+        return await transition('rejected', 'schedule_elapsed') ? 'legacy' : unchanged;
+      }
+      if (!await transition('sending')) return unchanged;
+      try {
+        await provider('create', payload, intent);
+      } catch (error) {
+        if (!(error instanceof PilotTaskNotCreated)) throw error;
+        return await transition('rejected', 'create_rejected') ? 'legacy' : unchanged;
+      }
+    } else if (record.phase === 'sending' || record.phase === 'acknowledged') {
+      await provider('inspect', payload, intent);
+    } else {
+      return unchanged;
+    }
+    if (record.phase !== 'acknowledged' && !await transition('acknowledged')) return unchanged;
+    const confirmed = await requestRef.transaction(current => {
+      if (current === null) return null;
+      if (!matchesPendingPilot(current, pending)) return undefined;
+      return { ...current, queuedTaskId: taskId, queuedAt, mosesGuestPilotIntent: null, mosesGuestPilot: marker };
+    }, undefined, false);
+    return confirmed.committed && isDeepStrictEqual(confirmed.snapshot.child('mosesGuestPilot').val(), marker)
+      ? { action: 'queued' as const, requestVersion, taskId, sourceType } : unchanged;
+  });
+  if (result !== 'legacy') return result;
+  return queueOrReplaceProcessAudioRequest({
+    database, payload, targetUri: args.targetUri, ownerId: `sermon-create:${eventId}`, onlyIfMissing: true,
+    initialCreate: { eventId, isValidLegacySource: args.isValidLegacySource, declinedPilot: true },
+  });
+}
+
 export async function queueOrReplaceProcessAudioRequest(args: {
   database: Database;
   payload: AddIntroOutroInputType;
   targetUri: string;
   ownerId: string;
   onlyIfMissing?: boolean;
+  initialCreate?: { eventId: string; isValidLegacySource: (successor?: AddIntroOutroInputType) => Promise<boolean>; declinedPilot?: boolean };
 }): Promise<QueueMutationResult> {
-  const { database, payload, targetUri, ownerId, onlyIfMissing = false } = args;
-  const sanitizedPayload = sanitizeProcessAudioPayload(payload);
-  const requestVersion = computeProcessAudioRequestVersion(sanitizedPayload);
-  const sourceType = getProcessAudioSourceType(sanitizedPayload);
-  const queue = getFunctions().taskQueue<AddIntroOutroInputType>(getProcessAudioTaskQueueNameForSource(sourceType));
+  const { database, payload, ownerId, onlyIfMissing = false } = args;
 
-  return await withProcessAudioQueueClaim(database, sanitizedPayload.id, ownerId, async () => {
+  const claimOwner = args.initialCreate ? `${ownerId}:${randomUUID()}` : ownerId;
+  return await withProcessAudioQueueClaim(database, payload.id, claimOwner, async () => {
+    let sanitizedPayload = sanitizeProcessAudioPayload(payload);
+    let requestVersion = computeProcessAudioRequestVersion(sanitizedPayload);
+    let sourceType = getProcessAudioSourceType(sanitizedPayload);
+    let targetUri = args.targetUri;
     const requestRef = database.ref(`${PROCESS_AUDIO_REQUESTS_PATH}/${sanitizedPayload.id}`);
     const lockRef = database.ref(`${PROCESS_AUDIO_LOCKS_PATH}/${sanitizedPayload.id}`);
+    const receiptRef = database.ref(`${MOSES_PILOT_INTENTS_PATH}/${sanitizedPayload.id}`);
+    let declinedReceipt: PilotReceipt | null = null;
+    let declinedPending: Record<string, unknown> | null = null;
     const [requestSnapshot, lockSnapshot] = await Promise.all([requestRef.get(), lockRef.get()]);
+    // An old Eventarc redelivery must still honor the permanent receipt after rollback.
+    // Only the native create path reads this extra row; ordinary callable requests do not.
+    if (args.initialCreate) {
+      const { eventId, isValidLegacySource, declinedPilot } = args.initialCreate;
+      let receipt = (await receiptRef.get()).val() as PilotReceipt | null;
+      if (receipt || declinedPilot) {
+        const unchanged = { action: 'unchanged' as const, requestVersion, sourceType };
+        if (!receipt || receipt.eventId !== eventId || receipt.requestVersion !== requestVersion) return unchanged;
+        if (receipt.phase === 'prepared' && !declinedPilot) {
+          const rejected = { ...receipt, phase: 'rejected' as const, reason: 'pilot_disarmed' };
+          const declined = await receiptRef.transaction(current => current === null ? null :
+            isDeepStrictEqual(current, receipt) ? rejected : undefined, undefined, false);
+          if (!declined.committed || !isDeepStrictEqual(declined.snapshot.val(), rejected)) return unchanged;
+          receipt = rejected;
+        }
+        if (receipt.phase !== 'rejected') return unchanged;
+        declinedReceipt = receipt;
+        const [deferred, probe] = await Promise.all([
+          database.ref(`${YOUTUBE_QUEUE_DEFERRED_PATH}/${sanitizedPayload.id}`).get(),
+          database.ref(`${YOUTUBE_QUEUE_STATE_PATH}/probeTaskSermonId`).get(),
+        ]);
+        if (lockSnapshot.exists() || deferred.exists() || (probe.exists() &&
+            (typeof probe.val() !== 'string' || probe.val() === sanitizedPayload.id))) return unchanged;
+        if (requestSnapshot.exists()) {
+          const { taskId, queuedAt } = receipt;
+          const marker = { eventId, taskId, queuedAt, requestVersion };
+          const pending = Object.fromEntries(Object.entries({
+            ...buildProcessAudioRequestState(sanitizedPayload, requestVersion, queuedAt), mosesGuestPilotIntent: marker,
+          }).filter(([, value]) => value !== null));
+          if (!matchesPendingPilot(requestSnapshot.val(), pending)) return unchanged;
+          declinedPending = pending;
+          // No pilot task was created. Dispatch the latest accepted callable edit directly.
+          const successor = requestSnapshot.child('nextPayload').val() as AddIntroOutroInputType | null;
+          if (successor && await isValidLegacySource(successor)) {
+            sanitizedPayload = successor;
+            sourceType = getProcessAudioSourceType(successor);
+            targetUri = getProcessAudioTargetUri(sourceType);
+            requestVersion = computeProcessAudioRequestVersion(successor);
+          } else {
+            if (!await isValidLegacySource()) return unchanged;
+          }
+        } else if (!await isValidLegacySource()) return unchanged;
+      }
+    }
+    if (!declinedReceipt && (requestSnapshot.child('mosesGuestPilotIntent').exists() || requestSnapshot.child('mosesGuestPilot').exists())) {
+      if (requestSnapshot.child('currentRequestVersion').val() === requestVersion ||
+          requestSnapshot.child('nextRequestVersion').val() === requestVersion || args.initialCreate) {
+        return { action: 'unchanged', requestVersion, sourceType };
+      }
+      const observed = requestSnapshot.val();
+      const nextUpdatedAt = getNowIsoString();
+      const staged = await requestRef.transaction(current => current === null ? null :
+        isDeepStrictEqual(current, observed) ? { ...current, nextPayload: sanitizedPayload, nextRequestVersion: requestVersion, nextUpdatedAt } : undefined,
+        undefined, false);
+      if (!staged.committed || staged.snapshot.child('nextRequestVersion').val() !== requestVersion) {
+        throw new Error('Audio request ownership changed before the replacement could be saved.');
+      }
+      return { action: 'running_replaced', requestVersion, sourceType };
+    }
+    const queue = getFunctions().taskQueue<AddIntroOutroInputType>(getProcessAudioTaskQueueNameForSource(sourceType));
     const now = getNowIsoString();
     const taskId = computeProcessAudioTaskId(sanitizedPayload.id, requestVersion, `${ownerId}:${now}`);
     const currentState = requestSnapshot.exists()
@@ -539,7 +745,7 @@ export async function queueOrReplaceProcessAudioRequest(args: {
       (currentState.currentRequestVersion === requestVersion ||
         currentState.nextRequestVersion === requestVersion ||
         currentState.lastCompletedRequestVersion === requestVersion);
-    if (onlyIfMissing && requestVersionAlreadyHandled) {
+    if (!declinedReceipt && onlyIfMissing && requestVersionAlreadyHandled) {
       return { action: 'unchanged', requestVersion, sourceType };
     }
 
@@ -610,6 +816,18 @@ export async function queueOrReplaceProcessAudioRequest(args: {
       return { action: 'deferred', requestVersion, sourceType };
     }
 
+    if (declinedReceipt) {
+      delete nextState.mosesGuestPilotIntent;
+      delete nextState.mosesGuestPilot;
+      // From here the ordinary Admin enqueue may have reached the provider. A replay,
+      // including one after request cleanup, cannot create another legacy task.
+      const sending = { ...declinedReceipt, phase: 'legacy_sending', legacyTaskId: taskId };
+      const spend = await receiptRef.transaction(current => current === null ? null :
+        isDeepStrictEqual(current, declinedReceipt) ? sending : undefined, undefined, false);
+      if (!spend.committed || !isDeepStrictEqual(spend.snapshot.val(), sending)) {
+        return { action: 'unchanged', requestVersion, sourceType };
+      }
+    }
     await deleteExistingTask(queue, currentState.queuedTaskId);
     await queue.enqueue(sanitizedPayload, {
       id: taskId,
@@ -617,12 +835,25 @@ export async function queueOrReplaceProcessAudioRequest(args: {
       uri: targetUri,
     });
 
-    await requestRef.set({
-      ...nextState,
-      queuedTaskId: taskId,
-      queuedAt: now,
-      deferredAt: null,
-    } satisfies StoredProcessAudioRequestState);
+    const queued = { ...nextState, queuedTaskId: taskId, queuedAt: now, deferredAt: null };
+    if (declinedReceipt) {
+      // A late ordinary ACK must not overwrite a cancellation, early consumption, or a
+      // more recent serial edit accepted after this invocation's claim expired.
+      const published = await requestRef.transaction(current => {
+        if (!declinedPending) return current === null ? queued : undefined;
+        if (current === null) return null;
+        if (!matchesPendingPilot(current, declinedPending)) return undefined;
+        if (current.nextRequestVersion && current.nextRequestVersion !== requestVersion) {
+          return { ...queued, nextPayload: current.nextPayload, nextRequestVersion: current.nextRequestVersion, nextUpdatedAt: current.nextUpdatedAt };
+        }
+        return queued;
+      }, undefined, false);
+      if (!published.committed || published.snapshot.child('queuedTaskId').val() !== taskId) {
+        return { action: 'unchanged', requestVersion, sourceType };
+      }
+    } else {
+      await requestRef.set(queued);
+    }
 
     return { action: 'queued', requestVersion, taskId, sourceType };
   });

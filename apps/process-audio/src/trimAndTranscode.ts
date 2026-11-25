@@ -1,16 +1,22 @@
 import { CancelToken } from './CancelToken';
 import { Bucket, File } from '@google-cloud/storage';
 import { Database, Reference } from 'firebase-admin/database';
+import { unlink } from 'node:fs/promises';
+import { dirname } from 'node:path';
 import {
   convertStringToMilliseconds,
   createTempFile,
   logMemoryUsage,
   throwErrorOnSpecificStderr,
   getFFmpegPath,
+  getFFprobePath,
+  normalizeYouTubeUrl,
   unlinkSafeTempFile,
 } from './utils';
 import { CustomMetadata, AudioSource } from './types';
 import { downloadYouTubeAudioToFile } from './processYouTubeUrl';
+import { downloadMosesGuestAudio, readMosesGuestAudioConfig } from './mosesGuestAudio';
+import { mosesGuestMediaInputArgs, verifyMosesGuestAudio } from './mosesGuestMedia';
 import { finished } from 'stream';
 import { spawn } from 'child_process';
 import { sermonStatus, sermonStatusType } from './types';
@@ -75,7 +81,8 @@ const trimAndTranscode = async (
   customMetadata: CustomMetadata,
   startTime?: number,
   duration?: number,
-  ctx?: LogContext
+  ctx?: LogContext,
+  mosesPilotEligible = false
 ): Promise<File> => {
   const log = createLoggerWithContext(ctx);
   const outputFile = bucket.file(outputFilePath);
@@ -88,6 +95,7 @@ const trimAndTranscode = async (
     timeout: 30 * 60 * 1000, // 30 minutes in milliseconds
   });
   let inputSource: string | undefined;
+  let usingMosesGuestSource = false;
   let proc: ReturnType<typeof spawn> | undefined;
   let releaseFfmpegSlot: (() => void) | undefined;
   let transcodingStarted = false;
@@ -244,7 +252,7 @@ const trimAndTranscode = async (
   try {
     if (audioSource.type === 'YouTubeUrl') {
       const youtubeSourceFileBase = createTempFile(`youtube-${audioSource.id}`, tempFiles);
-      log.info('Processing YouTube URL with yt-dlp local download', {
+      log.info('Acquiring YouTube audio', {
         url: audioSource.source,
         startTime,
         duration,
@@ -274,17 +282,57 @@ const trimAndTranscode = async (
           });
         }
       );
-      let downloadedFile: string;
+      let downloadedFile: string | undefined;
       try {
-        downloadedFile = await downloadYouTubeAudioToFile(
-          ytdlpPath,
-          audioSource.source,
-          youtubeSourceFileBase,
-          cancelToken,
-          updateDownloadProgress,
-          realtimeDB,
-          ctx
-        );
+        if (mosesPilotEligible && ctx) {
+          const config = readMosesGuestAudioConfig();
+          const canonicalUrl = normalizeYouTubeUrl(audioSource.source);
+          const videoId = canonicalUrl && new URL(canonicalUrl).searchParams.get('v');
+          if (config && videoId && config.videoIds?.has(videoId)) {
+            const result = await downloadMosesGuestAudio({
+              config,
+              videoId,
+              tempDir: dirname(youtubeSourceFileBase),
+              cancelToken,
+            });
+            if (result.status === 'downloaded') tempFiles.add(result.filePath);
+            if (result.status === 'cancelled' || cancelToken.isCancellationRequested) {
+              throw new Error('Moses guest audio acquisition was cancelled');
+            }
+            if (result.status === 'downloaded') {
+              const valid = await verifyMosesGuestAudio(result.filePath, getFFprobePath);
+              if (cancelToken.isCancellationRequested) throw new Error('Moses guest audio acquisition was cancelled');
+              if (valid) {
+                downloadedFile = result.filePath;
+                usingMosesGuestSource = true;
+                ctx.youtubeSuccessfulAcquisitionAuthority = 'public_provider';
+                log.info('Moses supplied verified guest audio', { acquisitionHost: 'moses', authority: 'public_provider' });
+                updateDownloadProgress(100);
+              } else {
+                await unlink(result.filePath);
+                tempFiles.delete(result.filePath);
+                log.info('Continuing YouTube acquisition on Hetzner', { mosesFallbackReason: 'invalid_audio' });
+              }
+            } else {
+              log.info('Continuing YouTube acquisition on Hetzner', { mosesFallbackReason: result.reason });
+            }
+          } else {
+            log.info('Continuing YouTube acquisition on Hetzner', {
+              mosesFallbackReason: config ? 'ineligible_video' : 'not_configured',
+            });
+          }
+        }
+        if (!downloadedFile) {
+          downloadedFile = await downloadYouTubeAudioToFile(
+            ytdlpPath,
+            audioSource.source,
+            youtubeSourceFileBase,
+            cancelToken,
+            updateDownloadProgress,
+            realtimeDB,
+            ctx
+          );
+        }
       } finally {
         releaseYtDlpSlot();
       }
@@ -320,6 +368,7 @@ const trimAndTranscode = async (
     if (startTime !== undefined && startTime !== null) {
       args.push('-ss', startTime.toString());
     }
+    if (usingMosesGuestSource) args.push(...mosesGuestMediaInputArgs);
     args.push('-i', inputSource);
     if (duration !== undefined && duration !== null) {
       args.push('-t', duration.toString());

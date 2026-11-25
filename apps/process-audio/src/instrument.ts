@@ -1,4 +1,5 @@
 import * as Sentry from '@sentry/node';
+import { scrubMosesSentryPayload } from './sentryMosesPrivacy';
 
 const dsn = process.env.SENTRY_DSN?.trim() || '';
 const runtimeEnv =
@@ -24,6 +25,25 @@ Sentry.init({
   enableLogs: sentryLogsEnabled,
   includeLocalVariables: true,
   sendDefaultPii: false,
+  transport(options) {
+    const transport = Sentry.makeNodeTransport(options);
+    return {
+      flush: transport.flush,
+      send(envelope) {
+        const items = envelope[1];
+        for (let index = items.length - 1; index >= 0; index--) {
+          const item = items[index];
+          if (!['event', 'transaction', 'span', 'log'].includes(item[0].type)) continue;
+          try {
+            item[1] = scrubMosesSentryPayload(item[1], process.env.MOSES_GUEST_AUDIO_TOKEN);
+          } catch {
+            items.splice(index, 1);
+          }
+        }
+        return items.length ? transport.send(envelope) : Promise.resolve({});
+      },
+    };
+  },
   initialScope: {
     tags: {
       service: 'process-audio',

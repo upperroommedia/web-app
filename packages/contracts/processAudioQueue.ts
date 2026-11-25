@@ -107,7 +107,28 @@ export interface NormalizedProcessAudioRequest {
   outroUrl: string | null;
 }
 
+export interface MosesGuestPilotMarker {
+  eventId: string;
+  taskId: string;
+  queuedAt: string;
+  requestVersion: string;
+}
+
+export function getMosesGuestPilotSelection(env: NodeJS.ProcessEnv) {
+  const sermonId = env.PROCESS_AUDIO_MOSES_GUEST_PILOT_SERMON_ID;
+  const notBefore = env.PROCESS_AUDIO_MOSES_GUEST_PILOT_NOT_BEFORE;
+  const videoId = env.MOSES_GUEST_AUDIO_VIDEO_IDS;
+  if (env.MOSES_GUEST_AUDIO_ENABLED !== 'true' ||
+      !sermonId || !/^[A-Za-z0-9_-]{1,128}$/u.test(sermonId) ||
+      !videoId || videoId.length !== 11 || !/^[A-Za-z0-9_-]+$/u.test(videoId) ||
+      !notBefore || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(notBefore) ||
+      !Number.isFinite(Date.parse(notBefore)) || new Date(notBefore).toISOString() !== notBefore) return null;
+  return { sermonId, videoId, notBefore };
+}
+
 export interface StoredProcessAudioRequestState {
+  mosesGuestPilot?: MosesGuestPilotMarker | null;
+  mosesGuestPilotIntent?: MosesGuestPilotMarker | null;
   sermonId: string;
   sourceType: ProcessAudioSourceType;
   currentPayload: AddIntroOutroInputType | null;

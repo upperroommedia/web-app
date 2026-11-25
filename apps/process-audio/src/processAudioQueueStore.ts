@@ -2,6 +2,7 @@ import type { Database } from 'firebase-admin/database';
 import { getFunctions, type TaskQueue } from 'firebase-admin/functions';
 import { GoogleAuth } from 'google-auth-library';
 import { createHash, randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import type { AddIntroOutroInputType } from '@upperroom/contracts/addIntroOutro/types';
 import type {
   ProcessAudioSourceType,
@@ -14,11 +15,14 @@ import type {
   YouTubeQueueProbeMode,
 } from '@upperroom/contracts/processAudioQueue';
 import {
+  getMosesGuestPilotSelection,
   getProcessAudioTaskQueueNameForSource,
   PROCESS_AUDIO_DEFERRED_DISPOSITIONS,
 } from '@upperroom/contracts/processAudioQueue';
 import { createLoggerWithContext } from './WinstonLogger';
 import type { LogContext } from './context';
+import { isProductionMosesGuestWorker } from './mosesGuestTaskIdentity';
+import { rememberConsumedMosesPilotNonce } from './sentryMosesPrivacy';
 
 const PROCESS_AUDIO_QUEUE_CLAIM_TTL_MS = 60 * 1000;
 const PROCESS_AUDIO_REQUESTS_PATH = 'processAudioRequests';
@@ -915,45 +919,195 @@ async function drainDeferredYouTubeRequestsAfterProbe(args: {
   });
 }
 
+function isInitialMosesPilotMarker(
+  marker: Record<string, unknown>,
+  payload: AddIntroOutroInputType,
+  requestVersion: string,
+  taskId: string | null
+): boolean {
+  if (!taskId || !isProductionMosesGuestWorker()) return false;
+  const selection = getMosesGuestPilotSelection(process.env);
+  if (
+    !selection ||
+    payload.id !== selection.sermonId ||
+    !('youtubeUrl' in payload) ||
+    payload.youtubeUrl !== `https://www.youtube.com/watch?v=${selection.videoId}`
+  ) return false;
+
+  if (
+    Object.keys(marker).sort().join(',') !== 'eventId,queuedAt,requestVersion,taskId' ||
+    typeof marker.eventId !== 'string' ||
+    !/^[A-Za-z0-9_-]{1,128}$/u.test(marker.eventId) ||
+    marker.taskId !== taskId ||
+    marker.requestVersion !== requestVersion
+  ) return false;
+
+  // Reproduce the task name minted by the original Firestore create event. Deferred
+  // dispatches can also have fresh queuedAt/updatedAt values, but use other enqueue tokens.
+  if (typeof marker.queuedAt !== 'string') return false;
+  const queuedAtMs = Date.parse(marker.queuedAt);
+  if (
+    !Number.isFinite(queuedAtMs) ||
+    new Date(queuedAtMs).toISOString() !== marker.queuedAt ||
+    queuedAtMs < Date.parse(selection.notBefore) ||
+    queuedAtMs > Date.now()
+  ) return false;
+  return !payload.skipTranscode &&
+    computeProcessAudioTaskId(payload.id, requestVersion, `sermon-create:${marker.eventId}:${marker.queuedAt}`) === taskId;
+}
+
+function ownsPilotDelivery(
+  state: StoredProcessAudioRequestState,
+  payload: AddIntroOutroInputType,
+  requestVersion: string,
+  taskId: string | null
+): boolean {
+  return (
+    state.sermonId === payload.id &&
+    state.sourceType === 'youtube' &&
+    (taskId === null ? state.queuedTaskId == null : state.queuedTaskId === taskId) &&
+    state.currentRequestVersion === requestVersion &&
+    typeof state.currentPayload === 'object' && state.currentPayload !== null &&
+    computeProcessAudioRequestVersion(state.currentPayload) === requestVersion &&
+    state.runningRequestId == null &&
+    state.runningTaskId == null &&
+    state.runningRequestVersion == null &&
+    state.runningAt == null
+  );
+}
+
+function isPristinePilotRow(state: StoredProcessAudioRequestState): boolean {
+  return (
+    state.updatedAt === state.queuedAt &&
+    ((state.nextPayload == null && state.nextRequestVersion == null && state.nextUpdatedAt == null) ||
+      hasValidStagedNextRequest(state)) &&
+    state.deferredAt == null &&
+    state.transientRetryCount === 0 &&
+    state.transientRetryReason == null &&
+    state.transientRetryNextRunAt == null &&
+    state.transientRetryLastFailureMessage == null &&
+    (state.authenticatedDeferralAttemptCount ?? 0) === 0 &&
+    state.lastCompletedRequestVersion == null &&
+    state.lastSuccessfulYouTubeAcquisitionAuthority == null
+  );
+}
+
+function hasValidStagedNextRequest(current: StoredProcessAudioRequestState): boolean {
+  const { nextPayload, nextRequestVersion, nextUpdatedAt } = current;
+  if (
+    !nextPayload || typeof nextPayload !== 'object' || nextPayload.id !== current.sermonId ||
+    !Number.isFinite(nextPayload.startTime) || !Number.isFinite(nextPayload.duration) ||
+    typeof ('youtubeUrl' in nextPayload ? nextPayload.youtubeUrl : nextPayload.storageFilePath) !== 'string' ||
+    !isDeepStrictEqual(nextPayload, sanitizeProcessAudioPayload(nextPayload)) ||
+    nextRequestVersion !== computeProcessAudioRequestVersion(nextPayload) ||
+    typeof nextUpdatedAt !== 'string' || !Number.isFinite(Date.parse(nextUpdatedAt)) ||
+    new Date(nextUpdatedAt).toISOString() !== nextUpdatedAt
+  ) return false;
+  return true;
+}
+
+function hasOnlyStagedNextRequest(current: StoredProcessAudioRequestState, initial: StoredProcessAudioRequestState): boolean {
+  const { nextPayload, nextRequestVersion, nextUpdatedAt } = current;
+  return hasValidStagedNextRequest(current) &&
+    isDeepStrictEqual(current, { ...initial, nextPayload, nextRequestVersion, nextUpdatedAt });
+}
+
 export async function markProcessAudioRequestRunning(args: {
   database: Database;
   payload: AddIntroOutroInputType;
   requestId: string;
   taskId: string | null;
   ctx?: LogContext;
-}): Promise<void> {
+  verifiedMosesPilotIntentNonce?: string;
+}): Promise<boolean | 'stale'> {
   const { database, payload, requestId, taskId, ctx } = args;
   const sanitizedPayload = sanitizeProcessAudioPayload(payload);
   const requestVersion = computeProcessAudioRequestVersion(sanitizedPayload);
   const now = getNowIsoString();
   const log = createLoggerWithContext(ctx);
 
-  await withProcessAudioQueueClaim(database, sanitizedPayload.id, `running:${requestId}`, async () => {
+  return withProcessAudioQueueClaim(database, sanitizedPayload.id, `running:${requestId}`, async () => {
     const requestRef = database.ref(`${PROCESS_AUDIO_REQUESTS_PATH}/${sanitizedPayload.id}`);
     const requestSnapshot = await requestRef.get();
     const existingState = requestSnapshot.exists()
       ? (requestSnapshot.val() as StoredProcessAudioRequestState)
       : buildProcessAudioRequestState(sanitizedPayload, requestVersion, now);
 
-    await requestRef.set({
-      ...existingState,
-      sermonId: sanitizedPayload.id,
-      sourceType: getProcessAudioSourceType(sanitizedPayload),
-      currentPayload: sanitizedPayload,
-      currentRequestVersion: requestVersion,
-      queuedTaskId: taskId ?? existingState.queuedTaskId,
-      runningRequestId: requestId,
-      runningTaskId: taskId,
-      runningRequestVersion: requestVersion,
-      runningAt: now,
-      updatedAt: now,
-    } satisfies StoredProcessAudioRequestState);
+    let mosesPilotEligible = false;
+    if (
+      typeof args.verifiedMosesPilotIntentNonce === 'string' &&
+      /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u.test(args.verifiedMosesPilotIntentNonce)
+    ) {
+      try {
+        const [deferred, probe, pilotIntent] = await Promise.all([
+          database.ref(`${YOUTUBE_QUEUE_DEFERRED_PATH}/${sanitizedPayload.id}`).get(),
+          database.ref(`${YOUTUBE_QUEUE_STATE_PATH}/probeTaskSermonId`).get(),
+          database.ref(`processAudioMosesGuestPilotIntents/${sanitizedPayload.id}`).get(),
+        ]);
+        const probeOwner = probe.val();
+        const { phase, nonce, ...marker } = asRecord(pilotIntent.val()) ?? {};
+        if (phase === 'acknowledged' && nonce === args.verifiedMosesPilotIntentNonce &&
+          isInitialMosesPilotMarker(marker, sanitizedPayload, requestVersion, taskId)) {
+          rememberConsumedMosesPilotNonce(args.verifiedMosesPilotIntentNonce);
+          // The sender may have recorded acknowledgement just before it installed the queued marker.
+          // An original pending delivery can still take the incumbent path.
+          const pending = existingState.mosesGuestPilot == null &&
+            isDeepStrictEqual(existingState.mosesGuestPilotIntent, marker) &&
+            ownsPilotDelivery(existingState, sanitizedPayload, requestVersion, null);
+          if (!pending && (!requestSnapshot.exists() || !ownsPilotDelivery(existingState, sanitizedPayload, requestVersion, taskId))) {
+            return 'stale';
+          }
+          mosesPilotEligible = existingState.mosesGuestPilotIntent == null &&
+            isDeepStrictEqual(existingState.mosesGuestPilot, marker) &&
+            existingState.queuedAt === marker.queuedAt && isPristinePilotRow(existingState) &&
+            !deferred.exists() && (!probe.exists() || (typeof probeOwner === 'string' && probeOwner !== sanitizedPayload.id));
+        }
+      } catch {
+        log.warn('Moses guest pilot skipped because queue eligibility could not be verified');
+      }
+    }
+
+    // This delivery consumes the pilot authorization even when it takes the legacy route.
+    // A queued retry must never adopt a previous delivery's grant or pending enqueue intent.
+    const markRunning = (state: StoredProcessAudioRequestState): StoredProcessAudioRequestState => {
+      const runningState = {
+        ...state,
+        sermonId: sanitizedPayload.id,
+        sourceType: getProcessAudioSourceType(sanitizedPayload),
+        currentPayload: sanitizedPayload,
+        currentRequestVersion: requestVersion,
+        queuedTaskId: taskId ?? state.queuedTaskId,
+        runningRequestId: requestId,
+        runningTaskId: taskId,
+        runningRequestVersion: requestVersion,
+        runningAt: now,
+        updatedAt: now,
+      };
+      delete runningState.mosesGuestPilot;
+      delete runningState.mosesGuestPilotIntent;
+      return runningState;
+    };
+    if (mosesPilotEligible) {
+      // A replacement can win if the additional remote reads outlive the queue claim.
+      // Grant Moses only on the transaction that consumes the original snapshot.
+      const transition = await requestRef.transaction((current) => {
+        const sameSnapshot = isDeepStrictEqual(current, existingState);
+        mosesPilotEligible = sameSnapshot && current?.nextPayload == null;
+        if (current === null) return null; // Allow RTDB to resolve a cold cache without recreating a deleted row.
+        if (!current || (!sameSnapshot && !hasOnlyStagedNextRequest(current, existingState))) return undefined;
+        return markRunning(current);
+      }, undefined, false);
+      if (!transition.committed || transition.snapshot.val()?.runningRequestId !== requestId) return 'stale';
+    } else {
+      await requestRef.set(markRunning(existingState));
+    }
 
     log.info('Marked process-audio request as running', {
       sermonId: sanitizedPayload.id,
       requestVersion,
       taskId,
     });
+    return mosesPilotEligible;
   });
 }
 
@@ -964,7 +1118,8 @@ export async function completeProcessAudioSuccess(args: {
   taskId: string | null;
   ctx?: LogContext;
   alreadyProcessed?: boolean;
-}): Promise<void> {
+  verifiedMosesPilotIntentNonce?: string;
+}): Promise<void | 'stale'> {
   const { database, payload, requestId, taskId, ctx, alreadyProcessed = false } = args;
   const sanitizedPayload = sanitizeProcessAudioPayload(payload);
   const log = createLoggerWithContext(ctx);
@@ -972,7 +1127,7 @@ export async function completeProcessAudioSuccess(args: {
     getProcessAudioTaskQueueNameForSource(getProcessAudioSourceType(sanitizedPayload))
   );
 
-  await withProcessAudioQueueClaim(database, sanitizedPayload.id, `success:${requestId}`, async () => {
+  return withProcessAudioQueueClaim<void | 'stale'>(database, sanitizedPayload.id, `success:${requestId}`, async () => {
     const requestRef = database.ref(`${PROCESS_AUDIO_REQUESTS_PATH}/${sanitizedPayload.id}`);
     const [requestSnapshot, queueSnapshot] = await Promise.all([
       requestRef.get(),
@@ -982,7 +1137,57 @@ export async function completeProcessAudioSuccess(args: {
     let requestState = requestSnapshot.exists()
       ? (requestSnapshot.val() as StoredProcessAudioRequestState)
       : buildProcessAudioRequestState(sanitizedPayload, computeProcessAudioRequestVersion(sanitizedPayload), now);
+    const completedState = (state: StoredProcessAudioRequestState) => ({
+      ...state,
+      queuedTaskId: state.queuedTaskId === taskId ? null : state.queuedTaskId,
+      queuedAt: state.queuedTaskId === taskId ? null : state.queuedAt,
+      runningRequestId: null,
+      runningTaskId: null,
+      runningRequestVersion: null,
+      runningAt: null,
+      deferredAt: null,
+      transientRetryReason: null,
+      transientRetryCount: 0,
+      transientRetryNextRunAt: null,
+      transientRetryLastFailureMessage: null,
+      authenticatedDeferralAttemptCount: 0,
+      lastCompletedRequestVersion: state.runningRequestVersion ?? state.currentRequestVersion,
+      lastCompletedAt: now,
+      updatedAt: now,
+    } satisfies StoredProcessAudioRequestState);
     const queueState = parseYouTubeQueueState(queueSnapshot.val());
+    if (alreadyProcessed && args.verifiedMosesPilotIntentNonce !== undefined) {
+      // The PROCESSED shortcut never acquired the sermon lock or marked this task running.
+      // Reclaim only its acknowledged queued row before doing any normal completion work.
+      const [intent, lock, deferred] = await Promise.all([
+        database.ref(`processAudioMosesGuestPilotIntents/${sanitizedPayload.id}`).get(),
+        database.ref(`${PROCESS_AUDIO_LOCKS_PATH}/${sanitizedPayload.id}`).get(),
+        database.ref(`${YOUTUBE_QUEUE_DEFERRED_PATH}/${sanitizedPayload.id}`).get(),
+      ]);
+      const { phase, nonce, ...marker } = asRecord(intent.val()) ?? {};
+      const version = computeProcessAudioRequestVersion(sanitizedPayload);
+      if (phase !== 'acknowledged' || nonce !== args.verifiedMosesPilotIntentNonce ||
+        !isInitialMosesPilotMarker(marker, sanitizedPayload, version, taskId) ||
+        lock.exists() || deferred.exists() || queueState.probeTaskSermonId === sanitizedPayload.id) return 'stale';
+      rememberConsumedMosesPilotNonce(args.verifiedMosesPilotIntentNonce);
+      let completedWithoutSuccessor = false;
+      const adoption = await requestRef.transaction((current: StoredProcessAudioRequestState | null) => {
+        completedWithoutSuccessor = false;
+        if (current === null) return null;
+        if (!current || !ownsPilotDelivery(current, sanitizedPayload, version, taskId) ||
+          !isPristinePilotRow(current) || current.mosesGuestPilotIntent != null ||
+          current.queuedAt !== marker.queuedAt || !isDeepStrictEqual(current.mosesGuestPilot, marker)) return undefined;
+        if (current.nextPayload == null) {
+          completedWithoutSuccessor = true;
+          return completedState({ ...current, mosesGuestPilot: null });
+        }
+        return { ...current, mosesGuestPilot: null, runningRequestId: requestId, runningTaskId: taskId,
+          runningRequestVersion: version, runningAt: now, updatedAt: now };
+      }, undefined, false);
+      if (adoption.committed && completedWithoutSuccessor) return;
+      if (!adoption.committed || adoption.snapshot.val()?.runningRequestId !== requestId) return 'stale';
+      requestState = adoption.snapshot.val() as StoredProcessAudioRequestState;
+    }
     const incomingSuccessfulAuthority = ctx?.youtubeSuccessfulAcquisitionAuthority;
     const activeRequestVersion = requestState.runningRequestVersion ?? requestState.currentRequestVersion;
     if (
@@ -1204,8 +1409,9 @@ export async function completeProcessAudioSuccess(args: {
         await enqueueTask(nextPayload, nextTaskId);
       }
 
-      await requestRef.set({
+      const nextState = {
         ...requestState,
+        sourceType: nextSourceType,
         currentPayload: nextPayload,
         currentRequestVersion: requestState.nextRequestVersion,
         queuedTaskId,
@@ -1226,33 +1432,25 @@ export async function completeProcessAudioSuccess(args: {
         lastCompletedRequestVersion: activeRequestVersion,
         lastCompletedAt: now,
         updatedAt: now,
-      } satisfies StoredProcessAudioRequestState);
+      } satisfies StoredProcessAudioRequestState;
+      if (alreadyProcessed && args.verifiedMosesPilotIntentNonce !== undefined) {
+        // A delayed enqueue response must not write this successor over a different owner.
+        const advanced = await requestRef.transaction((current) =>
+          current === null ? null : isDeepStrictEqual(current, requestState) ? nextState : undefined, undefined, false);
+        if (!advanced.committed || advanced.snapshot.val()?.queuedTaskId !== queuedTaskId) return 'stale';
+      } else {
+        await requestRef.set(nextState);
+      }
       return;
     }
 
-    await requestRef.set({
-      ...requestState,
-      queuedTaskId: requestState.queuedTaskId === taskId ? null : requestState.queuedTaskId,
-      queuedAt: requestState.queuedTaskId === taskId ? null : requestState.queuedAt,
-      runningRequestId: null,
-      runningTaskId: null,
-      runningRequestVersion: null,
-      runningAt: null,
-      deferredAt: null,
-      transientRetryReason: null,
-      transientRetryCount: 0,
-      transientRetryNextRunAt: null,
-      transientRetryLastFailureMessage: null,
-      authenticatedDeferralAttemptCount: 0,
-      lastCompletedRequestVersion: activeRequestVersion,
-      lastCompletedAt: now,
-      updatedAt: now,
-    } satisfies StoredProcessAudioRequestState);
+    await requestRef.set(completedState(requestState));
 
     log.info('Completed process-audio request successfully', {
       sermonId: sanitizedPayload.id,
       taskId,
     });
+    return;
   });
 }
 

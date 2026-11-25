@@ -3,10 +3,11 @@ import type { AddIntroOutroInputType } from '@upperroom/contracts/addIntroOutro/
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { Sermon, sermonStatusType } from '@upperroom/shared/types/SermonTypes';
 import { logger } from 'firebase-functions/v2';
-import { onDocumentCreated } from 'firebase-functions/v2/firestore';
+import { onDocumentCreated, type QueryDocumentSnapshot } from 'firebase-functions/v2/firestore';
 import { ensureFirebaseDownloadUrl } from '../../functions/src/storageDownloadUrl';
 import { getProcessAudioTargetUri } from './processAudioService';
-import { queueOrReplaceProcessAudioRequest } from './processAudioQueueStore';
+import { queueInitialMosesGuestPilot, queueOrReplaceProcessAudioRequest } from './processAudioQueueStore';
+import { isLegacyMosesPilotCreate, type PilotCreateEvent } from './legacyMosesGuestPilot';
 
 type InitialAudioEnqueueDependencies = {
   fileExists: (path: string) => Promise<boolean>;
@@ -80,17 +81,43 @@ export const enqueueInitialSermonAudio = async (
   return { action: 'enqueued', queueAction: result.action };
 };
 
-const createProductionDependencies = (bucket: Bucket, eventId: string): InitialAudioEnqueueDependencies => ({
+const createProductionDependencies = (
+  bucket: Bucket, event: PilotCreateEvent, snapshot: QueryDocumentSnapshot
+): InitialAudioEnqueueDependencies => ({
   fileExists: async (path) => (await bucket.file(path).exists())[0],
   getDownloadUrl: async (path) => ensureFirebaseDownloadUrl(bucket.file(path)),
-  enqueue: async (payload) =>
-    queueOrReplaceProcessAudioRequest({
-      database: firebaseAdmin.database(),
-      payload,
-      targetUri: getProcessAudioTargetUri('youtubeUrl' in payload ? 'youtube' : 'storage'),
-      ownerId: `sermon-create:${eventId}`,
-      onlyIfMissing: true,
-    }),
+  enqueue: async (payload) => {
+    const targetUri = getProcessAudioTargetUri('youtubeUrl' in payload ? 'youtube' : 'storage');
+    const { projectId, databaseURL } = firebaseAdmin.app().options;
+    const matchesLiveSource = async (requireUnedited: boolean, successor?: AddIntroOutroInputType) => {
+      const live = await snapshot.ref.get();
+      if (!live.exists || live.createTime?.isEqual(snapshot.createTime) !== true) return false;
+      if (successor) {
+        const sourceMatches = 'youtubeUrl' in successor ? live.get('youtubeUrl') === successor.youtubeUrl :
+          !live.get('youtubeUrl') && successor.storageFilePath === `sermons/${successor.id}`;
+        return sourceMatches && live.get('status.audioStatus') === sermonStatusType.PENDING &&
+          live.get('sourceStartTime') === successor.startTime && live.get('trimDurationSeconds') === successor.duration;
+      }
+      return ['youtubeUrl', 'sourceStartTime', 'trimDurationSeconds', 'subtitle', 'status.audioStatus']
+          .every(field => live.get(field) === snapshot.get(field)) &&
+        (!requireUnedited || (snapshot.createTime.isEqual(snapshot.updateTime) && live.updateTime?.isEqual(snapshot.updateTime) === true));
+    };
+    if (isLegacyMosesPilotCreate({
+      event, payload, targetUri, projectId, databaseURL,
+      snapshotPath: snapshot.ref.path, createdAtMs: snapshot.createTime.toMillis(),
+      originalYoutubeUrl: snapshot.get('youtubeUrl'),
+    })) {
+      return queueInitialMosesGuestPilot({
+        database: firebaseAdmin.database(), payload, eventId: event.id, targetUri,
+        isCurrentCreate: () => matchesLiveSource(true), isValidLegacySource: (next) => matchesLiveSource(false, next),
+      });
+    }
+    return queueOrReplaceProcessAudioRequest({
+      database: firebaseAdmin.database(), payload, targetUri,
+      ownerId: `sermon-create:${event.id}`, onlyIfMissing: true,
+      initialCreate: { eventId: event.id, isValidLegacySource: (next) => matchesLiveSource(false, next) },
+    });
+  },
 });
 
 const sermonAudioCreateTrigger = onDocumentCreated({ document: 'sermons/{sermonId}', retry: true }, async (event) => {
@@ -102,7 +129,7 @@ const sermonAudioCreateTrigger = onDocumentCreated({ document: 'sermons/{sermonI
   const result = await enqueueInitialSermonAudio(
     event.params.sermonId,
     snapshot.data() as Sermon,
-    createProductionDependencies(firebaseAdmin.storage().bucket(), event.id)
+    createProductionDependencies(firebaseAdmin.storage().bucket(), event, snapshot)
   );
 
   logger.info('Reconciled initial sermon audio queue request', {

@@ -90,6 +90,7 @@ export const isProcessAudioAlreadyRunningError = (error: unknown): error is Proc
 
 export interface ProcessAudioResult {
   alreadyProcessed: boolean;
+  staleTask?: true;
   youtubeSuccessfulAcquisitionAuthority?: LogContext['youtubeSuccessfulAcquisitionAuthority'];
 }
 
@@ -227,10 +228,9 @@ async function releaseProcessAudioLock(
 ): Promise<void> {
   const lockRef = realtimeDB.ref(`processAudioLocks/${sermonId}`);
   try {
-    const snapshot = await lockRef.get();
-    const current = snapshot.val();
-    if (current?.requestId === requestId) {
-      await lockRef.remove();
+    const released = await lockRef.transaction((current) =>
+      current === null || current?.requestId === requestId ? null : undefined, undefined, false);
+    if (released.committed) {
       log.debug('Released process-audio sermon lock', { sermonId, requestId });
     }
   } catch (error) {
@@ -258,7 +258,8 @@ export const processAudio = async (
   introUrl?: string,
   outroUrl?: string,
   ctx?: LogContext,
-  taskId?: string | null
+  taskId?: string | null,
+  verifiedMosesPilotIntentNonce?: string
 ): Promise<ProcessAudioResult> => {
   const fileName = audioSource.id;
   // Use provided context or create a new one with sermonId
@@ -267,6 +268,7 @@ export const processAudio = async (
   const tempFiles = new Set<string>();
   const lockRequestId = contextWithSermonId.requestId;
   let lockAcquired = false;
+  let staleTask = false;
   let stopLockHeartbeat: (() => void) | null = null;
   const buildResult = (alreadyProcessed = false): ProcessAudioResult => ({
     alreadyProcessed,
@@ -383,7 +385,7 @@ export const processAudio = async (
     }
     stopLockHeartbeat = startProcessAudioLockHeartbeat(realtimeDB, fileName, lockRequestId, log);
 
-    await markProcessAudioRequestRunning({
+    const admission = await markProcessAudioRequestRunning({
       database: realtimeDB,
       payload: audioSource.type === 'YouTubeUrl'
         ? {
@@ -409,7 +411,12 @@ export const processAudio = async (
       requestId: lockRequestId,
       taskId: taskId ?? null,
       ctx: contextWithSermonId,
+      verifiedMosesPilotIntentNonce,
     });
+    if (admission === 'stale') {
+      staleTask = true;
+      return { alreadyProcessed: false, staleTask: true } satisfies ProcessAudioResult;
+    }
 
     if (cancelToken.isCancellationRequested) return buildResult();
     await docRef.update({
@@ -496,7 +503,8 @@ export const processAudio = async (
           customMetadata,
           startTime,
           duration,
-          trimCtx
+          trimCtx,
+          admission
         );
       }
     );
@@ -606,7 +614,7 @@ export const processAudio = async (
     if (lockAcquired) {
       await releaseProcessAudioLock(realtimeDB, fileName, lockRequestId, log);
     }
-    await realtimeDB.ref(`addIntroOutro/${fileName}`).remove().catch((err) => {
+    if (!staleTask) await realtimeDB.ref(`addIntroOutro/${fileName}`).remove().catch((err) => {
       log.error('Failed to remove progress reference from realtimeDB', {
         error: err instanceof Error ? err.message : String(err),
       });
