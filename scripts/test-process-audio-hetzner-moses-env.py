@@ -84,6 +84,8 @@ esac
             self.assertEqual(code, 0)
             self.assertNotIn('MOSES_', rendered)
             self.assertFalse(access)
+            self.assertEqual('PROCESS_AUDIO_RECOVER_ORPHANED_STATE_ON_STARTUP=false' in rendered,
+                             target == 'production')
 
     def test_armed_production(self):
         code, rendered, access = self.render(pilot)

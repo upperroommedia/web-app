@@ -404,6 +404,11 @@ PROCESS_AUDIO_YOUTUBE_AUTH_CANARY_INTERVAL_MS=600000
 PROCESS_AUDIO_YOUTUBE_MEDIA_CANARY_MAX_AGE_MS=900000
 EOF
   chmod 600 "$WORK_DIR/env/$env_file_name"
+  if [[ "$env_name" == production ]]; then
+    # Production Hetzner shares RTDB with independent media workers.
+    # A container start is not evidence that their existing claims are orphaned.
+    printf '%s\n' 'PROCESS_AUDIO_RECOVER_ORPHANED_STATE_ON_STARTUP=false' >> "$WORK_DIR/env/$env_file_name"
+  fi
   append_moses_guest_pilot_env "$env_name" "$WORK_DIR/env/$env_file_name"
 }
 
