@@ -1,3 +1,5 @@
+import { getFunctions } from 'firebase-admin/functions';
+import { grantNativeMosesBacklogEdit, queueCompletedBacklogEdit } from './mosesBacklogEdit';
 import { logger } from 'firebase-functions/v2';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
 import type { AddIntroOutroInputType } from '@upperroom/contracts/addIntroOutro/types';
@@ -11,6 +13,7 @@ import {
 } from './audioTaskPayload';
 import { getProcessAudioTargetUri } from './processAudioService';
 import { queueOrReplaceProcessAudioRequest } from './processAudioQueueStore';
+import { MOSES_BACKLOG_DOCUMENT_FENCES } from '@upperroom/contracts/mosesDeferredRecovery';
 import { getProcessAudioTaskQueueNameForSource } from '@upperroom/contracts/processAudioQueue';
 
 const addintrooutrotaskgenerator = onCall({ invoker: 'public' }, async (request: CallableRequest<AddIntroOutroInputType>): Promise<void> => {
@@ -47,10 +50,38 @@ const addintrooutrotaskgenerator = onCall({ invoker: 'public' }, async (request:
       }
     }
 
-    await docRef.update({ 'status.audioStatus': sermonStatusType.PENDING });
-
     const queueResult = await queueOrReplaceProcessAudioRequest({
       database: firebaseAdmin.database(),
+      authorizedBacklogEdit: async (fence, claimOwner) => {
+        const user = request.auth;
+        const options = firebaseAdmin.app().options;
+        const route = sourceType === 'youtube' ? 'https://yt-worker.upperroommedia.org/process-audio' :
+          'https://process-audio-yshbijirxq-uc.a.run.app/process-audio';
+        if (!user || options.projectId !== 'urm-app' || options.storageBucket !== 'urm-app.appspot.com' ||
+            !['https://urm-app-default-rtdb.firebaseio.com', 'https://urm-app-default-rtdb.firebaseio.com/'].includes(options.databaseURL ?? '') ||
+            targetUri !== route || process.env.GCLOUD_PROJECT !== 'urm-app' || process.env.NODE_ENV !== 'production' ||
+            Object.keys(process.env).some(k => k === 'FUNCTIONS_EMULATOR' || k.endsWith('_EMULATOR_HOST')))
+          throw new HttpsError('failed-precondition', 'Recovered audio requires an authorized production edit.');
+        try {
+          return await queueCompletedBacklogEdit(fence, data, claimOwner, {
+            database: firebaseAdmin.database(), editor: { uid: user.uid, role: user.token.role },
+            authorize: (args) => grantNativeMosesBacklogEdit(db, bucket, args),
+            enqueue: (edited, taskId, nonce) => getFunctions().taskQueue<AddIntroOutroInputType>(taskQueueName).enqueue(edited, {
+              id: taskId, uri: route, dispatchDeadlineSeconds: 1800, headers: { 'x-urm-moses-pilot-intent': nonce },
+            }),
+          });
+        } catch {
+          // SDK errors may contain the private task header or signed storage URLs.
+          throw new HttpsError('failed-precondition', 'The authorized edit could not be confirmed. Inspect its existing task before retrying.');
+        }
+      },
+      markPending: async () => {
+        await db.runTransaction(async tx => {
+          const fence = await tx.get(db.collection(MOSES_BACKLOG_DOCUMENT_FENCES).doc(data.id));
+          if (fence.exists) throw new HttpsError('failed-precondition', 'Recovery owns this original upload.');
+          tx.update(docRef, { 'status.audioStatus': sermonStatusType.PENDING });
+        });
+      },
       payload: data,
       targetUri,
       ownerId: `enqueue:${data.id}:${Date.now()}`,

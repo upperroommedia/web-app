@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
+import { MOSES_BACKLOG_FENCES_PATH, type MosesBacklogReceipt } from '@upperroom/contracts/mosesDeferredRecovery';
 import { getProcessAudioTargetUri } from './processAudioService';
 import { MOSES_PILOT_INTENTS_PATH, PilotTaskNotCreated, prepareLegacyMosesPilotTransport, type PilotSendIntent, type PilotTransport } from './legacyMosesGuestPilot';
 import type { Database } from 'firebase-admin/database';
@@ -307,6 +308,7 @@ export async function recoverStaleYouTubeQueueProbe(
     async () => {
       const { queueState, deferredCount } = await getQueueStateAndDeferredCount(database);
       if (
+        (await database.ref(`${MOSES_BACKLOG_FENCES_PATH}/${probeSermonId}`).get()).exists() ||
         queueState.probeStatus !== 'probing' ||
         queueState.probeTaskSermonId !== probeSermonId ||
         !queueState.probeStartedAt
@@ -553,6 +555,7 @@ export async function queueInitialMosesGuestPilot(args: {
 
   // CloudEvent redelivery has the same event ID. Each invocation needs its own exclusion owner.
   const result = await withProcessAudioQueueClaim(database, sermonId, `moses-pilot:${randomUUID()}`, async () => {
+    if ((await database.ref(`${MOSES_BACKLOG_FENCES_PATH}/${sermonId}`).get()).exists()) return unchanged;
     const requestRef = database.ref(`${PROCESS_AUDIO_REQUESTS_PATH}/${sermonId}`);
     const receiptRef = database.ref(`${MOSES_PILOT_INTENTS_PATH}/${sermonId}`);
     const [request, receipt, lock, deferred, probe, currentCreate] = await Promise.all([
@@ -656,12 +659,23 @@ export async function queueOrReplaceProcessAudioRequest(args: {
   targetUri: string;
   ownerId: string;
   onlyIfMissing?: boolean;
+  markPending?: () => Promise<void>;
+  authorizedBacklogEdit?: (fence: MosesBacklogReceipt, claimOwner: string) => Promise<QueueMutationResult>;
   initialCreate?: { eventId: string; isValidLegacySource: (successor?: AddIntroOutroInputType) => Promise<boolean>; declinedPilot?: boolean };
 }): Promise<QueueMutationResult> {
   const { database, payload, ownerId, onlyIfMissing = false } = args;
 
-  const claimOwner = args.initialCreate ? `${ownerId}:${randomUUID()}` : ownerId;
+  const claimOwner = args.initialCreate || args.markPending ? `${ownerId}:${randomUUID()}` : ownerId;
   return await withProcessAudioQueueClaim(database, payload.id, claimOwner, async () => {
+    const backlogFence = await database.ref(`${MOSES_BACKLOG_FENCES_PATH}/${payload.id}`).get();
+    if (backlogFence.exists()) {
+      if (onlyIfMissing && args.initialCreate) {
+        return { action: 'unchanged', requestVersion: computeProcessAudioRequestVersion(payload), sourceType: getProcessAudioSourceType(payload) };
+      }
+      if (!args.initialCreate && args.authorizedBacklogEdit) return args.authorizedBacklogEdit(backlogFence.val(), claimOwner);
+      throw new Error('Recovery owns this original upload. Its existing request has been preserved.');
+    }
+    await args.markPending?.();
     let sanitizedPayload = sanitizeProcessAudioPayload(payload);
     let requestVersion = computeProcessAudioRequestVersion(sanitizedPayload);
     let sourceType = getProcessAudioSourceType(sanitizedPayload);
@@ -834,6 +848,9 @@ export async function queueOrReplaceProcessAudioRequest(args: {
         return { action: 'unchanged', requestVersion, sourceType };
       }
     }
+    if ((await database.ref(`${MOSES_BACKLOG_FENCES_PATH}/${payload.id}`).get()).exists()) {
+      throw new Error('Recovery has acquired this original upload.');
+    }
     await deleteExistingTask(queue, currentState.queuedTaskId);
     await queue.enqueue(sanitizedPayload, {
       id: taskId,
@@ -940,6 +957,7 @@ export async function beginYouTubeQueueProbe(args: {
   }
 
   await withProcessAudioQueueClaim(database, probeCandidate.sermonId, ownerId, async () => {
+    if ((await database.ref(`${MOSES_BACKLOG_FENCES_PATH}/${probeCandidate.sermonId}`).get()).exists()) return;
     const requestRef = database.ref(`${PROCESS_AUDIO_REQUESTS_PATH}/${probeCandidate.sermonId}`);
     const queueStateRef = database.ref(YOUTUBE_QUEUE_STATE_PATH);
     const [requestSnapshot, queueStateSnapshot, liveDeferredSnapshot] = await Promise.all([

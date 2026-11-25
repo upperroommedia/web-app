@@ -1,3 +1,4 @@
+import type { MosesBacklogStorage } from './mosesBacklogStorage';
 import { Reference } from 'firebase-admin/database';
 import { CancelToken } from './CancelToken';
 import { Bucket, File } from '@google-cloud/storage';
@@ -32,7 +33,9 @@ const mergeFiles = async (
   tempFiles: Set<string>,
   realtimeDBref: Reference,
   customMetadata: CustomMetadata,
-  ctx?: LogContext
+  ctx?: LogContext,
+  backlogStorage?: MosesBacklogStorage,
+  verifySource?: () => Promise<unknown>
 ): Promise<File> => {
   const log = createLoggerWithContext(ctx);
 
@@ -44,10 +47,12 @@ const mergeFiles = async (
   const contentDisposition = customMetadata.title
     ? `inline; filename="${customMetadata.title}.mp3"`
     : 'inline; filename="untitled.mp3"';
-  const writeStream = outputFile.createWriteStream({
+  const uploadOptions = {
     contentType: 'audio/mpeg',
     metadata: { contentDisposition, metadata: customMetadata },
-  });
+  };
+  if (verifySource) await verifySource();
+  const writeStream = outputFile.createWriteStream(backlogStorage ? backlogStorage.uploadOptions(outputFilePath, uploadOptions) : uploadOptions);
 
   // ffmpeg -f concat -i mylist.txt -c copy output
   // Escape single quotes in file paths to prevent ffmpeg concat format issues
@@ -70,6 +75,7 @@ const mergeFiles = async (
   if (!proc.stdout) {
     throw new Error('FFmpeg stdout is null');
   }
+  if (backlogStorage) writeStream.once('error', () => proc.kill('SIGTERM'));
   proc.stdout.pipe(writeStream);
 
   if (!proc.stderr) {
@@ -90,6 +96,7 @@ const mergeFiles = async (
       }
     });
   });
+  if (backlogStorage) void writeStreamDone.catch(() => {});
 
   return new Promise((resolve, reject) => {
     // Set initial merge progress to 98% (transcode phase complete)
@@ -122,6 +129,7 @@ const mergeFiles = async (
       // FFmpeg succeeded - now wait for GCS upload to complete
       try {
         await writeStreamDone;
+        backlogStorage?.recordUpload(outputFile);
         log.info('Merge completed successfully', { outputPath: outputFilePath });
         // Set to 100% when merge completes
         setProcessAudioProgress(realtimeDBref, 100, 'completed', 'Completed').catch((err) => {

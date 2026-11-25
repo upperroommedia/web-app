@@ -1,114 +1,33 @@
+import { randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
+import { MOSES_BACKLOG_FENCES_PATH } from '../../packages/contracts/mosesDeferredRecovery';
 import type { Database } from 'firebase-admin/database';
 import { getFunctions, type TaskQueue } from 'firebase-admin/functions';
 import type { AddIntroOutroInputType } from '../../packages/contracts/addIntroOutro/types';
 import {
-  buildInitialYouTubeQueueState,
-  computeProcessAudioTaskId,
   getProcessAudioTaskQueueNameForSource,
-  getProcessAudioSourceType,
   PROCESS_AUDIO_LOCKS_PATH,
   PROCESS_AUDIO_QUEUE_CLAIMS_PATH,
   PROCESS_AUDIO_QUEUE_CLAIM_TTL_MS,
   PROCESS_AUDIO_REQUESTS_PATH,
-  sanitizeProcessAudioPayload,
-  type StoredDeferredYouTubeRequest,
   type StoredProcessAudioRequestState,
-  type StoredYouTubeQueueState,
-  type YouTubeQueueProbeMode,
-  YOUTUBE_QUEUE_DEFERRED_PATH,
   YOUTUBE_QUEUE_STATE_PATH,
 } from '../../packages/contracts/processAudioQueue';
 
-const PROCESS_AUDIO_BASE_URLS = {
-  prod: {
-    storage: 'https://process-audio-yshbijirxq-uc.a.run.app',
-    youtube: 'https://yt-worker.upperroommedia.org',
-  },
-  staging: {
-    storage: 'https://process-audio-staging-pvaq33fxyq-uc.a.run.app',
-    youtube: 'https://yt-worker-staging.upperroommedia.org',
-  },
-  local: 'http://127.0.0.1:8080',
-};
-
 const CLAIM_ACQUIRE_ATTEMPTS = 20;
 const CLAIM_ACQUIRE_DELAY_MS = 150;
-const PROCESS_AUDIO_TASK_TIMEOUT_SECONDS = 1800;
 
 type QueueCleanupResult = {
   deletedTaskId: string | null;
   advancedProbe: boolean;
   deferredRemaining: number;
+  disposition?: 'stale' | 'held';
 };
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 const asRecord = (value: unknown): Record<string, unknown> | null => {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
-};
-
-const getNowIsoString = (): string => new Date().toISOString();
-
-const normalizeBaseUrl = (value: string): string => value.replace(/\/process-audio\/?$/u, '').replace(/\/+$/u, '');
-
-export const getProcessAudioTargetUriForQueueCleanup = (sourceType: 'youtube' | 'storage' = 'storage'): string => {
-  const configuredTarget =
-    sourceType === 'youtube'
-      ? process.env.PROCESS_AUDIO_YOUTUBE_TASK_TARGET_URI ||
-        process.env.PROCESS_AUDIO_YOUTUBE_SERVICE_URL ||
-        process.env.NEXT_PUBLIC_PROCESS_AUDIO_YOUTUBE_SERVICE_URL
-      : process.env.PROCESS_AUDIO_FILE_TASK_TARGET_URI ||
-        process.env.PROCESS_AUDIO_FILE_SERVICE_URL ||
-        process.env.NEXT_PUBLIC_PROCESS_AUDIO_FILE_SERVICE_URL ||
-        process.env.PROCESS_AUDIO_TASK_TARGET_URI ||
-        process.env.PROCESS_AUDIO_SERVICE_URL ||
-        process.env.NEXT_PUBLIC_PROCESS_AUDIO_SERVICE_URL;
-
-  if (configuredTarget) {
-    return `${normalizeBaseUrl(configuredTarget)}/process-audio`;
-  }
-
-  if (process.env.FUNCTIONS_EMULATOR === 'true') {
-    return `${PROCESS_AUDIO_BASE_URLS.local}/process-audio`;
-  }
-
-  const projectId = process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || process.env.FIREBASE_PROJECT_ID;
-  const baseUrlSet = projectId === 'urm-app-staging' ? PROCESS_AUDIO_BASE_URLS.staging : PROCESS_AUDIO_BASE_URLS.prod;
-  const baseUrl = baseUrlSet[sourceType];
-  return `${baseUrl}/process-audio`;
-};
-
-const parseYouTubeQueueState = (value: unknown): StoredYouTubeQueueState => {
-  const record = asRecord(value);
-  return {
-    ...buildInitialYouTubeQueueState(),
-    ...(record as Partial<StoredYouTubeQueueState> | null),
-  };
-};
-
-const buildProcessAudioRequestState = (
-  payload: AddIntroOutroInputType,
-  requestVersion: string,
-  updatedAt: string
-): StoredProcessAudioRequestState => {
-  const sanitizedPayload = sanitizeProcessAudioPayload(payload);
-  return {
-    sermonId: sanitizedPayload.id,
-    sourceType: getProcessAudioSourceType(sanitizedPayload),
-    currentPayload: sanitizedPayload,
-    currentRequestVersion: requestVersion,
-    queuedTaskId: null,
-    queuedAt: null,
-    runningRequestId: null,
-    runningTaskId: null,
-    runningRequestVersion: null,
-    runningAt: null,
-    nextPayload: null,
-    nextRequestVersion: null,
-    nextUpdatedAt: null,
-    deferredAt: null,
-    updatedAt,
-  };
 };
 
 const isTaskMissingError = (error: unknown): boolean => {
@@ -161,10 +80,7 @@ async function withProcessAudioQueueClaim<T>(
       try {
         return await run();
       } finally {
-        const snapshot = await claimRef.get();
-        if (snapshot.val()?.requestId === ownerId) {
-          await claimRef.remove();
-        }
+        await claimRef.transaction(current => current === null || current.requestId === ownerId ? null : undefined, undefined, false);
       }
     }
 
@@ -174,145 +90,87 @@ async function withProcessAudioQueueClaim<T>(
   throw new Error(`Timed out acquiring process-audio queue mutation claim for sermon ${sermonId}.`);
 }
 
-const sortDeferredEntries = (entries: StoredDeferredYouTubeRequest[]): StoredDeferredYouTubeRequest[] => {
-  return [...entries].sort((left, right) => Date.parse(left.deferredAt) - Date.parse(right.deferredAt));
-};
-
-const selectNextDeferredProbe = (
-  entries: StoredDeferredYouTubeRequest[],
-  preferredMode: YouTubeQueueProbeMode | null
-): StoredDeferredYouTubeRequest | null => {
-  const sortedEntries = sortDeferredEntries(entries);
-  if (!preferredMode) {
-    return sortedEntries[0] ?? null;
-  }
-
-  return sortedEntries.find((entry) => entry.probeMode === preferredMode) ?? sortedEntries[0] ?? null;
-};
-
-async function enqueueTask(
-  queue: TaskQueue<AddIntroOutroInputType>,
-  payload: AddIntroOutroInputType,
-  taskId: string,
-  targetUri: string
-): Promise<void> {
-  await queue.enqueue(sanitizeProcessAudioPayload(payload), {
-    id: taskId,
-    dispatchDeadlineSeconds: PROCESS_AUDIO_TASK_TIMEOUT_SECONDS,
-    uri: targetUri,
-  });
-}
-
 export async function cleanupDeletedSermonProcessAudioState(args: {
   database: Database;
   sermonId: string;
   ownerId: string;
-  targetUri?: string;
+  deletedAtMs?: number;
+  classifySource?: (backlog: unknown) => Promise<'stale' | 'ordinary' | 'held'>;
 }): Promise<QueueCleanupResult> {
-  const { database, sermonId, ownerId } = args;
-
-  return await withProcessAudioQueueClaim(database, sermonId, ownerId, async () => {
-    const requestRef = database.ref(`${PROCESS_AUDIO_REQUESTS_PATH}/${sermonId}`);
-    const deferredRef = database.ref(`${YOUTUBE_QUEUE_DEFERRED_PATH}/${sermonId}`);
-    const lockRef = database.ref(`${PROCESS_AUDIO_LOCKS_PATH}/${sermonId}`);
-    const queueStateRef = database.ref(YOUTUBE_QUEUE_STATE_PATH);
-    const [requestSnapshot, queueStateSnapshot, deferredSnapshot] = await Promise.all([
-      requestRef.get(),
-      queueStateRef.get(),
-      database.ref(YOUTUBE_QUEUE_DEFERRED_PATH).get(),
+  const { database, sermonId } = args;
+  const ownerId = args.ownerId + ':' + randomUUID();
+  const queueRef = database.ref(YOUTUBE_QUEUE_STATE_PATH).parent!;
+  return withProcessAudioQueueClaim(database, sermonId, ownerId, async () => {
+    const [requestSnapshot, stateSnapshot, deferredSnapshot, backlog, observedLock] = await Promise.all([
+      database.ref(PROCESS_AUDIO_REQUESTS_PATH + '/' + sermonId).get(), queueRef.child('state').get(), queueRef.child('deferred').get(),
+      database.ref(MOSES_BACKLOG_FENCES_PATH + '/' + sermonId).get(), database.ref(PROCESS_AUDIO_LOCKS_PATH + '/' + sermonId).get(),
     ]);
-
-    const requestState = requestSnapshot.exists() ? (requestSnapshot.val() as StoredProcessAudioRequestState) : null;
-    const queueState = parseYouTubeQueueState(queueStateSnapshot.val());
-    const deferredEntries = Object.values(
-      (deferredSnapshot.val() as Record<string, StoredDeferredYouTubeRequest> | null) ?? {}
-    );
-    const remainingDeferredEntries = sortDeferredEntries(deferredEntries.filter((entry) => entry.sermonId !== sermonId));
-    const deletedTaskId = requestState?.queuedTaskId ?? null;
-    const requestSourceType = requestState?.sourceType ?? 'storage';
-    const queue = getFunctions().taskQueue<AddIntroOutroInputType>(getProcessAudioTaskQueueNameForSource(requestSourceType));
-
-    await deleteExistingTask(queue, deletedTaskId);
-    await Promise.all([requestRef.remove(), deferredRef.remove(), lockRef.remove()]);
-
-    if (queueState.probeTaskSermonId !== sermonId) {
-      if (queueState.deferredYouTubeTaskCount !== remainingDeferredEntries.length) {
-        await queueStateRef.update({ deferredYouTubeTaskCount: remainingDeferredEntries.length });
-      }
-      return {
-        deletedTaskId,
-        advancedProbe: false,
-        deferredRemaining: remainingDeferredEntries.length,
-      };
+    const request = requestSnapshot.val() as StoredProcessAudioRequestState | null;
+    const observedDeferred = deferredSnapshot.child(sermonId).val();
+    const observedState = stateSnapshot.val();
+    const deferredRemaining = Object.keys(deferredSnapshot.val() ?? {}).length;
+    const disposition = args.classifySource ? await args.classifySource(backlog.val()) : backlog.exists() ? 'held' : 'ordinary';
+    if (disposition !== 'ordinary' || backlog.exists() || (args.deletedAtMs !== undefined && request &&
+        (!Number.isFinite(Date.parse(request.updatedAt)) || Date.parse(request.updatedAt) >= args.deletedAtMs))) {
+      return { deletedTaskId: null, advancedProbe: false, deferredRemaining,
+        disposition: disposition === 'ordinary' ? 'stale' as const : disposition };
     }
 
-    const nextProbe = selectNextDeferredProbe(remainingDeferredEntries, queueState.probeMode);
-    if (!nextProbe) {
-      await queueStateRef.set(
-        remainingDeferredEntries.length > 0
-          ? {
-              ...buildInitialYouTubeQueueState(),
-              probeStatus: 'waiting_for_auth_required_request',
-              deferredYouTubeTaskCount: remainingDeferredEntries.length,
-            }
-          : buildInitialYouTubeQueueState()
-      );
-
-      return {
-        deletedTaskId,
-        advancedProbe: false,
-        deferredRemaining: remainingDeferredEntries.length,
-      };
-    }
-
-    const nextRequestRef = database.ref(`${PROCESS_AUDIO_REQUESTS_PATH}/${nextProbe.sermonId}`);
-    const nextRequestSnapshot = await nextRequestRef.get();
-    const now = getNowIsoString();
-    const nextTargetUri = getProcessAudioTargetUriForQueueCleanup('youtube');
-    const nextRequestState = nextRequestSnapshot.exists()
-      ? (nextRequestSnapshot.val() as StoredProcessAudioRequestState)
-      : buildProcessAudioRequestState(nextProbe.payload, nextProbe.requestVersion, now);
-    const nextTaskId = computeProcessAudioTaskId(nextProbe.sermonId, nextProbe.requestVersion, `${ownerId}:${now}`);
-
-    await deleteExistingTask(queue, nextRequestState.queuedTaskId);
-    await enqueueTask(
-      getFunctions().taskQueue<AddIntroOutroInputType>(getProcessAudioTaskQueueNameForSource('youtube')),
-      nextProbe.payload,
-      nextTaskId,
-      nextTargetUri
-    );
-
-    await Promise.all([
-      nextRequestRef.set({
-        ...nextRequestState,
-        sermonId: nextProbe.sermonId,
-        sourceType: 'youtube',
-        currentPayload: sanitizeProcessAudioPayload(nextProbe.payload),
-        currentRequestVersion: nextProbe.requestVersion,
-        queuedTaskId: nextTaskId,
-        queuedAt: now,
-        deferredAt: null,
-        updatedAt: now,
-      } satisfies StoredProcessAudioRequestState),
-      database.ref(`${YOUTUBE_QUEUE_DEFERRED_PATH}/${nextProbe.sermonId}`).remove(),
-      queueStateRef.set({
-        ...queueState,
-        blocked: false,
-        blockerReason: null,
-        blockedAt: null,
-        probeMode: nextProbe.probeMode,
-        probeStatus: 'probing',
-        probeTaskSermonId: nextProbe.sermonId,
-        probeRequestVersion: nextProbe.requestVersion,
-        probeStartedAt: now,
-        deferredYouTubeTaskCount: Math.max(0, remainingDeferredEntries.length - 1),
-      } satisfies StoredYouTubeQueueState),
-    ]);
-
-    return {
-      deletedTaskId,
-      advancedProbe: true,
-      deferredRemaining: Math.max(0, remainingDeferredEntries.length - 1),
+    const deletedTaskId = request?.queuedTaskId ?? null;
+    const queue = getFunctions().taskQueue<AddIntroOutroInputType>(getProcessAudioTaskQueueNameForSource(request?.sourceType ?? 'storage'));
+    const stillOwns = async () => {
+      const claim = (await database.ref(PROCESS_AUDIO_QUEUE_CLAIMS_PATH + '/' + sermonId).get()).val();
+      return claim?.requestId === ownerId && Number.isFinite(claim.acquiredAt) && Date.now() - claim.acquiredAt < PROCESS_AUDIO_QUEUE_CLAIM_TTL_MS;
     };
+    const changed = { deletedTaskId, advancedProbe: false, deferredRemaining, disposition: 'stale' as const };
+    if (!await stillOwns()) return changed;
+    await deleteExistingTask(queue, deletedTaskId);
+    if (!await stillOwns() || (args.classifySource && await args.classifySource(backlog.val()) !== 'ordinary')) return changed;
+    const current = await Promise.all([requestSnapshot, observedLock].map(async observed => {
+      const value = observed.val();
+      const removed = await observed.ref.transaction(live => live === null || isDeepStrictEqual(live, value) ? null : undefined, undefined, false);
+      return removed.committed && !removed.snapshot.exists();
+    }));
+    if (!current.every(Boolean)) return changed;
+
+    if (observedDeferred === null && observedState?.probeTaskSermonId !== sermonId) {
+      return { deletedTaskId, advancedProbe: false, deferredRemaining };
+    }
+
+    // The worker owns all subsequent dispatches. Retire only the observed probe and
+    // this sermon's deferral. Its neighbours keep their original payload, mode and history.
+    if (!await stillOwns()) return changed;
+    const settled = await queueRef.transaction(queue => {
+      if (queue === null) return null;
+      if (!isDeepStrictEqual(queue.deferred?.[sermonId] ?? null, observedDeferred)) return undefined;
+      const state = queue.state;
+      const ownsProbe = observedState?.probeTaskSermonId === sermonId && state?.probeTaskSermonId === sermonId &&
+        ['probeRequestVersion', 'probeStartedAt', 'probeDispatchReservationId', 'probeMode', 'probeStatus']
+          .every(key => (state[key] ?? null) === (observedState[key] ?? null));
+      // A newer probe at the same ID owns any deferred entry now associated with it.
+      if (state?.probeTaskSermonId === sermonId && !ownsProbe) return undefined;
+      if (!ownsProbe && observedDeferred === null) return queue;
+      const deferred = { ...queue.deferred };
+      delete deferred[sermonId];
+      const count = Object.keys(deferred).length;
+      const next = { ...queue, deferred };
+      if (state) {
+        // A different in-flight reservation may already have discounted its own row.
+        const storedCount = state.deferredYouTubeTaskCount;
+        const nextCount = !ownsProbe && Number.isSafeInteger(storedCount) ? Math.max(0, storedCount - 1) : count;
+        next.state = { ...state, deferredYouTubeTaskCount: nextCount };
+      }
+      if (ownsProbe) {
+        Object.assign(next.state, {
+          probeStatus: count ? 'waiting_for_auth_required_request' : 'idle', probeTaskSermonId: null,
+          probeRequestVersion: null, probeStartedAt: null, probeDispatchReservationId: null,
+          probeMode: count ? state.probeMode ?? null : null,
+          ...(!count && { blocked: false, blockerReason: null, blockedAt: null }),
+        });
+      }
+      return next;
+    }, undefined, false);
+    if (!settled.committed) return changed;
+    return { deletedTaskId, advancedProbe: false, deferredRemaining: Object.keys(settled.snapshot.child('deferred').val() ?? {}).length };
   });
 }

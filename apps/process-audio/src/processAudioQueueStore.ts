@@ -1,3 +1,4 @@
+import { MOSES_BACKLOG_FENCES_PATH } from '@upperroom/contracts/mosesDeferredRecovery';
 import type { Database } from 'firebase-admin/database';
 import { getFunctions, type TaskQueue } from 'firebase-admin/functions';
 import { GoogleAuth } from 'google-auth-library';
@@ -640,6 +641,18 @@ function getProcessAudioTaskQueue(queueName: ProcessAudioTaskQueueName): Process
   return processAudioTaskQueueFactory?.(queueName) ?? getFunctions().taskQueue<AddIntroOutroInputType>(queueName);
 }
 
+export class ReservedBacklogDelivery extends Error {
+  constructor() { super('This audio request has a reserved backlog recovery'); }
+}
+
+export async function hasMosesBacklogFence(database: Database, sermonId: string): Promise<boolean> {
+  return (await database.ref(MOSES_BACKLOG_FENCES_PATH + '/' + sermonId).get()).exists();
+}
+
+async function requireUnreservedDelivery(database: Database, sermonId: string) {
+  if (await hasMosesBacklogFence(database, sermonId)) throw new ReservedBacklogDelivery();
+}
+
 export async function withProcessAudioQueueClaim<T>(
   database: Database,
   sermonId: string,
@@ -784,6 +797,7 @@ async function enqueueDeferredRequestIgnoringPause(
   stillOwnsDispatch?: () => Promise<boolean>
 ): Promise<boolean | null> {
   return await withProcessAudioQueueClaim(database, entry.sermonId, ownerId, async () => {
+    if (await hasMosesBacklogFence(database, entry.sermonId)) return null;
     const requestRef = database.ref(`${PROCESS_AUDIO_REQUESTS_PATH}/${entry.sermonId}`);
     const deferredRef = database.ref(`${YOUTUBE_QUEUE_DEFERRED_PATH}/${entry.sermonId}`);
     const [requestSnapshot, deferredSnapshot] = await Promise.all([requestRef.get(), deferredRef.get()]);
@@ -1040,6 +1054,7 @@ export async function markProcessAudioRequestRunning(args: {
   const log = createLoggerWithContext(ctx);
 
   return withProcessAudioQueueClaim(database, sanitizedPayload.id, `running:${requestId}`, async () => {
+    if (await hasMosesBacklogFence(database, sanitizedPayload.id)) return 'stale';
     const requestRef = database.ref(`${PROCESS_AUDIO_REQUESTS_PATH}/${sanitizedPayload.id}`);
     const requestSnapshot = await requestRef.get();
     const existingState = requestSnapshot.exists()
@@ -1143,6 +1158,7 @@ export async function completeProcessAudioSuccess(args: {
   );
 
   return withProcessAudioQueueClaim<void | 'stale'>(database, sanitizedPayload.id, `success:${requestId}`, async () => {
+    if (await hasMosesBacklogFence(database, sanitizedPayload.id)) return 'stale';
     const requestRef = database.ref(`${PROCESS_AUDIO_REQUESTS_PATH}/${sanitizedPayload.id}`);
     const [requestSnapshot, queueSnapshot] = await Promise.all([
       requestRef.get(),
@@ -1481,6 +1497,7 @@ export async function completeProcessAudioFailure(args: {
   const sanitizedPayload = sanitizeProcessAudioPayload(payload);
 
   await withProcessAudioQueueClaim(database, sanitizedPayload.id, `failure:${requestId}`, async () => {
+    await requireUnreservedDelivery(database, sanitizedPayload.id);
     const requestRef = database.ref(`${PROCESS_AUDIO_REQUESTS_PATH}/${sanitizedPayload.id}`);
     const requestSnapshot = await requestRef.get();
     const now = getNowIsoString();
@@ -1528,6 +1545,7 @@ export async function deferPostLiveArchiveYouTubeRequest(args: {
   let retryCount = 1;
 
   await withProcessAudioQueueClaim(database, sanitizedPayload.id, `post-live:${requestId}`, async () => {
+    await requireUnreservedDelivery(database, sanitizedPayload.id);
     const requestRef = database.ref(`${PROCESS_AUDIO_REQUESTS_PATH}/${sanitizedPayload.id}`);
     const queueStateRef = database.ref(YOUTUBE_QUEUE_STATE_PATH);
     const deferredRef = database.ref(`${YOUTUBE_QUEUE_DEFERRED_PATH}/${sanitizedPayload.id}`);
@@ -1740,6 +1758,7 @@ export async function cleanupDeletedSermonProcessAudioState(args: {
   );
 
   return await withProcessAudioQueueClaim(database, sanitizedPayload.id, `cleanup:${requestId}`, async () => {
+    await requireUnreservedDelivery(database, sanitizedPayload.id);
     const requestRef = database.ref(`${PROCESS_AUDIO_REQUESTS_PATH}/${sanitizedPayload.id}`);
     const deferredRef = database.ref(`${YOUTUBE_QUEUE_DEFERRED_PATH}/${sanitizedPayload.id}`);
     const lockRef = database.ref(`${PROCESS_AUDIO_LOCKS_PATH}/${sanitizedPayload.id}`);
@@ -2185,6 +2204,7 @@ export async function deferYouTubeRequestForAuthentication(args: {
   const alertCooldownMs = parsePositiveIntegerEnv('YOUTUBE_AUTH_ALERT_COOLDOWN_MS') ?? 6 * 60 * 60 * 1000;
 
   return await withProcessAudioQueueClaim(database, sanitizedPayload.id, `auth-wait:${requestId}`, async () => {
+    await requireUnreservedDelivery(database, sanitizedPayload.id);
     const requestRef = database.ref(`${PROCESS_AUDIO_REQUESTS_PATH}/${sanitizedPayload.id}`);
     const deferredRef = database.ref(`${YOUTUBE_QUEUE_DEFERRED_PATH}/${sanitizedPayload.id}`);
     const queueStateRef = database.ref(YOUTUBE_QUEUE_STATE_PATH);

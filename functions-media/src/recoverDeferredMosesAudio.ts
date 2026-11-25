@@ -1,11 +1,19 @@
 import { OAuth2Client, type TokenPayload } from 'google-auth-library';
 import { onRequest } from 'firebase-functions/v2/https';
 import type { AddIntroOutroInputType } from '@upperroom/contracts/addIntroOutro/types';
-import { getMosesRecoverySelection } from '@upperroom/contracts/mosesDeferredRecovery';
+import {
+  getMosesRecoveryCohort, getMosesRecoverySelection, MOSES_BACKLOG_FENCES_PATH, MOSES_RECOVERY_RECEIPTS_PATH,
+  computeMosesBacklogCustody, computeMosesBacklogTaskId, computeMosesRecoveryCustody, computeMosesRecoveryTaskId,
+  type MosesRecoveryCohortMember, type MosesRecoverySelection,
+} from '@upperroom/contracts/mosesDeferredRecovery';
+import type { Database } from 'firebase-admin/database';
 import { PROCESS_AUDIO_FILE_TASK_QUEUE_NAME, PROCESS_AUDIO_YOUTUBE_TASK_QUEUE_NAME } from '@upperroom/contracts/processAudioQueue';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { getProviderToken, sendLegacyMosesPilotTask } from './legacyMosesGuestPilot';
 import { recoverDeferredMosesRequest } from './mosesDeferredRecovery';
+import { getMosesBacklogSelection, recoverMosesBacklogRequest, type BacklogSelection, type MosesBacklogDependencies } from './mosesBacklogRecovery';
+import { readMosesBacklogNativeHead, readNativeBacklogWitness, verifyNativeBacklogDocumentFence, verifyNativeBacklogSourcePresent } from './mosesBacklogNative';
+import type { PilotTransport } from './legacyMosesGuestPilot';
 
 const AUDIENCE = 'https://us-central1-urm-app.cloudfunctions.net/recoverdeferredmosesaudio';
 const OPERATOR = 'moses-recovery-operator@urm-app.iam.gserviceaccount.com';
@@ -111,23 +119,102 @@ async function readNative(payload: AddIntroOutroInputType, ownedTaskId: string |
   return { documentCreateTime: timestamp(snapshot.createTime), documentUpdateTime: timestamp(snapshot.updateTime) };
 }
 
+type Route = {
+  backlog?: BacklogSelection;
+  deferred?: MosesRecoverySelection;
+  peers?: MosesRecoveryCohortMember[];
+};
+
+export function getMosesRecoveryRoute(env: NodeJS.ProcessEnv, post: boolean, query: Record<string, unknown>,
+  headers: Readonly<Record<string, readonly string[] | undefined>>): Route | null {
+  const custody = headers['x-urm-recovery-custody'];
+  const generation = headers['x-urm-recovery-witness-generation'];
+  if (post && env.PROCESS_AUDIO_MOSES_RECOVERY_ENABLED !== 'true') return null;
+  if (env.PROCESS_AUDIO_MOSES_RECOVERY_COHORT_B64URL === undefined) {
+    if (Object.keys(query).length || custody !== undefined || generation !== undefined) return null;
+    const kind = env.PROCESS_AUDIO_MOSES_RECOVERY_KIND;
+    const backlog = getMosesBacklogSelection(env);
+    if (backlog) return !post || (backlog.requestVersion && backlog.custodySha256) ? { backlog } : null;
+    const deferred = getMosesRecoverySelection(env);
+    return deferred && (kind === undefined || kind === 'deferred_cookie') && (!post || deferred.custodySha256) ? { deferred } : null;
+  }
+  const rows = getMosesRecoveryCohort(env);
+  if (!rows || Object.keys(query).length !== 1 || typeof query.ref !== 'string') return null;
+  const member = rows.find(row => row.ref === query.ref);
+  if (!member || (post ? custody?.length !== 1 || !/^[0-9a-f]{64}$/u.test(custody[0]) : custody !== undefined) ||
+      (generation !== undefined && (!post || member.kind === 'deferred_cookie' || generation.length !== 1 ||
+        !/^[1-9][0-9]*$/u.test(generation[0]) || !Number.isSafeInteger(Number(generation[0]))))) return null;
+  const peers = rows.filter(row => row.ref !== member.ref);
+  const { kind, sermonId, videoId, requestVersion } = member;
+  const selection = { sermonId, videoId, requestVersion, ...(custody && { custodySha256: custody[0] }) };
+  if (kind === 'deferred_cookie') return requestVersion ? { deferred: { ...selection, requestVersion }, peers } : null;
+  const releaseSha = env.PROCESS_AUDIO_MOSES_BACKLOG_RELEASE_SHA;
+  return releaseSha && /^[0-9a-f]{40}$/u.test(releaseSha) ?
+    { backlog: { ...selection, kind, releaseSha, ...(kind === 'missing_admission' && !requestVersion && { deriveCohortMissingVersion: true as const }),
+        ...(generation && { witnessGeneration: generation[0] }) }, peers } : null;
+}
+
+// The caller already owns the same global RTDB recovery claim used by both producers.
+// Every other selected original must be unstarted, definitely rejected, or natively completed.
+export async function assertOtherCohortRowsIdle(database: Database, peers: MosesRecoveryCohortMember[],
+  verifyBacklogSource = verifyNativeBacklogSourcePresent) {
+  await Promise.all(peers.map(async member => {
+    const path = member.kind === 'deferred_cookie' ?
+      MOSES_RECOVERY_RECEIPTS_PATH + '/' + member.sermonId + '/' + member.requestVersion :
+      MOSES_BACKLOG_FENCES_PATH + '/' + member.sermonId;
+    const state = (await database.ref(path).get()).val();
+    if (state === null) return;
+    const completed = state.phase === 'consumed' && state.outcome === 'completed' && typeof state.owner === 'string' && !!state.owner &&
+      /^[0-9a-f]{64}$/u.test(state.completedRequestSha256) && /^\d+\.\d{9}$/u.test(state.proof?.documentWriteTime) &&
+      Number.isFinite(Date.parse(state.proof?.completedAt)) && typeof state.proof?.mosesVerified === 'boolean' &&
+      ['public_provider', 'cookie_provider', 'browser_fallback'].includes(state.proof?.authority);
+    if ((completed || state.phase === 'rejected') && state.kind === member.kind && state.sermonId === member.sermonId &&
+        state.videoId === member.videoId && /^[0-9a-f]{16}$/u.test(state.requestVersion) &&
+        (!member.requestVersion || state.requestVersion === member.requestVersion)) {
+      const kind = member.kind;
+      const deferred = kind === 'deferred_cookie';
+      const digest = deferred ? computeMosesRecoveryCustody(state) : computeMosesBacklogCustody(state);
+      const id = deferred ? computeMosesRecoveryTaskId(member.sermonId, state.requestVersion, digest) :
+        computeMosesBacklogTaskId(kind, member.sermonId, state.requestVersion, digest);
+      if (state.schema === (deferred ? 1 : 2) && state.custodySha256 === digest && state.taskId === id) {
+        if (completed && !deferred) await verifyBacklogSource(state);
+        return;
+      }
+    }
+    throw new Error('A different cohort row remains unsettled.');
+  }));
+}
+
 const recoverDeferredMosesAudio = onRequest({ invoker: 'private', region: 'us-central1', concurrency: 1, maxInstances: 1, timeoutSeconds: 60 }, async (req, res) => {
   res.set('Cache-Control', 'no-store');
   if (req.method !== 'GET' && req.method !== 'POST') { res.status(405).end(); return; }
   if (!await verifyMosesRecoveryOperator(req.headersDistinct['x-urm-recovery-authorization'], process.env.PROCESS_AUDIO_MOSES_RECOVERY_OPERATOR_SUBJECT)) {
     res.status(403).end(); return;
   }
-  const selection = getMosesRecoverySelection(process.env);
-  if (!selection || (req.method === 'POST' && (process.env.PROCESS_AUDIO_MOSES_RECOVERY_ENABLED !== 'true' || !selection.custodySha256))) {
-    res.status(412).end(); return;
-  }
-  if (Object.keys(req.query).length || req.rawBody?.length) { res.status(400).end(); return; }
+  if (req.rawBody?.length) { res.status(400).end(); return; }
+  // Keep the original single-row API's malformed-query disposition.
+  if (process.env.PROCESS_AUDIO_MOSES_RECOVERY_COHORT_B64URL === undefined && Object.keys(req.query).length) { res.status(400).end(); return; }
+  const route = getMosesRecoveryRoute(process.env, req.method === 'POST', req.query, req.headersDistinct);
+  if (!route) { res.status(412).end(); return; }
   try {
     const token = await verifyRuntime();
-    const result = await recoverDeferredMosesRequest(req.method === 'POST' ? 'apply' : 'preview', selection, {
-      database: firebaseAdmin.database(),
-      readNative: (payload, ownedTaskId) => readNative(payload, ownedTaskId, token),
-      prepare: async () => (op, data, intent) => sendLegacyMosesPilotTask(op, data, intent, fetch, async () => token, true),
+    const mode = req.method === 'POST' ? 'apply' : 'preview';
+    const database = firebaseAdmin.database();
+    const prepare = async (): Promise<PilotTransport> => (op, data, intent) => sendLegacyMosesPilotTask(op, data, intent, fetch, async () => token, true);
+    const assertCohortIdle = route.peers && (() => assertOtherCohortRowsIdle(database, route.peers!));
+    if (route.backlog) {
+      const backlog = route.backlog;
+      const deps: MosesBacklogDependencies = {
+        database, prepare, assertCohortIdle, verifyDocumentFence: verifyNativeBacklogDocumentFence, verifySourcePresent: verifyNativeBacklogSourcePresent,
+        readWitness: fence => readNativeBacklogWitness(fence, backlog.witnessGeneration),
+        readHead: (selected, original, previous, own) => readMosesBacklogNativeHead(selected, original, previous, own, token, assertNoCompetingMosesTask),
+      };
+      res.json(await recoverMosesBacklogRequest(mode, backlog, deps));
+      return;
+    }
+    if (!route.deferred) { res.status(412).end(); return; }
+    const result = await recoverDeferredMosesRequest(mode, route.deferred, {
+      database, prepare, assertCohortIdle, readNative: (payload, ownedTaskId) => readNative(payload, ownedTaskId, token),
     });
     res.json(result);
   } catch {

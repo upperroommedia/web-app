@@ -1,3 +1,6 @@
+import type { Bucket } from '@google-cloud/storage';
+import { advanceBacklogMedia, beginBacklogRecovery, reconcileBacklogRecovery } from './mosesBacklogRecovery';
+import type { MosesBacklogStorage, BacklogOutputs } from './mosesBacklogStorage';
 import type { Database } from 'firebase-admin/database';
 import { FieldValue, type DocumentReference, type DocumentSnapshot, type Timestamp } from 'firebase-admin/firestore';
 import { isDeepStrictEqual } from 'node:util';
@@ -17,9 +20,10 @@ import { rememberConsumedMosesPilotNonce } from './sentryMosesPrivacy';
 
 import { sermonStatusType, type Sermon } from './types';
 
-export function createMosesRecoveryStatusWriter(ref: Pick<DocumentReference<Sermon>, 'update'>, initial: Timestamp) {
+export function createMosesRecoveryStatusWriter(ref: Pick<DocumentReference<Sermon>, 'update'>, initial: Timestamp, verify?: (previous: Timestamp) => Promise<void>) {
   let previous = initial;
   return async (audioStatus: sermonStatusType, message?: string, durationSeconds?: number) => {
+    await verify?.(previous);
     const written = await ref.update(
       {
         'status.audioStatus': audioStatus,
@@ -100,8 +104,10 @@ export async function beginMosesRecovery(
   db: Database,
   job: VerifiedMosesRecoveryDelivery,
   owner: string,
-  document: DocumentSnapshot
-): Promise<void> {
+  document: DocumentSnapshot,
+  bucket?: Bucket
+): Promise<MosesBacklogStorage | undefined> {
+  if (job.backlog) return beginBacklogRecovery(db, job, owner, document, bucket ?? fail());
   await withProcessAudioQueueClaim(db, job.sermonId, 'recovery-start:' + owner, async () => {
     const [state, lock] = await Promise.all([
       db.ref(requestPath(job)).get(),
@@ -160,6 +166,7 @@ export async function beginMosesRecovery(
       fail();
     rememberConsumedMosesPilotNonce(job.nonce);
   });
+  return undefined;
 }
 
 export async function holdUnconfirmedMosesRecovery(
@@ -167,6 +174,7 @@ export async function holdUnconfirmedMosesRecovery(
   job: VerifiedMosesRecoveryDelivery,
   owner: string
 ): Promise<void> {
+  if (job.backlog) return advanceBacklogMedia(db, job, owner);
   await db.ref(receiptPath(job)).transaction(
     (current: Receipt | null) => {
       if (!current) return null;
@@ -220,8 +228,11 @@ export async function recordMosesRecoveryMediaCompletion(
   owner: string,
   authority: YouTubeSuccessfulAcquisitionAuthority,
   mosesVerified: boolean,
-  written: Timestamp
+  written: Timestamp,
+  outputs?: BacklogOutputs
 ): Promise<void> {
+  if (job.backlog) return advanceBacklogMedia(db, job, owner, { authority, mosesVerified, outputs: outputs ?? fail(),
+    documentWriteTime: stamp(written)!, completedAt: written.toDate().toISOString() });
   const updated = await db.ref(receiptPath(job)).transaction(
     (current: Receipt | null) => {
       if (!current) return null;
@@ -253,8 +264,10 @@ export async function reconcileMosesRecovery(
   db: Database,
   job: VerifiedMosesRecoveryDelivery,
   requestId: string,
-  readDocument: () => Promise<DocumentSnapshot>
+  readDocument: () => Promise<DocumentSnapshot>,
+  bucket?: Bucket
 ): Promise<'ready' | 'completed'> {
+  if (job.backlog) return reconcileBacklogRecovery(db, job, requestId, readDocument, bucket ?? fail());
   return withProcessAudioQueueClaim(db, job.sermonId, 'recovery-finish:' + requestId, async () => {
     const receipt: Receipt = (await db.ref(receiptPath(job)).get()).val();
     if (!sameIntent(receipt, job)) return fail();

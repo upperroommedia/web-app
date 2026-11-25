@@ -1,3 +1,4 @@
+import { checkBacklogEditQueued, readBacklogDocument, transitionBacklogEdit, updateUnreservedAudioDocument, type BacklogEditDelivery } from './mosesBacklogRecovery';
 import path from 'path';
 import { Bucket } from '@google-cloud/storage';
 import { Sermon, sermonStatus, sermonStatusType } from './types';
@@ -19,9 +20,10 @@ import { PROCESSED_SERMONS_BUCKET } from './consts';
 import trim from './trim';
 import { createLoggerWithContext } from './WinstonLogger';
 import { LogContext, createChildContext, createContext } from './context';
+import type { MosesBacklogStorage } from './mosesBacklogStorage';
 import type { VerifiedMosesRecoveryDelivery } from './mosesGuestTaskIdentity';
 import { beginMosesRecovery, createMosesRecoveryStatusWriter, holdUnconfirmedMosesRecovery, recordMosesRecoveryMediaCompletion } from './mosesDeferredRecovery';
-import { markProcessAudioRequestRunning } from './processAudioQueueStore';
+import { hasMosesBacklogFence, markProcessAudioRequestRunning, withProcessAudioQueueClaim } from './processAudioQueueStore';
 import { setProcessAudioProgress } from './processAudioProgress';
 import { Sentry } from './instrument';
 
@@ -262,7 +264,8 @@ export const processAudio = async (
   ctx?: LogContext,
   taskId?: string | null,
   verifiedMosesPilotIntentNonce?: string,
-  recovery?: VerifiedMosesRecoveryDelivery
+  recovery?: VerifiedMosesRecoveryDelivery,
+  edit?: BacklogEditDelivery
 ): Promise<ProcessAudioResult> => {
   const fileName = audioSource.id;
   // Use provided context or create a new one with sermonId
@@ -273,12 +276,15 @@ export const processAudio = async (
   let lockAcquired = false;
   let staleTask = false;
   let recoveryStarted = false;
+  let editStarted = false;
+  let editCompleted = false;
+  let backlogStorage: MosesBacklogStorage | undefined;
   let recoveryMediaRecorded = false;
   let stopLockHeartbeat: (() => void) | null = null;
-  const buildResult = (alreadyProcessed = false): ProcessAudioResult => ({
-    alreadyProcessed,
-    youtubeSuccessfulAcquisitionAuthority: contextWithSermonId.youtubeSuccessfulAcquisitionAuthority,
-  });
+  const buildResult = (alreadyProcessed = false): ProcessAudioResult => {
+    if (edit && !editCompleted) throw new Error('Edited audio completion unconfirmed');
+    return { alreadyProcessed, youtubeSuccessfulAcquisitionAuthority: contextWithSermonId.youtubeSuccessfulAcquisitionAuthority };
+  };
 
   return Sentry.startSpan(
     {
@@ -368,13 +374,28 @@ export const processAudio = async (
     throw new MissingSermonDocumentError(fileName, documentPath);
   }
 
+  if (edit && (existingStatus?.audioStatus !== sermonStatusType.PENDING ||
+      !observedDocument?.updateTime?.isEqual(edit.pendingWriteTime))) throw new Error('Edited audio pending generation changed');
   if (existingStatus?.audioStatus === sermonStatusType.PROCESSED) {
     log.info('Sermon already processed, skipping (idempotent)', { documentPath, fileName });
     return buildResult(true);
   }
 
   try {
-    const lockResult = await acquireProcessAudioLock(realtimeDB, fileName, lockRequestId, log);
+    const acquire = () => acquireProcessAudioLock(realtimeDB, fileName, lockRequestId, log);
+    const lockResult = recovery?.backlog ? await acquire() : await withProcessAudioQueueClaim(
+      realtimeDB, fileName, 'audio-lock:' + lockRequestId,
+      async () => {
+        if (edit) {
+          await checkBacklogEditQueued(realtimeDB, edit);
+        } else if (await hasMosesBacklogFence(realtimeDB, fileName)) return null;
+        return acquire();
+      }
+    );
+    if (lockResult === null) {
+      staleTask = true;
+      return { alreadyProcessed: false, staleTask: true } satisfies ProcessAudioResult;
+    }
     lockAcquired = lockResult.acquired;
     if (!lockAcquired) {
       const currentLock = lockResult.currentLock;
@@ -394,10 +415,14 @@ export const processAudio = async (
 
     if (recovery) {
       if (!observedDocument) throw new Error('Missing deferred recovery source document');
-      await beginMosesRecovery(realtimeDB, recovery, lockRequestId, observedDocument);
+      backlogStorage = await beginMosesRecovery(realtimeDB, recovery, lockRequestId, observedDocument, bucket);
       recoveryStarted = true;
     }
-    const admission = recovery ? true : await markProcessAudioRequestRunning({
+    if (edit) {
+      await transitionBacklogEdit(realtimeDB, edit, lockRequestId, 'start');
+      editStarted = true;
+    }
+    const admission = recovery ? true : edit ? false : await markProcessAudioRequestRunning({
       database: realtimeDB,
       payload: audioSource.type === 'YouTubeUrl'
         ? {
@@ -438,11 +463,18 @@ export const processAudio = async (
         message: 'Getting Data',
       },
     };
-    const writeRecoveryStatus = recovery ? createMosesRecoveryStatusWriter(docRef, observedDocument!.updateTime!) : undefined;
+    const backlogMirror = backlogStorage?.documentFence ?? edit?.documentFence;
+    const verifySource = backlogMirror ? () => readBacklogDocument(docRef, backlogMirror) : undefined;
+    const writeRecoveryStatus = recovery || edit ? createMosesRecoveryStatusWriter(docRef, observedDocument!.updateTime!, backlogMirror && (async previous => {
+      const current = await readBacklogDocument(docRef, backlogMirror);
+      if (!current.updateTime?.isEqual(previous)) {
+        throw new Error('Backlog document generation changed');
+      }
+    })) : undefined;
     if (writeRecoveryStatus) {
       await writeRecoveryStatus(sermonStatusType.PROCESSING, 'Getting Data');
     } else {
-      await docRef.update(initialStatus);
+      await updateUnreservedAudioDocument(docRef, initialStatus);
     }
 
     const processedStoragePath = `${PROCESSED_SERMONS_BUCKET}/${fileName}`;
@@ -469,7 +501,7 @@ export const processAudio = async (
     if (writeRecoveryStatus) {
       await writeRecoveryStatus(sermonStatusType.PROCESSING, trimMessage);
     } else {
-      await docRef.update({
+      await updateUnreservedAudioDocument(docRef, {
         status: { ...sermonStatus, audioStatus: sermonStatusType.PROCESSING, message: trimMessage },
       });
     }
@@ -524,7 +556,9 @@ export const processAudio = async (
           duration,
           trimCtx,
           admission,
-          !!recovery
+          !!recovery || !!edit,
+          backlogStorage,
+          verifySource
         );
       }
     );
@@ -538,10 +572,10 @@ export const processAudio = async (
     // download processed audio for merging
     const processedFilePath = createTempFile(`processed-${fileName}`, tempFiles);
     log.debug('Downloading processed audio and intro/outro files');
-    const [tempFilePaths] = await Promise.all([
+    const tempFilePaths = backlogStorage ? await backlogStorage.downloadInputs(processedFilePath, tempFiles) : (await Promise.all([
       downloadFiles(bucket, audioFilesToMerge, tempFiles),
       bucket.file(processedStoragePath).download({ destination: processedFilePath }),
-    ]);
+    ]))[0];
 
     //create merge array in order INTRO, CONTENT, OUTRO
     const filePathsArray: string[] = [];
@@ -565,7 +599,7 @@ export const processAudio = async (
       if (writeRecoveryStatus) {
         await writeRecoveryStatus(sermonStatusType.PROCESSING, 'Adding Intro and Outro');
       } else {
-        await docRef.update({
+        await updateUnreservedAudioDocument(docRef, {
           status: { ...sermonStatus, audioStatus: sermonStatusType.PROCESSING, message: 'Adding Intro and Outro' },
         });
       }
@@ -592,7 +626,9 @@ export const processAudio = async (
             tempFiles,
             realtimeDB.ref(`addIntroOutro/${fileName}`),
             customMetadata,
-            mergeCtx
+            mergeCtx,
+            backlogStorage,
+            verifySource
           )
       );
       log.info('Files merged successfully', { outputPath: mergedOutputFile.name });
@@ -615,12 +651,21 @@ export const processAudio = async (
     if (recovery) {
       const authority = trimCtx.youtubeSuccessfulAcquisitionAuthority;
       if (!writeRecoveryStatus || !authority || cancelToken.isCancellationRequested) throw new Error('Unconfirmed deferred media completion');
+      const outputs = await backlogStorage?.verifyCurrent();
+      if (cancelToken.isCancellationRequested) throw new Error('Cancelled backlog completion');
       const written = await writeRecoveryStatus(sermonStatusType.PROCESSED, undefined, durationSeconds);
+      if (verifySource) await verifySource();
       await recordMosesRecoveryMediaCompletion(realtimeDB, recovery, lockRequestId, authority,
-        trimCtx.mosesVerifiedTransfer === true, written.writeTime);
+        trimCtx.mosesVerifiedTransfer === true, written.writeTime, outputs);
       recoveryMediaRecorded = true;
+    } else if (edit && writeRecoveryStatus) {
+      await writeRecoveryStatus(sermonStatusType.PROCESSED, undefined, durationSeconds);
+      if (cancelToken.isCancellationRequested) throw new Error('Edited audio completion unconfirmed');
+      await transitionBacklogEdit(realtimeDB, edit, lockRequestId, 'complete', trimCtx.youtubeSuccessfulAcquisitionAuthority);
+      await readBacklogDocument(docRef, edit.documentFence);
+      editCompleted = true;
     } else {
-      await docRef.update(finishedStatus);
+      await updateUnreservedAudioDocument(docRef, finishedStatus);
     }
 
     if (cancelToken.isCancellationRequested) return buildResult();
@@ -649,7 +694,7 @@ export const processAudio = async (
     if (lockAcquired) {
       await releaseProcessAudioLock(realtimeDB, fileName, lockRequestId, log);
     }
-    if (!staleTask && (!recovery || recoveryStarted)) await realtimeDB.ref(`addIntroOutro/${fileName}`).remove().catch((err) => {
+    if (!staleTask && (!recovery || recoveryStarted) && (!edit || editStarted)) await realtimeDB.ref(`addIntroOutro/${fileName}`).remove().catch((err) => {
       log.error('Failed to remove progress reference from realtimeDB', {
         error: err instanceof Error ? err.message : String(err),
       });

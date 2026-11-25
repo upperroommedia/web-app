@@ -5,6 +5,7 @@ import {
   sentryRelease,
   sentryTracesSampleRate,
 } from './instrument';
+import { readBacklogEditDelivery, updateUnreservedAudioDocument, type BacklogEditDelivery } from './mosesBacklogRecovery';
 import express, { Request } from 'express';
 import { createProviderRelayRouter } from './providerRelay';
 import { rateLimit } from 'express-rate-limit';
@@ -16,7 +17,7 @@ import { isAxiosError } from 'axios';
 import { isMissingSermonDocumentError, isProcessAudioAlreadyRunningError, processAudio } from './processAudio';
 import { CancelToken } from './CancelToken';
 import { reconcileMosesRecovery } from './mosesDeferredRecovery';
-import { readVerifiedMosesPilotIntentNonce, verifyMosesRecoveryDelivery } from './mosesGuestTaskIdentity';
+import { readVerifiedMosesPilotIntentNonce, RecoveryReceiptUnavailable, verifyMosesRecoveryDelivery, type VerifiedMosesRecoveryDelivery } from './mosesGuestTaskIdentity';
 import { firestoreAdminSermonConverter } from './firestoreAdminDataConverter';
 import { TIMEOUT_SECONDS } from './consts';
 import firebaseAdmin from './firebaseAdmin';
@@ -39,6 +40,8 @@ import {
   deferPostLiveArchiveYouTubeRequest,
   extractCloudTaskId,
   getYouTubeQueueScopeDiagnostics,
+  hasMosesBacklogFence,
+  ReservedBacklogDelivery,
   releaseYouTubeAuthAlertReservation,
   resumeDeferredYouTubeQueueOnStartup,
 } from './processAudioQueueStore';
@@ -968,11 +971,40 @@ app.post('/process-audio', processAudioRateLimit, async (request: Request<{}, {}
   };
 
   const recoveryNamed = request.headersDistinct['x-cloudtasks-taskname']?.some((name) => name.split('/').pop()?.startsWith('mr-'));
-  const recovery = recoveryNamed ? await verifyMosesRecoveryDelivery(request.body, request.headersDistinct) : undefined;
+  let recovery: VerifiedMosesRecoveryDelivery | undefined;
+  if (recoveryNamed) {
+    try {
+      recovery = await verifyMosesRecoveryDelivery(request.body, request.headersDistinct, process.env, undefined,
+        async path => (await realtimeDB.ref(path).get()).val());
+    } catch (error) {
+      res.status(error instanceof RecoveryReceiptUnavailable ? 503 : 403).json({ reason: 'recovery_unconfirmed' });
+      return;
+    }
+  }
   if (recoveryNamed && (!recovery || !youtubeProcessingEnabled)) {
     res.status(403).json({ reason: 'invalid_recovery_delivery' });
     return;
   }
+  let edit: BacklogEditDelivery | undefined;
+  const stopReservedDelivery = async (admitEdit = false): Promise<boolean> => {
+    try {
+      if (!(await hasMosesBacklogFence(realtimeDB, data.id))) return false;
+      if (admitEdit) {
+        const delivery = await readBacklogEditDelivery(realtimeDB, docRef, request.body, request.headersDistinct);
+        if (delivery === 'settled') {
+          res.status(200).send();
+          return true;
+        }
+        edit = delivery;
+        if (edit) return false;
+      }
+      res.status(202).json({ skipped: true, reason: 'reserved_audio_recovery' });
+    } catch {
+      res.status(503).json({ reason: 'audio_ownership_unconfirmed' });
+    }
+    return true;
+  };
+  if (!recovery && await stopReservedDelivery(true)) return;
 
   if (audioSource.type === 'YouTubeUrl' && !youtubeProcessingEnabled) {
     const message = 'This process-audio runtime only supports storage-backed audio processing.';
@@ -991,13 +1023,17 @@ app.post('/process-audio', processAudioRateLimit, async (request: Request<{}, {}
         taskId,
       });
     } catch (queueStateError) {
+      if (queueStateError instanceof ReservedBacklogDelivery) {
+        res.status(202).json({ skipped: true, reason: 'reserved_audio_recovery' });
+        return;
+      }
       log.error('Failed to update process-audio queue state after unsupported request rejection', {
         error: queueStateError instanceof Error ? queueStateError.message : String(queueStateError),
       });
     }
 
     try {
-      await docRef.update({
+      await updateUnreservedAudioDocument(docRef, {
         status: {
           ...sermonStatus,
           audioStatus: sermonStatusType.ERROR,
@@ -1013,11 +1049,11 @@ app.post('/process-audio', processAudioRateLimit, async (request: Request<{}, {}
   }
 
   try {
-    if (recovery && await reconcileMosesRecovery(realtimeDB, recovery, ctx.requestId, () => docRef.get()) === 'completed') {
+    if (recovery && await reconcileMosesRecovery(realtimeDB, recovery, ctx.requestId, () => docRef.get(), bucket) === 'completed') {
       res.status(200).send();
       return;
     }
-    const verifiedMosesPilotIntentNonce = !recovery && !('storageFilePath' in data) && !data.skipTranscode
+    const verifiedMosesPilotIntentNonce = !recovery && !edit && !('storageFilePath' in data) && !data.skipTranscode
       ? await readVerifiedMosesPilotIntentNonce(audioSource, request.headersDistinct)
       : undefined;
     const cancelToken = new CancelToken();
@@ -1041,14 +1077,19 @@ app.post('/process-audio', processAudioRateLimit, async (request: Request<{}, {}
           ctx,
           taskId,
           verifiedMosesPilotIntentNonce,
-          recovery
+          recovery,
+          edit
         ),
       cancelToken.cancel,
       timeoutMillis
     );
     if (recovery) {
-      const outcome = await reconcileMosesRecovery(realtimeDB, recovery, ctx.requestId, () => docRef.get());
+      const outcome = await reconcileMosesRecovery(realtimeDB, recovery, ctx.requestId, () => docRef.get(), bucket);
       if (outcome !== 'completed') throw new Error('Deferred audio recovery remains unconfirmed');
+      res.status(200).send();
+      return;
+    }
+    if (edit) {
       res.status(200).send();
       return;
     }
@@ -1086,12 +1127,21 @@ app.post('/process-audio', processAudioRateLimit, async (request: Request<{}, {}
     log.info('Request completed successfully');
     res.status(200).send();
   } catch (e) {
+    if (edit) {
+      res.status(503).json({ reason: 'edited_audio_unconfirmed' });
+      return;
+    }
     if (recovery) {
       // The reserved row and its receipt retain custody. Never apply ordinary task failure/defer effects here.
       log.warn('Deferred audio recovery remains held', { taskId });
       res.status(503).json({ reason: 'recovery_unconfirmed' });
       return;
     }
+    if (e instanceof ReservedBacklogDelivery) {
+      res.status(202).json({ skipped: true, reason: 'reserved_audio_recovery' });
+      return;
+    }
+    if (await stopReservedDelivery()) return;
     let message = 'Something Went Wrong';
     if (isAxiosError(e)) {
       // Check Axios errors first since AxiosError extends Error
@@ -1298,7 +1348,7 @@ app.post('/process-audio', processAudioRateLimit, async (request: Request<{}, {}
 
       if (postLiveResult.scheduled) {
         try {
-          await docRef.update({
+          await updateUnreservedAudioDocument(docRef, {
             status: {
               ...sermonStatus,
               audioStatus: sermonStatusType.PENDING,
@@ -1348,7 +1398,7 @@ app.post('/process-audio', processAudioRateLimit, async (request: Request<{}, {}
 
       if (authDeferralResult.deferred) {
         try {
-          await docRef.update({
+          await updateUnreservedAudioDocument(docRef, {
             status: {
               ...sermonStatus,
               audioStatus: sermonStatusType.PENDING,
@@ -1470,6 +1520,10 @@ app.post('/process-audio', processAudioRateLimit, async (request: Request<{}, {}
         taskId,
       });
     } catch (queueStateError) {
+      if (queueStateError instanceof ReservedBacklogDelivery) {
+        res.status(202).json({ skipped: true, reason: 'reserved_audio_recovery' });
+        return;
+      }
       log.error('Failed to update process-audio queue state after failure', {
         error: queueStateError instanceof Error ? queueStateError.message : String(queueStateError),
       });
@@ -1513,7 +1567,7 @@ app.post('/process-audio', processAudioRateLimit, async (request: Request<{}, {}
     }
 
     try {
-      await docRef.update({
+      await updateUnreservedAudioDocument(docRef, {
         status: {
           ...sermonStatus,
           audioStatus: sermonStatusType.ERROR,
