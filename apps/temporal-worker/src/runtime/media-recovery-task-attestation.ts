@@ -1,10 +1,14 @@
 import { createPublicKey, verify } from 'node:crypto';
 import { isMediaRecoveryTaskCreateTime } from '@upperroom/orchestration/media-recovery-task-identity';
 
+import { mediaRecoveryExecutionWindowVersion, mediaRecoveryWorkMillis } from './media-recovery-execution-window';
+
 export const mediaRecoveryTaskAttestationMode = 'operator-ed25519-v1';
+export const mediaRecoveryTaskAttestationV2Mode = 'operator-ed25519-v2';
 const modeName = 'TEMPORAL_MEDIA_RECOVERY_ATTESTATION_MODE';
 const keyName = 'TEMPORAL_MEDIA_RECOVERY_ATTESTATION_KEY';
 const domain = 'urm.staging.media-recovery.task-attestation.v1';
+const v2Domain = 'urm.staging.media-recovery.task-attestation.v2';
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 const digest = /^[a-f0-9]{64}$/;
 const generation = /^[1-9][0-9]{0,19}$/;
@@ -39,7 +43,7 @@ const fields = [
 
 export type MediaRecoveryTaskAttestation = {
   [K in Exclude<(typeof fields)[number], 'expiresAt' | 'taskUid'>]: string;
-} & { expiresAt: number; taskUid: string | null };
+} & { expiresAt: number; taskUid: string | null; executionWindowVersion?: typeof mediaRecoveryExecutionWindowVersion };
 
 function deny(): never {
   throw new Error('MEDIA_RECOVERY_TASK_ATTESTATION_UNCONFIRMED');
@@ -66,14 +70,22 @@ export function mediaRecoveryTaskAttestationKey(env: NodeJS.ProcessEnv) {
   const mode = env[modeName],
     key = env[keyName];
   if (mode === undefined && key === undefined) return undefined;
-  if (mode !== mediaRecoveryTaskAttestationMode || !key) return deny();
+  if ((mode !== mediaRecoveryTaskAttestationMode && mode !== mediaRecoveryTaskAttestationV2Mode) || !key) return deny();
   publicKey(key);
   return key;
 }
-export function matchesMediaRecoveryTaskAttestationEnv(entries: unknown, key: string) {
+export function mediaRecoveryTaskAttestationModeForPlan(plan: { executionWindowVersion?: unknown }) {
+  if (plan.executionWindowVersion === mediaRecoveryExecutionWindowVersion) return mediaRecoveryTaskAttestationV2Mode;
+  if (plan.executionWindowVersion === undefined) return mediaRecoveryTaskAttestationMode;
+  return deny();
+}
+
+export function matchesMediaRecoveryTaskAttestationEnv(
+  entries: unknown, key: string, mode = mediaRecoveryTaskAttestationMode as string
+) {
   if (!Array.isArray(entries)) return false;
   return [
-    [modeName, mediaRecoveryTaskAttestationMode],
+    [modeName, mode],
     [keyName, key],
   ].every(([name, value]) => {
     const found = entries.filter((entry) => entry?.name === name);
@@ -81,7 +93,9 @@ export function matchesMediaRecoveryTaskAttestationEnv(entries: unknown, key: st
   });
 }
 function payload(value: unknown): MediaRecoveryTaskAttestation {
-  if (!exact(value, fields) || fields.some((k) => k !== 'expiresAt' && k !== 'taskUid' && typeof value[k] !== 'string'))
+  const v2 = record(value) && value.executionWindowVersion === mediaRecoveryExecutionWindowVersion;
+  if (!exact(value, v2 ? [...fields, 'executionWindowVersion'] : fields) ||
+      fields.some((k) => k !== 'expiresAt' && k !== 'taskUid' && typeof value[k] !== 'string'))
     return deny();
   const p = value as MediaRecoveryTaskAttestation;
   const job = 'urm-media-recovery-' + p.operationId.replaceAll('-', '');
@@ -114,7 +128,7 @@ function payload(value: unknown): MediaRecoveryTaskAttestation {
     new Date(time).toISOString() !== p.issuedAt ||
     !Number.isSafeInteger(p.expiresAt) ||
     time >= p.expiresAt ||
-    time < p.expiresAt - 300000 ||
+    (v2 ? p.expiresAt !== time + mediaRecoveryWorkMillis : time < p.expiresAt - 300000) ||
     Date.parse(p.taskCreateTime) > time
   )
     return deny();
@@ -122,7 +136,9 @@ function payload(value: unknown): MediaRecoveryTaskAttestation {
 }
 export function mediaRecoveryTaskAttestationBytes(input: unknown): Buffer {
   const p = payload(input);
-  return Buffer.from(JSON.stringify([domain, ...fields.map((k) => p[k])]), 'utf8');
+  const lineage = fields.map((k) => p[k]);
+  return Buffer.from(JSON.stringify(p.executionWindowVersion
+    ? [v2Domain, p.executionWindowVersion, ...lineage] : [domain, ...lineage]), 'utf8');
 }
 /** The verification key comes from the immutable Job template through the process environment. */
 export function verifyMediaRecoveryTaskAttestation(input: unknown, trustedKey: string): MediaRecoveryTaskAttestation {

@@ -7,6 +7,7 @@ import { workerReadinessDigest as hash } from './readiness-probe';
 import { recheckMediaRecoveryTaskAttestation } from './media-recovery-task-attestation-reader';
 import { matchMediaRecoveryJobRun } from './media-recovery-job-witness';
 import { mediaRecoveryBucketName } from './media-recovery-storage';
+import { mediaRecoveryExecutionExpiry, mediaRecoveryLaunchWindow } from './media-recovery-execution-window';
 function fail(): never {
   throw new Error('MEDIA_RECOVERY_CAPABILITY_UNCONFIRMED');
 }
@@ -54,6 +55,7 @@ export async function mediaRecoveryKernelContext(
       j = journal.data(),
       before = start?.plan?.before,
       cloud = witness.cloudRun;
+    const window = mediaRecoveryLaunchWindow(p);
     if (
       op.get('action') !== 'diagnose-cloud-run-media-recovery' ||
       op.get('operationId') !== operationId ||
@@ -103,15 +105,13 @@ export async function mediaRecoveryKernelContext(
       s.get('phase') !== 'provider-usage-ready' ||
       domains.some((d) => c.get(`domains.${d}.admission`) !== 'paused') ||
       witness.buildId !== p.buildId ||
-      !Number.isFinite(Date.parse(p.createdAt)) ||
-      p.expiresAt !== Date.parse(p.createdAt) + 300000 ||
-      Date.parse(p.createdAt) > Date.now() + 5000 ||
-      Date.now() >= p.expiresAt
+      !window || window.startedAt > Date.now() + 5000
     )
       fail();
     const job = witness.cloudRunJob;
     if (p.diagnosticStorage !== undefined) mediaRecoveryBucketName(p, true);
     let computeIntent;
+    let attestedExpiry: number | undefined;
     if (job) {
       const native = op.get('mediaRecoveryJobProvider');
       if (
@@ -132,7 +132,10 @@ export async function mediaRecoveryKernelContext(
         fail();
       if (!native.runIdentity && !original) throw new PendingMediaRecoveryJobIdentity();
       if (!matchMediaRecoveryJobRun(job, p, native)) fail();
-      await recheckMediaRecoveryTaskAttestation(db, tx, operationId, job, p, op.get('mediaRecoveryTaskAttestation'));
+      const certificate = await recheckMediaRecoveryTaskAttestation(
+        db, tx, operationId, job, p, op.get('mediaRecoveryTaskAttestation')
+      );
+      attestedExpiry = certificate?.executionExpiresAt;
       computeIntent = { jobProviderSHA256: hash(native), jobIdentity: job };
     } else {
       if (
@@ -170,6 +173,8 @@ export async function mediaRecoveryKernelContext(
         fail();
       computeIntent = { startPlan: start.plan, startRequest: start.request, startAttemptedAt: start.attemptedAt };
     }
+    const executionExpiresAt = mediaRecoveryExecutionExpiry(p, attestedExpiry);
+    if (executionExpiresAt === undefined || Date.now() >= executionExpiresAt) fail();
     const attempt = op.get('mediaRecoveryJournalAttempt');
     if (
       j.releaseId !== p.releaseId ||
@@ -237,10 +242,10 @@ export async function mediaRecoveryKernelContext(
       state: stamp(s),
       actorUid: actor.uid,
     };
-    const current = { intent, plan: p, controlVersion: version(c), stateVersion: version(s) };
+    const current = { intent, plan: p, executionExpiresAt, controlVersion: version(c), stateVersion: version(s) };
     if (original && hash(current) !== hash(original)) fail();
     original = current;
-    if (Date.now() >= p.expiresAt) fail();
+    if (Date.now() >= executionExpiresAt) fail();
   };
   const began = performance.now();
   for (;;) {
@@ -260,7 +265,7 @@ export async function mediaRecoveryKernelContext(
   }
   const intentSHA256 = hash(original.intent);
   const checkFresh = () => {
-    if (Date.now() >= original.plan.expiresAt || Date.parse(original.plan.createdAt) > Date.now() + 5000) fail();
+    if (Date.now() >= original.executionExpiresAt || Date.parse(original.plan.createdAt) > Date.now() + 5000) fail();
   };
   return {
     context: {
@@ -273,5 +278,6 @@ export async function mediaRecoveryKernelContext(
     authorize: read,
     checkFresh,
     plan: original.plan,
+    executionExpiresAt: original.executionExpiresAt as number,
   };
 }

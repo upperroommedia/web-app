@@ -1668,7 +1668,8 @@ await runWithCleanup(
               operationId, releaseId: config.releaseId, buildId: platform.workerBuildId, bindingDigest,
               evidenceDigest: preparationArguments.digest, api, saved,
               ...(failedRetirement ? { preparationReceipt: preparation, failureReceipt: terminal,
-                preparationProof: historyProofs[0], failureProof: historyProofs[1] } :
+                preparationProof: historyProofs[0], failureProof: historyProofs[1],
+                failureCertificate: history[2].data(), failureCertificateProof: historyProofs[2] } :
                 retiring ? { preparationReceipt: preparation, terminalReceipt: terminal,
                   preparationProof: historyProofs[0], terminalProof: historyProofs[1] } : {}),
               authorize: async () => ({

@@ -69,7 +69,8 @@ export function mediaRecoveryJobBinding(buildId: string, env: NodeJS.ProcessEnv)
   )
     return deny();
   const jobPath = `${location}/jobs/${job}`;
-  return { job: jobPath, execution: `${jobPath}/executions/${execution}`, operationId, buildId, runner, image };
+  return { job: jobPath, execution: `${jobPath}/executions/${execution}`, operationId, buildId, runner, image,
+    ...(env.TEMPORAL_MEDIA_RECOVERY_ATTESTATION_MODE && {attestationMode:env.TEMPORAL_MEDIA_RECOVERY_ATTESTATION_MODE}) };
 }
 
 type Binding = ReturnType<typeof mediaRecoveryJobBinding>;

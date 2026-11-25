@@ -1,3 +1,10 @@
+import {
+  mediaRecoveryAttestationCommitIsTimely,
+  mediaRecoveryAttestedWorkExpiry,
+  mediaRecoveryExecutionWindowVersion,
+  mediaRecoveryLaunchWindow,
+  mediaRecoveryTaskAttestationV2Mode,
+} from './temporal-media-recovery-execution-window.mjs';
 import { observeMediaRecoveryPhasePool } from './temporal-media-recovery-phase-pool.mjs';
 import { mediaRecoveryTaskIdentity, sameMediaRecoveryTask } from './temporal-media-recovery-job.mjs';
 import { verifyMediaRecoveryTaskAttestation } from './temporal-media-recovery-task-attestation.mjs';
@@ -1007,7 +1014,7 @@ export async function assertCloudRunMediaRecoverySupported(o) {
     const options = { ...o, saved: undefined, observeProtection: failRecovery };
     const original = await readMediaRecoveryNormalOrigin(options);
     if (original.binding.poolName !== media.poolName || original.binding.image !== media.image) failRecovery();
-    await withNativeCloudRunClient(o, async (client, application) => {
+    return await withNativeCloudRunClient(o, async (client, application) => {
       if (o.requireTaskAttestation &&
           application.mediaRecoveryTaskAttestationMode !== 'operator-ed25519-v1') failRecovery();
       await createMediaRecoveryImageReplayObserver({
@@ -1022,6 +1029,8 @@ export async function assertCloudRunMediaRecoverySupported(o) {
       if (recoveryHash(original) !== recoveryHash(current)) failRecovery();
       await assertMediaRecoveryAuthority(o);
       assertMediaDiskQuotaFresh(quota);
+      if (application.mediaRecoveryTaskAttestationV2Mode === mediaRecoveryTaskAttestationV2Mode)
+        return mediaRecoveryExecutionWindowVersion;
     });
   } catch (error) {
     throw new Error('CLOUD_RUN_MEDIA_DIAGNOSTIC_RUNTIME_UNAVAILABLE', { cause: error });
@@ -1302,15 +1311,22 @@ export const archiveMediaDiagnosticStartedFailure = (o, { preparationRef, prepar
       const provider = held.get('mediaRecoveryJobProvider');
       const intent = held.get('mediaRecoveryWorkflowStart');
       if (held.get('cloudMediaRecovery.stage') !== 'prepared' || plan?.operationId !== id || plan.releaseId !== o.releaseId ||
-          !plan.diagnosticStorage || Date.now() <= plan.expiresAt ||
+          !plan.diagnosticStorage ||
           held.get('mediaRecoveryTaskAttestation.certificateSHA256') !== recoveryHash(certificate.data()) ||
           recoveryHash(prepared.get('identityState.certificate')) !== recoveryHash(plan.diagnosticStorage)) fail();
+      const signed = verifyMediaRecoveryTaskAttestation(certificate.data(), plan.taskAttestationPublicKey);
+      const window = mediaRecoveryLaunchWindow(plan);
+      const executionExpiresAt = mediaRecoveryAttestedWorkExpiry(plan, signed);
+      if (!window || executionExpiresAt === undefined || Date.now() <= executionExpiresAt ||
+          intent?.expiresAt !== executionExpiresAt ||
+          (window.version !== undefined &&
+            !mediaRecoveryAttestationCommitIsTimely(window, signed, certificate.createTime))) fail();
       await assertCurrent(tx);
       const closedFailure = { workflowId: `media-recovery-${id}`, runId: start.get('runId'),
         workers: { 1: original.get('worker'), ...(replacement.exists ? { 2: replacement.get('worker') } : {}) } };
       const durableWork = await readMediaDiagnosticDurableWork(db, tx, plan, id, { closedFailure });
       return { plan, provider, intent, start: start.data(),
-        certificate: verifyMediaRecoveryTaskAttestation(certificate.data(), plan.taskAttestationPublicKey),
+        certificate: signed,
         original: original.data(), replacement: replacement.data(),
         stamps: [start, certificate, original, replacement, pending].map(row => row.exists ? nativeSnapshotProof(row) : null),
         durableWorkSHA256: recoveryHash(durableWork),

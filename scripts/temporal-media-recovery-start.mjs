@@ -1,3 +1,8 @@
+import {
+  mediaRecoveryAttestationCommitIsTimely,
+  mediaRecoveryAttestedWorkExpiry,
+  mediaRecoveryLaunchWindow,
+} from './temporal-media-recovery-execution-window.mjs';
 import { setTimeout as delay } from 'node:timers/promises';
 import { readMediaRecoveryJobStartup } from './temporal-media-recovery-job-startup.mjs';
 import { verifyMediaRecoveryTaskAttestation } from './temporal-media-recovery-task-attestation.mjs';
@@ -59,14 +64,12 @@ async function start(o) {
     typeof application.mediaRecoveryPinnedVersion !== 'function'
   )
     fail();
+  const window = mediaRecoveryLaunchWindow(plan);
+  if (!window || (window.version !== undefined && (!job || !plan.taskAttestationPublicKey))) fail();
+  let executionExpiresAt = window.version === undefined ? window.launchExpiresAt : undefined;
   const fresh = (requireUnexpired = true) => {
-    if (
-      !Number.isFinite(Date.parse(plan.createdAt)) ||
-      plan.expiresAt !== Date.parse(plan.createdAt) + 300000 ||
-      (requireUnexpired && Date.now() >= plan.expiresAt) ||
-      Date.parse(plan.createdAt) > Date.now() + 5000
-    )
-      fail();
+    if (window.startedAt > Date.now() + 5000 ||
+        (requireUnexpired && (executionExpiresAt === undefined || Date.now() >= executionExpiresAt))) fail();
   };
   fresh(false);
   const journalRef = db.doc(`_control/temporalMediaRecoveryJournal-${o.operationId}`),
@@ -161,6 +164,12 @@ async function start(o) {
           signed.runOperation !== run.operation || signed.runIntentSHA256 !== run.intentSHA256 ||
           signed.jobUid !== run.jobUid || signed.execution !== run.execution || signed.executionUid !== run.executionUid)
         fail();
+      const expiry = mediaRecoveryAttestedWorkExpiry(plan, signed);
+      if (expiry === undefined || signed.operationId !== o.operationId ||
+          (window.version !== undefined &&
+            !mediaRecoveryAttestationCommitIsTimely(window, signed, certificateSnapshot.createTime))) fail();
+      if (executionExpiresAt !== undefined && executionExpiresAt !== expiry) fail();
+      executionExpiresAt = expiry;
       const proof = { digest: pointer.certificateSHA256,
         seconds: certificateSnapshot.createTime.seconds, nanoseconds: certificateSnapshot.createTime.nanoseconds };
       if (certificate && hash(certificate) !== hash(proof)) fail();
@@ -182,7 +191,7 @@ async function start(o) {
   const observeStartup = async tx => {
     if (!certificateRef) return;
     const observed = await readMediaRecoveryJobStartup(db, tx, plan, run,
-      application.validateHistoricalMediaRecoveryCapacity, certificate);
+      application.validateHistoricalMediaRecoveryCapacity, certificate, executionExpiresAt);
     if (observed && (observed.taskIdentity.name !== signedTask.task ||
         observed.taskIdentity.createTime !== signedTask.taskCreateTime ||
         (observed.taskIdentity.uid ?? null) !== signedTask.taskUid)) fail();
@@ -219,13 +228,15 @@ async function start(o) {
       nonce: input.startNonce,
       deploymentVersion: { deploymentName: 'urm-worker-media-recovery-staging', buildId: plan.buildId },
       attemptedAt: existing?.attemptedAt ?? new Date().toISOString(),
-      expiresAt: plan.expiresAt,
+      expiresAt: executionExpiresAt,
     };
   if (
     !uuid(intent.nonce) ||
     !Number.isFinite(Date.parse(intent.attemptedAt)) ||
     Date.parse(intent.attemptedAt) < Date.parse(plan.createdAt) ||
-    Date.parse(intent.attemptedAt) >= plan.expiresAt ||
+    Date.parse(intent.attemptedAt) >= executionExpiresAt ||
+    (window.version !== undefined && BigInt(Date.parse(intent.attemptedAt)) * 1_000_000n <
+      BigInt(certificate.seconds) * 1_000_000_000n + BigInt(certificate.nanoseconds)) ||
     (existing && hash(existing) !== hash(intent))
   )
     fail();
@@ -424,7 +435,7 @@ async function start(o) {
     return {
       ownedOperation: owned,
       start: fact,
-      authorizationExpired: Date.now() >= plan.expiresAt,
+      authorizationExpired: Date.now() >= executionExpiresAt,
       terminalFailure: hash({ intent, rejection: fact, nativeStatus: 'NOT_FOUND' }),
     };
   }
@@ -467,7 +478,7 @@ async function start(o) {
   const nativeStartSHA256 = application.mediaRecoveryNativeStart(history.history.events[0], intent, input, runId);
   const at = history.history.events[0].eventTime;
   if (
-    BigInt(String(at.seconds)) * 1000000000n + BigInt(at.nanos ?? 0) >= BigInt(plan.expiresAt) * 1000000n ||
+    BigInt(String(at.seconds)) * 1000000000n + BigInt(at.nanos ?? 0) >= BigInt(executionExpiresAt) * 1000000n ||
     !/^[a-f0-9]{64}$/.test(nativeStartSHA256)
   )
     fail();
@@ -509,7 +520,7 @@ async function start(o) {
   return {
     ownedOperation: owned,
     start: fact,
-    authorizationExpired: Date.now() >= plan.expiresAt,
+    authorizationExpired: Date.now() >= executionExpiresAt,
     ...(terminalFailure ? { terminalFailure } : {}),
   };
 }

@@ -11,6 +11,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { createDurableJobStore } from '../../../../packages/orchestration/src/job-store';
 import { computeProcessAudioRequestVersion } from '../../../../packages/contracts/processAudioQueue';
 import { mediaRecoveryBucketName } from './media-recovery-storage';
+import { mediaRecoveryExecutionExpiry, mediaRecoveryLaunchWindow } from './media-recovery-execution-window';
 import { createActorAuthorization } from './authorization';
 import { workerReadinessDigest as hash } from './readiness-probe';
 import type { WorkerWitness } from './worker-witness';
@@ -83,20 +84,21 @@ export function mediaRecoveryNativeStart(
   )
     fail();
   mediaRecoveryPinnedVersion(a.versioningOverride, start.deploymentVersion);
-  const seconds = BigInt(String(first.eventTime.seconds)),
-    nanos = Number(first.eventTime.nanos ?? 0);
+  const seconds = BigInt(String(first.eventTime.seconds));
+  const nanos = Number(first.eventTime.nanos ?? 0);
+  const attemptedAt = Date.parse(start.attemptedAt);
+  if (!Number.isInteger(nanos) || nanos < 0 || nanos >= 1e9 || !Number.isFinite(attemptedAt)) fail();
+  const nativeStartNanos = seconds * 1_000_000_000n + BigInt(nanos);
   if (
-    !Number.isInteger(nanos) ||
-    nanos < 0 ||
-    nanos >= 1e9 ||
-    !Number.isFinite(Date.parse(start.attemptedAt)) ||
-    seconds * 1000000000n + BigInt(nanos) < BigInt(Date.parse(start.attemptedAt)) * 1000000n
+    nativeStartNanos < BigInt(attemptedAt) * 1_000_000n ||
+    (start.expiresAt !== undefined && (!Number.isSafeInteger(start.expiresAt) ||
+      nativeStartNanos >= BigInt(start.expiresAt) * 1_000_000n))
   )
     fail();
   return hash({
     runId,
     inputSHA256: hash(input),
-    nativeStartNanos: (seconds * 1000000000n + BigInt(nanos)).toString(),
+    nativeStartNanos: nativeStartNanos.toString(),
     workflowType: 'MediaRecoveryProbe',
     queue: MEDIA_RECOVERY_QUEUE,
   });
@@ -180,13 +182,10 @@ export function createMediaRecoveryWorkActivities(o: {
           `_control/temporalMediaRecoveryJournal-${operationId}`,
         ].map((p) => db.doc(p));
         let plan: any, expected: any, actorUid: string | undefined, email: string | undefined;
+        let executionExpiresAt: number | undefined;
         const fresh = () => {
           if (
-            !plan ||
-            !Number.isSafeInteger(plan.expiresAt) ||
-            !Number.isFinite(Date.parse(plan.createdAt)) ||
-            plan.expiresAt !== Date.parse(plan.createdAt) + 300000 ||
-            Date.now() >= plan.expiresAt ||
+            !plan || executionExpiresAt === undefined || Date.now() >= executionExpiresAt ||
             Date.parse(plan.createdAt) > Date.now() + 5000
           )
             fail();
@@ -201,15 +200,17 @@ export function createMediaRecoveryWorkActivities(o: {
           const start = parent.get('mediaRecoveryWorkflowStart');
           const job = witness.cloudRunJob;
           const provider = parent.get('mediaRecoveryJobProvider');
-          if (job)
-            await recheckMediaRecoveryTaskAttestation(
+          const certificate = job
+            ? await recheckMediaRecoveryTaskAttestation(
               db,
               tx,
               operationId,
               job,
               p,
               parent.get('mediaRecoveryTaskAttestation')
-            );
+            ) : undefined;
+          const expiry = p && mediaRecoveryExecutionExpiry(p, certificate?.executionExpiresAt);
+          const launchWindow = mediaRecoveryLaunchWindow(p);
           const ownedCompute = job
             ? !cloud &&
               !cycle?.start &&
@@ -271,15 +272,20 @@ export function createMediaRecoveryWorkActivities(o: {
             hash(start.deploymentVersion) !== hash({ deploymentName: MEDIA_RECOVERY_DEPLOYMENT, buildId: p.buildId }) ||
             !Number.isFinite(Date.parse(start.attemptedAt)) ||
             Date.parse(start.attemptedAt) < Date.parse(p.createdAt) ||
-            Date.parse(start.attemptedAt) >= p.expiresAt ||
+            !launchWindow || expiry === undefined || Date.parse(start.attemptedAt) >= expiry ||
+            (launchWindow.version !== undefined && (!certificate ||
+              start.expiresAt !== expiry ||
+              BigInt(Date.parse(start.attemptedAt)) * 1_000_000n <
+                BigInt(certificate.seconds) * 1_000_000_000n + BigInt(certificate.nanoseconds))) ||
             parent.get('operatorPrincipal.adcAndGcloudAccountMatch') !== true ||
             typeof parent.get('operatorPrincipal.email') !== 'string'
           )
             fail();
           nativeStartSHA256 = mediaRecoveryNativeStart(first, start, input, execution.runId);
           const next = { parent: stamp(parent), control: stamp(control), state: stamp(state), arming: stamp(arming) };
-          if (expected && hash(expected) !== hash(next)) fail();
+          if (expected && (hash(expected) !== hash(next) || executionExpiresAt !== expiry)) fail();
           plan = p;
+          executionExpiresAt = expiry;
           expected = next;
           email = parent.get('operatorPrincipal.email');
           fresh();
@@ -326,7 +332,7 @@ export function createMediaRecoveryWorkActivities(o: {
             sourceSHA256: sha(bytes),
             sourceSize: bytes.length,
             createdAt: new Date().toISOString(),
-            expiresAt: plan.expiresAt,
+            expiresAt: executionExpiresAt,
           };
           try {
             await db.runTransaction(
@@ -370,7 +376,7 @@ export function createMediaRecoveryWorkActivities(o: {
               sourcePath,
               sourceSHA256: sha(bytes),
               sourceSize: bytes.length,
-              expiresAt: plan.expiresAt,
+              expiresAt: executionExpiresAt,
             }) ||
           !uuid(record.nonce) ||
           !Number.isFinite(Date.parse(record.createdAt)) ||
@@ -532,7 +538,7 @@ export function createMediaRecoveryWorkActivities(o: {
           ref,
           source,
           intentSHA256: hash(intent),
-          expiresAt: plan.expiresAt,
+          expiresAt: executionExpiresAt,
         };
         if (record.stage === 'admitted') {
           await db.runTransaction(

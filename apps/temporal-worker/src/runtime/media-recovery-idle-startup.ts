@@ -154,7 +154,7 @@ export async function collectMediaRecoveryIdleStartup(o: Options) {
         !Number.isSafeInteger(k.intent.parentPid) ||
         k.intent.parentPid <= 0 ||
         time(k.intent.createdAt) < time(o.plan.createdAt) ||
-        time(k.intent.createdAt) >= o.plan.expiresAt
+        time(k.intent.createdAt) >= cap.executionExpiresAt
       )
         fail();
       exact(
@@ -178,7 +178,7 @@ export async function collectMediaRecoveryIdleStartup(o: Options) {
           k.birth.pid <= 0 ||
           k.birth.pid === k.intent.parentPid ||
           time(k.birth.spawnedAt) < time(k.intent.createdAt) ||
-          time(k.birth.spawnedAt) >= o.plan.expiresAt
+          time(k.birth.spawnedAt) >= cap.executionExpiresAt
         )
           fail();
       }
@@ -213,7 +213,7 @@ export async function collectMediaRecoveryIdleStartup(o: Options) {
             s.bundle.bundleBytes < 1 ||
             s.bundle.bundleBytes > 64 * 1024 * 1024 ||
             time(s.observedAt) < time(k.birth.spawnedAt) ||
-            time(s.observedAt) >= o.plan.expiresAt
+            time(s.observedAt) >= cap.executionExpiresAt
           )
             fail();
           const capacity = validateHistoricalMediaRecoveryCapacity(s.capacity, k.birth.spawnedAt, s.observedAt);

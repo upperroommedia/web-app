@@ -1,3 +1,9 @@
+import {
+  mediaRecoveryAttestationCommitIsTimely,
+  mediaRecoveryAttestedWorkExpiry,
+  mediaRecoveryLaunchWindow,
+} from './temporal-media-recovery-execution-window.mjs';
+import { verifyMediaRecoveryTaskAttestation } from './temporal-media-recovery-task-attestation.mjs';
 import { isDeepStrictEqual as equal } from 'node:util';
 import { proofDigest } from './temporal-release-runtime.mjs';
 import { observeMediaDiagnosticStorage } from './temporal-media-diagnostic-storage.mjs';
@@ -468,6 +474,32 @@ function failedEpisode(o, p, prepared) {
   const workflowId = 'media-recovery-' + f.operationId;
   const stamp = BigInt(o.failureProof.createTime.seconds) * 1000000000n + BigInt(o.failureProof.createTime.nanoseconds);
   attestationPublicKey(plan.taskAttestationPublicKey);
+  const window = mediaRecoveryLaunchWindow(plan);
+  check(window, 'FAILURE_ARCHIVE');
+  let taskBirthDeadline = BigInt(window.launchExpiresAt) * 1_000_000n;
+  let executionExpiresAt = window.launchExpiresAt;
+  if (window.version !== undefined) {
+    const { failureCertificate, failureCertificateProof: proof } = o;
+    immutableReceipt(proof, failureCertificate);
+    check(equal(proof, f.facts?.[1]), 'FAILED_CERTIFICATE_PROVENANCE');
+    const signed = verifyMediaRecoveryTaskAttestation(failureCertificate, plan.taskAttestationPublicKey);
+    executionExpiresAt = mediaRecoveryAttestedWorkExpiry(plan, signed);
+    check(
+      executionExpiresAt !== undefined &&
+        mediaRecoveryAttestationCommitIsTimely(window, signed, proof.createTime) &&
+        signed.operationId === f.operationId &&
+        signed.planSHA256 === proofDigest(plan) &&
+        signed.job === job && signed.jobUid === native?.jobUid &&
+        signed.createOperation === provider?.create?.operation &&
+        signed.runOperation === native?.operation && signed.runIntentSHA256 === native?.intentSHA256 &&
+        signed.execution === execution && signed.executionUid === native?.executionUid &&
+        signed.task === run?.task && signed.taskCreateTime === run?.taskCreateTime &&
+        signed.taskUid === (run?.taskUid ?? null) &&
+        f.intent?.expiresAt === executionExpiresAt && start?.intentSHA256 === proofDigest(f.intent),
+      'FAILED_CERTIFICATE_AUTHORITY'
+    );
+    taskBirthDeadline = BigInt(window.attestationExpiresAt) * 1_000_000n;
+  }
   check(
     f.schemaVersion === 1 &&
       f.kind === 'staging-media-diagnostic-started-failure' &&
@@ -477,7 +509,7 @@ function failedEpisode(o, p, prepared) {
       Number.isSafeInteger(plan.expiresAt) &&
       date(plan.createdAt) &&
       plan.expiresAt === Date.parse(plan.createdAt) + 300000 &&
-      stamp > BigInt(plan.expiresAt) * 1000000n &&
+      stamp > BigInt(executionExpiresAt) * 1_000_000n &&
       equal(plan.diagnosticStorage, prepared.certificate),
     'FAILURE_ARCHIVE'
   );
@@ -557,7 +589,7 @@ function failedEpisode(o, p, prepared) {
       run.exitCode <= 255 &&
       sha(run.proofSHA256) &&
       instantNanos(native.attemptedAt) <= instantNanos(run.taskCreateTime) &&
-      instantNanos(run.taskCreateTime) < BigInt(plan.expiresAt) * 1000000n &&
+      instantNanos(run.taskCreateTime) < taskBirthDeadline &&
       instantNanos(run.taskCreateTime) <= instantNanos(workflow.closedAt) &&
       instantNanos(run.taskCreateTime) <= instantNanos(run.taskCompletionTime) &&
       instantNanos(run.taskCompletionTime) <= instantNanos(run.executionCompletionTime) &&

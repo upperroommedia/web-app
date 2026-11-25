@@ -1,4 +1,5 @@
-import { mediaRecoveryTaskAttestationPath } from './media-recovery-task-attestation-reader';
+import { historicalMediaRecoveryExecutionWindow, mediaRecoveryTaskAttestationPath } from './media-recovery-task-attestation-reader';
+import { mediaRecoveryLaunchWindow } from './media-recovery-execution-window';
 import { matchMediaRecoveryJobRun } from './media-recovery-job-witness';
 import { diagnosticComputeIdentity } from './worker-witness';
 /** Historical GET-only recovery episode collector. It grants no polling, signal,
@@ -95,8 +96,11 @@ async function collect(o: Options, deadline: number) {
           (typeof kinds)[number],
           any
         >;
-        if (p.taskAttestationPublicKey) {
-          const cert = await tx.get(db.doc(mediaRecoveryTaskAttestationPath(id)));
+        const cert = p.taskAttestationPublicKey
+          ? await tx.get(db.doc(mediaRecoveryTaskAttestationPath(id)))
+          : undefined;
+        const executionWindow = historicalMediaRecoveryExecutionWindow(p, cert);
+        if (cert) {
           const proof = facts.Startup.taskAttestation;
           if (
             !cert.exists ||
@@ -150,7 +154,7 @@ async function collect(o: Options, deadline: number) {
           start[computeKey] !== hash(compute) ||
           start.preparedSHA256 !== hash(c.prepared) ||
           start.cycleSHA256 !== hash(c) ||
-          start.expiresAt !== p.expiresAt ||
+          start.expiresAt !== executionWindow.expiresAt ||
           ack.stage !== 'confirmed' ||
           ack.operationId !== id ||
           ack.intentSHA256 !== hash(start) ||
@@ -203,13 +207,15 @@ async function collect(o: Options, deadline: number) {
           actorUid: work.actorUid,
         };
         if (kernel.context?.intentSHA256 !== hash(intent) || kernel.context.operationId !== id) fail();
-        const originals = await readMediaRecoveryOriginalLineage(db, { context: kernel.context, plan: p }, tx);
+        const originals = await readMediaRecoveryOriginalLineage(db, {
+          context: kernel.context, plan: p, executionExpiresAt: executionWindow.expiresAt,
+        }, tx);
         if (
           hash(originals.ready) !== hash(facts.OriginalReady) ||
           hash(originals.intent) !== hash(facts.ReplacementIntent)
         )
           fail();
-        const stamps = snaps.map((s) => ({
+        const stamps = (executionWindow.committedAtNanos !== undefined && cert ? [...snaps, cert] : snaps).map((s) => ({
           path: s.ref.path,
           created: s.createTime,
           updated: s.updateTime,
@@ -218,6 +224,7 @@ async function collect(o: Options, deadline: number) {
         return {
           facts,
           originals,
+          executionWindow,
           start,
           ...(p.job ? { jobProvider } : { pool: c.start.pool }),
           stampsSHA256: hash(stamps),
@@ -240,6 +247,7 @@ async function collectWithEpisodeReader(
   const { db, plan: p, operationId: id } = o;
   const before = await read();
   fresh();
+  const { expiresAt, committedAtNanos } = before.executionWindow;
   const f = before.facts,
     old = f.Kernel,
     k = f.ReplacementKernel,
@@ -298,7 +306,8 @@ async function collectWithEpisodeReader(
   exact(old.close, 'code,descendantsAbsent,observedAt,signal');
   if (
     time(before.start.attemptedAt) < time(p.createdAt) ||
-    time(before.start.attemptedAt) >= p.expiresAt ||
+    time(before.start.attemptedAt) >= expiresAt ||
+    (committedAtNanos !== undefined && BigInt(time(before.start.attemptedAt)) * 1_000_000n < committedAtNanos) ||
     before.start.operationId !== id ||
     before.start.workflowId !== `media-recovery-${id}` ||
     before.start.workflowType !== 'MediaRecoveryProbe' ||
@@ -354,7 +363,7 @@ async function collectWithEpisodeReader(
       startup.bundle.bundleBytes < 1 ||
       startup.bundle.bundleBytes > 64 * 1024 * 1024 ||
       time(startup.observedAt) < time(kernel.birth.spawnedAt) ||
-      time(startup.observedAt) >= p.expiresAt
+      time(startup.observedAt) >= expiresAt
     )
       fail();
     const capacity = validateHistoricalMediaRecoveryCapacity(
@@ -399,7 +408,7 @@ async function collectWithEpisodeReader(
     time(f.Startup.observedAt) > time(ready.observedAt) ||
     time(f.ReplacementStartup.observedAt) > time(a.observedAt) ||
     time(a.observedAt) > time(done.observedAt) ||
-    time(done.observedAt) >= p.expiresAt ||
+    time(done.observedAt) >= expiresAt ||
     time(done.observedAt) > time(stop.observedAt) ||
     time(stop.observedAt) > time(close.observedAt)
   )
@@ -460,8 +469,9 @@ async function collectWithEpisodeReader(
   )
     fail();
   const firstTime = events![0].eventTime!;
-  if (BigInt(String(firstTime.seconds)) * 1000000000n + BigInt(firstTime.nanos ?? 0) >= BigInt(p.expiresAt) * 1000000n)
-    fail();
+  const firstNanos = BigInt(String(firstTime.seconds)) * 1_000_000_000n + BigInt(firstTime.nanos ?? 0);
+  if (firstNanos >= BigInt(expiresAt) * 1_000_000n ||
+      (committedAtNanos !== undefined && firstNanos < committedAtNanos)) fail();
   const schedules = events!.filter((e) => e.activityTaskScheduledEventAttributes);
   if (
     schedules.length !== 2 ||
@@ -569,9 +579,13 @@ export async function waitForMediaRecoveryEpisode(o: Omit<Options, 'image'> & { 
   const monotonicStart = performance.now();
   const now = () => Math.max(Date.now(), started + performance.now() - monotonicStart);
   const overall = started + 90000;
-  const pollUntil = Math.min(overall, o.plan.expiresAt + 30000);
-  const historical = started >= pollUntil;
-  const deadline = historical ? overall : pollUntil;
+  const legacy = o.plan.executionWindowVersion === undefined;
+  const window = legacy ? undefined : mediaRecoveryLaunchWindow(o.plan);
+  if ((!legacy && !window) || !Number.isSafeInteger(o.plan.expiresAt)) return fail();
+  let pollUntil = legacy ? Math.min(overall, o.plan.expiresAt + 30000) : overall;
+  let observedCertificateCommit: bigint | undefined;
+  let historical = started >= pollUntil;
+  let deadline = historical ? overall : pollUntil;
   const boundedRead = async <T>(read: (rpcDeadline: number) => Promise<T>): Promise<T> => {
     const remaining = Math.min(5000, deadline - now());
     if (remaining <= 0) fail();
@@ -602,7 +616,7 @@ export async function waitForMediaRecoveryEpisode(o: Omit<Options, 'image'> & { 
     let first = true;
     while (first || (!historical && now() < deadline)) {
       first = false;
-      const ready = await boundedRead(() =>
+      const observed = await boundedRead(() =>
         o.db.runTransaction(
           async (tx) => {
             if (!active || now() >= deadline) fail();
@@ -659,11 +673,28 @@ export async function waitForMediaRecoveryEpisode(o: Omit<Options, 'image'> & { 
                 kernel.get('close.observerFailed') === true)
             )
               fail();
-            return kernel.get('stage') === 'closed' && completed.exists && stop.exists;
+            let expiresAt = o.plan.expiresAt;
+            if (window) {
+              const certificate = await tx.get(o.db.doc(mediaRecoveryTaskAttestationPath(o.operationId)));
+              const proof = historicalMediaRecoveryExecutionWindow(o.plan, certificate);
+              if (op.get('mediaRecoveryTaskAttestation.certificateSHA256') !== hash(certificate.data()) ||
+                  op.get('mediaRecoveryWorkflowStart.expiresAt') !== proof.expiresAt ||
+                  (observedCertificateCommit !== undefined && proof.committedAtNanos !== observedCertificateCommit))
+                fail();
+              expiresAt = proof.expiresAt;
+              observedCertificateCommit = proof.committedAtNanos;
+            }
+            return { ready: kernel.get('stage') === 'closed' && completed.exists && stop.exists, expiresAt };
           },
           { readOnly: true }
         )
       );
+      const { ready } = observed;
+      if (window) {
+        pollUntil = Math.min(overall, observed.expiresAt + 30000);
+        historical = started >= pollUntil;
+        deadline = historical ? overall : pollUntil;
+      }
       // One historical GET-only check is always allowed. Incomplete work cannot
       // obtain more polling time after its original window has ended.
       if (historical && !ready) fail();

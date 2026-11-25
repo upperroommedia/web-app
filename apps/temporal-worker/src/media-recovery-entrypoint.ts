@@ -275,8 +275,8 @@ export async function runMediaRecoveryApplication(bindShutdown?: (shutdown: () =
     lifecycle.workers.push(worker);
     await registration.authorize();
     if (lifecycle.draining) return;
-    worker.allowPolling(() => !lifecycle.draining && Date.now() < registration.cap.plan.expiresAt);
-    expiry = setTimeout(stop, Math.max(0, registration.cap.plan.expiresAt - Date.now()));
+    worker.allowPolling(() => !lifecycle.draining && Date.now() < registration.cap.executionExpiresAt);
+    expiry = setTimeout(stop, Math.max(0, registration.cap.executionExpiresAt - Date.now()));
     monitor = setInterval(() => {
       if (lifecycle.draining || probe) return;
       probe = registration

@@ -1,3 +1,4 @@
+import { mediaRecoveryAttestedWorkExpiry } from './temporal-media-recovery-execution-window.mjs';
 import { isDeepStrictEqual } from 'node:util';
 import { proofDigest } from './temporal-release-runtime.mjs';
 import { hasCompletedMediaRecoveryJobAccess, renderMediaRecoveryJob } from './temporal-media-recovery-job.mjs';
@@ -297,6 +298,7 @@ export async function observeClosedMediaDiagnosticFailure({
 }) {
   const workflowId = 'media-recovery-' + plan.operationId;
   const { runId } = start;
+  const executionExpiresAt = mediaRecoveryAttestedWorkExpiry(plan, certificate);
   check(
     plan.diagnosticStorage &&
       client.options.namespace === namespace &&
@@ -307,7 +309,9 @@ export async function observeClosedMediaDiagnosticFailure({
       certificate.operationId === plan.operationId &&
       certificate.planSHA256 === proofDigest(plan) &&
       certificate.executionUid === provider.runIdentity.executionUid &&
-      Date.now() > plan.expiresAt
+      executionExpiresAt !== undefined &&
+      intent.expiresAt === executionExpiresAt &&
+      Date.now() > executionExpiresAt
   );
   const wall = Date.now(),
     mono = performance.now(),

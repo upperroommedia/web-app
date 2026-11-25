@@ -1,3 +1,9 @@
+import {
+  mediaRecoveryAttestationCommitIsTimely,
+  mediaRecoveryAttestedWorkExpiry,
+  mediaRecoveryLaunchWindow,
+} from './temporal-media-recovery-execution-window.mjs';
+import { verifyMediaRecoveryTaskAttestation } from './temporal-media-recovery-task-attestation.mjs';
 import { sameMediaRecoveryTask } from './temporal-media-recovery-job.mjs';
 import { proofDigest as hash, assertNativeSnapshot } from './temporal-release-runtime.mjs';
 
@@ -69,6 +75,10 @@ export async function prepareCompletedMediaRecoveryCapsule(o, tx, parent, next, 
   if (p.taskAttestationPublicKey) refs.push(o.firestore.doc(`_control/temporalMediaRecoveryTaskAttestation-${id}`));
   const snapshots = await Promise.all(refs.map((r) => tx.get(r)));
   const facts = Object.fromEntries(kinds.map((k, i) => [k, snapshots[i]]));
+  const window = mediaRecoveryLaunchWindow(p);
+  if (!window || (window.version !== undefined && !p.taskAttestationPublicKey)) fail();
+  let executionExpiresAt = window.launchExpiresAt;
+  let committedAtNanos;
   const taskAttestation = parent.get('mediaRecoveryTaskAttestation');
   if (p.taskAttestationPublicKey) {
     const certificate = snapshots.at(-1);
@@ -78,6 +88,13 @@ export async function prepareCompletedMediaRecoveryCapsule(o, tx, parent, next, 
         hash(taskAttestation ?? null) !== hash({ certificateSHA256: digest }) ||
         ['Startup', 'ReplacementStartup'].some(kind =>
           hash(facts[kind].get('taskAttestation') ?? null) !== hash(proof))) fail();
+    if (window.version !== undefined) {
+      const signed = verifyMediaRecoveryTaskAttestation(certificate.data(), p.taskAttestationPublicKey);
+      executionExpiresAt = mediaRecoveryAttestedWorkExpiry(p, signed);
+      if (executionExpiresAt === undefined || signed.operationId !== id || signed.planSHA256 !== hash(p) ||
+          !mediaRecoveryAttestationCommitIsTimely(window, signed, certificate.createTime)) fail();
+      committedAtNanos = BigInt(proof.seconds) * 1_000_000_000n + BigInt(proof.nanoseconds);
+    }
   }
   const journal = facts.Journal.data(),
     ack = facts.Start.data(),
@@ -124,14 +141,15 @@ export async function prepareCompletedMediaRecoveryCapsule(o, tx, parent, next, 
     nonce: intent.nonce,
     deploymentVersion: { deploymentName: 'urm-worker-media-recovery-staging', buildId: p.buildId },
     attemptedAt: intent.attemptedAt,
-    expiresAt: p.expiresAt,
+    expiresAt: executionExpiresAt,
   };
   if (
     hash(intent) !== hash(expectedIntent) ||
     !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(intent.nonce ?? '') ||
     Date.parse(intent.attemptedAt) < Date.parse(p.createdAt) ||
     !Number.isFinite(Date.parse(intent.attemptedAt)) ||
-    Date.parse(intent.attemptedAt) >= p.expiresAt ||
+    Date.parse(intent.attemptedAt) >= executionExpiresAt ||
+    (committedAtNanos !== undefined && BigInt(Date.parse(intent.attemptedAt)) * 1_000_000n < committedAtNanos) ||
     hash(completion.operatorPrincipal) !== hash(parent.get('operatorPrincipal'))
   )
     fail();
