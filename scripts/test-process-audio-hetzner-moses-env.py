@@ -145,6 +145,12 @@ esac
         self.assertTrue(access)
         self.assertIn('MOSES_GUEST_AUDIO_VIDEO_IDS=aBcDe-FgH_0,aaaaaaaaaaa\n', rendered)
         self.assertNotIn('GUEST_PILOT', rendered)
+        self.assertNotIn('MOSES_GUEST_AUDIO_SECTION_ENABLED', rendered)
+        code, rendered, access = self.render({**settings, **scope, 'MOSES_GUEST_AUDIO_SECTION_ENABLED': 'true'})
+        self.assertEqual(code, 0)
+        self.assertTrue(access)
+        self.assertIn('MOSES_GUEST_AUDIO_SECTION_ENABLED=true\n', rendered)
+        self.assert_rejected(self.render({**pilot, 'MOSES_GUEST_AUDIO_SECTION_ENABLED': 'true'}), access=False)
         for override in (
             {'RELEASE_SHA': 'c' * 40},
             {'PROCESS_AUDIO_MOSES_RECOVERY_COHORT_B64URL': encode([rows[0], rows[0]])},

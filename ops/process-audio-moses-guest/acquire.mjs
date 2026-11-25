@@ -1,15 +1,16 @@
 import { spawn } from 'node:child_process';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { accessSync, constants, createReadStream, statSync } from 'node:fs';
-import { mkdtemp, open, rm } from 'node:fs/promises';
+import { lstat, mkdtemp, open, rm } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
-import { isAbsolute, join } from 'node:path';
+import { dirname, isAbsolute, join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 
 const endpoint = '/v1/youtube/guest-audio';
+const sectionEndpoint = '/v2/youtube/guest-audio-section';
 const bodyLimit = 256;
 const byteLimit = 200 * 1024 * 1024;
 const timeLimit = 120_000;
@@ -28,7 +29,12 @@ function failResponse(res, status) {
   res.end('Guest audio unavailable\n');
 }
 
-function readVideoId(req, signal) {
+function validSectionValue(value, limit, allowZero) {
+  return typeof value === 'number' && /^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(String(value)) && !Object.is(value, -0) &&
+    value <= limit && (allowZero ? value >= 0 : value > 0);
+}
+
+function readAcquisitionRequest(req, signal, section) {
   return new Promise((resolve, reject) => {
     const chunks = [];
     let size = 0;
@@ -53,16 +59,18 @@ function readVideoId(req, signal) {
     }
     function onEnd() {
       cleanup();
-      // This one-member JSON object has no legal comma. Reject duplicate keys
-      // before JSON.parse can silently discard the first one.
       const raw = Buffer.concat(chunks).toString('utf8');
       try {
         const value = JSON.parse(raw);
-        if (raw.includes(',') || !value || Object.keys(value).length !== 1 ||
-            typeof value.videoId !== 'string' || value.videoId.length !== 11 || !/^[A-Za-z0-9_-]+$/.test(value.videoId)) {
+        if (!value || typeof value.videoId !== 'string' || !/^[A-Za-z0-9_-]{11}$/.test(value.videoId)) throw new Error();
+        if (!section) {
+          // A one-member object has no legal comma. Reject duplicate keys.
+          if (raw.includes(',') || Object.keys(value).length !== 1) throw new Error();
+        } else if (JSON.stringify(value) !== raw || Object.keys(value).sort().join() !== 'durationSeconds,startSeconds,videoId' ||
+            !validSectionValue(value.startSeconds, 86_400, true) || !validSectionValue(value.durationSeconds, 3_600, false)) {
           throw new Error();
         }
-        resolve(value.videoId);
+        resolve(value);
       } catch {
         reject(new RequestFailure(400));
       }
@@ -159,7 +167,40 @@ async function acquire(videoId, file, directory, config, signal) {
   return { size, digest: hash.digest('hex') };
 }
 
-async function validateAudio(path, directory, ffprobePath, signal) {
+async function acquireSection({ videoId, startSeconds, durationSeconds }, directory, config, signal) {
+  const source = join(directory, 'source.audio');
+  const file = await open(source, 'wx+', 0o600);
+  try {
+    await acquire(videoId, file, directory, config, signal);
+  } finally {
+    await file.close();
+  }
+  // Seek and encode from the bounded local file. The YouTube stream for the
+  // incident source could be downloaded directly, but did not finish remote seeking.
+  const path = join(directory, 'section.mka');
+  await runTool(config.ffmpegPath, [
+    '-nostdin', '-v', 'error', '-xerror', '-ss', String(startSeconds),
+    '-protocol_whitelist', 'file', '-i', source, '-t', String(durationSeconds),
+    '-map', '0:a:0', '-vn', '-c:a', 'libopus', '-b:a', '96k', '-f', 'matroska', '-n', path,
+  ], directory, signal, async (stdout) => {
+    for await (const _chunk of stdout) signal.throwIfAborted();
+  });
+  await rm(source);
+  const metadata = await lstat(path);
+  if (!metadata.isFile() || !boundedInteger(metadata.size, config.maxBytes)) throw new RequestFailure(502);
+  const hash = createHash('sha256');
+  let size = 0;
+  for await (const chunk of createReadStream(path, { signal })) {
+    signal.throwIfAborted();
+    size += chunk.length;
+    if (size > config.maxBytes) throw new RequestFailure(502);
+    hash.update(chunk);
+  }
+  if (size !== metadata.size) throw new RequestFailure(502);
+  return { path, size, digest: hash.digest('hex') };
+}
+
+async function validateAudio(path, directory, ffprobePath, signal, expectedDuration) {
   const chunks = [];
   let size = 0;
   await runTool(ffprobePath, [
@@ -178,7 +219,8 @@ async function validateAudio(path, directory, ffprobePath, signal) {
   const duration = Number(format?.duration);
   const packets = Number(streams?.[0]?.nb_read_packets);
   if (!Array.isArray(streams) || streams.length !== 1 || streams[0].codec_type !== 'audio' ||
-      !Number.isSafeInteger(packets) || packets < 1 || !Number.isFinite(duration) || duration <= 0) {
+      !Number.isSafeInteger(packets) || packets < 1 || !Number.isFinite(duration) || duration <= 0 ||
+      (expectedDuration !== undefined && Math.abs(duration - expectedDuration) > 2)) {
     throw new RequestFailure(502);
   }
 }
@@ -188,31 +230,33 @@ function boundedInteger(value, limit) {
 }
 
 export function createGuestAudioServer({
-  token, ytDlpPath, ffprobePath, scratchRoot = tmpdir(), timeoutMs = timeLimit,
+  token, ytDlpPath, ffprobePath, ffmpegPath, scratchRoot = tmpdir(), timeoutMs = timeLimit,
   maxBytes = byteLimit, shutdownSignal,
 }) {
   if (typeof token !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(token) ||
       Buffer.from(token, 'base64url').toString('base64url') !== token ||
-      ![ytDlpPath, ffprobePath, scratchRoot].every((path) => typeof path === 'string' && isAbsolute(path)) ||
+      ![ytDlpPath, ffprobePath, scratchRoot, ...(ffmpegPath === undefined ? [] : [ffmpegPath])]
+        .every((path) => typeof path === 'string' && isAbsolute(path)) ||
       !boundedInteger(timeoutMs, timeLimit) || !boundedInteger(maxBytes, byteLimit) ||
       process.platform === 'win32') {
     throw new Error('Invalid guest acquisition configuration');
   }
-  for (const executable of [ytDlpPath, ffprobePath]) {
+  for (const executable of [ytDlpPath, ffprobePath, ...(ffmpegPath === undefined ? [] : [ffmpegPath])]) {
     if (!statSync(executable).isFile()) throw new Error('Invalid guest executable');
     accessSync(executable, constants.X_OK);
   }
   if (!statSync(scratchRoot).isDirectory()) throw new Error('Invalid guest scratch root');
   accessSync(scratchRoot, constants.W_OK | constants.X_OK);
   const credential = Buffer.from('Bearer ' + token);
-  const config = { ytDlpPath, maxBytes };
+  const config = { ytDlpPath, ffmpegPath, maxBytes };
   let busy = false;
   let cleanupFailed = false;
   return createServer({
     maxHeaderSize: 4096, headersTimeout: 10_000, requestTimeout: timeLimit,
     connectionsCheckingInterval: 1000, keepAliveTimeout: 1000,
   }, async (req, res) => {
-    if (req.url !== endpoint) return failResponse(res, 404);
+    const section = req.url === sectionEndpoint;
+    if (section ? !ffmpegPath : req.url !== endpoint) return failResponse(res, 404);
     if (req.method !== 'POST') return failResponse(res, 405);
     const auth = Buffer.from(req.headers.authorization ?? '');
     if (req.headersDistinct.authorization?.length !== 1 || auth.length !== credential.length ||
@@ -234,16 +278,23 @@ export function createGuestAudioServer({
     let file;
     let failure;
     try {
-      const videoId = await readVideoId(req, signal);
+      const input = await readAcquisitionRequest(req, signal, section);
       directory = await mkdtemp(join(scratchRoot, 'moses-guest-'));
-      const path = join(directory, 'audio');
-      file = await open(path, 'wx+', 0o600);
-      const { size, digest } = await acquire(videoId, file, directory, config, signal);
-      await validateAudio(path, directory, ffprobePath, signal);
+      let artifact;
+      if (section) {
+        artifact = await acquireSection(input, directory, config, signal);
+      } else {
+        const path = join(directory, 'audio');
+        file = await open(path, 'wx+', 0o600);
+        artifact = { path, ...await acquire(input.videoId, file, directory, config, signal) };
+      }
+      const { path, size, digest } = artifact;
+      await validateAudio(path, directory, ffprobePath, signal, input.durationSeconds);
       signal.throwIfAborted();
       res.writeHead(200, {
         'Cache-Control': 'no-store', 'Content-Type': 'application/octet-stream',
         'Content-Length': size, 'X-Content-SHA256': digest,
+        ...(section && { 'X-Section-Start-Seconds': String(input.startSeconds), 'X-Section-Duration-Seconds': String(input.durationSeconds) }),
       });
       await pipeline(createReadStream(path), res, { signal });
     } catch (error) {
@@ -273,10 +324,12 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     const port = Number(process.env.MOSES_GUEST_PORT ?? 8791);
     if (!boundedInteger(port, 65_535)) throw new Error();
     const shutdown = new AbortController();
+    const ffprobePath = process.env.MOSES_GUEST_FFPROBE_PATH;
     const server = createGuestAudioServer({
       token: process.env.MOSES_GUEST_TOKEN,
       ytDlpPath: process.env.MOSES_GUEST_YTDLP_PATH,
-      ffprobePath: process.env.MOSES_GUEST_FFPROBE_PATH,
+      ffprobePath,
+      ffmpegPath: process.env.MOSES_GUEST_FFMPEG_PATH ?? (ffprobePath && join(dirname(ffprobePath), 'ffmpeg')),
       scratchRoot: process.env.MOSES_GUEST_SCRATCH_ROOT,
       shutdownSignal: shutdown.signal,
     });

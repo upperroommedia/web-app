@@ -258,6 +258,9 @@ def setting(key, pattern):
     return value
 
 recovery_enabled = setting('PROCESS_AUDIO_MOSES_RECOVERY_ENABLED', r'true|false') if 'PROCESS_AUDIO_MOSES_RECOVERY_ENABLED' in os.environ else 'false'
+section_enabled = setting('MOSES_GUEST_AUDIO_SECTION_ENABLED', r'true|false') if 'MOSES_GUEST_AUDIO_SECTION_ENABLED' in os.environ else 'false'
+if section_enabled == 'true' and (recovery_enabled != 'true' or 'PROCESS_AUDIO_MOSES_RECOVERY_COHORT_B64URL' not in os.environ):
+    sys.exit('Moses section acquisition requires an explicit production recovery cohort')
 if 'PROCESS_AUDIO_MOSES_RECOVERY_COHORT_B64URL' in os.environ:
     if recovery_enabled != 'true':
         sys.exit('Moses recovery cohort requires explicit production recovery activation')
@@ -307,6 +310,8 @@ if 'PROCESS_AUDIO_MOSES_RECOVERY_COHORT_B64URL' in os.environ:
         'PROCESS_AUDIO_MOSES_RECOVERY_COHORT_B64URL': cohort,
         'PROCESS_AUDIO_MOSES_BACKLOG_RELEASE_SHA': release,
     }
+    if section_enabled == 'true':
+        selection['MOSES_GUEST_AUDIO_SECTION_ENABLED'] = 'true'
 elif recovery_enabled == 'true':
     video = setting('MOSES_GUEST_AUDIO_VIDEO_IDS', r'[A-Za-z0-9_-]{11}')
     if setting('PROCESS_AUDIO_MOSES_RECOVERY_VIDEO_ID', r'[A-Za-z0-9_-]{11}') != video:

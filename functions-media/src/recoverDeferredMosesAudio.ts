@@ -12,7 +12,7 @@ import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { getProviderToken, sendLegacyMosesPilotTask } from './legacyMosesGuestPilot';
 import { recoverDeferredMosesRequest } from './mosesDeferredRecovery';
 import { getMosesBacklogSelection, recoverMosesBacklogRequest, type BacklogSelection, type MosesBacklogDependencies } from './mosesBacklogRecovery';
-import { readMosesBacklogNativeHead, readNativeBacklogWitness, verifyNativeBacklogDocumentFence, verifyNativeBacklogSourcePresent } from './mosesBacklogNative';
+import { readMosesBacklogNativeHead, readNativeBacklogClosure, readNativeBacklogWitness, verifyNativeBacklogDocumentFence, verifyNativeBacklogSourcePresent } from './mosesBacklogNative';
 import type { PilotTransport } from './legacyMosesGuestPilot';
 
 const AUDIENCE = 'https://us-central1-urm-app.cloudfunctions.net/recoverdeferredmosesaudio';
@@ -129,6 +129,10 @@ export function getMosesRecoveryRoute(env: NodeJS.ProcessEnv, post: boolean, que
   headers: Readonly<Record<string, readonly string[] | undefined>>): Route | null {
   const custody = headers['x-urm-recovery-custody'];
   const generation = headers['x-urm-recovery-witness-generation'];
+  const closureGeneration = headers['x-urm-recovery-closure-generation'];
+  const closureSha = headers['x-urm-recovery-closure-sha256'];
+  const continuing = query.operation === 'continue-held';
+  if (!continuing && (closureGeneration !== undefined || closureSha !== undefined)) return null;
   if (post && env.PROCESS_AUDIO_MOSES_RECOVERY_ENABLED !== 'true') return null;
   if (env.PROCESS_AUDIO_MOSES_RECOVERY_COHORT_B64URL === undefined) {
     if (Object.keys(query).length || custody !== undefined || generation !== undefined) return null;
@@ -139,7 +143,7 @@ export function getMosesRecoveryRoute(env: NodeJS.ProcessEnv, post: boolean, que
     return deferred && (kind === undefined || kind === 'deferred_cookie') && (!post || deferred.custodySha256) ? { deferred } : null;
   }
   const rows = getMosesRecoveryCohort(env);
-  if (!rows || Object.keys(query).length !== 1 || typeof query.ref !== 'string') return null;
+  if (!rows || Object.keys(query).length !== (continuing ? 2 : 1) || typeof query.ref !== 'string') return null;
   const member = rows.find(row => row.ref === query.ref);
   if (!member || (post ? custody?.length !== 1 || !/^[0-9a-f]{64}$/u.test(custody[0]) : custody !== undefined) ||
       (generation !== undefined && (!post || member.kind === 'deferred_cookie' || generation.length !== 1 ||
@@ -147,6 +151,18 @@ export function getMosesRecoveryRoute(env: NodeJS.ProcessEnv, post: boolean, que
   const peers = rows.filter(row => row.ref !== member.ref);
   const { kind, sermonId, videoId, requestVersion } = member;
   const selection = { sermonId, videoId, requestVersion, ...(custody && { custodySha256: custody[0] }) };
+  if (continuing) {
+    const priorTaskId = env.PROCESS_AUDIO_MOSES_BACKLOG_CONTINUATION_PRIOR_TASK_ID;
+    const priorCustodySha256 = env.PROCESS_AUDIO_MOSES_BACKLOG_CONTINUATION_PRIOR_CUSTODY_SHA256;
+    const releaseSha = env.PROCESS_AUDIO_MOSES_BACKLOG_RELEASE_SHA;
+    if (member.ref !== env.PROCESS_AUDIO_MOSES_BACKLOG_CONTINUATION_REF || kind !== 'failed_request' || !requestVersion ||
+        !priorTaskId || !/^mr-[a-f0-9]{48}$/u.test(priorTaskId) || !priorCustodySha256 || !/^[a-f0-9]{64}$/u.test(priorCustodySha256) ||
+        !releaseSha || !/^[a-f0-9]{40}$/u.test(releaseSha) || generation !== undefined ||
+        closureGeneration?.length !== 1 || !/^[1-9][0-9]*$/u.test(closureGeneration[0]) || !Number.isSafeInteger(Number(closureGeneration[0])) ||
+        closureSha?.length !== 1 || !/^[a-f0-9]{64}$/u.test(closureSha[0])) return null;
+    return { backlog: { ...selection, kind, releaseSha, activation: { priorTaskId, priorCustodySha256,
+      closureGeneration: closureGeneration[0], closureSha256: closureSha[0] } }, peers };
+  }
   if (kind === 'deferred_cookie') return requestVersion ? { deferred: { ...selection, requestVersion }, peers } : null;
   const releaseSha = env.PROCESS_AUDIO_MOSES_BACKLOG_RELEASE_SHA;
   return releaseSha && /^[0-9a-f]{40}$/u.test(releaseSha) ?
@@ -206,8 +222,9 @@ const recoverDeferredMosesAudio = onRequest({ invoker: 'private', region: 'us-ce
       const backlog = route.backlog;
       const deps: MosesBacklogDependencies = {
         database, prepare, assertCohortIdle, verifyDocumentFence: verifyNativeBacklogDocumentFence, verifySourcePresent: verifyNativeBacklogSourcePresent,
+        readClosure: (prior, activation, release) => readNativeBacklogClosure(prior, activation, release, token),
         readWitness: fence => readNativeBacklogWitness(fence, backlog.witnessGeneration),
-        readHead: (selected, original, previous, own) => readMosesBacklogNativeHead(selected, original, previous, own, token, assertNoCompetingMosesTask),
+        readHead: (selected, original, previous, own, continuation) => readMosesBacklogNativeHead(selected, original, previous, own, token, assertNoCompetingMosesTask, continuation),
       };
       res.json(await recoverMosesBacklogRequest(mode, backlog, deps));
       return;

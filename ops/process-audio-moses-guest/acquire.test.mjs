@@ -11,6 +11,8 @@ const videoId = 'abcdefghijk';
 const canonicalUrl = 'https://www.youtube.com/watch?v=' + videoId;
 const payload = Buffer.from(Array.from({ length: 2048 }, (_, index) => index % 251));
 const route = '/v1/youtube/guest-audio';
+const sectionRoute = '/v2/youtube/guest-audio-section';
+const sectionBody = JSON.stringify({ videoId, startSeconds: 125.5, durationSeconds: 9.25 });
 
 // Both fake native tools run as children. Their only writable paths are literals
 // in this suite's private fixture directory, never paths from command arguments.
@@ -44,7 +46,9 @@ async function startFixture(t, mode = 'ok', limits = {}) {
   await mkdir(scratch, { mode: 0o700 });
   const ytDlpPath = join(root, 'fixture-ytdlp.cjs');
   const ffprobePath = join(root, 'fixture-ffprobe.cjs');
+  const ffmpegPath = join(root, 'fixture-ffmpeg.cjs');
   const data = "Buffer.from(" + JSON.stringify(payload.toString('base64')) + ", 'base64')";
+  const section = mode.startsWith('section-');
   await writeFixture(ytDlpPath, `
     assert.deepEqual(args, [
       '--ignore-config', '--no-plugin-dirs', '--no-remote-components',
@@ -75,6 +79,17 @@ async function startFixture(t, mode = 'ok', limits = {}) {
       });
     }
   `);
+  if (section) await writeFixture(ffmpegPath, `
+    const input = path.join(process.cwd(), 'source.audio');
+    const output = path.join(process.cwd(), 'section.mka');
+    assert.equal(path.dirname(process.cwd()), ${JSON.stringify(scratch)});
+    assert.deepEqual(fs.readFileSync(input), ${data});
+    assert.deepEqual(args, [
+      '-nostdin', '-v', 'error', '-xerror', '-ss', '125.5', '-protocol_whitelist', 'file',
+      '-i', input, '-t', '9.25', '-map', '0:a:0', '-vn', '-c:a', 'libopus', '-b:a', '96k', '-f', 'matroska', '-n', output,
+    ]);
+    fs.writeFileSync(output, ${data}, { flag: 'wx' });
+  `);
   await writeFixture(ffprobePath, `
     const scratch = ${JSON.stringify(scratch)};
     const input = args.at(-1);
@@ -82,24 +97,26 @@ async function startFixture(t, mode = 'ok', limits = {}) {
       '-v', 'error', '-protocol_whitelist', 'file',
       '-format_whitelist', 'matroska,webm,mov,mp4,m4a,3gp,3g2,mj2,ogg,aac,mp3,flac,wav',
       '-count_packets', '-show_entries', 'stream=codec_type,nb_read_packets:format=duration',
-      '-of', 'json', path.join(process.cwd(), 'audio'),
+      '-of', 'json', path.join(process.cwd(), ${JSON.stringify(section ? 'section.mka' : 'audio')}),
     ]);
     assert.equal(path.dirname(process.cwd()), scratch);
     assert.equal(input, fs.realpathSync(input));
     const stat = fs.lstatSync(input);
     assert.ok(stat.isFile() && stat.size === ${payload.length});
+    if (${section}) assert.ok(!fs.existsSync(path.join(process.cwd(), 'source.audio')));
     assert.deepEqual(fs.readFileSync(input), ${data});
     const mode = ${JSON.stringify(mode)};
     if (mode === 'bad-probe') { process.exit(9); }
     const codec_type = mode === 'no-audio' ? 'video' : 'audio';
-    const duration = mode === 'no-duration' ? '0' : '1.5';
+    const duration = ${section} ? (mode === 'section-wrong-duration' ? '30' : '9.3') : (mode === 'no-duration' ? '0' : '1.5');
     const nb_read_packets = mode === 'no-packets' ? '0' : '1';
     process.stdout.write(JSON.stringify({ streams: [{ codec_type, nb_read_packets }], format: { duration } }));
   `);
 
   const token = randomBytes(32).toString('base64url');
   server = createGuestAudioServer({
-    token, ytDlpPath, ffprobePath, scratchRoot: scratch, timeoutMs: 5000, maxBytes: 4096, ...limits,
+    token, ytDlpPath, ffprobePath, ffmpegPath: section ? ffmpegPath : undefined,
+    scratchRoot: scratch, timeoutMs: 5000, maxBytes: 4096, ...limits,
   });
   await new Promise((resolve, reject) => {
     server.once('error', reject);
@@ -114,6 +131,41 @@ async function startFixture(t, mode = 'ok', limits = {}) {
   }
   return { post, scratch, marker };
 }
+
+test('v2 emits only the cookie-free requested section with its native hash and exact range', async t => {
+  const { post, scratch } = await startFixture(t, 'section-ok');
+  const response = await post({ body: sectionBody, path: sectionRoute });
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('x-section-start-seconds'), '125.5');
+  assert.equal(response.headers.get('x-section-duration-seconds'), '9.25');
+  assert.equal(response.headers.get('x-content-sha256'), createHash('sha256').update(payload).digest('hex'));
+  assert.deepEqual(Buffer.from(await response.arrayBuffer()), payload);
+  await eventually(async () => (await readdir(scratch)).length === 0, 'Section scratch should close');
+});
+
+test('v2 rejects ambiguous numbers and preserves custody when ffprobe finds the wrong duration', async t => {
+  const { post, marker, scratch } = await startFixture(t, 'section-wrong-duration');
+  for (const body of [
+    JSON.stringify({ videoId }),
+    sectionBody.replace('125.5', '1.255e2'),
+    sectionBody.replace('125.5', '86401'),
+    sectionBody.replace('125.5', '-0'),
+    sectionBody.replace('9.25', '0'),
+    sectionBody.replace('9.25', '3601'),
+    sectionBody.replace('9.25', '9.25,"durationSeconds":9.25'),
+    sectionBody.replace('9.25', '9.25,"cookies":"not accepted"'),
+  ]) {
+    const response = await post({ body, path: sectionRoute });
+    assert.equal(response.status, 400);
+    await response.text();
+  }
+  await assert.rejects(readFile(marker), { code: 'ENOENT' });
+  const response = await post({ body: sectionBody, path: sectionRoute });
+  assert.equal(response.status, 502);
+  assert.equal(response.headers.has('x-section-duration-seconds'), false);
+  await response.text();
+  await eventually(async () => (await readdir(scratch)).length === 0, 'Rejected section scratch should close');
+});
 
 async function eventually(check, message) {
   const deadline = Date.now() + 3000;

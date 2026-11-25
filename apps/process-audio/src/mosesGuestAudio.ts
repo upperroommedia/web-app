@@ -5,12 +5,14 @@ import type { CancelToken } from './CancelToken';
 
 const VIDEO_ID = /^[A-Za-z0-9_-]{11}$/u;
 const ENDPOINT_PATH = '/v1/youtube/guest-audio';
+const SECTION_PATH = '/v2/youtube/guest-audio-section';
 const MAX_BYTES = 200 * 1024 * 1024;
 const TIMEOUT_MS = 180_000; // Includes remote extraction and transfer.
 
 export interface MosesGuestAudioConfig {
   readonly endpoint: string;
   readonly token: string;
+  readonly sectionEnabled?: true;
   readonly videoIds?: ReadonlySet<string>;
 }
 
@@ -32,11 +34,15 @@ export function readMosesGuestAudioConfig(env: NodeJS.ProcessEnv = process.env):
 
   const videoIds = env.MOSES_GUEST_AUDIO_VIDEO_IDS?.split(',').map((entry) => entry.trim());
   if (videoIds?.some((id) => !VIDEO_ID.test(id))) return null;
-  return { endpoint: url.origin + ENDPOINT_PATH, token, videoIds: videoIds && new Set(videoIds) };
+  return {
+    endpoint: url.origin + ENDPOINT_PATH, token, videoIds: videoIds && new Set(videoIds),
+    ...(env.MOSES_GUEST_AUDIO_SECTION_ENABLED === 'true' && { sectionEnabled: true as const }),
+  };
 }
 
 export type MosesGuestAudioFallbackReason =
   | 'ineligible_video'
+  | 'invalid_section'
   | 'remote_busy'
   | 'remote_refused'
   | 'remote_error'
@@ -51,9 +57,20 @@ export type MosesGuestAudioDownloadResult =
   | { status: 'fallback'; reason: MosesGuestAudioFallbackReason }
   | { status: 'cancelled' };
 
+type GuestAudioSection = { startSeconds: number; durationSeconds: number };
+
+export function getMosesGuestSection(startSeconds?: number, durationSeconds?: number): GuestAudioSection | undefined {
+  const decimal = (value?: number): value is number => typeof value === 'number' && Number.isFinite(value) &&
+    !Object.is(value, -0) && /^(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$/u.test(String(value));
+  if (!decimal(startSeconds) || startSeconds > 86400 ||
+      !decimal(durationSeconds) || durationSeconds <= 0 || durationSeconds > 3600) return;
+  return { startSeconds, durationSeconds };
+}
+
 interface DownloadInput {
   config: MosesGuestAudioConfig;
   videoId: string;
+  section?: GuestAudioSection;
   tempDir: string;
   cancelToken: Pick<CancelToken, 'isCancellationRequested'>;
 }
@@ -69,11 +86,17 @@ class DownloadFailure extends Error {
   }
 }
 
-function readAudioHeaders(response: Response): { length: number; digest: string } {
+function readAudioHeaders(response: Response, section?: GuestAudioSection): { length: number; digest: string } {
   if (response.redirected || (response.status >= 300 && response.status < 400))
     throw new DownloadFailure('invalid_response');
   if (response.status === 429) throw new DownloadFailure('remote_busy');
-  if (response.status >= 400 && response.status < 500) throw new DownloadFailure('remote_refused');
+  if (response.status >= 400 && response.status < 500) {
+    // A gateway timeout or disconnect can arrive while section capture is still active.
+    if (section && ![400, 401, 403, 404, 405, 413, 415, 422].includes(response.status)) {
+      throw new DownloadFailure('remote_error');
+    }
+    throw new DownloadFailure('remote_refused');
+  }
   if (response.status >= 500) throw new DownloadFailure('remote_error');
   const length = response.headers.get('content-length') ?? '';
   const digest = response.headers.get('x-content-sha256') ?? '';
@@ -82,6 +105,8 @@ function readAudioHeaders(response: Response): { length: number; digest: string 
     response.headers.get('content-type')?.toLowerCase() !== 'application/octet-stream' ||
     response.headers.has('content-encoding') ||
     response.headers.has('content-range') ||
+    (section !== undefined && (response.headers.get('x-section-start-seconds') !== String(section.startSeconds) ||
+      response.headers.get('x-section-duration-seconds') !== String(section.durationSeconds))) ||
     !/^[1-9][0-9]{0,8}$/u.test(length) ||
     Number(length) > MAX_BYTES ||
     !/^[a-f0-9]{64}$/u.test(digest)
@@ -91,12 +116,17 @@ function readAudioHeaders(response: Response): { length: number; digest: string 
 }
 
 export async function downloadMosesGuestAudio(
-  { config, videoId, tempDir, cancelToken }: DownloadInput,
+  { config, videoId, section, tempDir, cancelToken }: DownloadInput,
   deps: DownloadDependencies = {}
 ): Promise<MosesGuestAudioDownloadResult> {
   if (cancelToken.isCancellationRequested) return { status: 'cancelled' };
   if (!VIDEO_ID.test(videoId) || (config.videoIds && !config.videoIds.has(videoId))) {
     return { status: 'fallback', reason: 'ineligible_video' };
+  }
+
+  if (section !== undefined && (!config.sectionEnabled || !config.videoIds?.has(videoId) ||
+      !getMosesGuestSection(section.startSeconds, section.durationSeconds))) {
+    return { status: 'fallback', reason: 'invalid_section' };
   }
 
   const controller = new AbortController();
@@ -121,7 +151,8 @@ export async function downloadMosesGuestAudio(
   let reason: MosesGuestAudioFallbackReason = 'transfer_interrupted';
   let result: MosesGuestAudioDownloadResult;
   try {
-    const response = await (deps.fetch ?? fetch)(config.endpoint, {
+    const endpoint = section ? new URL(SECTION_PATH, config.endpoint).href : config.endpoint;
+    const response = await (deps.fetch ?? fetch)(endpoint, {
       method: 'POST',
       headers: {
         authorization: 'Bearer ' + config.token,
@@ -132,11 +163,11 @@ export async function downloadMosesGuestAudio(
       credentials: 'omit',
       redirect: 'error',
       signal: controller.signal,
-      body: JSON.stringify({ videoId }),
+      body: JSON.stringify(section ? { videoId, startSeconds: section.startSeconds, durationSeconds: section.durationSeconds } : { videoId }),
     });
     reader = response.body?.getReader();
     checkActive();
-    const expected = readAudioHeaders(response);
+    const expected = readAudioHeaders(response, section);
     if (!reader) throw new DownloadFailure('invalid_response');
 
     reason = 'local_io';

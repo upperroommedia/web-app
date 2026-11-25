@@ -1,8 +1,8 @@
 import { OAuth2Client, type TokenPayload } from 'google-auth-library';
 import { computeProcessAudioRequestVersion, getMosesGuestPilotSelection, PROCESS_AUDIO_YOUTUBE_TASK_QUEUE_NAME } from '@upperroom/contracts/processAudioQueue';
 import {
-  computeMosesBacklogTaskId, computeMosesRecoveryTaskId, getMosesRecoveryCohortMember, getMosesRecoverySelection,
-  MOSES_BACKLOG_FENCES_PATH, MOSES_RECOVERY_RECEIPTS_PATH, type MosesBacklogKind,
+  computeMosesBacklogCustody, computeMosesBacklogTaskId, computeMosesRecoveryTaskId, getMosesRecoveryCohortMember, getMosesRecoverySelection,
+  isValidMosesBacklogContinuation, MOSES_BACKLOG_FENCES_PATH, MOSES_RECOVERY_RECEIPTS_PATH, type MosesBacklogKind, type MosesBacklogReceipt,
 } from '@upperroom/contracts/mosesDeferredRecovery';
 import { isDeepStrictEqual } from 'node:util';
 import type { AddIntroOutroInputType } from '@upperroom/contracts/addIntroOutro/types';
@@ -71,7 +71,7 @@ async function hasVerifiedTaskIdentity(headers: DistinctHeaders, env: NodeJS.Pro
 }
 
 export interface VerifiedMosesRecoveryDelivery {
-  backlog?: { kind: MosesBacklogKind; releaseSha: string };
+  backlog?: { kind: MosesBacklogKind; releaseSha: string; predecessorReceiptSha256?: string };
   sermonId: string;
   videoId: string;
   requestVersion: string;
@@ -137,6 +137,13 @@ export async function verifyMosesRecoveryDelivery(
         receipt.requestVersion !== computeProcessAudioRequestVersion(payload) ||
         typeof receipt.custodySha256 !== 'string' || !/^[a-f0-9]{64}$/u.test(receipt.custodySha256) ||
         (backlog && (receipt.releaseSha !== backlog.releaseSha || !isDeepStrictEqual(receipt.payload, payload)))) return;
+    if ('continuation' in receipt) {
+      const active = native as MosesBacklogReceipt;
+      if (!backlog || !active.continuation || !readMosesGuestAudioConfig(env)?.sectionEnabled ||
+          !isValidMosesBacklogContinuation(active) || active.nonce === active.continuation.predecessor.nonce ||
+          computeMosesBacklogCustody(active) !== active.custodySha256) return;
+      backlog = { ...backlog, predecessorReceiptSha256: active.continuation.predecessorReceiptSha256 };
+    }
     if (receipt.phase === 'sending' || receipt.phase === 'prepared') throw new RecoveryReceiptUnavailable();
     if (receipt.phase !== 'acknowledged' && receipt.phase !== 'consumed') return;
     requestVersion = receipt.requestVersion;
