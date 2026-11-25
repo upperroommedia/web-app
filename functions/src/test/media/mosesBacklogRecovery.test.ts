@@ -7,9 +7,9 @@ import { recoverMosesBacklogRequest, type BacklogSelection, type MosesBacklogDep
 import { queueOrReplaceProcessAudioRequest } from '../../../../functions-media/src/processAudioQueueStore';
 import { MOSES_BACKLOG_SURFACES, verifyMosesBacklogWitness } from '../../../../functions-media/src/mosesBacklogWitness';
 import type { Bucket } from '@google-cloud/storage';
-import { MOSES_BACKLOG_DOCUMENT_FENCES } from '@upperroom/contracts/mosesDeferredRecovery';
+import { MOSES_BACKLOG_DELETIONS, MOSES_BACKLOG_DOCUMENT_FENCES } from '@upperroom/contracts/mosesDeferredRecovery';
 import { buildFirebaseStorageDownloadUrl } from '@upperroom/shared/shared/firebaseStorageUrls';
-import { pinBacklogBumper, verifyNativeBacklogDocumentFence } from '../../../../functions-media/src/mosesBacklogNative';
+import { pinBacklogBumper, verifyNativeBacklogDocumentFence, verifyNativeBacklogSourcePresent } from '../../../../functions-media/src/mosesBacklogNative';
 import type { PilotTransport } from '../../../../functions-media/src/legacyMosesGuestPilot';
 
 import { getMosesRecoveryCohortMember, type MosesRecoveryCohortMember } from '@upperroom/contracts/mosesDeferredRecovery';
@@ -33,6 +33,7 @@ function scenario(kind: MosesBacklogKind) {
   const deps = {
     database,
     readHead: jest.fn<ReturnType<MosesBacklogDependencies['readHead']>, Parameters<MosesBacklogDependencies['readHead']>>().mockResolvedValue(nativeHead),
+    verifySourcePresent: jest.fn(async () => undefined),
     verifyDocumentFence: jest.fn<ReturnType<MosesBacklogDependencies['verifyDocumentFence']>, Parameters<MosesBacklogDependencies['verifyDocumentFence']>>().mockResolvedValue(undefined),
     readWitness: jest.fn<ReturnType<MosesBacklogDependencies['readWitness']>, Parameters<MosesBacklogDependencies['readWitness']>>().mockResolvedValue(null),
     prepare: async () => provider,
@@ -171,10 +172,18 @@ describe('native backlog admission evidence', () => {
       await verifyNativeBacklogDocumentFence(frozen, true);
       expect((await mirror.get()).data()).toEqual(mosesBacklogDocumentFence(frozen));
       expect((await doc.get()).updateTime!.isEqual(before.updateTime!)).toBe(true);
+      await expect(verifyNativeBacklogSourcePresent(frozen)).resolves.toBeUndefined();
+      const deletion = db.collection(MOSES_BACKLOG_DELETIONS).doc(doc.id);
+      await deletion.create({disposition:'held_source_deleted'});
+      try { await expect(verifyNativeBacklogSourcePresent(frozen)).rejects.toThrow(); } finally { await deletion.delete(); }
       await expect(verifyNativeBacklogDocumentFence({ ...frozen, nonce: 'foreign' }, true)).rejects.toThrow();
       await doc.update({ title: 'new source revision' });
       await expect(verifyNativeBacklogDocumentFence(frozen, true)).rejects.toThrow();
       expect((await mirror.get()).data()).toEqual(mosesBacklogDocumentFence(frozen));
+      await doc.delete();
+      await expect(verifyNativeBacklogSourcePresent(frozen)).rejects.toThrow();
+      await doc.create({ title: 'new incarnation' });
+      await expect(verifyNativeBacklogSourcePresent(frozen)).rejects.toThrow();
     } finally {
       await Promise.all([doc.delete(), mirror.delete()]);
     }
@@ -353,7 +362,8 @@ describe('deployment-pinned recovery cohort', () => {
         taskId: computeMosesBacklogTaskId(evidence.kind, failed.sermonId, requestVersion, digest),
         phase: 'consumed', outcome: 'completed', owner: 'native-worker', completedRequestSha256: 'a'.repeat(64),
         proof: { documentWriteTime: '1000.000000001', completedAt: '2026-10-01T00:00:00.000Z', authority: 'cookie_provider', mosesVerified: false } });
-      await expect(assertOtherCohortRowsIdle(database, [failed])).resolves.toBeUndefined();
+      await expect(assertOtherCohortRowsIdle(database, [failed], async () => { throw new Error('source deletion held'); })).rejects.toThrow('source deletion held');
+      await expect(assertOtherCohortRowsIdle(database, [failed], async () => undefined)).resolves.toBeUndefined();
     } finally { await peer.remove(); }
   });
 });

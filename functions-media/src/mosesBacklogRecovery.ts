@@ -43,6 +43,7 @@ export interface MosesBacklogDependencies {
   database: Database;
   readHead: (selection: BacklogSelection, originalPayload: AddIntroOutroInputType | undefined,
     priorTaskId: string | undefined, ownTaskId: string | undefined) => Promise<MosesBacklogNativeHead>;
+  verifySourcePresent: (fence: MosesBacklogReceipt) => Promise<void>;
   verifyDocumentFence: (fence: MosesBacklogReceipt, install: boolean) => Promise<void>;
   readWitness: (fence: MosesBacklogReceipt) => Promise<MosesBacklogWitness | null>;
   prepare: () => Promise<PilotTransport>;
@@ -116,6 +117,7 @@ export async function recoverMosesBacklogRequest(mode: 'preview' | 'apply', sele
         fence.taskId !== computeMosesBacklogTaskId(kind, sermonId, fence.requestVersion, fence.custodySha256) ||
         !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u.test(fence.nonce));
       if (['consumed', 'acknowledged', 'rejected'].includes(fence.phase)) {
+        await deps.verifySourcePresent(fence);
         return { phase: fence.phase, requestVersion: fence.requestVersion, custodySha256: fence.custodySha256, taskId: fence.taskId };
       }
       holdIf(!['fenced', 'prepared', 'sending'].includes(fence.phase));

@@ -12,7 +12,7 @@ import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { getProviderToken, sendLegacyMosesPilotTask } from './legacyMosesGuestPilot';
 import { recoverDeferredMosesRequest } from './mosesDeferredRecovery';
 import { getMosesBacklogSelection, recoverMosesBacklogRequest, type BacklogSelection, type MosesBacklogDependencies } from './mosesBacklogRecovery';
-import { readMosesBacklogNativeHead, readNativeBacklogWitness, verifyNativeBacklogDocumentFence } from './mosesBacklogNative';
+import { readMosesBacklogNativeHead, readNativeBacklogWitness, verifyNativeBacklogDocumentFence, verifyNativeBacklogSourcePresent } from './mosesBacklogNative';
 import type { PilotTransport } from './legacyMosesGuestPilot';
 
 const AUDIENCE = 'https://us-central1-urm-app.cloudfunctions.net/recoverdeferredmosesaudio';
@@ -156,7 +156,8 @@ export function getMosesRecoveryRoute(env: NodeJS.ProcessEnv, post: boolean, que
 
 // The caller already owns the same global RTDB recovery claim used by both producers.
 // Every other selected original must be unstarted, definitely rejected, or natively completed.
-export async function assertOtherCohortRowsIdle(database: Database, peers: MosesRecoveryCohortMember[]) {
+export async function assertOtherCohortRowsIdle(database: Database, peers: MosesRecoveryCohortMember[],
+  verifyBacklogSource = verifyNativeBacklogSourcePresent) {
   await Promise.all(peers.map(async member => {
     const path = member.kind === 'deferred_cookie' ?
       MOSES_RECOVERY_RECEIPTS_PATH + '/' + member.sermonId + '/' + member.requestVersion :
@@ -175,7 +176,10 @@ export async function assertOtherCohortRowsIdle(database: Database, peers: Moses
       const digest = deferred ? computeMosesRecoveryCustody(state) : computeMosesBacklogCustody(state);
       const id = deferred ? computeMosesRecoveryTaskId(member.sermonId, state.requestVersion, digest) :
         computeMosesBacklogTaskId(kind, member.sermonId, state.requestVersion, digest);
-      if (state.schema === (deferred ? 1 : 2) && state.custodySha256 === digest && state.taskId === id) return;
+      if (state.schema === (deferred ? 1 : 2) && state.custodySha256 === digest && state.taskId === id) {
+        if (completed && !deferred) await verifyBacklogSource(state);
+        return;
+      }
     }
     throw new Error('A different cohort row remains unsettled.');
   }));
@@ -201,7 +205,7 @@ const recoverDeferredMosesAudio = onRequest({ invoker: 'private', region: 'us-ce
     if (route.backlog) {
       const backlog = route.backlog;
       const deps: MosesBacklogDependencies = {
-        database, prepare, assertCohortIdle, verifyDocumentFence: verifyNativeBacklogDocumentFence,
+        database, prepare, assertCohortIdle, verifyDocumentFence: verifyNativeBacklogDocumentFence, verifySourcePresent: verifyNativeBacklogSourcePresent,
         readWitness: fence => readNativeBacklogWitness(fence, backlog.witnessGeneration),
         readHead: (selected, original, previous, own) => readMosesBacklogNativeHead(selected, original, previous, own, token, assertNoCompetingMosesTask),
       };

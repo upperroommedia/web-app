@@ -20,6 +20,7 @@ import {
   type MosesBacklogRelease,
   mosesRecoveryDigest,
   MOSES_BACKLOG_DOCUMENT_FENCES,
+  MOSES_BACKLOG_DELETIONS,
   mosesBacklogDocumentFence,
   type MosesBacklogReceipt,
 } from '@upperroom/contracts/mosesDeferredRecovery';
@@ -125,10 +126,12 @@ export async function readBacklogDocument(
   expected: ReturnType<typeof mosesBacklogDocumentFence>
 ) {
   const mirrorRef = ref.firestore.collection(MOSES_BACKLOG_DOCUMENT_FENCES).doc(ref.id);
+  const deletionRef = ref.firestore.collection(MOSES_BACKLOG_DELETIONS).doc(ref.id);
   return ref.firestore.runTransaction(
     async (tx) => {
-      const [document, mirror] = await tx.getAll(ref, mirrorRef);
-      if (!mirror.exists || !isDeepStrictEqual(mirror.data(), expected)) return fail();
+      const [document, mirror, deletion] = await tx.getAll(ref, mirrorRef, deletionRef);
+      if (deletion.exists || !document.exists || stamp(document.createTime) !== expected.documentCreateTime ||
+          !mirror.exists || !isDeepStrictEqual(mirror.data(), expected)) return fail();
       return document;
     },
     { readOnly: true }
@@ -184,9 +187,9 @@ async function readAcknowledged(
     fail();
   checkOriginal(current.val(), receipt);
   checkDocument(document, receipt);
-  checkDocument(await readBacklogDocument(document.ref, mosesBacklogDocumentFence(receipt)), receipt);
   const storage = new MosesBacklogStorage(bucket, receipt, job.taskId);
   await Promise.all([storage.checkBeforeAcquisition(), storage.verifyWitness(job.nonce, receipt.witness!)]);
+  checkDocument(await readBacklogDocument(document.ref, mosesBacklogDocumentFence(receipt)), receipt);
   return { original: current.val() as StoredProcessAudioRequestState | null, storage };
 }
 
@@ -291,11 +294,15 @@ export async function reconcileBacklogRecovery(
     if (receipt.phase !== 'consumed' || !receipt.owner) return fail();
     const original = receipt.originalRequest ?? null;
     checkOriginal(original, receipt);
-    if (receipt.outcome === 'completed') return 'completed';
+    const source = await readDocument();
+    const liveSource = () => readBacklogDocument(source.ref, mosesBacklogDocumentFence(receipt));
+    if (receipt.outcome === 'completed') {
+      await liveSource();
+      return 'completed';
+    }
     if (receipt.outcome !== 'media_completed' || !receipt.proof) return fail();
-    const doc = await readDocument();
-    checkDocument(await readBacklogDocument(doc.ref, mosesBacklogDocumentFence(receipt)), receipt, true);
     await new MosesBacklogStorage(bucket, receipt, job.taskId).verifyCurrent(receipt.proof.outputs);
+    checkDocument(await liveSource(), receipt, true);
     const next = completedRequest(receipt);
     const changed = await request(db, job).transaction(
       (current) =>
@@ -308,6 +315,7 @@ export async function reconcileBacklogRecovery(
       false
     );
     if (!changed.committed || !isDeepStrictEqual(changed.snapshot.val(), next)) return fail();
+    checkDocument(await liveSource(), receipt, true);
     const terminal = { ...receipt, outcome: 'completed', completedRequestSha256: mosesRecoveryDigest(next) };
     const sealed = await ref.transaction(
       (current) => (current === null ? null : isDeepStrictEqual(current, receipt) ? terminal : undefined),
@@ -315,6 +323,7 @@ export async function reconcileBacklogRecovery(
       false
     );
     if (!sealed.committed || !isDeepStrictEqual(sealed.snapshot.val(), terminal)) return fail();
+    await liveSource();
     return 'completed';
   });
 }
@@ -329,6 +338,7 @@ export interface BacklogEditDelivery {
   payloadSha256: string;
   documentFence: ReturnType<typeof mosesBacklogDocumentFence>;
   pendingWriteTime: Timestamp;
+  source: DocumentReference;
 }
 
 export async function readBacklogEditDelivery(
@@ -355,9 +365,8 @@ export async function readBacklogEditDelivery(
       env.PROCESS_AUDIO_RUNTIME_HOST !== (youtube ? 'hetzner' : 'cloud-run')) return;
 
   const releaseRef = doc.firestore.collection(MOSES_BACKLOG_RELEASES).doc(doc.id);
-  const [fence, mirror, releaseDoc, grantDoc] = await Promise.all([
+  const [fence, releaseDoc, grantDoc] = await Promise.all([
     database.ref(MOSES_BACKLOG_FENCES_PATH + '/' + doc.id).get(),
-    doc.firestore.collection(MOSES_BACKLOG_DOCUMENT_FENCES).doc(doc.id).get(),
     releaseRef.get(),
     releaseRef.collection('tasks').doc(taskId).get(),
   ]);
@@ -379,7 +388,6 @@ export async function readBacklogEditDelivery(
       grant.taskId !== taskId || grant.nonce !== nonce || !grant.authorizedUid || !iso(grant.authorizedAt) ||
       grant.requestVersion !== requestVersion || grant.payloadSha256 !== mosesRecoveryDigest(payload)) return;
   const documentFence = mosesBacklogDocumentFence(receipt);
-  if (!isDeepStrictEqual(mirror.data(), documentFence)) return;
   // A lost HTTP acknowledgement after the running owner's successful settlement
   // must not cause the same task to acquire another media run.
   const [head, requestRow] = await Promise.all([
@@ -387,6 +395,7 @@ export async function readBacklogEditDelivery(
     database.ref('processAudioRequests/' + doc.id).get(),
   ]);
   const state: StoredProcessAudioRequestState | null = requestRow.val();
+  await readBacklogDocument(doc, documentFence);
   if (head.val()?.phase === 'acknowledged' && head.val().taskId === taskId &&
       head.val().requestVersion === requestVersion && head.val().payloadSha256 === grant.payloadSha256 &&
       state?.sermonId === doc.id && state.currentRequestVersion === requestVersion &&
@@ -394,7 +403,7 @@ export async function readBacklogEditDelivery(
       isDeepStrictEqual(state.currentPayload, payload) && state.runningRequestId == null && state.queuedTaskId == null) return 'settled';
   rememberConsumedMosesPilotNonce(nonce);
   // The Firestore transaction creates this grant and updates the sermon to PENDING in one commit.
-  return { taskId, requestVersion, payload, payloadSha256: grant.payloadSha256, documentFence, pendingWriteTime: grantDoc.createTime };
+  return { taskId, requestVersion, payload, payloadSha256: grant.payloadSha256, documentFence, pendingWriteTime: grantDoc.createTime, source: doc };
 }
 
 // These reads and transitions run under the same per-sermon claim as the
@@ -408,6 +417,7 @@ async function editQueueState(db: Database, edit: BacklogEditDelivery, owner?: s
     db.ref('processAudioQueues/youtube/deferred/' + id).get(),
     db.ref('processAudioQueues/youtube/state/probeTaskSermonId').get(),
     db.ref('processAudioLocks/' + id).get(),
+    readBacklogDocument(edit.source, edit.documentFence),
   ]);
   const receipt: Receipt | null = fence.val();
   const admission = marker.val();

@@ -267,9 +267,11 @@ if 'PROCESS_AUDIO_MOSES_RECOVERY_COHORT_B64URL' in os.environ:
         if base64.urlsafe_b64encode(decoded).rstrip(b'=').decode('ascii') != cohort:
             raise ValueError()
         manifest = json.loads(decoded)
+        if json.dumps(manifest, ensure_ascii=False, separators=(',', ':')).encode('utf-8') != decoded:
+            raise ValueError()
     except (ValueError, UnicodeError):
         sys.exit('Invalid production Moses recovery cohort encoding')
-    if not isinstance(manifest, dict) or set(manifest) != {'schema', 'rows'} or manifest['schema'] != 1:
+    if not isinstance(manifest, dict) or set(manifest) != {'schema', 'rows'} or type(manifest['schema']) is not int or manifest['schema'] != 1:
         sys.exit('Invalid production Moses recovery cohort')
     rows = manifest['rows']
     if not isinstance(rows, list) or not 1 <= len(rows) <= 14:
@@ -279,7 +281,7 @@ if 'PROCESS_AUDIO_MOSES_RECOVERY_COHORT_B64URL' in os.environ:
         if not isinstance(row, dict) or set(row) - {'ref', 'kind', 'sermonId', 'videoId', 'requestVersion'}:
             sys.exit('Invalid production Moses recovery cohort row')
         if not all(isinstance(row.get(k), str) and re.fullmatch(pattern, row[k], re.ASCII) for k, pattern in (
-            ('ref', r'[A-Za-z0-9_-]{1,64}'), ('sermonId', r'[A-Za-z0-9_-]{1,128}'), ('videoId', r'[A-Za-z0-9_-]{11}'),
+            ('ref', r'[A-Za-z0-9_-]{1,48}'), ('sermonId', r'[A-Za-z0-9_-]{1,128}'), ('videoId', r'[A-Za-z0-9_-]{11}'),
         )):
             sys.exit('Invalid production Moses recovery cohort row identity')
         kind = row.get('kind')
@@ -289,7 +291,7 @@ if 'PROCESS_AUDIO_MOSES_RECOVERY_COHORT_B64URL' in os.environ:
             (not isinstance(version, str) or not re.fullmatch(r'[a-f0-9]{16}', version))
         ):
             sys.exit('Invalid production Moses recovery cohort request identity')
-        if row['ref'] in refs or row['sermonId'] in sermons:
+        if row['ref'] in refs or row['sermonId'] in sermons or row['sermonId'] == '__youtube_auth_recovery__':
             sys.exit('Duplicate production Moses recovery cohort identity')
         refs.add(row['ref'])
         sermons.add(row['sermonId'])

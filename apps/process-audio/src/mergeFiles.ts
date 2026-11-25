@@ -34,7 +34,8 @@ const mergeFiles = async (
   realtimeDBref: Reference,
   customMetadata: CustomMetadata,
   ctx?: LogContext,
-  backlogStorage?: MosesBacklogStorage
+  backlogStorage?: MosesBacklogStorage,
+  verifySource?: () => Promise<unknown>
 ): Promise<File> => {
   const log = createLoggerWithContext(ctx);
 
@@ -50,6 +51,7 @@ const mergeFiles = async (
     contentType: 'audio/mpeg',
     metadata: { contentDisposition, metadata: customMetadata },
   };
+  if (verifySource) await verifySource();
   const writeStream = outputFile.createWriteStream(backlogStorage ? backlogStorage.uploadOptions(outputFilePath, uploadOptions) : uploadOptions);
 
   // ffmpeg -f concat -i mylist.txt -c copy output

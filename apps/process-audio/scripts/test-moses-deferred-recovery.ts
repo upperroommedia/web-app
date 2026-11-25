@@ -15,6 +15,7 @@ import {
   MOSES_BACKLOG_RELEASES,
   MOSES_BACKLOG_EDITS_PATH,
   MOSES_BACKLOG_DOCUMENT_FENCES,
+  MOSES_BACKLOG_DELETIONS,
   type MosesBacklogEvidence,
   type MosesBacklogKind,
   type MosesBacklogReceipt,
@@ -464,6 +465,8 @@ function backlogFixture(kind: MosesBacklogKind) {
   f.write(requestPath, priorRequest);
   f.write('processAudioLocks/' + id, null);
   let mirror: unknown = mosesBacklogDocumentFence(r);
+  let deletion = false;
+  let liveEpoch: Timestamp | undefined = new Timestamp(11, 1);
   const doc = (processed = false) => {
     const fields: Record<string, unknown> = {
       'status.audioStatus': processed ? 'PROCESSED' : kind === 'failed_request' ? 'ERROR' : 'PENDING',
@@ -475,6 +478,8 @@ function backlogFixture(kind: MosesBacklogKind) {
     };
     const result = {
       ...document(processed),
+      exists: liveEpoch !== undefined,
+      createTime: liveEpoch,
       get: (key: string) => fields[key],
       ref: {
         id,
@@ -482,7 +487,7 @@ function backlogFixture(kind: MosesBacklogKind) {
         firestore: {
           collection: () => ({ doc: () => ({}) }),
           runTransaction: async (fn) =>
-            fn({ getAll: async () => [result, { exists: mirror !== null, data: () => mirror }] }),
+            fn({ getAll: async () => [result, { exists: mirror !== null, data: () => mirror }, { exists: deletion }] }),
         },
       },
     };
@@ -523,6 +528,7 @@ function backlogFixture(kind: MosesBacklogKind) {
     downloads,
     doc,
     witnessPath,
+    sourceDeleted(marker: boolean, epoch?: Timestamp) { deletion = marker; liveEpoch = epoch; },
     mirror(value: unknown) {
       mirror = value;
     },
@@ -582,6 +588,14 @@ test('both historical backlog categories keep the fence and complete against cre
     assert.equal(f.read(f.fencePath).outcome, 'completed');
     assert.equal(f.read(requestPath).lastCompletedRequestVersion, f.r.requestVersion);
     assert.equal(f.read(queue + '/state').deferredYouTubeTaskCount, 1, 'unrelated native queue count preserved');
+    const terminal = structuredClone(f.read(f.fencePath));
+    f.sourceDeleted(false);
+    await assert.rejects(reconcileMosesRecovery(f.db, f.delivery, owner, async () => f.doc(true), f.bucket));
+    f.sourceDeleted(false, new Timestamp(12, 1));
+    await assert.rejects(reconcileMosesRecovery(f.db, f.delivery, owner, async () => f.doc(true), f.bucket));
+    f.sourceDeleted(true, new Timestamp(11, 1));
+    await assert.rejects(reconcileMosesRecovery(f.db, f.delivery, owner, async () => f.doc(true), f.bucket));
+    assert.deepEqual(f.read(f.fencePath), terminal);
   }
 });
 
@@ -592,6 +606,8 @@ test('missing or changed forward evidence, outputs, mirror, and prior request fa
     (f: ReturnType<typeof backlogFixture>) => f.write(f.fencePath + '/phase', 'sending'),
     (f: ReturnType<typeof backlogFixture>) => f.objects.set('processed-sermons/' + id, { generation: '900' }),
     (f: ReturnType<typeof backlogFixture>) => (f.objects.get('intros/test_intro.mp3').generation = '304'),
+    (f: ReturnType<typeof backlogFixture>) => f.sourceDeleted(true, new Timestamp(11, 1)),
+    (f: ReturnType<typeof backlogFixture>) => f.sourceDeleted(false),
     (f: ReturnType<typeof backlogFixture>) => f.mirror(null),
     (f: ReturnType<typeof backlogFixture>) => f.mirror({ nonce: 'wrong' }),
     (f: ReturnType<typeof backlogFixture>) => f.write(requestPath, { currentPayload: f.target }),
@@ -659,7 +675,10 @@ test('terminal edit requires its private named grant and exact ACK, then only it
     get: async () => ({ data: () => docs.get(path + '/' + key), createTime: written }),
     collection: (child: string) => collection(path + '/' + key + '/' + child),
   }) });
-  const ref = { id, firestore: { collection } } as unknown as Parameters<typeof readBacklogEditDelivery>[1];
+  const ref = { id, firestore: { collection, runTransaction: async (fn) => fn({
+    getAll: async () => [f.doc(true), { exists: true, data: () => docs.get(MOSES_BACKLOG_DOCUMENT_FENCES + '/' + id) },
+      { exists: docs.has(MOSES_BACKLOG_DELETIONS + '/' + id) }],
+  }) } } as unknown as Parameters<typeof readBacklogEditDelivery>[1];
   const headers = { 'x-urm-moses-pilot-intent': [nonce], 'x-cloudtasks-taskname': [name], 'x-cloudtasks-queuename': ['processaudioyoutubetask'] };
   const env = { NODE_ENV: 'production', FIREBASE_PROJECT_ID: 'urm-app', PROCESS_AUDIO_RUNTIME_ENV: 'production',
     PROCESS_AUDIO_RUNTIME_HOST: 'hetzner', PROCESS_AUDIO_RUNTIME_PROFILE: 'hetzner' };
@@ -688,5 +707,7 @@ test('terminal edit requires its private named grant and exact ACK, then only it
   assert.equal(f.read(requestPath).queuedTaskId, undefined);
   assert.deepEqual(f.read(f.fencePath), terminal);
   assert.equal(await deliver(), 'settled');
+  docs.set(MOSES_BACKLOG_DELETIONS + '/' + id, { disposition: 'held_source_deleted' });
+  await assert.rejects(deliver());
   await assert.rejects(transitionBacklogEdit(f.db, edit, owner, 'complete'));
 });

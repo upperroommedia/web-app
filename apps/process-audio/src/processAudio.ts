@@ -464,11 +464,10 @@ export const processAudio = async (
       },
     };
     const backlogMirror = backlogStorage?.documentFence ?? edit?.documentFence;
+    const verifySource = backlogMirror ? () => readBacklogDocument(docRef, backlogMirror) : undefined;
     const writeRecoveryStatus = recovery || edit ? createMosesRecoveryStatusWriter(docRef, observedDocument!.updateTime!, backlogMirror && (async previous => {
       const current = await readBacklogDocument(docRef, backlogMirror);
-      const creation = current.createTime;
-      if (!current.updateTime?.isEqual(previous) || !creation ||
-          creation.seconds + '.' + String(creation.nanoseconds).padStart(9, '0') !== backlogMirror.documentCreateTime) {
+      if (!current.updateTime?.isEqual(previous)) {
         throw new Error('Backlog document generation changed');
       }
     })) : undefined;
@@ -558,7 +557,8 @@ export const processAudio = async (
           trimCtx,
           admission,
           !!recovery || !!edit,
-          backlogStorage
+          backlogStorage,
+          verifySource
         );
       }
     );
@@ -627,7 +627,8 @@ export const processAudio = async (
             realtimeDB.ref(`addIntroOutro/${fileName}`),
             customMetadata,
             mergeCtx,
-            backlogStorage
+            backlogStorage,
+            verifySource
           )
       );
       log.info('Files merged successfully', { outputPath: mergedOutputFile.name });
@@ -653,6 +654,7 @@ export const processAudio = async (
       const outputs = await backlogStorage?.verifyCurrent();
       if (cancelToken.isCancellationRequested) throw new Error('Cancelled backlog completion');
       const written = await writeRecoveryStatus(sermonStatusType.PROCESSED, undefined, durationSeconds);
+      if (verifySource) await verifySource();
       await recordMosesRecoveryMediaCompletion(realtimeDB, recovery, lockRequestId, authority,
         trimCtx.mosesVerifiedTransfer === true, written.writeTime, outputs);
       recoveryMediaRecorded = true;
@@ -660,6 +662,7 @@ export const processAudio = async (
       await writeRecoveryStatus(sermonStatusType.PROCESSED, undefined, durationSeconds);
       if (cancelToken.isCancellationRequested) throw new Error('Edited audio completion unconfirmed');
       await transitionBacklogEdit(realtimeDB, edit, lockRequestId, 'complete', trimCtx.youtubeSuccessfulAcquisitionAuthority);
+      await readBacklogDocument(docRef, edit.documentFence);
       editCompleted = true;
     } else {
       await updateUnreservedAudioDocument(docRef, finishedStatus);

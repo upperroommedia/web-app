@@ -123,8 +123,9 @@ esac
             self.assert_rejected(self.render({**settings, **recovery, key: value}), access=False)
 
     def test_backlog_cohort_has_an_exact_production_release_and_video_scope(self):
-        def encode(rows):
-            return base64.urlsafe_b64encode(json.dumps({'schema': 1, 'rows': rows}).encode()).rstrip(b'=').decode()
+        def encode(rows, *, schema=1, compact=True):
+            body = json.dumps({'schema': schema, 'rows': rows}, separators=(',', ':') if compact else None)
+            return base64.urlsafe_b64encode(body.encode()).rstrip(b'=').decode()
 
         rows = [
             {'ref': 'failed-01', 'kind': 'failed_request', 'sermonId': 'failed_original',
@@ -148,6 +149,10 @@ esac
             {'RELEASE_SHA': 'c' * 40},
             {'PROCESS_AUDIO_MOSES_RECOVERY_COHORT_B64URL': encode([rows[0], rows[0]])},
             {'PROCESS_AUDIO_MOSES_RECOVERY_COHORT_B64URL': encode([{**rows[0], 'requestVersion': None}])},
+            {'PROCESS_AUDIO_MOSES_RECOVERY_COHORT_B64URL': encode([{**rows[0], 'ref': 'r' * 49}])},
+            {'PROCESS_AUDIO_MOSES_RECOVERY_COHORT_B64URL': encode([{**rows[0], 'sermonId': '__youtube_auth_recovery__'}])},
+            {'PROCESS_AUDIO_MOSES_RECOVERY_COHORT_B64URL': encode(rows, schema=True)},
+            {'PROCESS_AUDIO_MOSES_RECOVERY_COHORT_B64URL': encode(rows, compact=False)},
             {'MOSES_GUEST_AUDIO_VIDEO_IDS': 'c' * 11},
         ):
             self.assert_rejected(self.render({**settings, **scope, **override}), access=False)

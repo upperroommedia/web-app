@@ -111,6 +111,7 @@ export function computeMosesBacklogTaskId(kind: MosesBacklogKind, sermonId: stri
   return 'mr-' + createHash('sha256').update([kind, sermonId, version, custodySha256].join('\n')).digest('hex').slice(0, 48);
 }
 
+export const MOSES_BACKLOG_DELETIONS = '_processAudioBacklogDeletions';
 export const MOSES_BACKLOG_DOCUMENT_FENCES = '_processAudioBacklogFences';
 export function mosesBacklogDocumentFence(receipt: MosesBacklogReceipt) {
   const { schema, kind, sermonId, requestVersion, custodySha256, nonce, fencedAt, releaseSha, documentCreateTime, documentUpdateTime } = receipt;

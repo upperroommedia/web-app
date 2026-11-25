@@ -86,7 +86,8 @@ const trimAndTranscode = async (
   ctx?: LogContext,
   mosesPilotEligible = false,
   deferredRecovery = false,
-  backlogStorage?: MosesBacklogStorage
+  backlogStorage?: MosesBacklogStorage,
+  verifySource?: () => Promise<unknown>
 ): Promise<File> => {
   const log = createLoggerWithContext(ctx);
   const outputFile = bucket.file(outputFilePath);
@@ -98,7 +99,6 @@ const trimAndTranscode = async (
     metadata: { contentDisposition, metadata: customMetadata },
     timeout: 30 * 60 * 1000, // 30 minutes in milliseconds
   };
-  const writeStream = outputFile.createWriteStream(backlogStorage ? backlogStorage.uploadOptions(outputFilePath, uploadOptions) : uploadOptions);
   let inputSource: string | undefined;
   let usingMosesGuestSource = false;
   let proc: ReturnType<typeof spawn> | undefined;
@@ -415,6 +415,8 @@ const trimAndTranscode = async (
       },
     });
 
+    if (verifySource) await verifySource();
+    const writeStream = outputFile.createWriteStream(backlogStorage ? backlogStorage.uploadOptions(outputFilePath, uploadOptions) : uploadOptions);
     proc = spawn(ffmpegPath, args, {
       stdio: ['ignore', 'pipe', 'pipe'],
     });

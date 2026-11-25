@@ -7,6 +7,7 @@ export const MOSES_BACKLOG_SURFACES = {
   'media-callable': 'https://us-central1-urm-app.cloudfunctions.net/addintrooutrotaskgenerator',
   'media-sermon-create': 'https://us-central1-urm-app.cloudfunctions.net/sermonaudiocreatetrigger',
   'media-cookie-update': 'https://us-central1-urm-app.cloudfunctions.net/setyoutubecookies',
+  'core-sermon-delete': 'https://us-central1-urm-app.cloudfunctions.net/sermonOnDelete',
   'media-recovery': 'https://us-central1-urm-app.cloudfunctions.net/recoverdeferredmosesaudio',
 } as const;
 

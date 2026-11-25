@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import type { Bucket } from '@google-cloud/storage';
 import type { AddIntroOutroInputType } from '@upperroom/contracts/addIntroOutro/types';
-import { MOSES_BACKLOG_DOCUMENT_FENCES, mosesBacklogDocumentFence, type MosesBacklogReceipt } from '@upperroom/contracts/mosesDeferredRecovery';
+import { MOSES_BACKLOG_DELETIONS, MOSES_BACKLOG_DOCUMENT_FENCES, mosesBacklogDocumentFence, type MosesBacklogReceipt } from '@upperroom/contracts/mosesDeferredRecovery';
 import { sanitizeProcessAudioPayload } from '@upperroom/contracts/processAudioQueue';
 import { buildFirebaseStorageDownloadUrl } from '@upperroom/shared/shared/firebaseStorageUrls';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
@@ -98,7 +98,8 @@ export async function verifyNativeBacklogDocumentFence(fence: MosesBacklogReceip
   const native = db.collection(MOSES_BACKLOG_DOCUMENT_FENCES).doc(fence.sermonId);
   const expected = mosesBacklogDocumentFence(fence);
   await db.runTransaction(async tx => {
-    const [actual, doc] = await tx.getAll(native, db.collection('sermons').doc(fence.sermonId));
+    const [actual, doc, deletion] = await tx.getAll(native, db.collection('sermons').doc(fence.sermonId), db.collection(MOSES_BACKLOG_DELETIONS).doc(fence.sermonId));
+    if (deletion.exists) return refuse();
     if (!doc.createTime || !doc.updateTime || timestamp(doc.createTime) !== fence.documentCreateTime ||
         timestamp(doc.updateTime) !== fence.documentUpdateTime) return refuse();
     if (actual.exists) {
@@ -108,4 +109,16 @@ export async function verifyNativeBacklogDocumentFence(fence: MosesBacklogReceip
       tx.create(native, expected);
     }
   });
+}
+
+// A sealed completion describes the historical job. The operator must also observe
+// that the protected source incarnation still exists before reporting its status.
+export async function verifyNativeBacklogSourcePresent(fence: MosesBacklogReceipt) {
+  const db = firebaseAdmin.firestore();
+  await db.runTransaction(async tx => {
+    const [doc, mirror, deletion] = await tx.getAll(db.collection('sermons').doc(fence.sermonId),
+      db.collection(MOSES_BACKLOG_DOCUMENT_FENCES).doc(fence.sermonId), db.collection(MOSES_BACKLOG_DELETIONS).doc(fence.sermonId));
+    if (!doc.createTime || timestamp(doc.createTime) !== fence.documentCreateTime || deletion.exists ||
+        !isDeepStrictEqual(mirror.data(), mosesBacklogDocumentFence(fence))) return refuse();
+  }, { readOnly: true });
 }
