@@ -17,6 +17,7 @@ export function loadNativeReleaseApplication(runtimeRoot) {
     return {
       ...(existsSync(attestation) ? {
         mediaRecoveryTaskAttestationMode: workerRequire(attestation).mediaRecoveryTaskAttestationMode,
+        mediaRecoveryTaskAttestationV2Mode: workerRequire(attestation).mediaRecoveryTaskAttestationV2Mode,
         validateHistoricalMediaRecoveryCapacity: workerRequire(
           resolve(runtimeRoot, 'apps/temporal-worker/src/runtime/media-startup-capacity.ts')
         ).validateHistoricalMediaRecoveryCapacity,

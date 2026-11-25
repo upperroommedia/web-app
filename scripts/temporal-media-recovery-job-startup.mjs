@@ -7,7 +7,8 @@ const fail = () => {
 
 /** A startup witness only authorizes the original START gate together with
  * the caller's fresh native Job, pool, and paused release observations. */
-export async function readMediaRecoveryJobStartup(db, tx, plan, run, validateCapacity, taskAttestation) {
+export async function readMediaRecoveryJobStartup(db, tx, plan, run, validateCapacity, taskAttestation, executionExpiresAt) {
+  if (!Number.isSafeInteger(executionExpiresAt)) fail();
   const [kernelRef, startupRef] = ['Kernel', 'Startup'].map((kind) =>
     db.doc(`_control/temporalMediaRecovery${kind}-${plan.operationId}`)
   );
@@ -76,8 +77,12 @@ export async function readMediaRecoveryJobStartup(db, tx, plan, run, validateCap
     !Number.isFinite(spawned) ||
     time < spawned ||
     spawned < Date.parse(plan.createdAt) ||
+    (plan.executionWindowVersion !== undefined && (!taskAttestation ||
+      !Number.isSafeInteger(taskAttestation.seconds) || !Number.isInteger(taskAttestation.nanoseconds) ||
+      BigInt(spawned) * 1_000_000n <
+        BigInt(taskAttestation.seconds) * 1_000_000_000n + BigInt(taskAttestation.nanoseconds))) ||
     time > Date.now() + 1000 ||
-    time >= plan.expiresAt
+    time >= executionExpiresAt
   )
     fail();
   if (typeof validateCapacity !== 'function') fail();

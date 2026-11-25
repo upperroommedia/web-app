@@ -1,4 +1,4 @@
-import { mediaRecoveryTaskAttestationPath } from './media-recovery-task-attestation-reader';
+import { historicalMediaRecoveryExecutionWindow, mediaRecoveryTaskAttestationPath } from './media-recovery-task-attestation-reader';
 import { releaseProvenanceDigest } from './release-provenance';
 /** Fixed historical authorization reader. Current authority and immutable
  * original provenance are independent; no Firestore or parent overlays. */
@@ -219,8 +219,11 @@ async function readSnapshot(
         any
       >;
       if (!Array.isArray(v.facts) || v.facts.length !== kinds.length + (p.taskAttestationPublicKey ? 1 : 0)) fail();
-      if (p.taskAttestationPublicKey) {
-        const cert = await tx.get(o.db.doc(mediaRecoveryTaskAttestationPath(id)));
+      const cert = p.taskAttestationPublicKey
+        ? await tx.get(o.db.doc(mediaRecoveryTaskAttestationPath(id)))
+        : undefined;
+      const executionWindow = historicalMediaRecoveryExecutionWindow(p, cert);
+      if (cert) {
         if (!cert.exists || !cert.createTime?.isEqual(cert.updateTime!)) fail();
         const dataSHA256 = releaseProvenanceDigest(cert.data());
         const proof = { digest: dataSHA256, seconds: cert.createTime!.seconds,
@@ -272,7 +275,7 @@ async function readSnapshot(
         start.cycleSHA256 !== hash(cycle) ||
         start[computeKey] !== hash(compute) ||
         start.preparedSHA256 !== hash(completed.prepared) ||
-        start.expiresAt !== p.expiresAt ||
+        start.expiresAt !== executionWindow.expiresAt ||
         ack.stage !== 'confirmed' ||
         ack.operationId !== id ||
         ack.intentSHA256 !== hash(start) ||
@@ -324,7 +327,9 @@ async function readSnapshot(
           actorUid: facts.Work.actorUid,
         };
       if (kernel.context?.intentSHA256 !== hash(intent) || kernel.context.operationId !== id) fail();
-      const originals = await readMediaRecoveryOriginalLineage(o.db, { context: kernel.context, plan: p }, tx);
+      const originals = await readMediaRecoveryOriginalLineage(o.db, {
+        context: kernel.context, plan: p, executionExpiresAt: executionWindow.expiresAt,
+      }, tx);
       if (
         hash(originals.ready) !== hash(facts.OriginalReady) ||
         hash(originals.intent) !== hash(facts.ReplacementIntent)
@@ -340,6 +345,7 @@ async function readSnapshot(
       return {
         facts,
         originals,
+        executionWindow,
         start,
         ...(jobMode ? { jobProvider: provider } : { pool: completed.start.pool }),
         plan: p,

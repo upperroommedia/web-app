@@ -17,8 +17,11 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { attestationPublicKey, observeMediaRecoveryAttestationTask } from './temporal-media-recovery-job.mjs';
 import { proofDigest as hash } from './temporal-release-runtime.mjs';
 import { checkpointMediaRecoveryTaskAttestation } from './temporal-media-recovery-checkpoint.mjs';
+import { mediaRecoveryAttestedWorkExpiry, mediaRecoveryExecutionWindowVersion, mediaRecoveryLaunchWindow,
+  mediaRecoveryWorkMillis } from './temporal-media-recovery-execution-window.mjs';
 
 const domain = 'urm.staging.media-recovery.task-attestation.v1';
+const v2Domain = 'urm.staging.media-recovery.task-attestation.v2';
 const fields = [
   'operationId',
   'releaseId',
@@ -51,9 +54,11 @@ const deny = () => {
 };
 
 export function mediaRecoveryTaskAttestationBytes(payload) {
-  if (!payload || Object.keys(payload).length !== fields.length || fields.some((key) => !Object.hasOwn(payload, key)))
-    deny();
-  return Buffer.from(JSON.stringify([domain, ...fields.map((key) => payload[key])]), 'utf8');
+  const v2 = payload?.executionWindowVersion === mediaRecoveryExecutionWindowVersion;
+  if (!payload || Object.keys(payload).length !== fields.length + (v2 ? 1 : 0) ||
+      fields.some((key) => !Object.hasOwn(payload, key))) deny();
+  const lineage = fields.map(key => payload[key]);
+  return Buffer.from(JSON.stringify(v2 ? [v2Domain, payload.executionWindowVersion, ...lineage] : [domain, ...lineage]), 'utf8');
 }
 
 export function verifyMediaRecoveryTaskAttestation(record, publicKey) {
@@ -158,6 +163,8 @@ export function prepareMediaRecoveryTaskAttestation(directory, operationId, save
 
 export async function attestMediaRecoveryTask({ directory, o, plan, provider, setOwnedOperation }) {
   if (!plan.taskAttestationPublicKey) return;
+  const window = mediaRecoveryLaunchWindow(plan);
+  if (!window) deny();
   const run = provider?.runIdentity;
   if (
     !run ||
@@ -193,9 +200,10 @@ export async function attestMediaRecoveryTask({ directory, o, plan, provider, se
     runIntentSHA256: run.intentSHA256,
     execution: run.execution,
     executionUid: run.executionUid,
-    expiresAt: plan.expiresAt,
+    ...(window.version === undefined ? {expiresAt:plan.expiresAt} : {executionWindowVersion:window.version}),
   };
   let record = get();
+  let sampledAt;
   // Atomically rejoin the immutable journal and current authority before
   // requesting a witness. No worker status or caller-provided digest is used.
   const { armingSHA256, published } = await checkpointMediaRecoveryTaskAttestation({ ...o, plan, provider });
@@ -203,16 +211,17 @@ export async function attestMediaRecoveryTask({ directory, o, plan, provider, se
   if (published && !record) deny();
   if (!record) {
     for (;;) {
-      if (Date.now() >= plan.expiresAt) deny();
-      const sampledAt = performance.now();
+      if (Date.now() >= window.attestationExpiresAt) deny();
+      sampledAt = performance.now();
       const native = await observeMediaRecoveryAttestationTask({ api: o.api, plan, run });
       if (!native) {
         await delay(1000);
         continue;
       }
       const issuedAt = new Date().toISOString();
-      if (Date.parse(issuedAt) >= plan.expiresAt || performance.now() - sampledAt > 5000) deny();
-      createPrivate(directory, payloadPath, JSON.stringify({ ...base, ...native, issuedAt }));
+      if (Date.parse(issuedAt) >= window.attestationExpiresAt || performance.now() - sampledAt > 5000) deny();
+      const expiry = window.version === undefined ? window.launchExpiresAt : Date.parse(issuedAt) + mediaRecoveryWorkMillis;
+      createPrivate(directory, payloadPath, JSON.stringify({ ...base, ...native, issuedAt, expiresAt:expiry }));
       const payload = JSON.parse(readPrivate(payloadPath, 'utf8') ?? 'null');
       if (!payload || Object.entries({ ...base, ...native }).some(([name, value]) => payload[name] !== value)) deny();
       createPrivate(
@@ -228,16 +237,19 @@ export async function attestMediaRecoveryTask({ directory, o, plan, provider, se
     }
   }
   const signed = verifyMediaRecoveryTaskAttestation(record, plan.taskAttestationPublicKey);
-  if (Object.entries(base).some(([name, value]) => signed[name] !== value)) deny();
+  if (Object.entries(base).some(([name, value]) => signed[name] !== value) ||
+      mediaRecoveryAttestedWorkExpiry(plan, signed) === undefined) deny();
   if (published) {
     if (published !== hash(record)) deny();
     return;
   }
   // On a resume after local sealing, prove that the same exact task is live
   // again before the first Firestore publication. The signed bytes stay fixed.
-  const sampledAt = performance.now();
-  const native = await observeMediaRecoveryAttestationTask({ api: o.api, plan, run });
-  if (!native || Object.entries(native).some(([name, value]) => record.payload[name] !== value)) deny();
+  if (sampledAt === undefined) {
+    sampledAt = performance.now();
+    const native = await observeMediaRecoveryAttestationTask({ api: o.api, plan, run });
+    if (!native || Object.entries(native).some(([name, value]) => record.payload[name] !== value)) deny();
+  }
   const { ownedOperation } = await checkpointMediaRecoveryTaskAttestation({ ...o, plan, provider, record, sampledAt });
   setOwnedOperation(ownedOperation);
 }

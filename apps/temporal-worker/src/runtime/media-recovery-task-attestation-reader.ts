@@ -4,20 +4,48 @@ import { releaseProvenanceDigest as hash } from './release-provenance';
 import {
   matchesMediaRecoveryTaskAttestationEnv,
   mediaRecoveryTaskAttestationKey,
+  mediaRecoveryTaskAttestationMode,
+  mediaRecoveryTaskAttestationModeForPlan,
+  mediaRecoveryTaskAttestationV2Mode,
   verifyMediaRecoveryTaskAttestation,
 } from './media-recovery-task-attestation';
+import { mediaRecoveryAttestationCommitIsTimely, mediaRecoveryAttestedWorkExpiry, mediaRecoveryLaunchWindow, mediaRecoveryStartupMillis } from './media-recovery-execution-window';
 
-type Binding = { operationId: string; buildId: string; runner: string; image: string; job: string; execution: string };
+type Binding = { operationId: string; buildId: string; runner: string; image: string; job: string; execution: string; attestationMode?: string };
 type Metadata = { projectId: string; projectNumber: string; serviceAccount: string; instanceId: string };
 function deny(): never {
   throw new Error('MEDIA_RECOVERY_TASK_ATTESTATION_UNCONFIRMED');
 }
-type CertificateProof = { digest: string; seconds: number; nanoseconds: number };
+type CertificateProof = { digest: string; seconds: number; nanoseconds: number; executionExpiresAt?: number };
 const observedCertificates = new WeakMap<DurableMediaRecoveryJobIdentity, CertificateProof>();
-export const observedTaskAttestation = (identity: DurableMediaRecoveryJobIdentity) =>
-  observedCertificates.get(identity);
+export function observedTaskAttestation(identity: DurableMediaRecoveryJobIdentity) {
+  const proof = observedCertificates.get(identity);
+  if (proof) return { digest: proof.digest, seconds: proof.seconds, nanoseconds: proof.nanoseconds };
+}
 
 export const mediaRecoveryTaskAttestationPath = (op: string) => '_control/temporalMediaRecoveryTaskAttestation-' + op;
+
+/** Reconstruct the historical deadline from the original certificate without renewing it. */
+export function historicalMediaRecoveryExecutionWindow(
+  plan: any,
+  certificate?: DocumentSnapshot
+) {
+  const window = mediaRecoveryLaunchWindow(plan);
+  if (!window) return deny();
+  if (window.version === undefined) return { expiresAt: window.launchExpiresAt };
+  if (!certificate?.exists || !certificate.createTime || !certificate.updateTime ||
+      !certificate.createTime.isEqual(certificate.updateTime) ||
+      certificate.ref.path !== mediaRecoveryTaskAttestationPath(plan.operationId)) return deny();
+  const signed = verifyMediaRecoveryTaskAttestation(certificate.data(), plan.taskAttestationPublicKey);
+  const expiry = mediaRecoveryAttestedWorkExpiry(plan, signed);
+  if (expiry === undefined || signed.operationId !== plan.operationId || signed.planSHA256 !== hash(plan) ||
+      !mediaRecoveryAttestationCommitIsTimely(window, signed, certificate.createTime)) return deny();
+  return {
+    expiresAt: expiry,
+    committedAtNanos: BigInt(certificate.createTime.seconds) * 1_000_000_000n +
+      BigInt(certificate.createTime.nanoseconds),
+  };
+}
 
 export function joinMediaRecoveryTaskAttestation(
   trustedKey: string,
@@ -33,6 +61,7 @@ export function joinMediaRecoveryTaskAttestation(
   const pointer = op.get('mediaRecoveryTaskAttestation'),
     journal = arming.data();
   const run = native?.runIdentity;
+  const window = mediaRecoveryLaunchWindow(plan);
   if (
     op.ref.path !== '_control/temporalReleaseOperation' ||
     !op.exists ||
@@ -50,11 +79,10 @@ export function joinMediaRecoveryTaskAttestation(
     plan.job?.name !== binding.job ||
     plan.bindingDigest !== op.get('bindingDigest') ||
     plan.releaseId !== op.get('releaseId') ||
-    !Number.isFinite(Date.parse(plan.createdAt)) ||
-    plan.expiresAt !== Date.parse(plan.createdAt) + 300000 ||
-    now < Date.parse(plan.createdAt) ||
-    now >= plan.expiresAt ||
-    !matchesMediaRecoveryTaskAttestationEnv(plan.job.template?.template?.containers?.[0]?.env, trustedKey) ||
+    !window || now < window.startedAt ||
+    (binding.attestationMode ?? mediaRecoveryTaskAttestationMode) !== mediaRecoveryTaskAttestationModeForPlan(plan) ||
+    !matchesMediaRecoveryTaskAttestationEnv(plan.job.template?.template?.containers?.[0]?.env, trustedKey,
+      mediaRecoveryTaskAttestationModeForPlan(plan)) ||
     arming.ref.path !== '_control/temporalMediaRecoveryJournal-' + binding.operationId ||
     !arming.exists ||
     journal?.operationId !== binding.operationId ||
@@ -76,7 +104,7 @@ export function joinMediaRecoveryTaskAttestation(
     return deny();
   // A Job can be executing before its RUN ACK and attestation become visible.
   if (!certificate.exists && pointer === undefined) {
-    if (op.get('mediaRecoveryWorkflowStart') !== undefined) return deny();
+    if (op.get('mediaRecoveryWorkflowStart') !== undefined || now >= window.attestationExpiresAt) return deny();
     return undefined;
   }
   const record = certificate.data();
@@ -89,6 +117,10 @@ export function joinMediaRecoveryTaskAttestation(
   )
     return deny();
   const p = verifyMediaRecoveryTaskAttestation(record, trustedKey);
+  const workExpiry = mediaRecoveryAttestedWorkExpiry(plan, p);
+  if (workExpiry === undefined || now >= workExpiry) return deny();
+  if (window.version !== undefined &&
+      !mediaRecoveryAttestationCommitIsTimely(window, p, certificate.createTime)) return deny();
   if (
     p.operationId !== binding.operationId ||
     p.releaseId !== plan.releaseId ||
@@ -102,7 +134,6 @@ export function joinMediaRecoveryTaskAttestation(
     p.jobPlanSHA256 !== hash(plan.job) ||
     p.armingSHA256 !== hash(journal) ||
     p.authoritySHA256 !== hash(journal.authority) ||
-    p.expiresAt !== plan.expiresAt ||
     Date.parse(p.issuedAt) > now ||
     native.jobPlanSHA256 !== p.jobPlanSHA256 ||
     native.create.operation !== p.createOperation ||
@@ -118,7 +149,8 @@ export function joinMediaRecoveryTaskAttestation(
     run.executionUid !== p.executionUid ||
     run.attemptedAt !== native.run.attemptedAt ||
     !Number.isFinite(Date.parse(run.attemptedAt)) ||
-    Date.parse(run.attemptedAt) < Date.parse(plan.createdAt) ||
+    Date.parse(run.attemptedAt) < window.startedAt ||
+    Date.parse(run.attemptedAt) >= window.launchExpiresAt ||
     Date.parse(run.attemptedAt) > Date.parse(p.taskCreateTime)
   )
     return deny();
@@ -139,6 +171,7 @@ export function joinMediaRecoveryTaskAttestation(
     digest: hash(record),
     seconds: certificate.createTime.seconds,
     nanoseconds: certificate.createTime.nanoseconds,
+    ...(window.version !== undefined && {executionExpiresAt:workExpiry}),
   };
   return { identity, proof };
 }
@@ -156,7 +189,7 @@ export async function recheckMediaRecoveryTaskAttestation(
     entries = plan?.job?.template?.template?.containers?.[0]?.env;
   if (!key) {
     if (
-      pointer !== undefined ||
+      pointer !== undefined || plan?.executionWindowVersion !== undefined ||
       entries?.some(
         (entry: { name?: string }) =>
           entry.name === 'TEMPORAL_MEDIA_RECOVERY_ATTESTATION_MODE' ||
@@ -166,7 +199,9 @@ export async function recheckMediaRecoveryTaskAttestation(
       return deny();
     return;
   }
-  if (!matchesMediaRecoveryTaskAttestationEnv(entries, key)) return deny();
+  const mode = mediaRecoveryTaskAttestationModeForPlan(plan);
+  if (env.TEMPORAL_MEDIA_RECOVERY_ATTESTATION_MODE !== mode || !matchesMediaRecoveryTaskAttestationEnv(entries, key, mode))
+    return deny();
   const proof = observedCertificates.get(identity);
   if (!proof || hash(pointer) !== hash({ certificateSHA256: proof.digest })) return deny();
   const cert = await tx.get(db.doc(mediaRecoveryTaskAttestationPath(operationId)));
@@ -177,9 +212,14 @@ export async function recheckMediaRecoveryTaskAttestation(
     !cert.createTime.isEqual(cert.updateTime) ||
     cert.createTime.seconds !== proof.seconds ||
     cert.createTime.nanoseconds !== proof.nanoseconds ||
-    hash(cert.data()) !== proof.digest
+    hash(cert.data()) !== proof.digest ||
+    (proof.executionExpiresAt !== undefined && Date.now() >= proof.executionExpiresAt)
   )
     return deny();
+  const signed = verifyMediaRecoveryTaskAttestation(cert.data(), key);
+  if (signed.planSHA256 !== hash(plan) || signed.operationId !== operationId ||
+      signed.executionWindowVersion !== plan.executionWindowVersion) return deny();
+  return proof.executionExpiresAt === undefined ? undefined : proof;
 }
 
 /** The worker gets the key from its native template. Firestore supplies only the signed message. */
@@ -196,9 +236,10 @@ export async function awaitMediaRecoveryTaskAttestation(
     mediaRecoveryTaskAttestationPath(binding.operationId),
   ].map((path) => db.doc(path));
   const started = performance.now();
+  const maximumWait = binding.attestationMode === mediaRecoveryTaskAttestationV2Mode ? mediaRecoveryStartupMillis : 25_000;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const deadline = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error('MEDIA_RECOVERY_TASK_ATTESTATION_UNCONFIRMED')), 25000);
+    timer = setTimeout(() => reject(new Error('MEDIA_RECOVERY_TASK_ATTESTATION_UNCONFIRMED')), maximumWait);
   });
   try {
     for (;;) {
@@ -212,7 +253,7 @@ export async function awaitMediaRecoveryTaskAttestation(
           { readOnly: true }
         ),
       ]);
-      if (performance.now() - started >= 25000) return deny();
+      if (performance.now() - started >= maximumWait) return deny();
       if (result) {
         observedCertificates.set(result.identity, result.proof);
         return result.identity;

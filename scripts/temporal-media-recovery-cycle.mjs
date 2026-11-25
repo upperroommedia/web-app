@@ -1,3 +1,4 @@
+import { mediaRecoveryExecutionWindowVersion } from './temporal-media-recovery-execution-window.mjs';
 import { renderMediaRecoveryJob } from './temporal-media-recovery-job.mjs';
 import {assertStoredMediaDiagnosticDrain} from './temporal-media-diagnostic-drain.mjs';
 import { isDeepStrictEqual as equal } from 'node:util';
@@ -93,7 +94,7 @@ export async function runMediaRecoveryCycle(o) {
     fail();
   // Actual canonical integration deliberately cannot manufacture this capability
   // from controlled local tests, desired counts or a normal registration receipt.
-  await runtime.assertSupported({
+  const supportedWindow = await runtime.assertSupported({
     operationId: o.operationId,
     buildId: o.platform.workerBuildId,
     image: o.platform.workerImage,
@@ -125,7 +126,6 @@ export async function runMediaRecoveryCycle(o) {
   const originRevisionUid = await revision(ancestors.origin.revision, ancestors.zeroPlan.body.template);
   let state = o.saved,
     startCheckpointIssued = false;
-  const createdAt = state?.plan?.createdAt ?? new Date().toISOString();
   const jobMode = typeof runtime.launchJob === 'function';
   if (jobMode && typeof runtime.drainJob !== 'function') fail();
   const taskAttestationPublicKey = jobMode && typeof runtime.prepareTaskAttestation === 'function'
@@ -141,6 +141,12 @@ export async function runMediaRecoveryCycle(o) {
     ? undefined : await observeDiagnosticStorage(!state);
   if (diagnosticStorage && (!equal(diagnosticStorage, o.diagnosticStorageCertificate) ||
       !immutablePreparation(o.diagnosticStoragePreparationProof))) fail();
+  if (!state) await readMediaRecoveryNormalOrigin(baseOptions);
+  const executionWindowVersion = state ? state.plan.executionWindowVersion : supportedWindow;
+  if (executionWindowVersion !== undefined &&
+      (executionWindowVersion !== mediaRecoveryExecutionWindowVersion || supportedWindow !== executionWindowVersion ||
+        !taskAttestationPublicKey || !diagnosticStorage)) fail();
+  const createdAt = state?.plan?.createdAt ?? new Date().toISOString();
   const proposed = {
     schemaVersion: 1,
     operationId: o.operationId,
@@ -158,6 +164,7 @@ export async function runMediaRecoveryCycle(o) {
     diagnosticTemplate: diagnosticTemplate(ancestors.zeroPlan.body.template, o.operationId),
     contract,
     ...(taskAttestationPublicKey === undefined ? {} : { taskAttestationPublicKey }),
+    ...(executionWindowVersion === undefined ? {} : { executionWindowVersion }),
     ...(diagnosticStorage === undefined ? {} : {
       diagnosticStorage, diagnosticStoragePreparationProof: o.diagnosticStoragePreparationProof,
     }),
@@ -175,7 +182,6 @@ export async function runMediaRecoveryCycle(o) {
     if (Date.now() >= plan.expiresAt || Date.parse(createdAt) > Date.now() + 5000) fail();
   };
   if (!state) {
-    await readMediaRecoveryNormalOrigin(baseOptions);
     fresh();
     await put({ plan, stage: 'planned' });
   }

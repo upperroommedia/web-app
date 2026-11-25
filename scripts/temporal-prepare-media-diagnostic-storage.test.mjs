@@ -1,3 +1,6 @@
+import { generateKeyPairSync, sign } from 'node:crypto';
+import { mediaRecoveryExecutionWindowVersion } from './temporal-media-recovery-execution-window.mjs';
+import { mediaRecoveryTaskAttestationBytes } from './temporal-media-recovery-task-attestation.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -342,8 +345,7 @@ function failureStamp(receipt) {
   const time = { seconds: 500, nanoseconds: 1000 };
   return { dataDigest: proofDigest(receipt), createTime: time, updateTime: time };
 }
-function failedRetirement(f, prepared) {
-  const args = failedAncestors(prepared);
+function failedRetirement(f, prepared, args = failedAncestors(prepared)) {
   return {
     ...f.options,
     ...args,
@@ -382,6 +384,54 @@ test('an immutable failed Workflow and Task with fresh idle proof retire only th
   assert.equal(result.retiredPolicyETag, 'E2');
   assert.deepEqual(f.packets[3].body, { etag: 'E1', version: 1, bindings: [priorBinding] });
   assert.deepEqual(await retireMediaDiagnosticStorageGrant({ ...retire, saved: f.getSaved() }), result);
+  assert.equal(f.packets.length, 4);
+});
+
+test('failed v2 retirement joins the original signed Task born after the launch cutoff', async () => {
+  const f = fixture();
+  const prepared = await prepareMediaDiagnosticStorage(f.options);
+  f.reset();
+  const args = failedAncestors(prepared);
+  const record = args.failureReceipt;
+  const { plan, provider, start, workflow, jobTermination: task } = record;
+  const time = seconds => new Date(seconds * 1000).toISOString();
+  const key = generateKeyPairSync('ed25519');
+  plan.executionWindowVersion = mediaRecoveryExecutionWindowVersion;
+  plan.taskAttestationPublicKey = key.publicKey.export({ type: 'spki', format: 'der' }).toString('base64');
+  task.taskCreateTime = time(430);
+  task.taskCompletionTime = time(570);
+  task.executionCompletionTime = time(571);
+  workflow.closedAt = time(569);
+  start.recordedAt = time(440);
+  start.confirmedAt = time(444);
+  record.intent = { expiresAt: 615000 };
+  start.intentSHA256 = proofDigest(record.intent);
+  const payload = {
+    operationId: record.operationId, releaseId: record.releaseId, bindingDigest: record.bindingDigest,
+    buildId: record.buildId, image: plan.image, runner: plan.runner, planSHA256: proofDigest(plan),
+    jobPlanSHA256: provider.jobPlanSHA256,
+    armingSHA256: '8'.repeat(64), authoritySHA256: '9'.repeat(64),
+    job: task.job, jobUid: task.jobUid, createOperation: provider.create.operation, runOperation: task.runOperation,
+    runIntentSHA256: provider.runIdentity.intentSHA256, execution: task.execution, executionUid: task.executionUid,
+    executionGeneration: '1', task: task.task, taskCreateTime: task.taskCreateTime, taskGeneration: '1', taskUid: null,
+    issuedAt: time(435), expiresAt: 615000, executionWindowVersion: plan.executionWindowVersion,
+  };
+  const certificate = { payload, signature: sign(null, mediaRecoveryTaskAttestationBytes(payload), key.privateKey).toString('base64') };
+  const stamp = (data, seconds) => ({
+    dataDigest: proofDigest(data), createTime: { seconds, nanoseconds: 0 }, updateTime: { seconds, nanoseconds: 0 },
+  });
+  args.failureCertificate = certificate;
+  args.failureCertificateProof = stamp(certificate, 436);
+  record.facts = [null, args.failureCertificateProof];
+  args.failureProof = stamp(record, 616);
+  await assert.rejects(retireMediaDiagnosticStorageGrant({
+    ...failedRetirement(f, prepared, args), failureCertificateProof: stamp(certificate, 437),
+  }), /FAILED_CERTIFICATE_PROVENANCE/);
+  await assert.rejects(retireMediaDiagnosticStorageGrant({
+    ...failedRetirement(f, prepared, args), failureProof: stamp(record, 614),
+  }), /FAILURE_ARCHIVE/);
+  const result = await retireMediaDiagnosticStorageGrant(failedRetirement(f, prepared, args));
+  assert.equal(result.retiredPolicyETag, 'E2');
   assert.equal(f.packets.length, 4);
 });
 

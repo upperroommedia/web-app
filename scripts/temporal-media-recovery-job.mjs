@@ -2,6 +2,8 @@ import { isDeepStrictEqual } from 'node:util';
 import { createPublicKey } from 'node:crypto';
 import { nativeSnapshotProof, proofDigest } from './temporal-release-runtime.mjs';
 import { prepareFencedPolicyGrant, verifyPreparedDirectPolicyGrant } from './temporal-preparation-iam.mjs';
+import { mediaRecoveryExecutionWindowVersion, mediaRecoveryLaunchWindow,
+  mediaRecoveryTaskAttestationV2Mode } from './temporal-media-recovery-execution-window.mjs';
 
 const location = 'projects/urm-app-staging/locations/us-central1';
 const endpoint = 'https://run.googleapis.com/v2/';
@@ -151,11 +153,14 @@ export function renderMediaRecoveryJob(plan) {
   const modeName = 'TEMPORAL_MEDIA_RECOVERY_ATTESTATION_MODE';
   const keyName = 'TEMPORAL_MEDIA_RECOVERY_ATTESTATION_KEY';
   if (worker.env.some(({ name }) => name === modeName || name === keyName)) fail();
+  const v2 = plan.executionWindowVersion === mediaRecoveryExecutionWindowVersion;
+  if (plan.executionWindowVersion !== undefined && (!v2 || !plan.taskAttestationPublicKey || !mediaRecoveryLaunchWindow(plan)))
+    fail();
   delete worker.startupProbe;
   worker.env.push({ name: 'TEMPORAL_MEDIA_RECOVERY_COMPUTE', value: 'cloud-run-job-v1' });
   if (Object.hasOwn(plan, 'taskAttestationPublicKey')) {
     attestationPublicKey(plan.taskAttestationPublicKey);
-    worker.env.push({ name: modeName, value: 'operator-ed25519-v1' },
+    worker.env.push({ name: modeName, value: v2 ? mediaRecoveryTaskAttestationV2Mode : 'operator-ed25519-v1' },
       { name: keyName, value: plan.taskAttestationPublicKey });
   }
   return {
@@ -490,11 +495,11 @@ export function renderMediaRecoveryJobCreateRequest(plan) {
 /** A single CREATE and RUN under the caller's release snapshot and normal pool
  * isolation fence. Persisting intent or losing either ACK grants zero resends. */
 export async function advanceMediaRecoveryJob({ api, plan, saved, save, fence, observeAcknowledgedRun }) {
+  const window = mediaRecoveryLaunchWindow(plan);
   if (
     ![api, save, fence].every((method) => typeof method === 'function') ||
     !isDeepStrictEqual(plan?.job, renderMediaRecoveryJob(plan)) ||
-    !Number.isFinite(Date.parse(plan.createdAt)) ||
-    plan.expiresAt !== Date.parse(plan.createdAt) + 300000 ||
+    !window ||
     Date.parse(plan.createdAt) > Date.now()
   )
     jobUnconfirmed();
@@ -573,7 +578,10 @@ export async function advanceMediaRecoveryJob({ api, plan, saved, save, fence, o
           performance.now() >= deadline || result?.error || normalize(result?.name) !== name ||
           ![undefined, false, true].includes(result.done) ||
           result.done === true || (kind === 'run' && result.metadata?.name)) return result;
-      if (Date.now() >= plan.expiresAt) jobUnconfirmed();
+      const cutoff = state.run?.stage === 'acknowledged'
+        ? window.attestationExpiresAt
+        : window.launchExpiresAt;
+      if (Date.now() >= cutoff) jobUnconfirmed();
       await new Promise(resolve => setTimeout(resolve, 250));
     }
   };
@@ -759,10 +767,14 @@ export async function observeMediaRecoveryAttestationTask({ api, plan, run }) {
     throw error;
   }
   const attemptTime = Date.parse(run.attemptedAt);
+  const window = plan.executionWindowVersion === undefined ? undefined : mediaRecoveryLaunchWindow(plan);
+  if (plan.executionWindowVersion !== undefined && (!window || !Number.isFinite(attemptTime) ||
+      attemptTime >= window.launchExpiresAt)) jobUnconfirmed();
+  const readyDeadline = window?.attestationExpiresAt ?? plan.expiresAt;
   const matches = value =>
     normalize(value?.name) === task && !value.deleteTime &&
     Object.hasOwn(value, 'createTime') && isMediaRecoveryTaskIdentity(value) &&
-    Date.parse(value.createTime) >= attemptTime && Date.parse(value.createTime) < plan.expiresAt &&
+    Date.parse(value.createTime) >= attemptTime && Date.parse(value.createTime) < readyDeadline &&
     refersTo(value.job, plan.job.name) && refersTo(value.execution, run.execution) &&
     [undefined, 0].includes(value.index) && [undefined, 0].includes(value.retried) &&
     !value.completionTime && !value.lastAttemptResult && hasNoTerminalTaskCondition(value) &&

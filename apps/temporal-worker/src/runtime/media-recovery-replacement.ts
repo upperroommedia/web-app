@@ -10,13 +10,19 @@ import type { mediaRecoveryKernelContext } from './media-recovery-capability';
 import { workerReadinessDigest as hash } from './readiness-probe';
 import { mediaRecoveryPinnedVersion } from './media-recovery-pin';
 import { diagnosticComputeIdentity } from './worker-witness';
+import { mediaRecoveryExecutionExpiry } from './media-recovery-execution-window';
 import { originalMediaArtifacts, superviseOriginalMediaFault } from './media-recovery-original-fault';
 import { readMediaRecoveryReplacementKernelBirth, superviseMediaRecoveryReplacement } from './media-kernel-supervisor';
 type Cap = Awaited<ReturnType<typeof mediaRecoveryKernelContext>>;
-type LineageBase = Pick<Cap, 'context' | 'plan'>;
+type LineageBase = Pick<Cap, 'context' | 'plan'> & Partial<Pick<Cap, 'executionExpiresAt'>>;
 const fail = (): never => {
   throw new Error('MEDIA_RECOVERY_REPLACEMENT_UNCONFIRMED');
 };
+function executionExpiry(base: LineageBase) {
+  const value = mediaRecoveryExecutionExpiry(base.plan, base.executionExpiresAt);
+  if (value === undefined) return fail();
+  return value;
+}
 const name = (kind: string, cap: LineageBase) => `_control/temporalMediaRecovery${kind}-${cap.context.operationId}`;
 const uuid = (x: unknown) =>
   typeof x === 'string' && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(x);
@@ -99,7 +105,7 @@ async function originals(db: Firestore, base: LineageBase, tx: Transaction) {
     readyAt > signalAt ||
     signalAt > closedAt ||
     closedAt > deathAt ||
-    signalAt >= base.plan.expiresAt ||
+    signalAt >= executionExpiry(base) ||
     deathAt > Date.now() + 1000
   )
     fail();
@@ -124,13 +130,13 @@ async function intentRecord(db: Firestore, base: LineageBase, tx: Transaction) {
     intent.inventorySHA256 !== hash(original.ready.inventory) ||
     intent.grantSHA256 !== original.ready.grantSHA256 ||
     hash(intent.ref) !== hash(original.ready.ref) ||
-    intent.expiresAt !== base.plan.expiresAt ||
+    intent.expiresAt !== executionExpiry(base) ||
     intent.birth?.parentPid !== original.kernel.intent?.parentPid ||
     !uuid(intent.birth?.launchId) ||
     intent.birth.launchId === original.kernel.intent.launchId ||
     !Number.isFinite(Date.parse(intent.birth?.createdAt)) ||
     Date.parse(intent.birth.createdAt) < Date.parse(original.death.observedAt) ||
-    Date.parse(intent.birth.createdAt) >= base.plan.expiresAt
+    Date.parse(intent.birth.createdAt) >= executionExpiry(base)
   )
     fail();
   return { ...original, intent: intent! };
@@ -189,7 +195,7 @@ async function saveReplacementIntent(db: Firestore, base: Cap) {
             inventorySHA256: hash(original.ready.inventory),
             grantSHA256: original.ready.grantSHA256,
             ref: original.ready.ref,
-            expiresAt: base.plan.expiresAt,
+            expiresAt: executionExpiry(base),
             birth: { parentPid: process.pid, launchId: randomUUID(), createdAt: new Date().toISOString() },
           };
           base.checkFresh();

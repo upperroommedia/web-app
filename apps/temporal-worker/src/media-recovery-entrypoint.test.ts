@@ -117,11 +117,13 @@ jest.mock('./runtime/media-recovery-task-attestation-reader', () => ({
 }));
 jest.mock('./runtime/media-recovery-registration', () => {
   const make = async (options: any) => {
+    const executionExpiresAt = Date.now() + 10000;
     const cap = {
+      executionExpiresAt,
       authorize: mockAuthorize,
       context: { intentSHA256: 'd'.repeat(64) },
       plan: {
-        expiresAt: Date.now() + 10000,
+        expiresAt: executionExpiresAt,
         createdAt: new Date().toISOString(),
         operationId: mockOperationId,
         releaseId: mockReleaseId,

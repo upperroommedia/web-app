@@ -8,13 +8,16 @@ import {
   mediaRecoveryTaskAttestationBytes,
   mediaRecoveryTaskAttestationKey,
   mediaRecoveryTaskAttestationMode,
+  mediaRecoveryTaskAttestationV2Mode,
   verifyMediaRecoveryTaskAttestation,
 } from './media-recovery-task-attestation';
 import {
+  historicalMediaRecoveryExecutionWindow,
   joinMediaRecoveryTaskAttestation,
   mediaRecoveryTaskAttestationPath,
   recheckMediaRecoveryTaskAttestation,
 } from './media-recovery-task-attestation-reader';
+import { mediaRecoveryExecutionWindowVersion } from './media-recovery-execution-window';
 import { loadMediaRecoveryJobIdentity } from './media-recovery-job-witness';
 import { releaseProvenanceDigest as hash } from './release-provenance';
 
@@ -40,8 +43,8 @@ const keys = () => {
   return { key: publicKey.export({ type: 'spki', format: 'der' }).toString('base64'), privateKey };
 };
 const signer = keys();
-function row(path: string, data: Record<string, any> | undefined) {
-  const time = { seconds: 1, nanoseconds: 7, isEqual: (t: unknown) => t === time };
+function row(path: string, data: Record<string, any> | undefined, stamp = { seconds: 1, nanoseconds: 7 }) {
+  const time = { ...stamp, isEqual: (t: unknown) => t === time };
   return {
     ref: { path },
     exists: data !== undefined,
@@ -51,12 +54,12 @@ function row(path: string, data: Record<string, any> | undefined) {
     get: (field: string) => field.split('.').reduce((v, k) => v?.[k], data as any),
   } as unknown as DocumentSnapshot;
 }
-function fixture() {
+function fixture(v2 = false) {
   const now = Date.now(),
-    createdAt = new Date(now - 10000).toISOString(),
+    createdAt = new Date(now - (v2 ? 310000 : 10000)).toISOString(),
     expiresAt = Date.parse(createdAt) + 300000;
   const env = {
-    TEMPORAL_MEDIA_RECOVERY_ATTESTATION_MODE: mediaRecoveryTaskAttestationMode,
+    TEMPORAL_MEDIA_RECOVERY_ATTESTATION_MODE: v2 ? mediaRecoveryTaskAttestationV2Mode : mediaRecoveryTaskAttestationMode,
     TEMPORAL_MEDIA_RECOVERY_ATTESTATION_KEY: signer.key,
   };
   const plan = {
@@ -66,6 +69,7 @@ function fixture() {
     bindingDigest: '1'.repeat(64),
     createdAt,
     expiresAt,
+    ...(v2 && { executionWindowVersion: mediaRecoveryExecutionWindowVersion, taskAttestationPublicKey: signer.key }),
     job: {
       name: job,
       template: { template: { containers: [{ env: Object.entries(env).map(([name, value]) => ({ name, value })) }] } },
@@ -103,7 +107,8 @@ function fixture() {
     taskGeneration: '1',
     taskUid: null,
     issuedAt: new Date(now - 1000).toISOString(),
-    expiresAt,
+    expiresAt: v2 ? now - 1000 + 180000 : expiresAt,
+    ...(v2 && { executionWindowVersion: mediaRecoveryExecutionWindowVersion }),
   };
   const signRecord = (p: typeof payload, key = signer.privateKey) => ({
     payload: p,
@@ -137,14 +142,40 @@ function fixture() {
       },
     },
   };
-  const snapshots = (record = cert) =>
+  const stamp = (ms: number, additionalNanos = 0) => ({
+    seconds: Math.floor(ms / 1000), nanoseconds: (ms % 1000) * 1_000_000 + additionalNanos,
+  });
+  const snapshots = (record = cert, stamped = v2 ? stamp(now - 999) : undefined) =>
     [
       row('_control/temporalReleaseOperation', op),
       row('_control/temporalMediaRecoveryJournal-' + operationId, journal),
-      row(mediaRecoveryTaskAttestationPath(operationId), record),
+      row(mediaRecoveryTaskAttestationPath(operationId), record, stamped),
     ] as const;
-  return { payload, cert, op, journal, signRecord, snapshots, now, env };
+  return { payload, cert, op, journal, signRecord, snapshots, now, env, stamp };
 }
+
+test('the controller and worker agree on a signed work deadline after the provider launch window', () => {
+  const f = fixture(true);
+  const plan = f.op.cloudMediaRecovery.plan;
+  const operator = resolve(__dirname, '../../../../scripts/temporal-media-recovery-task-attestation.mjs');
+  const bytes = execFileSync(process.execPath, [
+    '--input-type=module', '-e',
+    'const m = await import(process.argv[1]); process.stdout.write(m.mediaRecoveryTaskAttestationBytes(JSON.parse(process.argv[2])));',
+    operator, JSON.stringify(f.payload),
+  ]);
+  expect(bytes).toEqual(mediaRecoveryTaskAttestationBytes(f.payload));
+  expect(plan.expiresAt).toBeLessThan(f.now);
+  expect(historicalMediaRecoveryExecutionWindow(plan, f.snapshots()[2]).expiresAt).toBe(f.payload.expiresAt);
+  const issued = Date.parse(f.payload.issuedAt);
+  const onBoundary = f.snapshots(f.cert, f.stamp(issued + 5000))[2];
+  const tooLate = f.snapshots(f.cert, f.stamp(issued + 5000, 1))[2];
+  expect(historicalMediaRecoveryExecutionWindow(plan, onBoundary).expiresAt).toBe(f.payload.expiresAt);
+  expect(() => historicalMediaRecoveryExecutionWindow(plan, tooLate)).toThrow();
+  expect(() => historicalMediaRecoveryExecutionWindow({ ...plan, bindingDigest: 'f'.repeat(64) }, onBoundary)).toThrow();
+  expect(() => historicalMediaRecoveryExecutionWindow(plan)).toThrow();
+  const tampered = { ...f.cert, payload: { ...f.payload, expiresAt: f.payload.expiresAt + 1 } };
+  expect(() => historicalMediaRecoveryExecutionWindow(plan, f.snapshots(tampered)[2])).toThrow();
+});
 
 test('uses domain-separated fixed field order and rejects key, signature, schema and payload replacement', () => {
   const { payload, cert, signRecord } = fixture();

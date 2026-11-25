@@ -130,7 +130,7 @@ async function registration(
             hash(grant.ref) !== hash(ref) ||
             hash(grant.deploymentVersion) !==
               hash({ deploymentName: MEDIA_RECOVERY_DEPLOYMENT, buildId: o.witness.buildId }) ||
-            grant.expiresAt !== cap.plan.expiresAt ||
+            grant.expiresAt !== cap.executionExpiresAt ||
             hash(record.worker) !== hash(replacement ? replacement.kernel.worker : o.witness) ||
             (replacement && hash(grant) !== replacement.ready.grantSHA256) ||
             hash(intent.data()) !== grant.intentSHA256 ||

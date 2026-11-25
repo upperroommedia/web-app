@@ -1,3 +1,4 @@
+import { mediaRecoveryAttestationCommitIsTimely, mediaRecoveryAttestedWorkExpiry, mediaRecoveryLaunchWindow } from './temporal-media-recovery-execution-window.mjs';
 import { hasCompletedMediaRecoveryJobAccess, mediaRecoveryJobAccessPlan, requiresEmptyAttestedJobPolicy, renderMediaRecoveryJob, renderMediaRecoveryJobCreateRequest, sameMediaRecoveryTask } from './temporal-media-recovery-job.mjs';
 import {assertStoredMediaDiagnosticDrain,assertFreshMediaDiagnosticDrain} from './temporal-media-diagnostic-drain.mjs';
 import { assertNativeSnapshot, assertNativeSnapshotSuccessor, nativeSnapshotProof, proofDigest as hash } from './temporal-release-runtime.mjs';
@@ -393,9 +394,18 @@ export async function saveMediaRecoveryJobJournal(o, before, next) {
 export async function checkpointMediaRecoveryTaskAttestation(o) {
   const ref = o.firestore.doc(`_control/temporalMediaRecoveryTaskAttestation-${o.operationId}`);
   const arming = o.firestore.doc(`_control/temporalMediaRecoveryJournal-${o.operationId}`);
+  const window = mediaRecoveryLaunchWindow(o.plan);
+  if (!window) fail();
+  const assertTimely = certificate => {
+    if (window.version === undefined) return;
+    const payload = certificate.data()?.payload;
+    if (mediaRecoveryAttestedWorkExpiry(o.plan, payload) === undefined ||
+        payload.operationId !== o.operationId || payload.planSHA256 !== hash(o.plan) ||
+        !mediaRecoveryAttestationCommitIsTimely(window, payload, certificate.createTime)) fail();
+  };
   const fresh = () => {
     if (!Number.isFinite(o.sampledAt) || performance.now() < o.sampledAt ||
-        performance.now() - o.sampledAt > 5000 || Date.now() >= o.plan.expiresAt) fail();
+        performance.now() - o.sampledAt > 5000 || Date.now() >= window.attestationExpiresAt) fail();
   };
   const observed = await o.firestore.runTransaction(async tx => {
     const parent = await authority(o, tx);
@@ -414,6 +424,7 @@ export async function checkpointMediaRecoveryTaskAttestation(o) {
       const published = hash(certificate.data() ?? null);
       if (!certificate.exists || !certificate.createTime?.isEqual(certificate.updateTime) ||
           hash(pointer ?? null) !== hash({ certificateSHA256: published }) || o.record) fail();
+      assertTimely(certificate);
       return { armingSHA256, published };
     }
     if (!o.record) return { armingSHA256 };
@@ -421,6 +432,11 @@ export async function checkpointMediaRecoveryTaskAttestation(o) {
       tx.get(o.firestore.doc(`_control/temporalMediaRecovery${kind}-${o.operationId}`))));
     if (parent.get('mediaRecoveryWorkflowStart') !== undefined || workers.some(worker => worker.exists) ||
         o.record.payload?.armingSHA256 !== armingSHA256) fail();
+    if (window.version !== undefined) {
+      const issuedAt = Date.parse(o.record.payload?.issuedAt);
+      if (mediaRecoveryAttestedWorkExpiry(plan, o.record.payload) === undefined ||
+          issuedAt > Date.now() || Date.now() - issuedAt > 5000) fail();
+    }
     fresh();
     const next = { certificateSHA256: hash(o.record) };
     tx.create(ref, o.record);
@@ -432,6 +448,7 @@ export async function checkpointMediaRecoveryTaskAttestation(o) {
   const ownedOperation = assertNativeSnapshotSuccessor(o.ownedOperation, observed.parentDigest, parent);
   if (!certificate.exists || !certificate.createTime?.isEqual(certificate.updateTime) ||
       !certificate.createTime.isEqual(parent.updateTime) || hash(certificate.data()) !== hash(o.record)) fail();
+  assertTimely(certificate);
   return { ownedOperation };
 }
 
