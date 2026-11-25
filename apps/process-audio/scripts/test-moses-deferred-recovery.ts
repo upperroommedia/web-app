@@ -9,6 +9,9 @@ import type { Database } from 'firebase-admin/database';
 import { Timestamp, type DocumentSnapshot } from 'firebase-admin/firestore';
 import {
   mosesBacklogDocumentFence,
+  mosesBacklogClosurePath,
+  isMosesBacklogHeldPredecessor,
+  isValidMosesBacklogContinuation,
   computeMosesBacklogCustody,
   computeMosesBacklogTaskId,
   MOSES_BACKLOG_FENCES_PATH,
@@ -413,8 +416,10 @@ function backlogFixture(kind: MosesBacklogKind) {
           sermonId: id,
           currentPayload: target,
           currentRequestVersion: version,
-          queuedTaskId: 'pa-aaaaaaaa-' + version + '-cccccccc',
+          queuedTaskId: computeProcessAudioTaskId(id, version, 'original-enqueue'),
+          queuedAt: '2026-01-01T00:00:00.000Z',
           updatedAt: '2026-01-01T00:00:00.000Z',
+          transientRetryCount: 0,
         }
       : null;
   const e: MosesBacklogEvidence = {
@@ -467,9 +472,9 @@ function backlogFixture(kind: MosesBacklogKind) {
   let mirror: unknown = mosesBacklogDocumentFence(r);
   let deletion = false;
   let liveEpoch: Timestamp | undefined = new Timestamp(11, 1);
-  const doc = (processed = false) => {
+  const doc = (processed = false, heldWrite?: Timestamp) => {
     const fields: Record<string, unknown> = {
-      'status.audioStatus': processed ? 'PROCESSED' : kind === 'failed_request' ? 'ERROR' : 'PENDING',
+      'status.audioStatus': processed ? 'PROCESSED' : heldWrite ? 'PROCESSING' : kind === 'failed_request' ? 'ERROR' : 'PENDING',
       'status.subsplash': 'NOT_UPLOADED',
       'status.soundCloud': 'NOT_UPLOADED',
       youtubeUrl: target.youtubeUrl,
@@ -477,7 +482,7 @@ function backlogFixture(kind: MosesBacklogKind) {
       trimDurationSeconds: target.duration,
     };
     const result = {
-      ...document(processed),
+      ...document(processed, heldWrite),
       exists: liveEpoch !== undefined,
       createTime: liveEpoch,
       get: (key: string) => fields[key],
@@ -597,6 +602,49 @@ test('both historical backlog categories keep the fence and complete against cre
     await assert.rejects(reconcileMosesRecovery(f.db, f.delivery, owner, async () => f.doc(true), f.bucket));
     assert.deepEqual(f.read(f.fencePath), terminal);
   }
+});
+
+test('a continued held original keeps its mirror and predecessor, admitting only its new task and closure', async () => {
+  const f = backlogFixture('failed_request');
+  const archived: unknown = { ...f.r, phase: 'consumed', outcome: 'review_required', owner, originalRequest: f.priorRequest };
+  assert.ok(isMosesBacklogHeldPredecessor(archived));
+  const oldDigest = mosesRecoveryDigest(archived);
+  const newNonce = 'b59496c1-4594-40b4-9db3-4765351f4acd';
+  const releaseSha = 'e'.repeat(40);
+  const heldWrite = new Timestamp(22, 3);
+  const continuation = { predecessor: archived, predecessorReceiptSha256: oldDigest, closureGeneration: '308',
+    closureSha256: archived.witness.sha256, sourceAudioStatus: 'PROCESSING' as const };
+  const evidence = { ...f.r, nonce: newNonce, documentUpdateTime: '22.000000003', releaseSha, continuation };
+  const custody = computeMosesBacklogCustody(evidence);
+  const task = computeMosesBacklogTaskId('failed_request', id, f.r.requestVersion, custody);
+  const active = { ...evidence, custodySha256: custody, taskId: task, witness: { ...archived.witness, releaseSha } };
+  const resumed = { ...f.delivery, nonce: newNonce, custodySha256: custody, taskId: task,
+    backlog: { kind: 'failed_request' as const, releaseSha, predecessorReceiptSha256: oldDigest } };
+  assert.notEqual(task, archived.taskId);
+  assert.deepEqual(mosesBacklogDocumentFence(active), mosesBacklogDocumentFence(archived));
+  assert.equal(isValidMosesBacklogContinuation({ ...active, releaseSha: archived.releaseSha }), false);
+  assert.equal(isValidMosesBacklogContinuation({ ...active, continuation: { ...continuation, predecessorReceiptSha256: '0'.repeat(64) } }), false);
+  assert.equal(isMosesBacklogHeldPredecessor({ ...archived, continuation }), false);
+  const witness = '_ops/moses-backlog-drain/' + id + '/' + newNonce + '.json';
+  f.objects.set(witness, { ...f.objects.get(f.witnessPath), name: witness });
+  const closure = mosesBacklogClosurePath(id, archived.nonce);
+  f.write(f.fencePath, active);
+  const reconcile = () => reconcileMosesRecovery(f.db, resumed, 'new-owner', async () => f.doc(false, heldWrite), f.bucket);
+  await assert.rejects(reconcile()); // No pinned closure.
+  f.objects.set(closure, { ...f.objects.get(f.witnessPath), name: closure, generation: '308' });
+  await assert.rejects(reconcileMosesRecovery(f.db, f.delivery, owner, async () => f.doc(false, heldWrite), f.bucket));
+  await assert.rejects(reconcileMosesRecovery(f.db, resumed, 'new-owner', async () => f.doc(), f.bucket));
+  assert.equal(await reconcile(), 'ready');
+  f.write('processAudioLocks/' + id, { requestId: 'new-owner' });
+  const storage = await beginMosesRecovery(f.db, resumed, 'new-owner', f.doc(false, heldWrite), f.bucket);
+  assert.ok(storage);
+  f.upload(storage, 'processed-sermons/' + id, '501');
+  f.upload(storage, 'intro-outro-sermons/' + id, '502');
+  const outputs = await storage.verifyCurrent();
+  await recordMosesRecoveryMediaCompletion(f.db, resumed, 'new-owner', 'public_provider', true, written, outputs);
+  assert.equal(await reconcileMosesRecovery(f.db, resumed, 'new-owner', async () => f.doc(true), f.bucket), 'completed');
+  assert.deepEqual(f.read(f.fencePath).continuation.predecessor, archived);
+  assert.equal(f.objects.get('intro-outro-sermons/' + id).metadata.urmBacklogTask, task);
 });
 
 test('missing or changed forward evidence, outputs, mirror, and prior request fail closed before consumption', async () => {

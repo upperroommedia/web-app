@@ -1,15 +1,16 @@
 import { createHash, generateKeyPairSync, sign } from 'node:crypto';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { computeProcessAudioRequestVersion, computeProcessAudioTaskId, sanitizeProcessAudioPayload } from '@upperroom/contracts/processAudioQueue';
-import { canonicalMosesRecoveryJson, computeMosesBacklogCustody, MOSES_BACKLOG_FENCES_PATH, mosesBacklogDocumentFence,
-  mosesRecoveryDigest, type MosesBacklogReceipt, type MosesBacklogKind } from '@upperroom/contracts/mosesDeferredRecovery';
+import { canonicalMosesRecoveryJson, computeMosesBacklogCustody, computeMosesBacklogTaskId, MOSES_BACKLOG_FENCES_PATH, mosesBacklogDocumentFence,
+  mosesRecoveryDigest, type MosesBacklogReceipt, type MosesBacklogKind, isMosesBacklogHeldPredecessor } from '@upperroom/contracts/mosesDeferredRecovery';
 import { recoverMosesBacklogRequest, type BacklogSelection, type MosesBacklogDependencies } from '../../../../functions-media/src/mosesBacklogRecovery';
+import { classifyDeletedSermon } from '../../DocumentListeners/Sermons/sermonOnDelete';
 import { queueOrReplaceProcessAudioRequest } from '../../../../functions-media/src/processAudioQueueStore';
-import { MOSES_BACKLOG_SURFACES, verifyMosesBacklogWitness } from '../../../../functions-media/src/mosesBacklogWitness';
+import { MOSES_BACKLOG_SURFACES, verifyMosesBacklogClosure, verifyMosesBacklogWitness } from '../../../../functions-media/src/mosesBacklogWitness';
 import type { Bucket } from '@google-cloud/storage';
 import { MOSES_BACKLOG_DELETIONS, MOSES_BACKLOG_DOCUMENT_FENCES } from '@upperroom/contracts/mosesDeferredRecovery';
 import { buildFirebaseStorageDownloadUrl } from '@upperroom/shared/shared/firebaseStorageUrls';
-import { pinBacklogBumper, verifyNativeBacklogDocumentFence, verifyNativeBacklogSourcePresent } from '../../../../functions-media/src/mosesBacklogNative';
+import { pinBacklogBumper, verifyBacklogClosureSource, verifyNativeBacklogDocumentFence, verifyNativeBacklogSourcePresent } from '../../../../functions-media/src/mosesBacklogNative';
 import type { PilotTransport } from '../../../../functions-media/src/legacyMosesGuestPilot';
 
 import { getMosesRecoveryCohortMember, type MosesRecoveryCohortMember } from '@upperroom/contracts/mosesDeferredRecovery';
@@ -21,7 +22,7 @@ const payload = sanitizeProcessAudioPayload({ id: sermonId, youtubeUrl: `https:/
 const requestVersion = computeProcessAudioRequestVersion(payload);
 const nativeHead = { payload, documentCreateTime: '101.000000001', documentUpdateTime: '202.000000001',
   bumperGenerations: { intro: { path: 'intros/default_intro.mp3', generation: '12' }, outro: { path: 'outros/default_outro.mp3', generation: '13' } } };
-const previous = { sermonId, sourceType: 'youtube', currentPayload: payload, currentRequestVersion: requestVersion,
+const previous = { sermonId, sourceType: 'youtube' as const, currentPayload: payload, currentRequestVersion: requestVersion,
   queuedAt: '2026-11-20T00:00:00.000Z', queuedTaskId: computeProcessAudioTaskId(sermonId, requestVersion, 'old'), transientRetryCount: 0, updatedAt: '2026-11-20T00:10:00.000Z' };
 const database = firebaseAdmin.database();
 const fence = database.ref(`${MOSES_BACKLOG_FENCES_PATH}/${sermonId}`);
@@ -75,6 +76,70 @@ describe('same-sermon backlog forward exclusion', () => {
     expect(provider.mock.calls[0].slice(1)).toEqual(provider.mock.calls[2].slice(1));
     expect((await request.get()).val()).toEqual(kind === 'failed_request' ? previous : null);
   });
+  it('installs one clean successor under both claims and leaves the consumed origin and original queue row intact', async () => {
+    await request.set(previous);
+    const { preview, apply, deps, provider } = scenario('failed_request');
+    const first = await preview();
+    await apply(first.custodySha256);
+    const original = (await fence.get()).val();
+    const then = new Date().toISOString();
+    const prior = { ...original, phase: 'consumed', outcome: 'review_required', owner: 'old-native-owner', originalRequest: previous,
+      witness: { generation: '11', sha256: 'a'.repeat(64), observedAt: then, releaseSha }, queuedAt: then };
+    await fence.set(prior);
+    const activation = { priorTaskId: prior.taskId, priorCustodySha256: prior.custodySha256,
+      closureGeneration: '555', closureSha256: 'c'.repeat(64) };
+    const selection: BacklogSelection = { sermonId, videoId, kind: 'failed_request', requestVersion, releaseSha: 'b'.repeat(40), activation };
+    const documentUpdateTime = '303.000000001';
+    const readClosure = jest.fn(async () => ({ documentCreateTime: nativeHead.documentCreateTime, documentUpdateTime,
+      sourceAudioStatus: 'PROCESSING' as const, observedAt: new Date().toISOString(), beforeSha256: '1'.repeat(64),
+      afterSha256: '2'.repeat(64), unchangedFieldsSha256: '3'.repeat(64), changedMessage: true }));
+    const d = { ...deps, readClosure };
+    d.readHead.mockResolvedValue({ ...nativeHead, documentUpdateTime });
+    const plan = await recoverMosesBacklogRequest('preview', selection, d);
+    expect(plan.phase).toBe('eligible_to_continue');
+    expect((await fence.get()).val()).toEqual(prior);
+    await expect(recoverMosesBacklogRequest('apply', { ...selection, custodySha256: prior.custodySha256 }, d)).rejects.toThrow();
+    const install = () => recoverMosesBacklogRequest('apply', { ...selection, custodySha256: plan.custodySha256 }, d);
+    const lock = database.ref('processAudioLocks/' + sermonId);
+    await lock.set({ requestId: 'still-active' });
+    await expect(install()).rejects.toThrow();
+    await lock.remove();
+    await fence.update({ owner: 'different-owner' });
+    await expect(install()).rejects.toThrow();
+    await fence.set(prior);
+    expect((await install()).phase).toBe('fenced');
+    const successor = (await fence.get()).val();
+    expect(successor).toMatchObject({ phase: 'fenced', requestVersion, taskId: plan.taskId, documentUpdateTime,
+      continuation: { predecessor: prior, predecessorReceiptSha256: mosesRecoveryDigest(prior), sourceAudioStatus: 'PROCESSING' } });
+    expect(mosesBacklogDocumentFence(successor)).toEqual(mosesBacklogDocumentFence(prior));
+    expect(successor.taskId).not.toBe(prior.taskId);
+    expect(successor.nonce).not.toBe(prior.nonce);
+    for (const field of ['owner','outcome','queuedAt','witness','originalRequest','proof']) expect(successor).not.toHaveProperty(field);
+    expect((await install()).phase).toBe('fenced');
+    expect((await fence.get()).val()).toEqual(successor);
+    expect((await request.get()).val()).toEqual(previous);
+    expect(d.readWitness).not.toHaveBeenCalled();
+    expect(provider).not.toHaveBeenCalled();
+    const ordinary = { ...selection, custodySha256: plan.custodySha256, activation: undefined };
+    expect((await recoverMosesBacklogRequest('apply', ordinary, d)).phase).toBe('waiting_for_witness');
+    d.readWitness.mockResolvedValue({ generation: '999', sha256: 'e'.repeat(64), observedAt: new Date().toISOString(), releaseSha: selection.releaseSha });
+    expect((await recoverMosesBacklogRequest('apply', ordinary, d)).phase).toBe('acknowledged');
+    expect(provider.mock.calls.map(([op]) => op)).toEqual(['create']);
+    expect((await install()).phase).toBe('acknowledged');
+    expect((await fence.get()).val().continuation.predecessor).toEqual(prior);
+    const db = firebaseAdmin.firestore();
+    const doc = db.collection('sermons').doc(sermonId);
+    const mirror = db.collection(MOSES_BACKLOG_DOCUMENT_FENCES).doc(sermonId);
+    const deletion = db.collection(MOSES_BACKLOG_DELETIONS).doc(sermonId);
+    const event = { documentCreateTime: nativeHead.documentCreateTime, deletedDocumentUpdateTime: documentUpdateTime,
+      eventTime: then, eventId: 'native-continuation-deletion' };
+    try {
+      await expect(classifyDeletedSermon(doc, event, successor)).rejects.toThrow();
+      await mirror.create(mosesBacklogDocumentFence(prior));
+      await expect(classifyDeletedSermon(doc, event, successor)).resolves.toBe('held');
+      expect((await deletion.get()).get('custodySha256')).toBe(prior.custodySha256);
+    } finally { await Promise.all([mirror.delete(), deletion.delete()]); }
+  });
   it('holds request drift, generation drift, old proofs and incomplete native mirrors before any send', async () => {
     await request.set(previous);
     const { preview, apply, deps, provider } = scenario('failed_request');
@@ -119,9 +184,9 @@ describe('forward drain release attestation', () => {
   const fingerprint = 'SHA256:' + createHash('sha256').update(publicBlob).digest('base64').replace(/=+$/u, '');
   const now = Date.parse('2026-11-25T01:00:00.000Z');
   const when = new Date(now - 1000).toISOString();
-  const receipt: MosesBacklogReceipt = { ...nativeHead, schema: 2, kind:'failed_request', sermonId, videoId, requestVersion,
+  const receipt = { ...nativeHead, schema: 2, kind:'failed_request', sermonId, videoId, requestVersion,
     requestSha256: mosesRecoveryDigest(previous), priorTaskId: previous.queuedTaskId, releaseSha, custodySha256: '', taskId:'test',
-    fencedAt: new Date(now - 10_000).toISOString(), nonce:'00000000-0000-4000-8000-000000000001', phase:'fenced' };
+    fencedAt: new Date(now - 10_000).toISOString(), nonce:'00000000-0000-4000-8000-000000000001', phase:'fenced' } satisfies MosesBacklogReceipt;
   receipt.custodySha256 = computeMosesBacklogCustody(receipt);
   const surfaces = Object.fromEntries(Object.entries(MOSES_BACKLOG_SURFACES).map(([id,target]) => [id, {
     target, releaseSha, nativeIds: ['native-' + id], unguardedOwners: [], readAt:when, evidenceSha256:'b'.repeat(64),
@@ -135,6 +200,33 @@ describe('forward drain release attestation', () => {
     const envelope = Buffer.concat([Buffer.from('SSHSIG'), Buffer.from([0,0,0,1]),sshField(publicBlob),sshField(namespace),sshField(''),sshField('sha512'),sshField(sig)]);
     return Buffer.from(JSON.stringify({statement:proof, signature:`-----BEGIN SSH SIGNATURE-----\n${envelope.toString('base64')}\n-----END SSH SIGNATURE-----\n`}));
   }
+  it('joins the signed physical closure, original owner and complete typed Firestore projection', () => {
+    const prior = { ...receipt, kind: 'failed_request', phase: 'consumed', outcome: 'review_required', owner: 'prior-owner',
+      originalRequest: previous, priorTaskId: previous.queuedTaskId, queuedAt: receipt.fencedAt,
+      witness: { generation: '8', sha256: 'b'.repeat(64), observedAt: receipt.fencedAt, releaseSha },
+      taskId: computeMosesBacklogTaskId('failed_request', sermonId, requestVersion, receipt.custodySha256) };
+    if (!isMosesBacklogHeldPredecessor(prior)) throw new Error('Invalid historical request fixture.');
+    const release = 'b'.repeat(40);
+    const fields = (status: object) => ({ trim: {integerValue:'1279'}, status:{mapValue:{fields:{
+      soundCloud: {stringValue:'NOT_UPLOADED'}, subsplash: {stringValue:'NOT_UPLOADED'}, ...status }}} });
+    const current = fields({ audioStatus: {stringValue:'PROCESSING'}, message: {stringValue:'native worker status'} });
+    const source = { beforeSha256: mosesRecoveryDigest(fields({audioStatus:{stringValue:'ERROR'}})), afterSha256: mosesRecoveryDigest(current),
+      unchangedFieldsSha256: mosesRecoveryDigest(fields({})), changedFields: ['status.audioStatus','status.message'], readAt: when };
+    const transport = { taskRetired:true, ownerExited:true, activeOwners:[], evidenceSha256:'2'.repeat(64), readAt:when };
+    const queue = { youtubeTaskAbsent:true, storageTaskAbsent:true, outputsAbsent:true, activeClaims:[], evidenceSha256:'3'.repeat(64), readAt:when };
+    const proof = {schema:1, kind:'moses_backlog_predecessor_closure', project:'urm-app', sermonId, requestVersion,
+      predecessorTaskId:prior.taskId, predecessorCustodySha256:prior.custodySha256, predecessorReceiptSha256:mosesRecoveryDigest(prior),
+      releaseSha:release, documentCreateTime:prior.documentCreateTime, documentUpdateTime:'303.000000001', sourceAudioStatus:'PROCESSING',
+      observedAt:when, source, transport, queue};
+    const check = (s: unknown) => verifyMosesBacklogClosure(envelope(s,'urm-moses-backlog-closure-v1'),prior,release,fingerprint,now);
+    expect(() => verifyBacklogClosureSource(current,check(proof))).not.toThrow();
+    expect(() => verifyBacklogClosureSource({...current, trim:{integerValue:'1280'}},check(proof))).toThrow();
+    expect(() => verifyBacklogClosureSource(current,check({...proof,source:{...source,unchangedFieldsSha256: '7'.repeat(64)}}))).toThrow();
+    for (const mutation of [{predecessorReceiptSha256:'0'.repeat(64)}, {releaseSha}, {source:{...source,changedFields:['status.subsplash']}},
+      {queue:{...queue,activeClaims:['other']}}, {transport:{...transport,ownerExited:false}}, {queue:{...queue,outputsAbsent:false}},
+      {transport:{...transport,readAt:'2020-01-01T00:00:00.000Z'}}]) expect(() => check({...proof,...mutation})).toThrow();
+    expect(() => verifyMosesBacklogClosure(envelope(proof),prior,release,fingerprint,now)).toThrow();
+  });
   it('accepts the pinned release signature only after every native writer observed the installed fence', () => {
     expect(verifyMosesBacklogWitness(envelope(statement),receipt,fingerprint,now)).toBe(when);
     const target = 'hetzner-youtube';
@@ -211,7 +303,7 @@ describe('native backlog admission evidence', () => {
   });
 });
 
-import { MOSES_BACKLOG_EDITS_PATH, MOSES_BACKLOG_RELEASES, computeMosesBacklogTaskId } from '@upperroom/contracts/mosesDeferredRecovery';
+import { MOSES_BACKLOG_EDITS_PATH, MOSES_BACKLOG_RELEASES } from '@upperroom/contracts/mosesDeferredRecovery';
 import { grantNativeMosesBacklogEdit, queueCompletedBacklogEdit, type BacklogEditDependencies } from '../../../../functions-media/src/mosesBacklogEdit';
 
 describe('post-terminal authenticated edit', () => {
@@ -335,6 +427,20 @@ describe('deployment-pinned recovery cohort', () => {
     for (const generation of ['0001', '9007199254740992', '../123', '0']) {
       expect(getMosesRecoveryRoute(env, true, query, { ...headers, 'x-urm-recovery-witness-generation': [generation] })).toBeNull();
     }
+  });
+  it('requires the separately armed failed member, exact predecessor identity and complete closure narrowing', () => {
+    const gate = { ...env, PROCESS_AUDIO_MOSES_BACKLOG_CONTINUATION_REF: failed.ref,
+      PROCESS_AUDIO_MOSES_BACKLOG_CONTINUATION_PRIOR_TASK_ID: 'mr-' + 'f'.repeat(48),
+      PROCESS_AUDIO_MOSES_BACKLOG_CONTINUATION_PRIOR_CUSTODY_SHA256: 'a'.repeat(64) };
+    const proof = { 'x-urm-recovery-closure-generation': ['12'], 'x-urm-recovery-closure-sha256': ['c'.repeat(64)] };
+    const query = { ref: failed.ref, operation: 'continue-held' };
+    expect(getMosesRecoveryRoute(gate, false, query, proof)?.backlog?.activation?.priorTaskId).toBe(gate.PROCESS_AUDIO_MOSES_BACKLOG_CONTINUATION_PRIOR_TASK_ID);
+    expect(getMosesRecoveryRoute(env, false, query, proof)).toBeNull();
+    expect(getMosesRecoveryRoute(gate, false, {...query,ref:missing.ref}, proof)).toBeNull();
+    expect(getMosesRecoveryRoute(gate, true, query, proof)).toBeNull();
+    expect(getMosesRecoveryRoute(gate, true, query, {...proof, ...headers})).toBeNull();
+    expect(getMosesRecoveryRoute(gate, true, query, {...proof,'x-urm-recovery-custody':['d'.repeat(64)]})?.backlog?.custodySha256).toBe('d'.repeat(64));
+    expect(getMosesRecoveryRoute(gate, false, {ref:failed.ref}, proof)).toBeNull();
   });
   it('rejects the entire deployment list on extra authority fields, ambiguous rows or an invalid envelope', () => {
     for (const rows of [[], [missing, missing], [missing, { ...failed, ref: missing.ref }], [missing, { ...failed, sermonId: missing.sermonId }],

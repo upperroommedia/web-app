@@ -1,13 +1,15 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtemp, readFile, readdir, rm, stat, unlink } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { ReadableStream } from 'node:stream/web';
 import { setTimeout as delay } from 'node:timers/promises';
+import { verifyMosesGuestAudio } from '../src/mosesGuestMedia';
 import { CancelToken } from '../src/CancelToken';
 import {
   downloadMosesGuestAudio,
+  getMosesGuestSection,
   readMosesGuestAudioConfig,
   type MosesGuestAudioFallbackReason,
 } from '../src/mosesGuestAudio';
@@ -103,6 +105,80 @@ async function main() {
       await unlink(result.filePath);
     }
     assert.equal(paths.size, 2);
+
+    const sectionConfig = readMosesGuestAudioConfig({ ...env, MOSES_GUEST_AUDIO_SECTION_ENABLED: 'true' });
+    assert.ok(sectionConfig?.sectionEnabled);
+    assert.equal(config.sectionEnabled, undefined);
+    assert.deepEqual(getMosesGuestSection(86400, 3600), { startSeconds: 86400, durationSeconds: 3600 });
+    assert.deepEqual(getMosesGuestSection(0, 0.000001), { startSeconds: 0, durationSeconds: 0.000001 });
+    const section = { startSeconds: 18940.125, durationSeconds: 1279.5 };
+    const sectionInput = { ...input, config: sectionConfig, section };
+    const echoes = { ...headerValues, 'x-section-start-seconds': '18940.125', 'x-section-duration-seconds': '1279.5' };
+    for (const invalid of [
+      { startSeconds: -0, durationSeconds: 5 }, { startSeconds: -1, durationSeconds: 5 },
+      { startSeconds: 86400.001, durationSeconds: 5 }, { startSeconds: 0, durationSeconds: 3600.001 },
+      { startSeconds: 0, durationSeconds: 0 }, { startSeconds: 0, durationSeconds: 1e-7 },
+      { startSeconds: Number.NaN, durationSeconds: 5 }, { startSeconds: 0, durationSeconds: Infinity },
+    ]) {
+      assert.equal(getMosesGuestSection(invalid.startSeconds, invalid.durationSeconds), undefined);
+      assert.deepEqual(await downloadMosesGuestAudio({ ...sectionInput, section: invalid }, { fetch: async () => { throw new Error('Unexpected guest audio request'); } }),
+        { status: 'fallback', reason: 'invalid_section' });
+    }
+    assert.deepEqual(await downloadMosesGuestAudio({ ...input, section }, { fetch: async () => { throw new Error('Unexpected guest audio request'); } }),
+      { status: 'fallback', reason: 'invalid_section' });
+    // Enabling sections leaves an explicitly ordinary v1 request on its existing route.
+    const ordinary = await downloadMosesGuestAudio({ ...input, config: sectionConfig }, { fetch: successFetch });
+    assert.equal(ordinary.status, 'downloaded');
+    await unlink(ordinary.filePath);
+    const served = await downloadMosesGuestAudio(sectionInput, { fetch: async (url, init) => {
+      assert.equal(url, origin + '/v2/youtube/guest-audio-section');
+      assert.equal(init?.method, 'POST');
+      assert.equal(init?.redirect, 'error');
+      assert.equal(init?.credentials, 'omit');
+      assert.equal(new Headers(init?.headers).get('accept-encoding'), 'identity');
+      assert.equal(init?.body, JSON.stringify({ videoId, ...section }));
+      return audioResponse(new Headers(echoes));
+    } });
+    assert.equal(served.status, 'downloaded');
+    assert.deepEqual(await readFile(served.filePath), audio);
+    await unlink(served.filePath);
+    for (const [name, value] of [
+      ['x-section-start-seconds', null], ['x-section-duration-seconds', null],
+      ['x-section-start-seconds', '18940.1250'], ['x-section-start-seconds', '0'],
+      ['x-section-duration-seconds', '1.2795e3'], ['x-section-duration-seconds', '1279.5, 1279.5'],
+    ] as const) {
+      const amended = new Headers(echoes);
+      if (value === null) amended.delete(name); else amended.set(name, value);
+      let calls = 0;
+      const rejected = await downloadMosesGuestAudio(sectionInput, { fetch: async url => {
+        calls++;
+        assert.equal(url, origin + '/v2/youtube/guest-audio-section');
+        return audioResponse(amended);
+      } });
+      assert.deepEqual(rejected, { status: 'fallback', reason: 'invalid_response' });
+      assert.equal(calls, 1);
+      assert.deepEqual(await readdir(tempDir), []);
+    }
+
+    for (const [status, reason] of [
+      [408, 'remote_error'], [499, 'remote_error'], [418, 'remote_error'], [504, 'remote_error'],
+      [400, 'remote_refused'], [401, 'remote_refused'], [403, 'remote_refused'], [404, 'remote_refused'],
+      [405, 'remote_refused'], [413, 'remote_refused'], [415, 'remote_refused'], [422, 'remote_refused'], [429, 'remote_busy'],
+    ] as const) {
+      assert.deepEqual(await downloadMosesGuestAudio(sectionInput, { fetch: async () => new Response(null, { status }) }),
+        { status: 'fallback', reason });
+    }
+
+    const fakeProbe = join(tempDir, 'ffprobe-fixture');
+    const probeOutput = join(tempDir, 'probe.json');
+    await writeFile(fakeProbe, "#!/usr/bin/env node\nprocess.stdout.write(require('node:fs').readFileSync(process.argv.at(-1)));\n", { mode: 0o700 });
+    for (const [measured, withinTolerance] of [[1277.5, true], [1281.5, true], [1277.49, false], [1281.51, false], [25782, false]] as const) {
+      await writeFile(probeOutput, JSON.stringify({ streams: [{ codec_type: 'audio', nb_read_packets: '10' }], format: { duration: String(measured) } }));
+      assert.equal(await verifyMosesGuestAudio(probeOutput, () => fakeProbe, section.durationSeconds), withinTolerance);
+    }
+    assert.equal(await verifyMosesGuestAudio(probeOutput, () => fakeProbe), true);
+    await unlink(fakeProbe);
+    await unlink(probeOutput);
 
     let ineligibleCalls = 0;
     const neverFetch: typeof fetch = async () => {

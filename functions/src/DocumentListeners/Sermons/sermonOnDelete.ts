@@ -1,8 +1,9 @@
+import { isDeepStrictEqual } from 'node:util';
 import { onDocumentDeleted } from 'firebase-functions/v2/firestore';
 import type { DocumentReference, Timestamp } from 'firebase-admin/firestore';
 import type { Bucket } from '@google-cloud/storage';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
-import { MOSES_BACKLOG_DELETIONS, MOSES_BACKLOG_DOCUMENT_FENCES } from '@upperroom/contracts/mosesDeferredRecovery';
+import { MOSES_BACKLOG_DELETIONS, MOSES_BACKLOG_DOCUMENT_FENCES, mosesBacklogDocumentFence, type MosesBacklogReceipt } from '@upperroom/contracts/mosesDeferredRecovery';
 import handleError from '../../handleError';
 import {
   INTRO_OUTRO_SERMONS_BUCKET,
@@ -20,7 +21,11 @@ export async function classifyDeletedSermon(doc: DocumentReference, event: Delet
   return db.runTransaction(async tx => {
     const [source, mirror, held] = await tx.getAll(doc, db.collection(MOSES_BACKLOG_DOCUMENT_FENCES).doc(doc.id), deletion);
     if (!backlog && !mirror.exists && !held.exists) return source.exists ? 'stale' as const : 'ordinary' as const;
-    const receipt = backlog as Record<string, unknown> | null;
+    const active = backlog as Record<string, unknown> | null;
+    const receipt: Record<string, unknown> | null = active && 'continuation' in active
+      ? mosesBacklogDocumentFence(active as unknown as MosesBacklogReceipt) : active;
+    if (active && 'continuation' in active && !isDeepStrictEqual(mirror.data(), receipt))
+      throw new Error('Cannot confirm continuation origin mirror.');
     const identity = mirror.data() ?? receipt;
     if (!identity || identity.schema !== 2 || identity.sermonId !== doc.id ||
         !/^[a-f0-9]{64}$/u.test(String(identity.custodySha256)) || !/^[a-f0-9]{16}$/u.test(String(identity.requestVersion)) ||

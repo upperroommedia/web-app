@@ -17,7 +17,7 @@ import {
 } from './utils';
 import { CustomMetadata, AudioSource } from './types';
 import { downloadYouTubeAudioToFile } from './processYouTubeUrl';
-import { downloadMosesGuestAudio, readMosesGuestAudioConfig } from './mosesGuestAudio';
+import { downloadMosesGuestAudio, getMosesGuestSection, readMosesGuestAudioConfig } from './mosesGuestAudio';
 import { mosesGuestMediaInputArgs, verifyMosesGuestAudio } from './mosesGuestMedia';
 import { finished } from 'stream';
 import { spawn } from 'child_process';
@@ -101,6 +101,7 @@ const trimAndTranscode = async (
   };
   let inputSource: string | undefined;
   let usingMosesGuestSource = false;
+  let inputStartTime = startTime;
   let proc: ReturnType<typeof spawn> | undefined;
   let releaseFfmpegSlot: (() => void) | undefined;
   let transcodingStarted = false;
@@ -293,10 +294,16 @@ const trimAndTranscode = async (
           const config = readMosesGuestAudioConfig();
           const canonicalUrl = normalizeYouTubeUrl(audioSource.source);
           const videoId = canonicalUrl && new URL(canonicalUrl).searchParams.get('v');
+          const sectionRequired = deferredRecovery && process.env.MOSES_GUEST_AUDIO_SECTION_ENABLED === 'true';
+          const section = sectionRequired ? getMosesGuestSection(startTime, duration) : undefined;
+          if (sectionRequired && (!section || !config?.sectionEnabled || !videoId || !config.videoIds?.has(videoId))) {
+            throw new Error('Moses guest section is outside the authorized scope');
+          }
           if (config && videoId && config.videoIds?.has(videoId)) {
             const result = await downloadMosesGuestAudio({
               config,
               videoId,
+              section,
               tempDir: dirname(youtubeSourceFileBase),
               cancelToken,
             });
@@ -305,21 +312,28 @@ const trimAndTranscode = async (
               throw new Error('Moses guest audio acquisition was cancelled');
             }
             if (result.status === 'downloaded') {
-              const valid = await verifyMosesGuestAudio(result.filePath, getFFprobePath);
+              const valid = await verifyMosesGuestAudio(result.filePath, getFFprobePath, section?.durationSeconds);
               if (cancelToken.isCancellationRequested) throw new Error('Moses guest audio acquisition was cancelled');
               if (valid) {
                 downloadedFile = result.filePath;
                 usingMosesGuestSource = true;
+                if (section) inputStartTime = 0;
                 if (deferredRecovery) ctx.mosesVerifiedTransfer = true;
                 ctx.youtubeSuccessfulAcquisitionAuthority = 'public_provider';
-                log.info('Moses supplied verified guest audio', { acquisitionHost: 'moses', authority: 'public_provider' });
+                log.info('Moses supplied verified guest audio', {
+                  acquisitionHost: 'moses', authority: 'public_provider', transferScope: section ? 'section' : 'whole',
+                });
                 updateDownloadProgress(100);
               } else {
                 await unlink(result.filePath);
                 tempFiles.delete(result.filePath);
+                if (section) throw new Error('Moses guest section media verification failed');
                 log.info('Continuing YouTube acquisition on Hetzner', { mosesFallbackReason: 'invalid_audio' });
               }
             } else {
+              if (section && !['remote_refused', 'remote_busy'].includes(result.reason)) {
+                throw new Error('Unconfirmed Moses guest section attempt');
+              }
               if (deferredRecovery && !['ineligible_video', 'remote_refused', 'remote_busy'].includes(result.reason)) {
                 throw new Error('Unconfirmed deferred guest audio attempt');
               }
@@ -374,8 +388,8 @@ const trimAndTranscode = async (
     const args: string[] = [];
 
     // Input options
-    if (startTime !== undefined && startTime !== null) {
-      args.push('-ss', startTime.toString());
+    if (inputStartTime !== undefined && inputStartTime !== null) {
+      args.push('-ss', inputStartTime.toString());
     }
     if (usingMosesGuestSource) args.push(...mosesGuestMediaInputArgs);
     args.push('-i', inputSource);
@@ -512,6 +526,7 @@ const trimAndTranscode = async (
             approach: audioSource.type === 'YouTubeUrl' ? 'ytdlp_download_to_file_then_ffmpeg' : 'standard',
             trimDecision: {
               startTime,
+              inputStartTime,
               requestedDuration: duration,
               note:
                 audioSource.type === 'YouTubeUrl'

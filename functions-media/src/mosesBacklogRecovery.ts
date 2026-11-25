@@ -4,14 +4,24 @@ import type { Database } from 'firebase-admin/database';
 import type { AddIntroOutroInputType } from '@upperroom/contracts/addIntroOutro/types';
 import { computeProcessAudioRequestVersion, computeProcessAudioTaskId, sanitizeProcessAudioPayload } from '@upperroom/contracts/processAudioQueue';
 import {
-  MOSES_BACKLOG_FENCES_PATH, MOSES_RECOVERY_RECEIPTS_PATH, computeMosesBacklogCustody, computeMosesBacklogTaskId,
-  getMosesRecoverySelection, mosesRecoveryDigest, type MosesBacklogEvidence, type MosesBacklogKind,
+  MOSES_BACKLOG_EDITS_PATH, MOSES_BACKLOG_FENCES_PATH, MOSES_RECOVERY_RECEIPTS_PATH, computeMosesBacklogCustody, computeMosesBacklogTaskId,
+  getMosesRecoverySelection, isMosesBacklogHeldPredecessor, isValidMosesBacklogContinuation, mosesRecoveryDigest,
+  type MosesBacklogContinuation, type MosesBacklogHeldPredecessor, type MosesBacklogEvidence, type MosesBacklogKind,
   type MosesBacklogReceipt, type MosesBacklogWitness,
 } from '@upperroom/contracts/mosesDeferredRecovery';
 import { MOSES_PILOT_INTENTS_PATH, PilotTaskNotCreated, type PilotTransport } from './legacyMosesGuestPilot';
 import { withProcessAudioQueueClaim } from './processAudioQueueStore';
+import type { VerifiedBacklogClosure } from './mosesBacklogWitness';
+
+export interface BacklogActivation {
+  priorTaskId: string;
+  priorCustodySha256: string;
+  closureGeneration: string;
+  closureSha256: string;
+}
 
 export interface BacklogSelection {
+  activation?: BacklogActivation;
   kind: MosesBacklogKind;
   sermonId: string;
   videoId: string;
@@ -42,9 +52,10 @@ export interface MosesBacklogNativeHead {
 export interface MosesBacklogDependencies {
   database: Database;
   readHead: (selection: BacklogSelection, originalPayload: AddIntroOutroInputType | undefined,
-    priorTaskId: string | undefined, ownTaskId: string | undefined) => Promise<MosesBacklogNativeHead>;
+    priorTaskId: string | undefined, ownTaskId: string | undefined, continuation?: MosesBacklogContinuation) => Promise<MosesBacklogNativeHead>;
   verifySourcePresent: (fence: MosesBacklogReceipt) => Promise<void>;
   verifyDocumentFence: (fence: MosesBacklogReceipt, install: boolean) => Promise<void>;
+  readClosure?: (prior: MosesBacklogHeldPredecessor, gate: BacklogActivation, releaseSha: string) => Promise<VerifiedBacklogClosure>;
   readWitness: (fence: MosesBacklogReceipt) => Promise<MosesBacklogWitness | null>;
   prepare: () => Promise<PilotTransport>;
   assertCohortIdle?: () => Promise<void>;
@@ -63,7 +74,7 @@ export async function recoverMosesBacklogRequest(mode: 'preview' | 'apply', sele
   }
   const ownerPrefix = `moses-backlog:${select.custodySha256}:`;
   const owner = ownerPrefix + randomUUID();
-  const read = async (ownTaskId?: string): Promise<MosesBacklogEvidence> => {
+  const read = async (ownTaskId?: string, continuation?: MosesBacklogContinuation): Promise<MosesBacklogEvidence> => {
     const [request, lock, progress, deferred, probe, pilot, otherReceipts] = await Promise.all([
       database.ref(`processAudioRequests/${sermonId}`).get(), database.ref(`processAudioLocks/${sermonId}`).get(),
       database.ref(`addIntroOutro/${sermonId}`).get(), database.ref(`processAudioQueues/youtube/deferred/${sermonId}`).get(),
@@ -90,7 +101,11 @@ export async function recoverMosesBacklogRequest(mode: 'preview' | 'apply', sele
       holdIf(!isDeepStrictEqual(original, sanitizeProcessAudioPayload(original)) || computeProcessAudioRequestVersion(original) !== select.requestVersion);
     } else holdIf(request.exists());
 
-    const head = await deps.readHead(select, original, priorTaskId, ownTaskId);
+    if (continuation) {
+      holdIf(!isDeepStrictEqual(row, continuation.predecessor.originalRequest) ||
+        (await database.ref(`${MOSES_BACKLOG_EDITS_PATH}/${sermonId}`).get()).exists());
+    }
+    const head = await deps.readHead(select, original, priorTaskId, ownTaskId, continuation);
     const data = head.payload;
     holdIf(data.id !== sermonId || !('youtubeUrl' in data) || data.youtubeUrl !== `https://www.youtube.com/watch?v=${videoId}` ||
       !Number.isFinite(data.startTime) || data.startTime < 0 || !Number.isFinite(data.duration) || data.duration <= 0 || data.skipTranscode ||
@@ -98,7 +113,7 @@ export async function recoverMosesBacklogRequest(mode: 'preview' | 'apply', sele
     const requestVersion = computeProcessAudioRequestVersion(data);
     holdIf(select.requestVersion && select.requestVersion !== requestVersion);
     return { schema: 2, kind, sermonId, videoId, releaseSha, requestVersion, requestSha256: mosesRecoveryDigest(row),
-      ...(priorTaskId && { priorTaskId }), ...head };
+      ...(priorTaskId && { priorTaskId }), ...(continuation && { continuation }), ...head };
   };
   const owns = async () => {
     const claims = await Promise.all([sermonId, '__youtube_auth_recovery__'].map(id => database.ref(`processAudioQueueClaims/${id}`).get()));
@@ -109,6 +124,45 @@ export async function recoverMosesBacklogRequest(mode: 'preview' | 'apply', sele
     if (mode === 'apply' && deps.assertCohortIdle) await deps.assertCohortIdle();
     await owns();
     let fence: MosesBacklogReceipt | null = (await fenceRef.get()).val();
+    const activation = select.activation;
+    if (activation) {
+      if (kind !== 'failed_request' || !select.requestVersion || !fence || !deps.readClosure || select.witnessGeneration) return nope();
+      const prior = fence.continuation?.predecessor ?? fence;
+      if (!isMosesBacklogHeldPredecessor(prior) || prior.sermonId !== sermonId || prior.videoId !== videoId ||
+          prior.requestVersion !== select.requestVersion || prior.taskId !== activation.priorTaskId ||
+          prior.custodySha256 !== activation.priorCustodySha256 || prior.releaseSha === releaseSha) return nope();
+      if (fence.continuation) {
+        holdIf(!isValidMosesBacklogContinuation(fence) || fence.releaseSha !== releaseSha ||
+          fence.continuation.closureGeneration !== activation.closureGeneration || fence.continuation.closureSha256 !== activation.closureSha256 ||
+          fence.custodySha256 !== computeMosesBacklogCustody(fence) ||
+          fence.taskId !== computeMosesBacklogTaskId(kind, sermonId, prior.requestVersion, fence.custodySha256) ||
+          (select.custodySha256 && select.custodySha256 !== fence.custodySha256));
+        await deps.verifySourcePresent(fence);
+        return { phase: fence.phase, taskId: fence.taskId, custodySha256: fence.custodySha256, requestVersion: fence.requestVersion };
+      }
+      const closure = await deps.readClosure(prior, activation, releaseSha);
+      const continuation: MosesBacklogContinuation = { predecessor: prior, predecessorReceiptSha256: mosesRecoveryDigest(prior),
+        closureGeneration: activation.closureGeneration, closureSha256: activation.closureSha256, sourceAudioStatus: closure.sourceAudioStatus };
+      const evidence = await read(undefined, continuation);
+      holdIf(evidence.documentCreateTime !== closure.documentCreateTime || evidence.documentUpdateTime !== closure.documentUpdateTime ||
+        !isValidMosesBacklogContinuation(evidence));
+      const custodySha256 = computeMosesBacklogCustody(evidence);
+      const taskId = computeMosesBacklogTaskId(kind, sermonId, evidence.requestVersion, custodySha256);
+      holdIf(taskId === prior.taskId || (select.custodySha256 && select.custodySha256 !== custodySha256));
+      // Build from clean evidence only. Lifecycle, owner and old ACK live solely inside the immutable predecessor.
+      const successor: MosesBacklogReceipt = { ...evidence, custodySha256, taskId, nonce: randomUUID(),
+        phase: 'fenced', fencedAt: new Date().toISOString() };
+      await deps.verifyDocumentFence(successor, false);
+      const summary = { taskId, custodySha256, requestVersion: evidence.requestVersion };
+      if (mode === 'preview') return { ...summary, phase: 'eligible_to_continue' };
+      await owns();
+      const age = Date.now() - Date.parse(closure.observedAt);
+      holdIf(!(age >= 0 && age <= 300_000) || Date.parse(successor.fencedAt) <= Date.parse(prior.queuedAt));
+      const saved = await fenceRef.transaction(current =>
+        current === null ? null : isDeepStrictEqual(current, prior) ? successor : undefined, undefined, false);
+      holdIf(!saved.committed || !isDeepStrictEqual(saved.snapshot.val(), successor));
+      return { ...summary, phase: 'fenced' };
+    }
     if (fence) {
       holdIf(fence.schema !== 2 || fence.sermonId !== sermonId || fence.kind !== kind || fence.videoId !== videoId ||
         (select.witnessGeneration && fence.witness && fence.witness.generation !== select.witnessGeneration) ||
@@ -122,7 +176,7 @@ export async function recoverMosesBacklogRequest(mode: 'preview' | 'apply', sele
       }
       holdIf(!['fenced', 'prepared', 'sending'].includes(fence.phase));
     }
-    const evidence = await read(fence?.phase === 'sending' ? fence.taskId : undefined);
+    const evidence = await read(fence?.phase === 'sending' ? fence.taskId : undefined, fence?.continuation);
     const custodySha256 = computeMosesBacklogCustody(evidence);
     holdIf((select.custodySha256 && custodySha256 !== select.custodySha256) || (fence && fence.custodySha256 !== custodySha256));
     const taskId = computeMosesBacklogTaskId(kind, sermonId, evidence.requestVersion, custodySha256);
@@ -161,7 +215,7 @@ export async function recoverMosesBacklogRequest(mode: 'preview' | 'apply', sele
     const intent = { taskId, nonce: current.nonce, queuedAt: current.queuedAt!, requestVersion: evidence.requestVersion, eventId: custodySha256 };
     if (current.phase === 'prepared') {
       // Install only after a second post-witness native read, while the receipt and claims still own this head.
-      const fresh = await read();
+      const fresh = await read(undefined, current.continuation);
       await deps.verifyDocumentFence(current, false);
       holdIf(!isDeepStrictEqual(evidence, fresh) || Date.now() - Date.parse(current.queuedAt!) >= 25_000 ||
         Date.now() - Date.parse(current.witness!.observedAt) > 300_000);

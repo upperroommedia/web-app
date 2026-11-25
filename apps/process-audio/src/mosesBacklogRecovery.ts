@@ -10,9 +10,12 @@ import type {
   UpdateData,
 } from 'firebase-admin/firestore';
 import { isDeepStrictEqual } from 'node:util';
+import { createHash } from 'node:crypto';
 import {
   computeMosesBacklogCustody,
   computeMosesBacklogTaskId,
+  getMosesBacklogSourceAudioStatus,
+  mosesBacklogClosurePath,
   MOSES_BACKLOG_FENCES_PATH,
   MOSES_BACKLOG_RELEASES,
   MOSES_BACKLOG_EDITS_PATH,
@@ -75,6 +78,9 @@ function checkIntent(receipt: Receipt | null, job: VerifiedMosesRecoveryDelivery
     receipt.videoId !== job.videoId ||
     receipt.taskId !== job.taskId ||
     receipt.nonce !== job.nonce ||
+    receipt.continuation?.predecessorReceiptSha256 !== job.backlog.predecessorReceiptSha256 ||
+    (receipt.continuation && (receipt.nonce === receipt.continuation.predecessor.nonce ||
+      receipt.taskId === receipt.continuation.predecessor.taskId)) ||
     receipt.custodySha256 !== job.custodySha256 ||
     computeMosesBacklogCustody(receipt) !== job.custodySha256 ||
     computeMosesBacklogTaskId(receipt.kind, job.sermonId, job.requestVersion, job.custodySha256) !== job.taskId ||
@@ -139,7 +145,7 @@ export async function readBacklogDocument(
 }
 
 function checkDocument(doc: DocumentSnapshot, receipt: Receipt, terminal = false) {
-  const status = terminal ? 'PROCESSED' : receipt.kind === 'failed_request' ? 'ERROR' : 'PENDING';
+  const status = terminal ? 'PROCESSED' : getMosesBacklogSourceAudioStatus(receipt);
   const payload = receipt.payload;
   if (
     !doc.exists ||
@@ -168,6 +174,20 @@ function checkDocument(doc: DocumentSnapshot, receipt: Receipt, terminal = false
     fail();
 }
 
+async function verifyContinuationClosure(bucket: Bucket, receipt: Receipt) {
+  const c = receipt.continuation;
+  if (!c) return;
+  const path = mosesBacklogClosurePath(receipt.sermonId, c.predecessor.nonce);
+  const file = bucket.file(path, { generation: c.closureGeneration });
+  const [metadata] = await file.getMetadata();
+  const length = Number(metadata.size);
+  if (metadata.bucket !== 'urm-app.appspot.com' || metadata.name !== path ||
+      String(metadata.generation) !== c.closureGeneration || metadata.contentEncoding ||
+      !Number.isSafeInteger(length) || length <= 0 || length > 65536) return fail();
+  const [bytes] = await file.download({ decompress: false, validation: 'crc32c' });
+  if (bytes.length !== length || createHash('sha256').update(bytes).digest('hex') !== c.closureSha256) return fail();
+}
+
 async function readAcknowledged(
   db: Database,
   job: VerifiedMosesRecoveryDelivery,
@@ -188,7 +208,7 @@ async function readAcknowledged(
   checkOriginal(current.val(), receipt);
   checkDocument(document, receipt);
   const storage = new MosesBacklogStorage(bucket, receipt, job.taskId);
-  await Promise.all([storage.checkBeforeAcquisition(), storage.verifyWitness(job.nonce, receipt.witness!)]);
+  await Promise.all([storage.checkBeforeAcquisition(), storage.verifyWitness(job.nonce, receipt.witness!), verifyContinuationClosure(bucket, receipt)]);
   checkDocument(await readBacklogDocument(document.ref, mosesBacklogDocumentFence(receipt)), receipt);
   return { original: current.val() as StoredProcessAudioRequestState | null, storage };
 }

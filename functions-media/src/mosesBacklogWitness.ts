@@ -1,5 +1,6 @@
 import { createHash, createPublicKey, verify } from 'node:crypto';
-import { canonicalMosesRecoveryJson, type MosesBacklogReceipt } from '@upperroom/contracts/mosesDeferredRecovery';
+import { isDeepStrictEqual } from 'node:util';
+import { canonicalMosesRecoveryJson, mosesRecoveryDigest, type MosesBacklogHeldPredecessor, type MosesBacklogReceipt } from '@upperroom/contracts/mosesDeferredRecovery';
 
 export const MOSES_BACKLOG_SURFACES = {
   'hetzner-youtube': 'https://yt-worker.upperroommedia.org/process-audio',
@@ -37,7 +38,7 @@ function field(value: Buffer | string) {
 }
 
 // ssh-keygen -Y sign, version 1. Pin the SSH public blob independently of the supplied envelope.
-function verifyReleaseSignature(statement: unknown, armor: unknown, fingerprint: string) {
+function verifyReleaseSignature(statement: unknown, armor: unknown, fingerprint: string, expectedNamespace = 'urm-moses-backlog-drain-v1') {
   if (!/^SHA256:[A-Za-z0-9+/]{43}$/u.test(fingerprint) || typeof armor !== 'string' || armor.length > 4096) fail();
   const match = /^-----BEGIN SSH SIGNATURE-----\r?\n([A-Za-z0-9+/=\r\n]+)\r?\n-----END SSH SIGNATURE-----\r?\n?$/u.exec(armor as string);
   if (!match) return fail();
@@ -56,7 +57,7 @@ function verifyReleaseSignature(statement: unknown, armor: unknown, fingerprint:
   const signatureType = signature.field().toString();
   const rawSig = signature.field(); signature.done();
   if (keyType !== 'ssh-ed25519' || signatureType !== keyType || rawKey.length !== 32 || rawSig.length !== 64 ||
-      namespace !== 'urm-moses-backlog-drain-v1' || reserved.length !== 0 || hash !== 'sha512' ||
+      namespace !== expectedNamespace || reserved.length !== 0 || hash !== 'sha512' ||
       'SHA256:' + createHash('sha256').update(keyBlob).digest('base64').replace(/=+$/u, '') !== fingerprint) fail();
   const digest = createHash('sha512').update(canonicalMosesRecoveryJson(statement)).digest();
   const data = Buffer.concat([Buffer.from('SSHSIG'), field(namespace), field(reserved), field(hash), field(digest)]);
@@ -88,4 +89,49 @@ export function verifyMosesBacklogWitness(bytes: Buffer, receipt: MosesBacklogRe
         surface.unguardedOwners.length || typeof surface.evidenceSha256 !== 'string' || !/^[a-f0-9]{64}$/u.test(surface.evidenceSha256)) return fail();
   }
   return statement.observedAt as string;
+}
+
+export interface VerifiedBacklogClosure {
+  documentCreateTime: string;
+  documentUpdateTime: string;
+  sourceAudioStatus: 'PROCESSING' | 'ERROR';
+  observedAt: string;
+  beforeSha256: string;
+  afterSha256: string;
+  unchangedFieldsSha256: string;
+  changedMessage: boolean;
+}
+
+export function verifyMosesBacklogClosure(bytes: Buffer, prior: MosesBacklogHeldPredecessor, releaseSha: string,
+  fingerprint: string, now = Date.now()): VerifiedBacklogClosure {
+  if (!bytes.length || bytes.length > 65536) return fail();
+  const envelope = record(JSON.parse(bytes.toString('utf8')));
+  const s = record(envelope.statement);
+  verifyReleaseSignature(s, envelope.signature, fingerprint, 'urm-moses-backlog-closure-v1');
+  if (s.schema !== 1 || s.kind !== 'moses_backlog_predecessor_closure' || s.project !== 'urm-app' ||
+      s.sermonId !== prior.sermonId || s.requestVersion !== prior.requestVersion || s.predecessorTaskId !== prior.taskId ||
+      s.predecessorCustodySha256 !== prior.custodySha256 || s.predecessorReceiptSha256 !== mosesRecoveryDigest(prior) ||
+      s.releaseSha !== releaseSha || releaseSha === prior.releaseSha || s.documentCreateTime !== prior.documentCreateTime ||
+      typeof s.documentUpdateTime !== 'string' || !/^\d+\.\d{9}$/u.test(s.documentUpdateTime) ||
+      (s.sourceAudioStatus !== 'PROCESSING' && s.sourceAudioStatus !== 'ERROR')) return fail();
+  const observed = canonicalTime(s.observedAt);
+  const source = record(s.source), transport = record(s.transport), queue = record(s.queue);
+  const digest = (v: unknown): v is string => typeof v === 'string' && /^[a-f0-9]{64}$/u.test(v);
+  const empty = (v: unknown) => Array.isArray(v) && v.length === 0;
+  const changedMessage = isDeepStrictEqual(source.changedFields, ['status.audioStatus', 'status.message']);
+  const changedAudioOnly = isDeepStrictEqual(source.changedFields, ['status.audioStatus']);
+  if (observed > now || [source, transport, queue].some(part => {
+    const at = canonicalTime(part.readAt);
+    return at < now - 300_000 || at < canonicalTime(prior.queuedAt) || at > observed;
+  }) || !digest(source.beforeSha256) || !digest(source.afterSha256) ||
+      !digest(source.unchangedFieldsSha256) || (s.sourceAudioStatus === 'PROCESSING'
+        ? (!changedAudioOnly && !changedMessage) || source.beforeSha256 === source.afterSha256
+        : !empty(source.changedFields) || source.beforeSha256 !== source.afterSha256) ||
+      !digest(transport.evidenceSha256) || transport.taskRetired !== true || transport.ownerExited !== true || !empty(transport.activeOwners) ||
+      !digest(queue.evidenceSha256) || queue.youtubeTaskAbsent !== true || queue.storageTaskAbsent !== true ||
+      !empty(queue.activeClaims) || queue.outputsAbsent !== true) return fail();
+  return { documentCreateTime: prior.documentCreateTime, documentUpdateTime: s.documentUpdateTime,
+    sourceAudioStatus: s.sourceAudioStatus, observedAt: s.observedAt as string,
+    beforeSha256: source.beforeSha256, afterSha256: source.afterSha256, unchangedFieldsSha256: source.unchangedFieldsSha256,
+    changedMessage };
 }
