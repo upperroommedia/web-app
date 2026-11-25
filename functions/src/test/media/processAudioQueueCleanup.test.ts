@@ -27,7 +27,7 @@ describe('cleanupDeletedSermonProcessAudioState', () => {
     ]);
   });
 
-  it('removes a deleted probe sermon and advances the queue to the next deferred sermon', async () => {
+  it('retires a deleted probe to waiting and preserves the next browser deferral and attempted generation', async () => {
     await Promise.all([
       database.ref('processAudioRequests/deleted-sermon').set({
         sermonId: 'deleted-sermon',
@@ -103,52 +103,60 @@ describe('cleanupDeletedSermonProcessAudioState', () => {
         probeRequestVersion: 'probe-version',
         probeStartedAt: '2026-03-28T00:00:30.000Z',
         deferredYouTubeTaskCount: 1,
+        blockerReason: 'browser_fallback_unavailable',
+        lastAttemptedAuthRecoveryGeneration: 'already-attempted',
       }),
     ]);
 
-    const result = await cleanupDeletedSermonProcessAudioState({
-      database,
-      sermonId: 'deleted-sermon',
-      ownerId: 'test-owner',
-      targetUri: 'https://example.com/process-audio',
-    });
-
-    expect(result).toEqual({
-      deletedTaskId: 'probe-task-id',
-      advancedProbe: true,
-      deferredRemaining: 0,
-    });
+    const deferred = database.ref('processAudioQueues/youtube/deferred/next-sermon');
+    const nextRequest = database.ref('processAudioRequests/next-sermon');
+    const before = await Promise.all([deferred.get(), nextRequest.get()]);
+    const clean = () => cleanupDeletedSermonProcessAudioState({ database, sermonId: 'deleted-sermon', ownerId: 'test-owner' });
+    expect(await clean()).toEqual({ deletedTaskId: 'probe-task-id', advancedProbe: false, deferredRemaining: 1 });
     expect(mockTaskDelete).toHaveBeenCalledWith('probe-task-id');
-    expect(mockTaskEnqueue).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: 'next-sermon',
-        youtubeUrl: 'https://youtu.be/next',
-      }),
-      expect.objectContaining({
-        uri: 'https://yt-worker.upperroommedia.org/process-audio',
-      })
-    );
-
-    const [deletedRequest, nextDeferred, queueState, nextRequest] = await Promise.all([
-      database.ref('processAudioRequests/deleted-sermon').get(),
-      database.ref('processAudioQueues/youtube/deferred/next-sermon').get(),
-      database.ref('processAudioQueues/youtube/state').get(),
-      database.ref('processAudioRequests/next-sermon').get(),
-    ]);
-
-    expect(deletedRequest.exists()).toBe(false);
-    expect(nextDeferred.exists()).toBe(false);
-    expect(queueState.val()).toMatchObject({
-      probeMode: 'browser_fallback',
-      probeStatus: 'probing',
-      probeTaskSermonId: 'next-sermon',
-      probeRequestVersion: 'next-version',
-      deferredYouTubeTaskCount: 0,
+    expect((await database.ref('processAudioRequests/deleted-sermon').get()).exists()).toBe(false);
+    const state = database.ref('processAudioQueues/youtube/state');
+    const waiting = (await state.get()).val();
+    expect(waiting).toMatchObject({
+      probeStatus: 'waiting_for_auth_required_request', probeMode: 'browser_fallback',
+      blockerReason: 'browser_fallback_unavailable', deferredYouTubeTaskCount: 1,
+      lastAttemptedAuthRecoveryGeneration: 'already-attempted',
     });
-    expect(nextRequest.val()).toMatchObject({
-      queuedTaskId: expect.stringMatching(/^pa-/u),
-    });
-    expect(nextRequest.val()?.deferredAt ?? null).toBeNull();
+    expect(waiting.probeTaskSermonId).toBeUndefined();
+    expect(waiting.probeRequestVersion).toBeUndefined();
+    expect(waiting.probeStartedAt).toBeUndefined();
+    expect(waiting.probeDispatchReservationId).toBeUndefined();
+    expect(await clean()).toEqual({ deletedTaskId: null, advancedProbe: false, deferredRemaining: 1 });
+    expect((await state.get()).val()).toEqual(waiting);
+    expect((await deferred.get()).val()).toEqual(before[0].val());
+    expect((await nextRequest.get()).val()).toEqual(before[1].val());
+    expect(mockTaskEnqueue).not.toHaveBeenCalled();
+  });
+
+  it('keeps a newer matching-ID reservation and every other deferred row intact', async () => {
+    const state = database.ref('processAudioQueues/youtube/state');
+    const deferred = database.ref('processAudioQueues/youtube/deferred');
+    const probe = { probeStatus: 'probing', probeMode: 'browser_fallback', probeTaskSermonId: 'deleted-sermon',
+      probeRequestVersion: 'v1', probeStartedAt: '2026-03-28T00:00:00.000Z', probeDispatchReservationId: 'old',
+      lastAttemptedAuthRecoveryGeneration: 'used', deferredYouTubeTaskCount: 1 };
+    await Promise.all([state.set(probe), deferred.set({ neighbour: { reason: 'browser_fallback_unavailable' } })]);
+    const newer = { ...probe, probeDispatchReservationId: 'new-owner', probeStartedAt: '2026-03-28T00:05:00.000Z' };
+    const result = await cleanupDeletedSermonProcessAudioState({database, sermonId:'deleted-sermon', ownerId:'delete-event',
+      classifySource: async () => { await state.set(newer); return 'ordinary'; } });
+    expect(result.disposition).toBe('stale');
+    expect((await state.get()).val()).toEqual(newer);
+    expect((await deferred.get()).val()).toEqual({neighbour: {reason:'browser_fallback_unavailable'}});
+    expect(mockTaskEnqueue).not.toHaveBeenCalled();
+  });
+
+  it('removes its own deferral without recounting a different in-flight reservation', async () => {
+    const queue = database.ref('processAudioQueues/youtube');
+    const state = { probeTaskSermonId:'other', probeStatus:'probing', probeDispatchReservationId:'active',
+      probeRequestVersion:'current', deferredYouTubeTaskCount: 1, lastAttemptedAuthRecoveryGeneration:'used' };
+    await queue.set({state, deferred:{deleted:{reason:'old'}, other:{reason:'keep'}}});
+    await cleanupDeletedSermonProcessAudioState({database, sermonId:'deleted', ownerId:'delete-event'});
+    expect((await queue.get()).val()).toEqual({state:{...state,deferredYouTubeTaskCount:0},deferred:{other:{reason:'keep'}}});
+    expect(mockTaskEnqueue).not.toHaveBeenCalled();
   });
 });
 
@@ -214,7 +222,7 @@ describe('native deletion ownership', () => {
     expect(remove).toHaveBeenCalledTimes(1);
   });
 
-  it.each(['permanent-fence','deferred-reservation'])('preserves a foreign %s when advancing a deleted probe', async kind => {
+  it.each(['permanent-fence','deferred-reservation'])('leaves a foreign %s untouched when a deleted probe retires', async kind => {
     const source = 'deleted-probe-' + kind, candidate = 'reserved-probe-' + kind;
     const deferred = database.ref('processAudioQueues/youtube/deferred/' + candidate);
     const state = database.ref('processAudioQueues/youtube/state');

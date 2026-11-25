@@ -80,13 +80,6 @@ const sermonOnDelete = onDocumentDeleted('sermons/{sermonId}', async event => {
   try {
     const result = await cleanupDeletedSermonProcessAudioState({
       database: firebaseAdmin.database(), sermonId: id, ownerId: 'sermon-delete:' + event.id, deletedAtMs: beforeMs,
-      isLiveProbeCandidate: async entry => {
-        const [candidate, mirror] = await doc.firestore.getAll(doc.parent.doc(entry.sermonId),
-          doc.firestore.collection(MOSES_BACKLOG_DOCUMENT_FENCES).doc(entry.sermonId));
-        return candidate.exists && !mirror.exists && 'youtubeUrl' in entry.payload && candidate.get('youtubeUrl') === entry.payload.youtubeUrl &&
-          candidate.get('sourceStartTime') === entry.payload.startTime && candidate.get('trimDurationSeconds') === entry.payload.duration &&
-          candidate.get('status.audioStatus') === 'PENDING';
-      },
       classifySource: backlog => classifyDeletedSermon(doc, incarnation, backlog),
     });
     if (result.disposition || (await doc.get()).exists) return;
