@@ -10,6 +10,7 @@ import {
   enqueueTaskViaCloudTasksApi,
   getPostLiveArchiveRetryDelaySeconds,
   getYouTubeQueueScopeDiagnostics,
+  markProcessAudioRequestRunning,
   normalizeCloudTasksAccessToken,
   releaseYouTubeAuthAlertReservation,
   resumeDeferredYouTubeQueueOnStartup,
@@ -18,6 +19,8 @@ import {
 } from '../src/processAudioQueueStore';
 import {
   PROCESS_AUDIO_DEFERRED_DISPOSITIONS,
+  computeProcessAudioRequestVersion,
+  computeProcessAudioTaskId,
   getYouTubeFailureDisposition,
 } from '../../../packages/contracts/processAudioQueue';
 import {
@@ -35,7 +38,7 @@ class MockSnapshot {
   }
 
   val(): unknown {
-    return this.value;
+    return this.value ?? null;
   }
 }
 
@@ -99,7 +102,8 @@ class MockRef {
         return { committed: false, snapshot: new MockSnapshot(serverCurrent) };
       }
       if (serverCurrent === null || typeof serverCurrent === 'undefined') {
-        this.store[this.key] = coldNext;
+        if (coldNext === null) delete this.store[this.key];
+        else this.store[this.key] = coldNext;
         return { committed: true, snapshot: new MockSnapshot(coldNext) };
       }
     }
@@ -108,7 +112,8 @@ class MockRef {
     if (typeof next === 'undefined') {
       return { committed: false, snapshot: new MockSnapshot(this.store[this.key]) };
     }
-    this.store[this.key] = next;
+    if (next === null) delete this.store[this.key];
+    else this.store[this.key] = next;
     return { committed: true, snapshot: new MockSnapshot(next) };
   }
 }
@@ -140,7 +145,202 @@ function createMockDatabase(
   };
 }
 
+async function testMosesPilotAdmission(): Promise<void> {
+  const payload = { id: 'pilot', startTime: 0, duration: 10, youtubeUrl: 'https://www.youtube.com/watch?v=dKaZ89SkVYY' };
+  const queuedAt = '2020-01-01T00:00:00.000Z';
+  const eventId = 'synthetic-create-event';
+  const version = computeProcessAudioRequestVersion(payload);
+  const originalTask = computeProcessAudioTaskId(payload.id, version, `sermon-create:${eventId}:${queuedAt}`);
+  const requestPath = 'processAudioRequests/pilot';
+  const marker = { eventId, taskId: originalTask, queuedAt, requestVersion: version };
+  const nonce = '11111111-1111-4111-8111-111111111111';
+  const receiptPath = 'processAudioMosesGuestPilotIntents/pilot';
+  const receipt = { ...marker, nonce, phase: 'acknowledged' };
+  const original = {
+    sermonId: payload.id, sourceType: 'youtube', currentPayload: payload, currentRequestVersion: version,
+    queuedAt, updatedAt: queuedAt, queuedTaskId: originalTask, transientRetryCount: 0, mosesGuestPilot: marker,
+  };
+  const pilotEnv: NodeJS.ProcessEnv = {
+    NODE_ENV: 'production', PROCESS_AUDIO_RUNTIME_ENV: 'production', PROCESS_AUDIO_RUNTIME_HOST: 'hetzner',
+    PROCESS_AUDIO_RUNTIME_PROFILE: 'hetzner', FIREBASE_PROJECT_ID: 'urm-app', GOOGLE_CLOUD_PROJECT: 'urm-app',
+    GCLOUD_PROJECT: 'urm-app', PROCESS_AUDIO_MOSES_GUEST_PILOT_SERMON_ID: payload.id,
+    PROCESS_AUDIO_MOSES_GUEST_PILOT_NOT_BEFORE: queuedAt, MOSES_GUEST_AUDIO_VIDEO_IDS: 'dKaZ89SkVYY',
+    MOSES_GUEST_AUDIO_ENABLED: 'true',
+    FIRESTORE_EMULATOR_HOST: undefined,
+    FIREBASE_DATABASE_EMULATOR_HOST: undefined, FUNCTIONS_EMULATOR: undefined,
+  };
+  const originalEnv = Object.fromEntries(Object.keys(pilotEnv).map((key) => [key, process.env[key]]));
+  function setEnv(env: NodeJS.ProcessEnv): void {
+    for (const [key, value] of Object.entries(env)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+  try {
+    setEnv(pilotEnv);
+    const mark = (database: ReturnType<typeof createMockDatabase>, deliveredNonce: string | null = nonce, taskId = originalTask) =>
+      markProcessAudioRequestRunning({ database: database as any, payload, requestId: 'request', taskId,
+        verifiedMosesPilotIntentNonce: deliveredNonce ?? undefined });
+    const fixture = (overrides: Record<string, unknown> = {}) =>
+      createMockDatabase({ [requestPath]: original, [receiptPath]: receipt, ...overrides });
+    const fresh = () => fixture();
+    const admitted = fresh();
+    assert.equal(await mark(admitted), true);
+    assert.deepEqual(Object.keys(admitted.store), [requestPath, receiptPath], 'admission must not add queue state');
+    assert.deepEqual(admitted.store[receiptPath], receipt, 'consumer preserves the producer receipt');
+    assert.equal(Object.hasOwn(admitted.store[requestPath] as object, 'mosesGuestPilot'), false, 'first mark consumes pilot');
+    assert.equal(await mark(admitted), 'stale', 'a second admission must not adopt running state');
+    const replacement = { id: payload.id, startTime: 0, duration: 11, storageFilePath: 'sermons/pilot', deleteOriginal: false, skipTranscode: false };
+    const replacementVersion = computeProcessAudioRequestVersion(replacement);
+    const staged = { ...original, nextPayload: replacement, nextRequestVersion: replacementVersion, nextUpdatedAt: queuedAt };
+    assert.equal(await mark(fixture({ [requestPath]: staged })), false, 'pre-staged successor follows the legacy route');
+    const cold = createMockDatabase({ [requestPath]: original, [receiptPath]: receipt }, [], {}, {}, [requestPath]);
+    assert.equal(await mark(cold), true, 'an empty local RTDB cache must recheck the original server record');
+    const raced = createMockDatabase({ [requestPath]: original, [receiptPath]: receipt }, [], {
+      [requestPath]: [(store) => {
+        store[requestPath] = staged;
+      }],
+    });
+    assert.equal(await mark(raced), false, 'replacement before the running transaction keeps acquisition on Hetzner');
+    assert.equal((raced.store[requestPath] as typeof original & { nextRequestVersion: string }).nextRequestVersion, replacementVersion);
+    const dispatched: Array<{ queue: string; payload: unknown; headers: Record<string, string> }> = [];
+    setProcessAudioTaskQueueFactoryForTesting(() => ({ async delete(): Promise<void> {} }));
+    setCloudTasksApiDepsForTesting({
+      authFactory: async () => ({ getAccessToken: async () => 'synthetic-token' }),
+      fetchImpl: async (url, init) => {
+        const { task } = JSON.parse(String(init?.body));
+        const request = task.httpRequest;
+        dispatched.push({ queue: String(url), payload: JSON.parse(Buffer.from(request.body, 'base64').toString()).data, headers: request.headers });
+        return new Response('{}', { status: 200 });
+      },
+    });
+    try {
+      const alreadyProcessed = (database: ReturnType<typeof createMockDatabase>) =>
+        completeProcessAudioSuccess({ database: database as any, payload, requestId: 'processed-delivery',
+          taskId: originalTask, alreadyProcessed: true, verifiedMosesPilotIntentNonce: nonce });
+      const matching = fresh();
+      assert.equal(await alreadyProcessed(matching), undefined);
+      assert.equal((matching.store[requestPath] as { lastCompletedRequestVersion: string }).lastCompletedRequestVersion, version);
+      assert.equal((matching.store[requestPath] as { queuedTaskId: unknown }).queuedTaskId, null);
+      assert.equal(await alreadyProcessed(matching), 'stale', 'a repeated shortcut cannot complete a second time');
+      for (const row of [null, { ...original, currentRequestVersion: 'foreign' }, { ...original, queuedTaskId: 'another-task' }]) {
+        const stale = fixture({ [requestPath]: row });
+        assert.equal(await alreadyProcessed(stale), 'stale');
+        assert.deepEqual((await stale.ref(requestPath).get()).val(), row, 'processed shortcut must not complete missing or foreign work');
+      }
+      const lostAtCompletion = createMockDatabase({ [requestPath]: original, [receiptPath]: receipt }, [], {
+        [requestPath]: [(store) => { delete store[requestPath]; }],
+      });
+      assert.equal(await alreadyProcessed(lostAtCompletion), 'stale');
+      assert.equal(lostAtCompletion.store[requestPath], undefined);
+      assert.equal(dispatched.length, 0);
+      const processedWithSuccessor = fixture({ [requestPath]: staged });
+      assert.equal(await alreadyProcessed(processedWithSuccessor), undefined);
+      assert.equal(await alreadyProcessed(processedWithSuccessor), 'stale');
+      assert.equal(dispatched.length, 1);
+      assert.deepEqual(dispatched[0].payload, replacement);
+      assert.equal((processedWithSuccessor.store[requestPath] as { sourceType: string }).sourceType, 'storage');
+      dispatched.length = 0;
+      process.env.MOSES_GUEST_AUDIO_ENABLED = 'false';
+      await completeProcessAudioSuccess({ database: raced as any, payload, requestId: 'request', taskId: originalTask });
+      assert.equal(dispatched.length, 1);
+      assert.match(dispatched[0].queue, /\/queues\/processaudiofiletask\/tasks$/u);
+      assert.deepEqual(dispatched[0].payload, replacement);
+      assert.ok(!('x-urm-moses-pilot-intent' in dispatched[0].headers));
+      assert.equal((raced.store[requestPath] as { sourceType: string }).sourceType, 'storage');
+      assert.equal((raced.store[requestPath] as { nextPayload: unknown }).nextPayload, null);
+    } finally {
+      setCloudTasksApiDepsForTesting(null);
+      setProcessAudioTaskQueueFactoryForTesting(null);
+      setEnv(pilotEnv);
+    }
+    const foreignRows = [
+      undefined,
+      { ...original, currentRequestVersion: 'foreign-version' },
+      { ...original, runningRequestId: 'another-worker' },
+      { ...original, queuedTaskId: 'another-task' },
+      { ...original, nextPayload: replacement, nextRequestVersion: 'incorrect', nextUpdatedAt: queuedAt },
+    ];
+    for (const foreign of foreignRows) {
+      const conflicted = createMockDatabase({ [requestPath]: original, [receiptPath]: receipt }, [], {
+        [requestPath]: [(store) => { if (foreign) store[requestPath] = foreign; else delete store[requestPath]; }],
+      });
+      assert.equal(await mark(conflicted), 'stale');
+      assert.deepEqual(conflicted.store[requestPath], foreign, 'stale task must leave the newly observed row untouched');
+    }
+    const unverified = fresh();
+    assert.equal(await mark(unverified, null), false, 'unverified delivery');
+    assert.equal(Object.hasOwn(unverified.store[requestPath] as object, 'mosesGuestPilot'), false);
+    assert.equal(await mark(fresh(), '22222222-2222-4222-8222-222222222222'), false, 'nonce belongs to another task');
+    assert.equal(await mark(fresh(), 'invalid'), false, 'malformed nonce');
+    const removedBeforeAdmission = fixture({ [requestPath]: null });
+    assert.equal(await mark(removedBeforeAdmission), 'stale', 'an acknowledged pilot cannot recreate a removed task');
+    assert.equal(removedBeforeAdmission.store[requestPath], null);
+    assert.equal(await mark(fixture({ [receiptPath]: null })), false, 'older record without producer receipt');
+    for (const patch of [
+      { phase: 'prepared' }, { phase: 'sending' }, { phase: 'rejected' }, { nonce: null },
+      { eventId: 'wrong' }, { taskId: 'wrong' }, { requestVersion: 'wrong' }, { queuedAt: 'wrong' }, { extra: true },
+    ]) {
+      assert.equal(await mark(fixture({ [receiptPath]: { ...receipt, ...patch } })), false);
+    }
+    const pending = fixture({ [requestPath]: { ...original, queuedTaskId: null, mosesGuestPilot: null, mosesGuestPilotIntent: marker } });
+    assert.equal(await mark(pending), false, 'an unacknowledged create intent cannot authorize guest acquisition');
+    assert.equal(Object.hasOwn(pending.store[requestPath] as object, 'mosesGuestPilotIntent'), false);
+    for (const patch of [
+      { queuedTaskId: 'another-task' }, { currentRequestVersion: 'another-version' },
+      { currentPayload: { ...payload, duration: 11 } }, { runningRequestId: 'incumbent' },
+    ]) {
+      const changed = { ...original, ...patch };
+      const otherOwner = fixture({ [requestPath]: changed });
+      assert.equal(await mark(otherOwner), 'stale');
+      assert.deepEqual(otherOwner.store[requestPath], changed);
+    }
+    for (const patch of [
+      { updatedAt: 'later' },
+      { transientRetryCount: 1 }, { authenticatedDeferralAttemptCount: 1 }, { deferredAt: queuedAt },
+      { nextPayload: payload }, { lastCompletedRequestVersion: version },
+      { mosesGuestPilot: null }, { mosesGuestPilot: 'damaged' }, { mosesGuestPilot: { ...marker, extra: true } },
+      { mosesGuestPilot: { ...marker, eventId: 'other-create-event' } }, { mosesGuestPilot: { ...marker, eventId: '' } },
+      { mosesGuestPilot: { ...marker, queuedAt: '2020-01-01T00:00:01.000Z' } },
+      { mosesGuestPilot: { ...marker, requestVersion: 'wrong' } }, { mosesGuestPilot: { ...marker, taskId: 'wrong' } },
+      { mosesGuestPilotIntent: marker },
+    ]) {
+      assert.equal(await mark(fixture({ [requestPath]: { ...original, ...patch } })), false, JSON.stringify(patch));
+    }
+    for (const [path, value] of [
+      ['processAudioQueues/youtube/state/probeTaskSermonId', payload.id],
+      ['processAudioQueues/youtube/deferred/pilot', { requestVersion: version }],
+    ] as const) {
+      assert.equal(await mark(fixture({ [path]: value })), false, path);
+    }
+    const deferredTask = computeProcessAudioTaskId(payload.id, version, 'deferred-dispatch:0');
+    const deferred = { ...original, queuedTaskId: deferredTask, mosesGuestPilot: { ...marker, taskId: deferredTask } };
+    assert.equal(await mark(fixture({ [requestPath]: deferred, [receiptPath]: { ...receipt, taskId: deferredTask } }), nonce, deferredTask), false,
+      'a deferred task cannot be turned into a first delivery by changing the marker task ID');
+    const future = new Date(Date.now() + 86_400_000).toISOString();
+    const futureTask = computeProcessAudioTaskId(payload.id, version, `sermon-create:${eventId}:${future}`);
+    const futureRecord = { ...original, queuedTaskId: futureTask, queuedAt: future, updatedAt: future,
+      mosesGuestPilot: { ...marker, queuedAt: future, taskId: futureTask } };
+    assert.equal(await mark(fixture({ [requestPath]: futureRecord, [receiptPath]: { ...receipt, taskId: futureTask, queuedAt: future } }), nonce, futureTask), false);
+    for (const env of [
+      { PROCESS_AUDIO_MOSES_GUEST_PILOT_NOT_BEFORE: '2020-01-01' },
+      { PROCESS_AUDIO_MOSES_GUEST_PILOT_NOT_BEFORE: '2020-01-01T00:00:00.001Z' },
+      { PROCESS_AUDIO_MOSES_GUEST_PILOT_SERMON_ID: 'another-sermon' },
+      { MOSES_GUEST_AUDIO_VIDEO_IDS: 'aaaaaaaaaaa' },
+    ]) {
+      setEnv({ ...pilotEnv, ...env });
+      assert.equal(await mark(fresh()), false, JSON.stringify(env));
+    }
+    setEnv(pilotEnv);
+    process.env.PROCESS_AUDIO_RUNTIME_ENV = 'staging';
+    assert.equal(await mark(fresh()), false);
+  } finally {
+    setEnv(originalEnv);
+  }
+}
+
 async function main(): Promise<void> {
+  await testMosesPilotAdmission();
   const youtubePayload = {
     id: 'sermon-123',
     startTime: 12,

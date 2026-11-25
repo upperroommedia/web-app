@@ -15,6 +15,8 @@ import { ProcessAudioInputType, sermonStatusType, uploadStatus, sermonStatus } f
 import { isAxiosError } from 'axios';
 import { isMissingSermonDocumentError, isProcessAudioAlreadyRunningError, processAudio } from './processAudio';
 import { CancelToken } from './CancelToken';
+import { reconcileMosesRecovery } from './mosesDeferredRecovery';
+import { readVerifiedMosesPilotIntentNonce, verifyMosesRecoveryDelivery } from './mosesGuestTaskIdentity';
 import { firestoreAdminSermonConverter } from './firestoreAdminDataConverter';
 import { TIMEOUT_SECONDS } from './consts';
 import firebaseAdmin from './firebaseAdmin';
@@ -965,6 +967,13 @@ app.post('/process-audio', processAudioRateLimit, async (request: Request<{}, {}
     audioStatus: sermonStatusType.PROCESSING,
   };
 
+  const recoveryNamed = request.headersDistinct['x-cloudtasks-taskname']?.some((name) => name.split('/').pop()?.startsWith('mr-'));
+  const recovery = recoveryNamed ? await verifyMosesRecoveryDelivery(request.body, request.headersDistinct) : undefined;
+  if (recoveryNamed && (!recovery || !youtubeProcessingEnabled)) {
+    res.status(403).json({ reason: 'invalid_recovery_delivery' });
+    return;
+  }
+
   if (audioSource.type === 'YouTubeUrl' && !youtubeProcessingEnabled) {
     const message = 'This process-audio runtime only supports storage-backed audio processing.';
     log.error('Rejected unsupported YouTube request for storage-only runtime', {
@@ -1004,6 +1013,13 @@ app.post('/process-audio', processAudioRateLimit, async (request: Request<{}, {}
   }
 
   try {
+    if (recovery && await reconcileMosesRecovery(realtimeDB, recovery, ctx.requestId, () => docRef.get()) === 'completed') {
+      res.status(200).send();
+      return;
+    }
+    const verifiedMosesPilotIntentNonce = !recovery && !('storageFilePath' in data) && !data.skipTranscode
+      ? await readVerifiedMosesPilotIntentNonce(audioSource, request.headersDistinct)
+      : undefined;
     const cancelToken = new CancelToken();
     const processAudioResult = await executeWithTimeout(
       () =>
@@ -1023,25 +1039,59 @@ app.post('/process-audio', processAudioRateLimit, async (request: Request<{}, {}
           data.introUrl,
           data.outroUrl,
           ctx,
-          taskId
+          taskId,
+          verifiedMosesPilotIntentNonce,
+          recovery
         ),
       cancelToken.cancel,
       timeoutMillis
     );
+    if (recovery) {
+      const outcome = await reconcileMosesRecovery(realtimeDB, recovery, ctx.requestId, () => docRef.get());
+      if (outcome !== 'completed') throw new Error('Deferred audio recovery remains unconfirmed');
+      res.status(200).send();
+      return;
+    }
+    if (processAudioResult.staleTask) {
+      log.info('Acknowledged superseded process-audio task', { taskId });
+      res.status(202).json({ skipped: true, reason: 'stale_task' });
+      return;
+    }
     if (processAudioResult.youtubeSuccessfulAcquisitionAuthority) {
       ctx.youtubeSuccessfulAcquisitionAuthority = processAudioResult.youtubeSuccessfulAcquisitionAuthority;
     }
-    await completeProcessAudioSuccess({
+    const completion = await completeProcessAudioSuccess({
       database: realtimeDB,
       payload: data,
       requestId: ctx.requestId,
       taskId,
       ctx,
       alreadyProcessed: processAudioResult.alreadyProcessed,
+      verifiedMosesPilotIntentNonce,
+    }).catch((error: unknown) => {
+      if (!processAudioResult.alreadyProcessed || !verifiedMosesPilotIntentNonce) throw error;
+      // The audio was already complete. A failed queue read or write cannot establish which delivery owns it.
+      log.error('Could not confirm queue completion for an already-processed pilot', { taskId });
+      return 'unconfirmed' as const;
     });
+    if (completion === 'unconfirmed') {
+      res.status(503).json({ reason: 'queue_completion_unconfirmed' });
+      return;
+    }
+    if (completion === 'stale') {
+      log.info('Acknowledged superseded process-audio task', { taskId });
+      res.status(202).json({ skipped: true, reason: 'stale_task' });
+      return;
+    }
     log.info('Request completed successfully');
     res.status(200).send();
   } catch (e) {
+    if (recovery) {
+      // The reserved row and its receipt retain custody. Never apply ordinary task failure/defer effects here.
+      log.warn('Deferred audio recovery remains held', { taskId });
+      res.status(503).json({ reason: 'recovery_unconfirmed' });
+      return;
+    }
     let message = 'Something Went Wrong';
     if (isAxiosError(e)) {
       // Check Axios errors first since AxiosError extends Error

@@ -5,6 +5,7 @@ import { functionsSentryDsnSecret, initFunctionsSentry } from '../../functions/s
 import addintrooutrotaskgenerator from './addIntroOutroTaskGenerator';
 import getyoutubecookiestatus from './getYouTubeCookieStatus';
 import { processaudiofiletask, processaudioyoutubetask } from './processAudioTask';
+import recoverDeferredMosesAudio from './recoverDeferredMosesAudio';
 import setyoutubecookies from './setYouTubeCookies';
 import sermonAudioCreateTrigger from './sermonAudioCreateTrigger';
 
@@ -17,6 +18,7 @@ setGlobalOptions({
 exports.addintrooutrotaskgenerator = addintrooutrotaskgenerator;
 exports.processaudiofiletask = processaudiofiletask;
 exports.processaudioyoutubetask = processaudioyoutubetask;
+exports.recoverdeferredmosesaudio = recoverDeferredMosesAudio;
 exports.getyoutubecookiestatus = getyoutubecookiestatus;
 exports.setyoutubecookies = setyoutubecookies;
 exports.sermonaudiocreatetrigger = sermonAudioCreateTrigger;

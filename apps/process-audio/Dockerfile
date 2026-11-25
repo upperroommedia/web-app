@@ -3,7 +3,7 @@
 ARG NODE_VERSION=22
 ARG PNPM_VERSION=11.28.2
 ARG PROCESS_AUDIO_RUNTIME_PROFILE=hetzner
-ARG YT_DLP_VERSION=2026.08.19
+ARG YT_DLP_VERSION=2026.11.23
 ARG FFMPEG_VERSION=8.1
 ARG FFMPEG_BUILD_BASE_URL=https://github.com/BtbN/FFmpeg-Builds/releases/download/latest
 ARG BGUTIL_YTDLP_POT_PROVIDER_VERSION=1.3.2
@@ -98,6 +98,7 @@ RUN apt-get update -o Acquire::Retries=3 -o Acquire::http::No-Cache=true -o Acqu
     && apt-get install -y --no-install-recommends curl tar xz-utils \
     && rm -rf /var/lib/apt/lists/*
 
+COPY apps/process-audio/yt-dlp.lock /tmp/yt-dlp.lock
 RUN if [ "${PROCESS_AUDIO_RUNTIME_PROFILE}" = "hetzner" ]; then \
       apt-get update -o Acquire::Retries=3 -o Acquire::https::No-Cache=true -o Acquire::http::Pipeline-Depth=0 \
       && apt-get install -y --no-install-recommends python3 python3-pip unzip aria2 \
@@ -105,9 +106,8 @@ RUN if [ "${PROCESS_AUDIO_RUNTIME_PROFILE}" = "hetzner" ]; then \
       && export DENO_INSTALL=/usr/local \
       && curl -fsSL https://deno.land/install.sh | sh -s -- v${DENO_VERSION} \
       && deno --version \
-      && python3 -m pip install --break-system-packages --no-cache-dir \
-          "yt-dlp[default]==${YT_DLP_VERSION}" \
-          "bgutil-ytdlp-pot-provider==${BGUTIL_YTDLP_POT_PROVIDER_VERSION}" \
+      && python3 -m pip install --break-system-packages --ignore-installed --no-cache-dir \
+          --only-binary=:all: --index-url https://pypi.org/simple --require-hashes -r /tmp/yt-dlp.lock \
       && test "$(yt-dlp --version)" = "${YT_DLP_VERSION}" \
       && python3 -c "from importlib.metadata import version; actual = version('bgutil-ytdlp-pot-provider'); expected = '${BGUTIL_YTDLP_POT_PROVIDER_VERSION}'; assert actual == expected, f'expected bgutil {expected}, got {actual}'" \
       && echo "yt-dlp version: $(yt-dlp --version)" \
