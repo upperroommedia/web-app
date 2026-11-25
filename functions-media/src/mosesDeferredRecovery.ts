@@ -4,7 +4,7 @@ import type { Database } from 'firebase-admin/database';
 import type { AddIntroOutroInputType } from '@upperroom/contracts/addIntroOutro/types';
 import { computeProcessAudioRequestVersion, sanitizeProcessAudioPayload } from '@upperroom/contracts/processAudioQueue';
 import {
-  computeMosesRecoveryCustody, computeMosesRecoveryTaskId, MOSES_RECOVERY_RECEIPTS_PATH, mosesRecoveryDigest,
+  computeMosesRecoveryCustody, computeMosesRecoveryTaskId, MOSES_BACKLOG_FENCES_PATH, MOSES_RECOVERY_RECEIPTS_PATH, mosesRecoveryDigest,
   type MosesDeferredRecoveryReceipt, type MosesDeferredRecoveryReservation, type MosesRecoverySelection,
 } from '@upperroom/contracts/mosesDeferredRecovery';
 import { MOSES_PILOT_INTENTS_PATH, PilotTaskNotCreated, type PilotTransport } from './legacyMosesGuestPilot';
@@ -20,6 +20,7 @@ export interface MosesRecoveryDependencies {
   database: Database;
   readNative: (payload: AddIntroOutroInputType, ownedTaskId?: string) => Promise<NativeDocument>;
   prepare: () => Promise<PilotTransport>;
+  assertCohortIdle?: () => Promise<void>;
 }
 
 function isWaiting(state: unknown): boolean {
@@ -95,12 +96,14 @@ export async function recoverDeferredMosesRequest(
       typeof snapshot.child('acquiredAt').val() === 'number' && Date.now() - snapshot.child('acquiredAt').val() < 40_000));
   };
   const run = async () => {
-    const [requestSnap, deferredSnap, queue, lock, progress, pilot, stored] = await Promise.all([
+    if (mode === 'apply' && deps.assertCohortIdle) await deps.assertCohortIdle();
+    const [requestSnap, deferredSnap, queue, lock, progress, pilot, stored, backlog] = await Promise.all([
       database.ref(`processAudioRequests/${sermonId}`).get(), database.ref(`${QUEUE}/deferred/${sermonId}`).get(),
       database.ref(`${QUEUE}/state`).get(), database.ref(`processAudioLocks/${sermonId}`).get(),
       database.ref(`addIntroOutro/${sermonId}`).get(), database.ref(`${MOSES_PILOT_INTENTS_PATH}/${sermonId}`).get(),
-      database.ref(`${MOSES_RECOVERY_RECEIPTS_PATH}/${sermonId}/${requestVersion}`).get(),
+      database.ref(`${MOSES_RECOVERY_RECEIPTS_PATH}/${sermonId}/${requestVersion}`).get(), database.ref(`${MOSES_BACKLOG_FENCES_PATH}/${sermonId}`).get(),
     ]);
+    requireEvidence(!backlog.exists());
     let receipt = stored.val() as MosesDeferredRecoveryReceipt | null;
     if (receipt) {
       requireEvidence(receipt.schema === 1 && receipt.kind === 'deferred_cookie' &&

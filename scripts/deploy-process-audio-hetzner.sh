@@ -224,9 +224,10 @@ append_moses_guest_pilot_env() {
     return 1
   fi
 
-  python3 - "$env_file" <<'MOSES_GUEST_ENV_PY'
+  python3 -I - "$env_file" "$RELEASE_SHA" <<'MOSES_GUEST_ENV_PY'
 import base64
 import datetime
+import json
 import os
 import re
 import stat
@@ -256,9 +257,56 @@ def setting(key, pattern):
         sys.exit(f'Invalid production Moses pilot setting {key}')
     return value
 
-video = setting('MOSES_GUEST_AUDIO_VIDEO_IDS', r'[A-Za-z0-9_-]{11}')
 recovery_enabled = setting('PROCESS_AUDIO_MOSES_RECOVERY_ENABLED', r'true|false') if 'PROCESS_AUDIO_MOSES_RECOVERY_ENABLED' in os.environ else 'false'
-if recovery_enabled == 'true':
+if 'PROCESS_AUDIO_MOSES_RECOVERY_COHORT_B64URL' in os.environ:
+    if recovery_enabled != 'true':
+        sys.exit('Moses recovery cohort requires explicit production recovery activation')
+    cohort = setting('PROCESS_AUDIO_MOSES_RECOVERY_COHORT_B64URL', r'[A-Za-z0-9_-]{2,12000}')
+    try:
+        decoded = base64.urlsafe_b64decode(cohort + '=' * (-len(cohort) % 4))
+        if base64.urlsafe_b64encode(decoded).rstrip(b'=').decode('ascii') != cohort:
+            raise ValueError()
+        manifest = json.loads(decoded)
+    except (ValueError, UnicodeError):
+        sys.exit('Invalid production Moses recovery cohort encoding')
+    if not isinstance(manifest, dict) or set(manifest) != {'schema', 'rows'} or manifest['schema'] != 1:
+        sys.exit('Invalid production Moses recovery cohort')
+    rows = manifest['rows']
+    if not isinstance(rows, list) or not 1 <= len(rows) <= 14:
+        sys.exit('Production Moses recovery cohort must contain 1–14 approved rows')
+    refs, sermons, videos = set(), set(), set()
+    for row in rows:
+        if not isinstance(row, dict) or set(row) - {'ref', 'kind', 'sermonId', 'videoId', 'requestVersion'}:
+            sys.exit('Invalid production Moses recovery cohort row')
+        if not all(isinstance(row.get(k), str) and re.fullmatch(pattern, row[k], re.ASCII) for k, pattern in (
+            ('ref', r'[A-Za-z0-9_-]{1,64}'), ('sermonId', r'[A-Za-z0-9_-]{1,128}'), ('videoId', r'[A-Za-z0-9_-]{11}'),
+        )):
+            sys.exit('Invalid production Moses recovery cohort row identity')
+        kind = row.get('kind')
+        version = row.get('requestVersion')
+        if kind not in ('failed_request', 'missing_admission') or (
+            (kind != 'missing_admission' or 'requestVersion' in row) and
+            (not isinstance(version, str) or not re.fullmatch(r'[a-f0-9]{16}', version))
+        ):
+            sys.exit('Invalid production Moses recovery cohort request identity')
+        if row['ref'] in refs or row['sermonId'] in sermons:
+            sys.exit('Duplicate production Moses recovery cohort identity')
+        refs.add(row['ref'])
+        sermons.add(row['sermonId'])
+        videos.add(row['videoId'])
+    release = setting('PROCESS_AUDIO_MOSES_BACKLOG_RELEASE_SHA', r'[a-f0-9]{40}')
+    if release != sys.argv[2]:
+        sys.exit('Moses backlog worker must match the active deployment release')
+    video = ','.join(sorted(videos))
+    if os.environ.get('MOSES_GUEST_AUDIO_VIDEO_IDS', video) != video:
+        sys.exit('Moses transport allowlist must match the approved cohort videos')
+    selection = {
+        'PROCESS_AUDIO_MOSES_RECOVERY_ENABLED': 'true',
+        'PROCESS_AUDIO_MOSES_RECOVERY_COHORT_B64URL': cohort,
+        'PROCESS_AUDIO_MOSES_BACKLOG_RELEASE_SHA': release,
+    }
+elif recovery_enabled == 'true':
+    video = setting('MOSES_GUEST_AUDIO_VIDEO_IDS', r'[A-Za-z0-9_-]{11}')
     if setting('PROCESS_AUDIO_MOSES_RECOVERY_VIDEO_ID', r'[A-Za-z0-9_-]{11}') != video:
         sys.exit('Moses recovery video must match the transport allowlist')
     selection = {
@@ -268,7 +316,16 @@ if recovery_enabled == 'true':
         'PROCESS_AUDIO_MOSES_RECOVERY_REQUEST_VERSION': setting('PROCESS_AUDIO_MOSES_RECOVERY_REQUEST_VERSION', r'[a-f0-9]{16}'),
         'PROCESS_AUDIO_MOSES_RECOVERY_CUSTODY_SHA256': setting('PROCESS_AUDIO_MOSES_RECOVERY_CUSTODY_SHA256', r'[a-f0-9]{64}'),
     }
+    if 'PROCESS_AUDIO_MOSES_RECOVERY_KIND' in os.environ:
+        kind = setting('PROCESS_AUDIO_MOSES_RECOVERY_KIND', r'deferred_cookie|failed_request|missing_admission')
+        selection['PROCESS_AUDIO_MOSES_RECOVERY_KIND'] = kind
+        if kind != 'deferred_cookie':
+            release = setting('PROCESS_AUDIO_MOSES_BACKLOG_RELEASE_SHA', r'[a-f0-9]{40}')
+            if release != sys.argv[2]:
+                sys.exit('Moses backlog worker must match the active deployment release')
+            selection['PROCESS_AUDIO_MOSES_BACKLOG_RELEASE_SHA'] = release
 else:
+    video = setting('MOSES_GUEST_AUDIO_VIDEO_IDS', r'[A-Za-z0-9_-]{11}')
     sermon = setting('PROCESS_AUDIO_MOSES_GUEST_PILOT_SERMON_ID', r'[A-Za-z0-9_-]{1,128}')
     start = setting('PROCESS_AUDIO_MOSES_GUEST_PILOT_NOT_BEFORE', r'\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z')
     try:

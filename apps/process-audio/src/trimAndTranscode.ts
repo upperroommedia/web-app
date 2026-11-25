@@ -1,3 +1,5 @@
+import { updateUnreservedAudioDocument } from './mosesBacklogRecovery';
+import type { MosesBacklogStorage } from './mosesBacklogStorage';
 import { CancelToken } from './CancelToken';
 import { Bucket, File } from '@google-cloud/storage';
 import { Database, Reference } from 'firebase-admin/database';
@@ -83,18 +85,20 @@ const trimAndTranscode = async (
   duration?: number,
   ctx?: LogContext,
   mosesPilotEligible = false,
-  deferredRecovery = false
+  deferredRecovery = false,
+  backlogStorage?: MosesBacklogStorage
 ): Promise<File> => {
   const log = createLoggerWithContext(ctx);
   const outputFile = bucket.file(outputFilePath);
   const contentDisposition = customMetadata.title
     ? `inline; filename="${customMetadata.title}.mp3"`
     : 'inline; filename="untitled.mp3"';
-  const writeStream = outputFile.createWriteStream({
+  const uploadOptions = {
     contentType: 'audio/mpeg',
     metadata: { contentDisposition, metadata: customMetadata },
     timeout: 30 * 60 * 1000, // 30 minutes in milliseconds
-  });
+  };
+  const writeStream = outputFile.createWriteStream(backlogStorage ? backlogStorage.uploadOptions(outputFilePath, uploadOptions) : uploadOptions);
   let inputSource: string | undefined;
   let usingMosesGuestSource = false;
   let proc: ReturnType<typeof spawn> | undefined;
@@ -466,6 +470,7 @@ const trimAndTranscode = async (
         }
       });
     });
+    if (backlogStorage) void writeStreamDone.catch(() => {});
 
     const promiseResult = await new Promise<File>((resolve, reject) => {
       ffmpegProc.on('error', (err) => {
@@ -498,6 +503,7 @@ const trimAndTranscode = async (
         // FFmpeg succeeded - now wait for GCS upload to complete
         try {
           await writeStreamDone;
+          backlogStorage?.recordUpload(outputFile);
           log.info('Trim and transcode completed successfully', {
             outputPath: outputFilePath,
             sourceType: audioSource.type,
@@ -600,8 +606,7 @@ const trimAndTranscode = async (
             });
             previousPercent = initialTranscodePercent; // Start transcode progress tracking at current progress
             // Recovery keeps its document generation in the sequential owner. RTDB reports this progress stage.
-            if (!deferredRecovery) await docRef
-              .update({
+            if (!deferredRecovery) await updateUnreservedAudioDocument(docRef, {
                 status: {
                   ...sermonStatus,
                   audioStatus: sermonStatusType.PROCESSING,

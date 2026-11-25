@@ -1,6 +1,7 @@
 """Exercise the deploy script's production preflight with synthetic inputs and no remote operations."""
 
 import base64
+import json
 import os
 import stat
 import subprocess
@@ -120,6 +121,36 @@ esac
             ('PROCESS_AUDIO_MOSES_RECOVERY_CUSTODY_SHA256', 'b' * 63),
         ):
             self.assert_rejected(self.render({**settings, **recovery, key: value}), access=False)
+
+    def test_backlog_cohort_has_an_exact_production_release_and_video_scope(self):
+        def encode(rows):
+            return base64.urlsafe_b64encode(json.dumps({'schema': 1, 'rows': rows}).encode()).rstrip(b'=').decode()
+
+        rows = [
+            {'ref': 'failed-01', 'kind': 'failed_request', 'sermonId': 'failed_original',
+             'videoId': 'aBcDe-FgH_0', 'requestVersion': 'a' * 16},
+            {'ref': 'missing-01', 'kind': 'missing_admission', 'sermonId': 'missing_original',
+             'videoId': 'aaaaaaaaaaa'},
+        ]
+        settings = {key: value for key, value in pilot.items() if 'GUEST_PILOT' not in key and key != 'MOSES_GUEST_AUDIO_VIDEO_IDS'}
+        scope = {
+            'PROCESS_AUDIO_MOSES_RECOVERY_ENABLED': 'true',
+            'PROCESS_AUDIO_MOSES_RECOVERY_COHORT_B64URL': encode(rows),
+            'PROCESS_AUDIO_MOSES_BACKLOG_RELEASE_SHA': 'b' * 40,
+            'RELEASE_SHA': 'b' * 40,
+        }
+        code, rendered, access = self.render({**settings, **scope})
+        self.assertEqual(code, 0)
+        self.assertTrue(access)
+        self.assertIn('MOSES_GUEST_AUDIO_VIDEO_IDS=aBcDe-FgH_0,aaaaaaaaaaa\n', rendered)
+        self.assertNotIn('GUEST_PILOT', rendered)
+        for override in (
+            {'RELEASE_SHA': 'c' * 40},
+            {'PROCESS_AUDIO_MOSES_RECOVERY_COHORT_B64URL': encode([rows[0], rows[0]])},
+            {'PROCESS_AUDIO_MOSES_RECOVERY_COHORT_B64URL': encode([{**rows[0], 'requestVersion': None}])},
+            {'MOSES_GUEST_AUDIO_VIDEO_IDS': 'c' * 11},
+        ):
+            self.assert_rejected(self.render({**settings, **scope, **override}), access=False)
 
     def test_reject_invalid_scope_or_input_before_secret_access(self):
         for key, value in (
