@@ -60,7 +60,7 @@ export const prepareLegacyMosesPilotTransport = async (): Promise<PilotTransport
   return (operation, data, intent) => sendLegacyMosesPilotTask(operation, data, intent, fetch, async () => token);
 };
 
-const getProviderToken = async () => {
+export const getProviderToken = async () => {
   // GoogleAuth.getProjectId() also accepts an environment override. The production
   // sender instead checks the runtime's project and uses its attached identity.
   const project = await fetch('http://metadata.google.internal/computeMetadata/v1/project/project-id', {
@@ -80,7 +80,8 @@ const getProviderToken = async () => {
 // inspecting this precise task, including its intent nonce, data, target, and OIDC.
 export const sendLegacyMosesPilotTask = async (
   operation: 'create' | 'inspect', payload: AddIntroOutroInputType, intent: PilotSendIntent,
-  fetchProvider: typeof fetch = fetch, authorize: () => Promise<string> = getProviderToken
+  fetchProvider: typeof fetch = fetch, authorize: () => Promise<string> = getProviderToken,
+  inspectDispatchedRecovery = false
 ): Promise<void> => {
   const taskName = `${QUEUE}/tasks/${intent.taskId}`;
   const headers = { 'Content-Type': 'application/json', [INTENT_HEADER]: intent.nonce };
@@ -115,7 +116,8 @@ export const sendLegacyMosesPilotTask = async (
           request?.httpMethod === 'POST' && request.url === TARGET && request.body === body &&
           actor?.audience === TARGET && actor.serviceAccountEmail === INVOKER && request.oauthToken === undefined &&
           actualHeaders[INTENT_HEADER] === intent.nonce && actualHeaders['content-type'] === 'application/json' &&
-          (actual.dispatchCount ?? 0) === 0 && (actual.responseCount ?? 0) === 0) return;
+          (((actual.dispatchCount ?? 0) === 0 && (actual.responseCount ?? 0) === 0) ||
+            (inspectDispatchedRecovery && operation === 'inspect' && /^mr-[a-f0-9]{48}$/u.test(intent.taskId)))) return;
     }
   } catch {
     throw new Error(`Cloud Tasks pilot ${operation} outcome could not be verified.`);

@@ -96,6 +96,29 @@ esac
             'PROCESS_AUDIO_MOSES_GUEST_TASK_OIDC_SERVICE_ACCOUNT': account,
         })
 
+    def test_recovery_is_separately_configured_and_exactly_scoped(self):
+        recovery = {
+            'PROCESS_AUDIO_MOSES_RECOVERY_ENABLED': 'true',
+            'PROCESS_AUDIO_MOSES_RECOVERY_VIDEO_ID': pilot['MOSES_GUEST_AUDIO_VIDEO_IDS'],
+            'PROCESS_AUDIO_MOSES_RECOVERY_SERMON_ID': 'existing_sermon',
+            'PROCESS_AUDIO_MOSES_RECOVERY_REQUEST_VERSION': 'a' * 16,
+            'PROCESS_AUDIO_MOSES_RECOVERY_CUSTODY_SHA256': 'b' * 64,
+        }
+        settings = {key: value for key, value in pilot.items() if 'GUEST_PILOT' not in key}
+        code, rendered, access = self.render({**settings, **recovery})
+        self.assertEqual(code, 0)
+        self.assertTrue(access)
+        self.assertNotIn('GUEST_PILOT', rendered)
+        for key, value in recovery.items():
+            self.assertIn(f'{key}={value}\n', rendered)
+        for key, value in (
+            ('MOSES_GUEST_AUDIO_ENABLED', 'false'),
+            ('PROCESS_AUDIO_MOSES_RECOVERY_VIDEO_ID', 'f' * 11),
+            ('PROCESS_AUDIO_MOSES_RECOVERY_REQUEST_VERSION', 'a' * 15),
+            ('PROCESS_AUDIO_MOSES_RECOVERY_CUSTODY_SHA256', 'b' * 63),
+        ):
+            self.assert_rejected(self.render({**settings, **recovery, key: value}), access=False)
+
     def test_reject_invalid_scope_or_input_before_secret_access(self):
         for key, value in (
             ('MOSES_GUEST_AUDIO_ENABLED', 'yes'), ('MOSES_GUEST_AUDIO_ORIGIN', origin + '/'),

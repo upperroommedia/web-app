@@ -82,7 +82,8 @@ const trimAndTranscode = async (
   startTime?: number,
   duration?: number,
   ctx?: LogContext,
-  mosesPilotEligible = false
+  mosesPilotEligible = false,
+  deferredRecovery = false
 ): Promise<File> => {
   const log = createLoggerWithContext(ctx);
   const outputFile = bucket.file(outputFilePath);
@@ -305,6 +306,7 @@ const trimAndTranscode = async (
               if (valid) {
                 downloadedFile = result.filePath;
                 usingMosesGuestSource = true;
+                if (deferredRecovery) ctx.mosesVerifiedTransfer = true;
                 ctx.youtubeSuccessfulAcquisitionAuthority = 'public_provider';
                 log.info('Moses supplied verified guest audio', { acquisitionHost: 'moses', authority: 'public_provider' });
                 updateDownloadProgress(100);
@@ -314,6 +316,9 @@ const trimAndTranscode = async (
                 log.info('Continuing YouTube acquisition on Hetzner', { mosesFallbackReason: 'invalid_audio' });
               }
             } else {
+              if (deferredRecovery && !['ineligible_video', 'remote_refused', 'remote_busy'].includes(result.reason)) {
+                throw new Error('Unconfirmed deferred guest audio attempt');
+              }
               log.info('Continuing YouTube acquisition on Hetzner', { mosesFallbackReason: result.reason });
             }
           } else {
@@ -594,7 +599,8 @@ const trimAndTranscode = async (
               log.error('Failed to set initial transcode progress', { error: err });
             });
             previousPercent = initialTranscodePercent; // Start transcode progress tracking at current progress
-            await docRef
+            // Recovery keeps its document generation in the sequential owner. RTDB reports this progress stage.
+            if (!deferredRecovery) await docRef
               .update({
                 status: {
                   ...sermonStatus,

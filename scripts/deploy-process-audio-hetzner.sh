@@ -209,7 +209,13 @@ append_moses_guest_pilot_env() {
   local env_name="$1" env_file="$2"
   [[ "$env_name" == production ]] || return 0
   case "${MOSES_GUEST_AUDIO_ENABLED-false}" in
-    false) return 0 ;;
+    false)
+      if [[ "${PROCESS_AUDIO_MOSES_RECOVERY_ENABLED-false}" != false ]]; then
+        echo "Moses recovery requires the production guest transport" >&2
+        return 1
+      fi
+      return 0
+      ;;
     true) ;;
     *) echo "MOSES_GUEST_AUDIO_ENABLED must be true or false" >&2; return 1 ;;
   esac
@@ -251,12 +257,28 @@ def setting(key, pattern):
     return value
 
 video = setting('MOSES_GUEST_AUDIO_VIDEO_IDS', r'[A-Za-z0-9_-]{11}')
-sermon = setting('PROCESS_AUDIO_MOSES_GUEST_PILOT_SERMON_ID', r'[A-Za-z0-9_-]{1,128}')
-start = setting('PROCESS_AUDIO_MOSES_GUEST_PILOT_NOT_BEFORE', r'\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z')
-try:
-    datetime.datetime.strptime(start, '%Y-%m-%dT%H:%M:%S.%fZ')
-except ValueError:
-    sys.exit('Invalid UTC date for PROCESS_AUDIO_MOSES_GUEST_PILOT_NOT_BEFORE')
+recovery_enabled = setting('PROCESS_AUDIO_MOSES_RECOVERY_ENABLED', r'true|false') if 'PROCESS_AUDIO_MOSES_RECOVERY_ENABLED' in os.environ else 'false'
+if recovery_enabled == 'true':
+    if setting('PROCESS_AUDIO_MOSES_RECOVERY_VIDEO_ID', r'[A-Za-z0-9_-]{11}') != video:
+        sys.exit('Moses recovery video must match the transport allowlist')
+    selection = {
+        'PROCESS_AUDIO_MOSES_RECOVERY_ENABLED': 'true',
+        'PROCESS_AUDIO_MOSES_RECOVERY_VIDEO_ID': video,
+        'PROCESS_AUDIO_MOSES_RECOVERY_SERMON_ID': setting('PROCESS_AUDIO_MOSES_RECOVERY_SERMON_ID', r'[A-Za-z0-9_-]{1,128}'),
+        'PROCESS_AUDIO_MOSES_RECOVERY_REQUEST_VERSION': setting('PROCESS_AUDIO_MOSES_RECOVERY_REQUEST_VERSION', r'[a-f0-9]{16}'),
+        'PROCESS_AUDIO_MOSES_RECOVERY_CUSTODY_SHA256': setting('PROCESS_AUDIO_MOSES_RECOVERY_CUSTODY_SHA256', r'[a-f0-9]{64}'),
+    }
+else:
+    sermon = setting('PROCESS_AUDIO_MOSES_GUEST_PILOT_SERMON_ID', r'[A-Za-z0-9_-]{1,128}')
+    start = setting('PROCESS_AUDIO_MOSES_GUEST_PILOT_NOT_BEFORE', r'\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z')
+    try:
+        datetime.datetime.strptime(start, '%Y-%m-%dT%H:%M:%S.%fZ')
+    except ValueError:
+        sys.exit('Invalid UTC date for PROCESS_AUDIO_MOSES_GUEST_PILOT_NOT_BEFORE')
+    selection = {
+        'PROCESS_AUDIO_MOSES_GUEST_PILOT_SERMON_ID': sermon,
+        'PROCESS_AUDIO_MOSES_GUEST_PILOT_NOT_BEFORE': start,
+    }
 subject = setting('PROCESS_AUDIO_MOSES_GUEST_TASK_OIDC_SUBJECT', r'[1-9][0-9]{20}')
 version = setting('MOSES_GUEST_AUDIO_TOKEN_VERSION', r'[1-9][0-9]{0,18}')
 
@@ -283,11 +305,12 @@ with env_file.open('a', encoding='ascii') as output:
     output.write(
         f'MOSES_GUEST_AUDIO_ENABLED=true\nMOSES_GUEST_AUDIO_ORIGIN={origin}\n'
         f'MOSES_GUEST_AUDIO_VIDEO_IDS={video}\nMOSES_GUEST_AUDIO_TOKEN={token.decode("ascii")}\n'
-        f'PROCESS_AUDIO_MOSES_GUEST_PILOT_SERMON_ID={sermon}\nPROCESS_AUDIO_MOSES_GUEST_PILOT_NOT_BEFORE={start}\n'
         f'PROCESS_AUDIO_MOSES_GUEST_TASK_OIDC_AUDIENCE={audience}\n'
         f'PROCESS_AUDIO_MOSES_GUEST_TASK_OIDC_SERVICE_ACCOUNT={account}\n'
         f'PROCESS_AUDIO_MOSES_GUEST_TASK_OIDC_SUBJECT={subject}\n'
     )
+    for key, value in selection.items():
+        output.write(f'{key}={value}\n')
 MOSES_GUEST_ENV_PY
 }
 

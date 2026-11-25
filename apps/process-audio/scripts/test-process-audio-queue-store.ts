@@ -38,7 +38,7 @@ class MockSnapshot {
   }
 
   val(): unknown {
-    return this.value;
+    return this.value ?? null;
   }
 }
 
@@ -102,7 +102,8 @@ class MockRef {
         return { committed: false, snapshot: new MockSnapshot(serverCurrent) };
       }
       if (serverCurrent === null || typeof serverCurrent === 'undefined') {
-        this.store[this.key] = coldNext;
+        if (coldNext === null) delete this.store[this.key];
+        else this.store[this.key] = coldNext;
         return { committed: true, snapshot: new MockSnapshot(coldNext) };
       }
     }
@@ -111,7 +112,8 @@ class MockRef {
     if (typeof next === 'undefined') {
       return { committed: false, snapshot: new MockSnapshot(this.store[this.key]) };
     }
-    this.store[this.key] = next;
+    if (next === null) delete this.store[this.key];
+    else this.store[this.key] = next;
     return { committed: true, snapshot: new MockSnapshot(next) };
   }
 }
@@ -224,7 +226,7 @@ async function testMosesPilotAdmission(): Promise<void> {
       for (const row of [null, { ...original, currentRequestVersion: 'foreign' }, { ...original, queuedTaskId: 'another-task' }]) {
         const stale = fixture({ [requestPath]: row });
         assert.equal(await alreadyProcessed(stale), 'stale');
-        assert.deepEqual(stale.store[requestPath], row, 'processed shortcut must not complete missing or foreign work');
+        assert.deepEqual((await stale.ref(requestPath).get()).val(), row, 'processed shortcut must not complete missing or foreign work');
       }
       const lostAtCompletion = createMockDatabase({ [requestPath]: original, [receiptPath]: receipt }, [], {
         [requestPath]: [(store) => { delete store[requestPath]; }],

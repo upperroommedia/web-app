@@ -197,11 +197,12 @@ async function deleteExistingTask(
   }
 }
 
-async function withProcessAudioQueueClaim<T>(
+export async function withProcessAudioQueueClaim<T>(
   database: Database,
   sermonId: string,
   ownerId: string,
-  run: () => Promise<T>
+  run: () => Promise<T>,
+  mayRecoverExpiredOwner?: (requestId: string) => boolean
 ): Promise<T> {
   const claimRef = database.ref(`${PROCESS_AUDIO_QUEUE_CLAIMS_PATH}/${sermonId}`);
 
@@ -213,7 +214,8 @@ async function withProcessAudioQueueClaim<T>(
       const requestId = typeof record?.requestId === 'string' ? record.requestId : null;
       const expired = !acquiredAt || now - acquiredAt > PROCESS_AUDIO_QUEUE_CLAIM_TTL_MS;
 
-      if (requestId && requestId !== ownerId && !expired) {
+      if (mayRecoverExpiredOwner && current !== null && (!requestId || !Number.isFinite(acquiredAt) || acquiredAt <= 0)) return undefined;
+      if (requestId && requestId !== ownerId && (!expired || (mayRecoverExpiredOwner && !mayRecoverExpiredOwner(requestId)))) {
         return;
       }
 
@@ -228,10 +230,7 @@ async function withProcessAudioQueueClaim<T>(
       try {
         return await run();
       } finally {
-        const snapshot = await claimRef.get();
-        if (snapshot.val()?.requestId === ownerId) {
-          await claimRef.remove();
-        }
+        await claimRef.transaction(current => current === null || current?.requestId === ownerId ? null : undefined, undefined, false);
       }
     }
 
@@ -673,6 +672,13 @@ export async function queueOrReplaceProcessAudioRequest(args: {
     let declinedReceipt: PilotReceipt | null = null;
     let declinedPending: Record<string, unknown> | null = null;
     const [requestSnapshot, lockSnapshot] = await Promise.all([requestRef.get(), lockRef.get()]);
+    if (requestSnapshot.child('deferredAt').exists()) {
+      const reservation = await database.ref(`${YOUTUBE_QUEUE_DEFERRED_PATH}/${sanitizedPayload.id}/mosesRecoveryReservation`).get();
+      if (reservation.exists()) {
+        if (requestSnapshot.child('currentRequestVersion').val() === requestVersion) return { action: 'unchanged', requestVersion, sourceType };
+        throw new Error('An audio recovery currently owns this deferred request. Retry the edit after it settles.');
+      }
+    }
     // An old Eventarc redelivery must still honor the permanent receipt after rollback.
     // Only the native create path reads this extra row; ordinary callable requests do not.
     if (args.initialCreate) {
@@ -877,7 +883,9 @@ export async function beginYouTubeQueueProbe(args: {
       dependencyScope: entry.dependencyScope ?? 'authenticated_session',
     })
   );
-  const probeCandidate = deferredEntries.sort(
+  const available = deferredEntries.filter(entry => !('mosesRecoveryReservation' in entry));
+  if (deferredEntries.length && !available.length) return;
+  const probeCandidate = available.sort(
     (left, right) => Date.parse(left.deferredAt) - Date.parse(right.deferredAt)
   )[0];
   const deferredCount = deferredEntries.length;
@@ -950,7 +958,7 @@ export async function beginYouTubeQueueProbe(args: {
         })
       )
       .sort((left, right) => Date.parse(left.deferredAt) - Date.parse(right.deferredAt));
-    const liveProbeCandidate = liveDeferredEntries[0];
+    const liveProbeCandidate = liveDeferredEntries.find(entry => !('mosesRecoveryReservation' in entry));
     if (
       liveProbeCandidate?.sermonId !== probeCandidate.sermonId ||
       liveProbeCandidate.requestVersion !== probeCandidate.requestVersion

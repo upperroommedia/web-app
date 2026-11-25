@@ -73,6 +73,21 @@ jobs:
           latest_ffmpeg_version="$(curl -fsSL https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/tags/latest | python3 -c "import json, re, sys; data = json.load(sys.stdin); names = {asset.get('name', '') for asset in data.get('assets', [])}; versions = []; pattern = re.compile(r'^ffmpeg-n([0-9]+(?:\\.[0-9]+){1,2})-latest-linux64-gpl-\\1\\.tar\\.xz$'); [versions.append(match.group(1)) for name in names for match in [pattern.match(name)] if match and f'ffmpeg-n{match.group(1)}-latest-linuxarm64-gpl-{match.group(1)}.tar.xz' in names]; assert versions, 'No compatible BtbN ffmpeg release assets found'; print(sorted(set(versions), key=lambda s: [int(x) for x in s.split('.')])[-1])")"
           latest_deno_version="$(curl -fsSL https://api.github.com/repos/denoland/deno/releases/latest | python3 -c "import json, sys; data = json.load(sys.stdin); tag = (data.get('tag_name') or '').strip(); assert tag, 'No latest Deno release tag found'; print(tag.lstrip('v'))")"
           latest_pot_provider_version="$(curl -fsSL https://pypi.org/pypi/bgutil-ytdlp-pot-provider/json | python3 -c "import json, sys; data = json.load(sys.stdin); version = (data.get('info', {}).get('version') or '').strip(); assert version, 'No latest bgutil PO-token provider version found'; print(version)")"
+          python3 - "$latest_ytdlp_version" "$latest_pot_provider_version" <<'PY'
+          import pathlib, sys
+          lock_path = pathlib.Path('apps/process-audio/yt-dlp.lock')
+          if not lock_path.is_file():
+              # The scheduled workflow checks out staging, which can predate the locked installer.
+              if str(lock_path) not in pathlib.Path('apps/process-audio/Dockerfile').read_text():
+                  sys.exit(0)
+              sys.exit(f'Missing required process-audio wheel lock: {lock_path}')
+          lock = lock_path.read_text().splitlines()
+          for name, proposed in zip(('yt-dlp', 'bgutil-ytdlp-pot-provider'), sys.argv[1:]):
+              pins = [line.split()[0] for line in lock if line.startswith(name + '==')]
+              if pins != [f'{name}=={proposed}']:
+                  sys.exit(f'Refresh and review apps/process-audio/yt-dlp.lock for {name}=={proposed} '
+                           'with Python 3.11 Linux wheel hashes before applying this media runtime bump.')
+          PY
           provider_registry_token="$(curl -fsSL --get 'https://auth.docker.io/token' --data-urlencode 'service=registry.docker.io' --data-urlencode 'scope=repository:brainicism/bgutil-ytdlp-pot-provider:pull' | python3 -c "import json, sys; token = json.load(sys.stdin).get('token', '').strip(); assert token, 'No Docker Hub registry token returned'; print(token)")"
           latest_pot_provider_digest="$(curl -fsSI -H "Authorization: Bearer ${provider_registry_token}" -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' "https://registry-1.docker.io/v2/brainicism/bgutil-ytdlp-pot-provider/manifests/${latest_pot_provider_version}" | tr -d '\r' | awk 'tolower($1) == "docker-content-digest:" { print $2 }')"
           [[ "$latest_pot_provider_digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "Could not resolve OCI digest for bgutil provider ${latest_pot_provider_version}" >&2; exit 1; }
