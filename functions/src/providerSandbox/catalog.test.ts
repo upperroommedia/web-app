@@ -50,6 +50,8 @@ test('import preserves opaque aliases, seeds numeric virtualSCowner, sourceprove
   const find = (family: string, id: string) =>
     plan.resources.find((value) => value.family === family && value.id === id)!;
   expect(find('media-items', 'old-media').body._embedded['media-series'].id).toBe('old-series');
+  expect(find('list-rows', 'old-row').body.method).toBe('static');
+  expect(find('list-rows', 'overflow-row').body.method).toBe('static');
   expect(find('list-rows', 'old-row').body._embedded['source-list'].id).toBe('old-list');
   expect(find('list-rows', 'overflow-row').body._embedded.list.id).toBe('overflow-list');
   expect(plan.resources.find((value) => value.family === 'taggings')?.body._embedded.tag.id).toBe('old-tag');

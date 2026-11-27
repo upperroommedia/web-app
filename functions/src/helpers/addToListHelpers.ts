@@ -823,10 +823,11 @@ export async function patchListRows(
       target: { provider: 'subsplash', account: 'app:9XTSHD', resourceType: 'list', resourceId: listId },
       method: 'PATCH',
       payload,
+      normalizeAcknowledgement: (result) => normalizeSubsplashListPatchAck(result, listId),
       send: async () => {
         const response = await axios(config);
         assertSynchronousProviderMutationCompleted(response);
-        return { completion: 'acknowledged', result: normalizeSubsplashListPatchAck(response.data, listId) };
+        return { completion: 'acknowledged', result: response.data };
       },
     });
     const patchedRows = response?._embedded?.['list-rows'];

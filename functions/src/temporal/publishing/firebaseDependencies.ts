@@ -25,7 +25,10 @@ import { buildPublishingMutationResourcePlan, assertMutationResourcePlanCurrent 
 import { runWithSoundCloudAccessToken } from '../../soundcloudSecrets';
 import { getAuthenticatedSoundCloudAccountId, formatTagList } from '../../soundcloudClient';
 import type { ProviderMutationResource } from './providerMutationGuard';
-import { abortProvablyUnsentProviderMutationSessionsForJob } from './providerMutationGuard';
+import {
+  abortProvablyUnsentProviderMutationSessionsForJob,
+  ForeignProviderMutationLockError,
+} from './providerMutationGuard';
 import { reconcilePublishingDeletionCheckpoints } from './providerDeletion';
 import { deletePublishingSubsplashMedia, deletePublishingSoundCloudTrack } from './providerDeletion';
 import {
@@ -210,7 +213,17 @@ async function beginMembershipMutation(
     };
   };
   const plan = await rebuild();
-  await beginProviderMutationPlan(plan);
+  try {
+    await beginProviderMutationPlan(plan);
+  } catch (error) {
+    // We have not acquired this membership plan or issued any of its requests.
+    if (step === 'lists' && intent.action === 'publish' && error instanceof ForeignProviderMutationLockError)
+      throw Object.assign(new Error('Another publishing job owns the selected lists.'), {
+        code: 'PUBLISHING_LIST_RESOURCE_BUSY',
+        mutationSessionId: error.mutationSessionId,
+      });
+    throw error;
+  }
   try {
     await assertMutationResourcePlanCurrent(plan, rebuild);
   } catch {

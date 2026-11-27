@@ -158,6 +158,7 @@ export function createPublishingActivities(dependencies: PublishingDomainDepende
             'PUBLISHING_AUDIO_TRANSCODE_FAILED',
             'PUBLISHING_SOUNDCLOUD_DECISION_REQUIRED',
             'PUBLISHING_PROVIDER_ALLOCATION_PENDING',
+            'PUBLISHING_LIST_RESOURCE_BUSY',
             'PUBLISHING_DELETION_SETTLEMENT_PENDING',
             'PUBLISHING_LEGACY_SOUNDCLOUD_RETENTION_REQUIRED',
           ].includes(candidate)
@@ -191,6 +192,7 @@ export function createPublishingActivities(dependencies: PublishingDomainDepende
                 'PROVIDER_MUTATION_GRAPH_CHANGED_UNSENT',
                 'PROVIDER_MUTATION_UNRESOLVED',
                 'PROVIDER_MUTATION_RESULT_REPAIR_REQUIRED',
+                'PUBLISHING_LIST_RESOURCE_BUSY',
               ].includes(code) ||
               code === 'SOUNDCLOUD_RECONNECT_REQUIRED' ||
               code === 'PUBLISHING_PERMISSION_CHANGED' ||
@@ -322,8 +324,10 @@ export function createPublishingActivities(dependencies: PublishingDomainDepende
       code:
         | 'PUBLISHING_RETRY_EXHAUSTED'
         | 'PUBLISHING_PROVIDER_ALLOCATION_REVIEW_REQUIRED'
+        | 'PUBLISHING_LIST_RESOURCE_REVIEW_REQUIRED'
         | 'PUBLISHING_DELETION_SETTLEMENT_REVIEW_REQUIRED' = 'PUBLISHING_RETRY_EXHAUSTED',
-      blockingJobId?: string
+      blockingJobId?: string,
+      mutationSessionId?: string
     ): Promise<void> {
       const known: PublishingStep[] = [
         'subsplash-media',
@@ -342,6 +346,12 @@ export function createPublishingActivities(dependencies: PublishingDomainDepende
           state: 'failed',
           code,
           ...(blockingJobId && /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(blockingJobId) ? { blockingJobId } : {}),
+          ...(code === 'PUBLISHING_LIST_RESOURCE_REVIEW_REQUIRED' &&
+          step === 'lists' &&
+          mutationSessionId &&
+          /^[a-f0-9]{64}$/.test(mutationSessionId)
+            ? { mutationSessionId }
+            : {}),
         }
       );
     },

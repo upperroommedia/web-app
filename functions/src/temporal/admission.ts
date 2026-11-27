@@ -1,7 +1,7 @@
 import { onCall, HttpsError, type CallableRequest } from 'firebase-functions/v2/https';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { getFirebaseImagesBucket } from '@upperroom/shared/shared/firebaseProjectConfig';
-import type { Transaction } from 'firebase-admin/firestore';
+import type { DocumentSnapshot, Transaction } from 'firebase-admin/firestore';
 import type {
   DurableAdmissionRequest,
   DurableJobCommand,
@@ -22,8 +22,18 @@ import {
 import { createDurableJobStore } from '../../../packages/orchestration/src/job-store';
 import { resolveDurableDomain } from './domainResolver';
 import { domainForIntent } from './ownership';
+import { assertAdmissionReleaseInTransaction } from './releaseControl';
 import { subsplashSecretsWithRuntimeAlerts } from '../subsplashSecrets';
 import { soundcloudSecretsWithRuntimeAlerts } from '../soundcloudSecrets';
+import { isStagingSandboxDatabase } from '../providerSandbox/database';
+import {
+  readSandboxListDecision,
+  readSandboxListCommitReviewStatus,
+  assertSandboxListReviewer,
+  prepareSandboxListReviewRequest,
+  prepareApprovedSandboxListStop,
+  SANDBOX_LIST_STOP_PENDING,
+} from './publishing/sandboxListStopAdmission';
 function uid(request: CallableRequest<unknown>): string {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in to continue.');
   if (request.auth.uid.startsWith('system:'))
@@ -41,9 +51,22 @@ export const getDurableJobReceipt = onCall<{ requestId: string }>(options, async
     throw new HttpsError('invalid-argument', 'Request ID is required.');
   return getServerDurableJobReceipt(actorUid, request.data.requestId);
 });
+export const getSandboxListCommitReviewStatus = onCall<{ jobId: string; approvalId: string }>(
+  options,
+  async (request) => {
+    const actorUid = uid(request);
+    const db = firebaseAdmin.firestore();
+    const projectId = temporalProjectId();
+    if (!isStagingSandboxDatabase(db, projectId))
+      throw new HttpsError('failed-precondition', 'Sandbox list review status is restricted to staging publishing.');
+    assertSandboxListReviewer(await firebaseAdmin.auth().getUser(actorUid), request.auth?.token.auth_time, true);
+    return readSandboxListCommitReviewStatus(db, projectId, actorUid, request.data);
+  }
+);
 export async function commandServerDurableJob(
   actorUid: string,
-  input: DurableJobCommand
+  input: DurableJobCommand,
+  authenticatedAt?: number
 ): Promise<DurableCommandReceipt> {
   if (
     !input ||
@@ -69,6 +92,12 @@ export async function commandServerDurableJob(
     admin = actor.customClaims?.role === 'admin';
   if (actor.disabled || (job.requestedBy !== actorUid && !admin))
     throw new HttpsError('permission-denied', 'You cannot control this job.');
+  const sandboxDecision = readSandboxListDecision(input);
+  if (sandboxDecision) {
+    if (!isStagingSandboxDatabase(db, projectId) || job.kind !== 'sermon.publish')
+      throw new HttpsError('failed-precondition', 'This decision is restricted to staging publishing.');
+    assertSandboxListReviewer(actor, authenticatedAt, false);
+  }
   const jobDomain =
     job.kind === 'maintenance.run'
       ? domainForIntent(job.kind, (await db.collection('durableJobIntents').doc(job.jobId).get()).get('payload') ?? {})
@@ -82,12 +111,21 @@ export async function commandServerDurableJob(
   )
     throw new HttpsError('permission-denied', 'Your role no longer permits this action.');
   const hash = durableInputFingerprint(input);
-  const existing = await commandDoc.get();
-  if (existing.exists) {
-    if (existing.get('inputHash') !== hash)
+  function alreadyAccepted(doc: DocumentSnapshot): DurableCommandReceipt {
+    if (doc.get('inputHash') !== hash)
       throw new HttpsError('already-exists', 'Command ID already used for different input.');
-    return { ...existing.get('receipt'), state: 'already_accepted' } as DurableCommandReceipt;
+    const receipt = doc.get('receipt') as DurableCommandReceipt;
+    if (sandboxDecision?.kind !== 'prepare') return { ...receipt, state: 'already_accepted' };
+    const requestId = admissionKey(actorUid, 'sandbox-list-review:' + input.requestId);
+    if (
+      doc.get('sandboxListReviewRequestId') !== requestId ||
+      (receipt.sandboxListReviewRequestId !== undefined && receipt.sandboxListReviewRequestId !== requestId)
+    )
+      throw new HttpsError('failed-precondition', 'The original review request could not be confirmed.');
+    return { ...receipt, state: 'already_accepted', sandboxListReviewRequestId: requestId };
   }
+  const existing = await commandDoc.get();
+  if (existing.exists) return alreadyAccepted(existing);
   const confirmedUpload =
     input.action === 'resume_upload' &&
     job.kind === 'upload.create' &&
@@ -106,7 +144,10 @@ export async function commandServerDurableJob(
   let resolvedCleanupOnly = false;
   let criticalRepairCertificateId: string | undefined;
   if (input.action === 'resume_upload') await confirmUploadSource(job.requestedBy, input.jobId, input.resolution ?? {});
-  const prepareCommand = async (tx: Transaction): Promise<() => DurableCommandReceipt> => {
+  const prepareCommand = async (
+    tx: Transaction,
+    sandboxStop?: Awaited<ReturnType<typeof prepareApprovedSandboxListStop>>
+  ): Promise<() => DurableCommandReceipt> => {
     const currentActor = await firebaseAdmin.auth().getUser(actorUid);
     if (currentActor.disabled || (job.requestedBy !== actorUid && currentActor.customClaims?.role !== 'admin'))
       throw new HttpsError('permission-denied', 'You can no longer control this job.');
@@ -119,10 +160,7 @@ export async function commandServerDurableJob(
     if (input.action === 'resolve' && currentActor.customClaims?.role !== 'admin')
       throw new HttpsError('permission-denied', 'An active administrator must commit this review.');
     const [fresh, duplicate] = await Promise.all([tx.get(jobDoc), tx.get(commandDoc)]);
-    if (duplicate.exists) {
-      if (duplicate.get('inputHash') !== hash) throw new HttpsError('already-exists', 'Command ID already used.');
-      return () => ({ ...duplicate.get('receipt'), state: 'already_accepted' } as DurableCommandReceipt);
-    }
+    if (duplicate.exists) return () => alreadyAccepted(duplicate);
     if (input.action !== 'resume_upload')
       await createDurableJobStore({ firestore: db, projectId }).assertCurrentInTransaction(tx, {
         jobId: job.jobId,
@@ -176,6 +214,8 @@ export async function commandServerDurableJob(
         args: [],
       };
     if (resolutionSignal) signal = resolutionSignal;
+    if (sandboxStop)
+      signal = { name: 'publishingCriticalRepair', args: [{ certificateId: sandboxStop.certificateId }] };
     const localCancel = input.action === 'cancel' && job.kind === 'upload.create';
     const publishing = jobDomain === 'publishing';
     const cancellationDoc = db.collection('durableJobCancellationIntents').doc(job.jobId);
@@ -187,9 +227,12 @@ export async function commandServerDurableJob(
         cancellation.get('generation') !== fresh.get('generation'))
     )
       throw new HttpsError('failed-precondition', 'Cancellation authority does not match this operation.');
+    if (sandboxStop && cancellation?.exists)
+      throw new HttpsError('failed-precondition', 'This staging job already has a cancellation intent.');
     const cleanupOnly =
       publishing &&
-      (resolvedCleanupOnly ||
+      (sandboxStop !== undefined ||
+        resolvedCleanupOnly ||
         input.action === 'cancel' ||
         cancellation?.exists === true ||
         fresh.get('state') === 'cancel_requested' ||
@@ -245,11 +288,31 @@ export async function commandServerDurableJob(
           acceptedUserCancellation: cancellation?.exists
             ? cancellation.get('acceptedUserCancellation') ?? cancellation.get('purpose') !== 'critical_repair_cleanup'
             : input.action === 'cancel',
-          purpose: criticalRepairCertificateId
+          purpose: sandboxStop
+            ? 'sandbox_list_partial_stop'
+            : criticalRepairCertificateId
             ? 'critical_repair_cleanup'
             : cancellation?.get('purpose') ?? 'user_cancellation',
           ...(input.action === 'resolve' ? { reviewCommandId: commandDoc.id } : {}),
           ...(criticalRepairCertificateId ? { certificateId: criticalRepairCertificateId } : {}),
+          ...(sandboxStop
+            ? {
+                certificateId: sandboxStop.certificateId,
+                approvalId: sandboxStop.approvalId,
+                sessionId: sandboxStop.sessionId,
+              }
+            : {}),
+        });
+      if (sandboxStop)
+        tx.create(db.collection(SANDBOX_LIST_STOP_PENDING).doc(sandboxStop.sessionId), {
+          schemaVersion: 1,
+          ...ref,
+          sessionId: sandboxStop.sessionId,
+          generation: fresh.get('generation'),
+          workflowId: job.workflowId,
+          commandId: commandDoc.id,
+          certificateId: sandboxStop.certificateId,
+          state: 'pending',
         });
       tx.create(commandDoc, {
         schemaVersion: 1,
@@ -267,6 +330,7 @@ export async function commandServerDurableJob(
         nextAttemptAt: 0,
         leaseExpiresAt: 0,
         ...(signal ? { signal } : {}),
+        ...(sandboxStop ? { sandboxListApprovalId: sandboxStop.approvalId } : {}),
       });
       if (input.action !== 'resume_upload')
         tx.update(jobDoc, {
@@ -278,6 +342,13 @@ export async function commandServerDurableJob(
                   ...fresh.get('result'),
                   ...(replacementJobRef ? { replacementJobId: replacementJobRef.jobId } : {}),
                   ...(cleanupOnly ? { resolutionPurpose: 'cleanup' } : {}),
+                  ...(sandboxStop
+                    ? {
+                        mode: sandboxStop.result.mode,
+                        providerEffects: sandboxStop.result.providerEffects,
+                        contentPreserved: sandboxStop.result.contentPreserved,
+                      }
+                    : {}),
                 },
               }
             : {}),
@@ -299,6 +370,32 @@ export async function commandServerDurableJob(
       return receipt;
     };
   };
+  if (sandboxDecision) {
+    const ref = { jobId: job.jobId, projectId };
+    const assertAdmin = async () =>
+      assertSandboxListReviewer(await firebaseAdmin.auth().getUser(actorUid), authenticatedAt, true);
+    return db.runTransaction(async (tx) => {
+      const duplicate = await tx.get(commandDoc);
+      if (duplicate.exists) return alreadyAccepted(duplicate);
+      await assertAdmissionReleaseInTransaction(tx, db, 'sermon.publish', { continuation: true });
+      await assertAdmin();
+      if (sandboxDecision.kind === 'prepare')
+        return prepareSandboxListReviewRequest(tx, db, ref, input, actorUid, hash);
+      const stop = await prepareApprovedSandboxListStop(
+        tx,
+        db,
+        ref,
+        sandboxDecision.approvalId,
+        actorUid,
+        commandDoc.id,
+        input.expectedRevision,
+        assertAdmin
+      );
+      const writeCommand = await prepareCommand(tx, stop);
+      await stop.commit();
+      return writeCommand();
+    });
+  }
   if (input.action === 'resolve') {
     const resolved = await resolveDurableDomain(
       {
@@ -329,5 +426,5 @@ export const commandDurableJob = onCall<DurableJobCommand>(
     timeoutSeconds: 180,
     secrets: [...new Set([...subsplashSecretsWithRuntimeAlerts, ...soundcloudSecretsWithRuntimeAlerts])],
   },
-  (request) => commandServerDurableJob(uid(request), request.data)
+  (request) => commandServerDurableJob(uid(request), request.data, request.auth?.token.auth_time)
 );

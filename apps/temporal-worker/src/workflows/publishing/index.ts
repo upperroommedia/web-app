@@ -82,12 +82,25 @@ const criticalRepair = proxyActivities<{
   repairPublishingCritical(
     ref: PublishingJobRef,
     certificateId: string
-  ): Promise<PublishingStepResult & { mode?: string; providerEffects?: string; contentPreserved?: boolean }>;
+  ): Promise<PublishingStepResult & {
+    mode?: string;
+    providerEffects?: string;
+    contentPreserved?: boolean;
+    nativeCancellationRequired?: true;
+  }>;
 }>({
   startToCloseTimeout: '20 minutes',
   heartbeatTimeout: '30 seconds',
   cancellationType: ActivityCancellationType.WAIT_CANCELLATION_COMPLETED,
   retry: { maximumAttempts: 1 },
+});
+const sandboxStop = proxyActivities<{
+  requestSandboxListNativeCancellation(ref: PublishingJobRef, certificateId: string): Promise<void>;
+}>({
+  taskQueue: 'urm-controls',
+  startToCloseTimeout: '15 seconds',
+  retry: { maximumAttempts: 5 },
+  cancellationType: ActivityCancellationType.WAIT_CANCELLATION_COMPLETED,
 });
 const createReview = proxyActivities<{
   savePublishingCreateReviewCheckpoint(
@@ -132,6 +145,7 @@ async function executePublishingWorkflow(
   const completedStages = new Set<string>();
   let criticalCertificateId = continuation.criticalRepairCertificateId;
   const desiredScope = new CancellationScope();
+  const workflowScope = CancellationScope.current();
   let resumeVersion = continuation.reviewOnly?.resumeRequested ? 1 : 0;
   let consumedReviewResume = 0;
   let reviewCheckpointId = continuation.reviewOnly?.checkpointId;
@@ -215,6 +229,7 @@ async function executePublishingWorkflow(
         [
           'PUBLISHING_AUDIO_PROCESSING',
           'PUBLISHING_PROVIDER_ALLOCATION_PENDING',
+          'PUBLISHING_LIST_RESOURCE_BUSY',
           'PUBLISHING_DELETION_SETTLEMENT_PENDING',
         ].includes(result.code ?? '') &&
         encodingChecks < 120
@@ -232,16 +247,21 @@ async function executePublishingWorkflow(
         result.code === 'PUBLISHING_AUDIO_PROCESSING' ||
         result.code === 'PUBLISHING_TRANSIENT' ||
         result.code === 'PUBLISHING_PROVIDER_ALLOCATION_PENDING' ||
+        result.code === 'PUBLISHING_LIST_RESOURCE_BUSY' ||
         result.code === 'PUBLISHING_DELETION_SETTLEMENT_PENDING'
       ) {
         const exhausted =
           result.code === 'PUBLISHING_DELETION_SETTLEMENT_PENDING'
             ? 'PUBLISHING_DELETION_SETTLEMENT_REVIEW_REQUIRED'
+            : result.code === 'PUBLISHING_LIST_RESOURCE_BUSY'
+            ? 'PUBLISHING_LIST_RESOURCE_REVIEW_REQUIRED'
             : result.code === 'PUBLISHING_PROVIDER_ALLOCATION_PENDING'
             ? 'PUBLISHING_PROVIDER_ALLOCATION_REVIEW_REQUIRED'
             : 'PUBLISHING_RETRY_EXHAUSTED';
         status = { state: 'failed', step, code: exhausted };
-        await attention.projectPublishingAttention(ref, step, exhausted, result.blockingJobId);
+        if (exhausted === 'PUBLISHING_LIST_RESOURCE_REVIEW_REQUIRED')
+          await attention.projectPublishingAttention(ref, step, exhausted, undefined, result.mutationSessionId);
+        else await attention.projectPublishingAttention(ref, step, exhausted, result.blockingJobId);
       }
       // An authenticated control action must reconcile receipt ambiguity or
       // reconnect authorization before sending this signal.
@@ -419,6 +439,7 @@ async function executePublishingWorkflow(
                 mode?: string;
                 providerEffects?: string;
                 contentPreserved?: boolean;
+                nativeCancellationRequired?: true;
               };
               try {
                 result = await criticalRepair.repairPublishingCritical(ref, criticalCertificateId);
@@ -435,6 +456,19 @@ async function executePublishingWorkflow(
                   result.mode === 'partial_stop' &&
                   result.contentPreserved === true &&
                   ['not_started', 'partial'].includes(result.providerEffects ?? '');
+                if (preservedStop && result.nativeCancellationRequired === true && !workflowScope.consideredCancelled) {
+                  while (!workflowScope.consideredCancelled) {
+                    try {
+                      await sandboxStop.requestSandboxListNativeCancellation(ref, criticalCertificateId);
+                      break;
+                    } catch {
+                      await sleep('30 seconds');
+                    }
+                  }
+                  await workflowScope.cancelRequested.catch((failure) => {
+                    if (!isCancellation(failure)) throw failure;
+                  });
+                }
                 break;
               }
               if (result.code === 'PUBLISHING_CRITICAL_REPAIR_PROJECTION_PENDING') {

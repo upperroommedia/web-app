@@ -86,7 +86,11 @@ export async function runDispatchService() {
     )
       throw new Error('Serverless dispatcher requires its creator-owned Firebase app');
     const { getFirestore } = await import('firebase-admin/firestore');
-    dispatcher = new OutboxDispatcher({ db: getFirestore(owner.app), client, projectId: config.projectId, requireOpenAdmission: true });
+    const db = getFirestore(owner.app);
+    const sandboxListSettlement = config.projectId === 'urm-app-staging'
+      ? (await import('./runtime/sandbox-list-settlement')).reconcileSandboxListSettlement
+      : undefined;
+    dispatcher = new OutboxDispatcher({ db, client, projectId: config.projectId, requireOpenAdmission: true });
     const diagnostic = new DispatchDiagnostic({ db: getFirestore(owner.app), client, projectId: config.projectId,
       buildId: config.buildId, serviceRevision: `projects/${config.projectId}/locations/us-central1/services/${process.env.K_SERVICE ?? ''}/revisions/${process.env.K_REVISION ?? ''}` });
     handler = createServerlessDispatchHandler({
@@ -106,6 +110,8 @@ export async function runDispatchService() {
         const observed = await connection!.withDeadline(Date.now() + 20000, () => diagnostic.tick(signal, context));
         if (observed !== undefined) return !signal.aborted && observed;
         await connection!.withDeadline(Date.now() + 20000, () => dispatcher!.tick(signal));
+        if (sandboxListSettlement && context.delivery.kind === 'scheduler' && !signal.aborted)
+          await sandboxListSettlement(db, client, config.namespace, signal);
         return !signal.aborted && dispatcher!.healthy;
       },
     });

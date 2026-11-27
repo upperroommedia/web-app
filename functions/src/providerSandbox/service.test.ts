@@ -1,4 +1,5 @@
 import type { SandboxResource } from './types';
+import { normalizeSubsplashListPatchAck } from '../helpers/subsplashMutationAck';
 import { STAGING_SANDBOX_PROFILE } from './profile';
 const resources = new Map<string, SandboxResource>();
 let clock = 1000;
@@ -109,7 +110,9 @@ it('preserves ordered memberships and truthfully tombstones deleted rows', async
   seed('lists', 'list', { _embedded: {} });
   seed('media-items', 'media', {});
   const result = await request('/builder/v1/lists/list', 'PATCH', {
-    _embedded: { 'list-rows': [{ position: 1, type: 'media-item', _embedded: { 'media-item': { id: 'media' } } }] },
+    _embedded: {
+      'list-rows': [{ position: 1, type: 'media-item', method: 'static', _embedded: { 'media-item': { id: 'media' } } }],
+    },
   });
   expect(result.data.list_rows_count).toBe(1);
   const rowId = result.data._embedded['list-rows'][0].id;
@@ -117,12 +120,39 @@ it('preserves ordered memberships and truthfully tombstones deleted rows', async
   expect(resources.get(key('subsplash', 'list-rows', rowId))?.deleted).toBe(true);
   expect((await request('/builder/v1/list-rows?filter[source_list]=list')).data.total).toBe(0);
 });
+it('returns legacy static methods on list reads and retained-row PATCH acknowledgements', async () => {
+  seed('lists', 'list', {});
+  seed('lists', 'overflow', {});
+  seed('media-items', 'media', {});
+  const embedded = { 'source-list': { id: 'list' }, 'media-item': { id: 'media' } };
+  seed('list-rows', 'sermon', { type: 'media-item', position: 1, _embedded: embedded });
+  seed('list-rows', 'dynamic', { type: 'media-item', method: 'most_recent', position: 2, _embedded: embedded });
+  seed('list-rows', 'link', {
+    type: 'list',
+    position: 3,
+    _embedded: { 'source-list': { id: 'list' }, list: { id: 'overflow' } },
+  });
+  const expected = ['static', 'most_recent', 'static'];
+  const read = await request('/builder/v1/lists/list');
+  expect(read.data._embedded['list-rows'].map((row: { method: string }) => row.method)).toEqual(expected);
+  expect((await request('/builder/v1/list-rows/sermon')).data.method).toBe('static');
+  expect(resources.get(key('subsplash', 'list-rows', 'sermon'))?.body.method).toBeUndefined();
+  const retained = ['sermon', 'dynamic', 'link'].map((id, index) => ({ id, position: index + 1 }));
+  const patch = await request('/builder/v1/lists/list', 'PATCH', { _embedded: { 'list-rows': retained } });
+  const receipt = normalizeSubsplashListPatchAck(patch.data, 'list');
+  expect(receipt?._embedded['list-rows'].map((row) => row.method)).toEqual(expected);
+});
 it('rejects cross-list row adoption and unknown aliases without changing resources', async () => {
   seed('lists', 'list', { _embedded: {} });
   seed('lists', 'other', { _embedded: {} });
   seed('list-rows', 'foreign', { position: 1, _embedded: { 'source-list': { id: 'other' } } });
   await expect(
     request('/builder/v1/lists/list', 'PATCH', { _embedded: { 'list-rows': [{ id: 'foreign', position: 1 }] } })
+  ).rejects.toThrow('another list');
+  await expect(
+    request('/builder/v1/lists/list', 'PATCH', {
+      _embedded: { 'list-rows': [{ position: 1, _embedded: { 'source-list': { id: 'other' } } }] },
+    })
   ).rejects.toThrow('another list');
   await expect(request('/files/v1/audios/unseeded')).rejects.toThrow('not found');
 });

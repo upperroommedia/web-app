@@ -3,8 +3,9 @@ import {
   hasConfirmedCapturedEmail,
   hasStagingEmailCaptureProfile,
 } from '../../utils/providerSimulation';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import firebase from '../../firebase/firebase';
 import type { DurableAction, DurableJob } from '@upperroom/contracts/temporal';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
@@ -18,7 +19,7 @@ import TextField from '@mui/material/TextField';
 import MenuItem from '@mui/material/MenuItem';
 import Checkbox from '@mui/material/Checkbox';
 import FormControlLabel from '@mui/material/FormControlLabel';
-import { submitDurableCommand } from '../../utils/durableJobs';
+import { getSandboxListCommitReviewStatus, submitDurableCommand } from '../../utils/durableJobs';
 import {
   entityHref,
   jobTitle,
@@ -101,6 +102,60 @@ export default function JobStatusPanel({ job, compact = false, stale = false, sh
     ['repair_confirmed_changes', 'complete_fixed_cleanup'].includes(job.attention.repairPurpose ?? '')
       ? job.attention.certificateId
       : undefined;
+  const sandboxListReview =
+    !compact &&
+    canReview &&
+    availableActions.includes('resolve') &&
+    firebase?.options?.projectId === 'urm-app-staging' &&
+    job.projectId === 'urm-app-staging' &&
+    job.kind === 'sermon.publish' &&
+    job.state === 'needs_attention' &&
+    criticalReview &&
+    job.attention?.stepId === 'lists' &&
+    /^[a-f0-9]{64}$/.test(job.attention.certificateId ?? '') &&
+    job.providerExecution?.mode === 'sandbox' &&
+    job.providerExecution.profileId === 'urm-app-staging-publishing-v1' &&
+    job.providerExecution.version === 1 &&
+    job.providerExecution.scenario === 'success';
+  const sandboxScope = JSON.stringify([
+    user?.uid,
+    job.jobId,
+    job.generation,
+    job.revision,
+    job.attention?.certificateId,
+  ]);
+  const [review, setReview] = useState<{
+    scope: string;
+    approvalId: string;
+    state: 'pending' | 'issued' | 'error' | 'submitted';
+    error?: string;
+  } | null>(null);
+  const currentReview = review?.scope === sandboxScope ? review : null;
+  useEffect(() => {
+    if (!sandboxListReview || stale || currentReview?.state !== 'pending') return;
+    let active = true;
+    let timer: ReturnType<typeof setTimeout>;
+    const check = async () => {
+      try {
+        const state = await getSandboxListCommitReviewStatus(job.jobId, currentReview.approvalId);
+        if (!active) return;
+        if (state === 'issued') setReview({ ...currentReview, state });
+        else timer = setTimeout(check, 5000);
+      } catch (error) {
+        if (active)
+          setReview({
+            ...currentReview,
+            state: 'error',
+            error: error instanceof Error ? error.message : 'Review status unavailable.',
+          });
+      }
+    };
+    void check();
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [currentReview, job.jobId, sandboxListReview, stale]);
   const criticalCleanup = job.attention?.repairPurpose === 'complete_fixed_cleanup';
   const criticalRetention = criticalReview && job.attention?.requiresRetentionAcknowledgement === true;
   const knownResourceReview =
@@ -135,7 +190,18 @@ export default function JobStatusPanel({ job, compact = false, stale = false, sh
     setSubmitting(action);
     setNotice(null);
     try {
-      await submitDurableCommand(job, action, resolution);
+      const receipt = await submitDurableCommand(job, action, resolution);
+      if (resolution?.decision === 'prepare_sandbox_list_commit_review') {
+        const approvalId = receipt.sandboxListReviewRequestId;
+        if (!approvalId || !/^[a-f0-9]{64}$/.test(approvalId))
+          throw new Error('The review request ID could not be confirmed.');
+        setReview({ scope: sandboxScope, approvalId, state: 'pending' });
+        return;
+      }
+      if (resolution?.decision === 'stop_after_sandbox_list_commit' && currentReview) {
+        setReview({ ...currentReview, state: 'submitted' });
+        return;
+      }
       setNotice({
         scope: resolutionIdentity,
         error: false,
@@ -391,6 +457,57 @@ export default function JobStatusPanel({ job, compact = false, stale = false, sh
               </Button>
             </Stack>
           )}
+        {sandboxListReview && (
+          <Stack spacing={1}>
+            <Typography variant="subtitle2">Stop remaining simulated list work</Typography>
+            <Typography variant="body2">
+              Review the committed list change first. The stop keeps that simulated change and ends the remaining list work.
+            </Typography>
+            {currentReview?.state === 'pending' && (
+              <Alert severity="info">Waiting for the staging worker to verify the committed change.</Alert>
+            )}
+            {currentReview?.state === 'error' && <Alert severity="error">{currentReview.error}</Alert>}
+            {currentReview?.state === 'issued' && (
+              <Alert severity="info">
+                The worker verified the committed change. You can now stop the remaining work.
+              </Alert>
+            )}
+            {currentReview?.state === 'submitted' && (
+              <Alert severity="info">Stop requested. Waiting for the task status to update.</Alert>
+            )}
+            {!currentReview && (
+              <Button
+                disabled={stale || submitting !== null}
+                onClick={() => void perform('resolve', { decision: 'prepare_sandbox_list_commit_review' })}
+              >
+                Review simulated list change
+              </Button>
+            )}
+            {currentReview?.state === 'error' && (
+              <Button
+                disabled={stale || submitting !== null}
+                onClick={() => setReview({ ...currentReview, state: 'pending', error: undefined })}
+              >
+                Check review again
+              </Button>
+            )}
+            {currentReview?.state === 'issued' && (
+              <Button
+                color="warning"
+                variant="outlined"
+                disabled={stale || submitting !== null}
+                onClick={() =>
+                  void perform('resolve', {
+                    decision: 'stop_after_sandbox_list_commit',
+                    approvalId: currentReview.approvalId,
+                  })
+                }
+              >
+                Keep committed change and stop remaining work
+              </Button>
+            )}
+          </Stack>
+        )}
         {!compact &&
           canReview &&
           criticalReview &&

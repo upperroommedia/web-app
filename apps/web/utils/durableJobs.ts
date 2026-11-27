@@ -216,6 +216,20 @@ export async function submitDurableIntent(
   }
 }
 
+export async function getSandboxListCommitReviewStatus(
+  jobId: string,
+  approvalId: string
+): Promise<'pending' | 'issued'> {
+  const inspect = createFunctionV2<{ jobId: string; approvalId: string }, { state: 'pending' | 'issued' }>(
+    'getSandboxListCommitReviewStatus'
+  );
+  const result = await inspect({ jobId, approvalId });
+  if (result?.state !== 'pending' && result?.state !== 'issued') {
+    throw new Error('The review status could not be confirmed.');
+  }
+  return result.state;
+}
+
 export async function submitDurableCommand(
   job: DurableJob,
   action: DurableAction,

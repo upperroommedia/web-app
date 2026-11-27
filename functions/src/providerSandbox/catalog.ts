@@ -261,6 +261,7 @@ export function buildSandboxCatalogPlan(
         fail('SANDBOX_MANUAL_OVERFLOW_REFERENCE_MISSING');
       put('subsplash', 'list-rows', data.manualOverflowRowId, {
         type: 'list',
+        method: 'static',
         position: 200,
         _embedded: { 'source-list': { id: data.subsplashId }, list: { id: data.manualOverflowTargetSubsplashId } },
       });
@@ -286,6 +287,7 @@ export function buildSandboxCatalogPlan(
         data.physicalPlacement?.listItemId ?? data.uploadStatus.listItemId ?? alias(`sandbox-list-row:${doc.path}`);
       put('subsplash', 'list-rows', rowId, {
         type: 'media-item',
+        method: 'static',
         position: Math.max(1, Number(data.position ?? 0) + 1),
         _embedded: { 'source-list': { id: listId }, 'media-item': { id: mediaId } },
       });
