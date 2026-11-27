@@ -46,6 +46,63 @@ test('unknown desired mutable requests have no generic replay or provider-ID res
   expect(projection.attention).toMatchObject({ kind: 'external_result_unknown' });
   expect(projection.attention?.message).toContain('original provider request may still arrive');
 });
+test('a foreign list lock is retryable without presenting an unknown provider result', () => {
+  const projection = createDomainAttentionProjection({ kind: 'sermon.publish' }, 'lists', {
+    state: 'blocked',
+    code: 'PUBLISHING_LIST_RESOURCE_BUSY',
+    mutationSessionId: 'a'.repeat(64),
+  });
+  expect(projection).toMatchObject({
+    state: 'retrying',
+    actions: ['cancel'],
+    result: { mutationSessionId: 'a'.repeat(64) },
+    error: {
+      code: 'PUBLISHING_LIST_RESOURCE_BUSY',
+      message: 'Waiting for another publishing task to release the selected lists.',
+      retryable: true,
+    },
+  });
+  expect(projection.attention).toBeUndefined();
+});
+test('an exhausted list wait identifies the holder without offering a generic resume', () => {
+  expect(
+    createDomainAttentionProjection({ kind: 'sermon.publish' }, 'lists', {
+      state: 'failed',
+      code: 'PUBLISHING_LIST_RESOURCE_REVIEW_REQUIRED',
+      mutationSessionId: 'a'.repeat(64),
+    })
+  ).toMatchObject({
+    state: 'needs_attention',
+    actions: ['cancel'],
+    attention: { kind: 'provider_dependency', stepId: 'lists' },
+    result: { mutationSessionId: 'a'.repeat(64) },
+    error: { retryable: false },
+  });
+});
+test('list wait exhaustion preserves a different destination’s unresolved receipt', () => {
+  const existing = {
+    kind: 'external_result_unknown' as const,
+    stepId: 'soundcloud-track',
+    receiptId: 'original-receipt',
+    message: 'Review the original track creation.',
+  };
+  expect(
+    createDomainAttentionProjection(
+      {
+        kind: 'sermon.publish',
+        state: 'needs_attention',
+        actions: ['resolve'],
+        attention: existing,
+      },
+      'lists',
+      {
+        state: 'failed',
+        code: 'PUBLISHING_LIST_RESOURCE_REVIEW_REQUIRED',
+        mutationSessionId: 'a'.repeat(64),
+      }
+    )
+  ).toMatchObject({ state: 'needs_attention', actions: ['resolve'], attention: existing });
+});
 test('unknown account access cannot be resumed or cancelled before audited resolution', () => {
   expect(
     createDomainAttentionProjection({ kind: 'role.assign' }, 'claims', {

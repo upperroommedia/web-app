@@ -80,7 +80,13 @@ export interface DurableSafeError {
   provider?: 'subsplash' | 'soundcloud' | 'youtube' | 'algolia' | 'smtp' | 'storage';
 }
 export interface DurableJobAttention {
-  kind: 'reconnect_provider' | 'external_result_unknown' | 'remote_drift' | 'source_unavailable' | 'permission_changed';
+  kind:
+    | 'reconnect_provider'
+    | 'external_result_unknown'
+    | 'remote_drift'
+    | 'source_unavailable'
+    | 'permission_changed'
+    | 'provider_dependency';
   message: string;
   stepId?: string;
   receiptId?: string;
@@ -199,6 +205,7 @@ export interface DurableCommandReceipt extends DurableJobRef {
   acceptedRevision: number;
   state: 'accepted' | 'already_accepted';
   replacementJobRef?: DurableJobRef;
+  sandboxListReviewRequestId?: string;
 }
 
 /** Workflow history carries references only; activities load the private immutable intent. */

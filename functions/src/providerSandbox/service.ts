@@ -279,12 +279,23 @@ function allocationUrl(profile: SandboxStoreProfile, id: string): string {
 function mediaUrl(profile: SandboxStoreProfile, family: string, id: string): string {
   return `https://provider-sandbox.invalid/${profile.profileId}/media/${family}/${id}`;
 }
+// Older catalogs omitted the method on their two explicitly linked row shapes.
+function catalogCompatibleRow(body: SandboxResource['body']): SandboxResource['body'] {
+  if (body.method !== undefined || (body.type !== 'media-item' && body.type !== 'list')) return body;
+  const sourceId = body._embedded?.['source-list']?.id;
+  const targetId = body._embedded?.[body.type]?.id;
+  if (body.app_key !== APP || typeof sourceId !== 'string' || !sourceId || typeof targetId !== 'string' || !targetId)
+    return body;
+  return { ...body, method: 'static' };
+}
+
 async function presented(
   store: SandboxTransaction,
   profile: SandboxStoreProfile,
   resource: SandboxResource
 ): Promise<Record<string, any>> {
   const body = JSON.parse(JSON.stringify(resource.body));
+  if (resource.family === 'list-rows') return catalogCompatibleRow(body);
   if (resource.family === 'audios') {
     body._embedded = {
       ...body._embedded,
@@ -317,7 +328,7 @@ async function presented(
       .sort((a, b) => Number(a.body.position) - Number(b.body.position));
     body.list_rows_count = rows.length;
     body.max_item_count = 200;
-    body._embedded = { ...body._embedded, 'list-rows': rows.map((row) => row.body) };
+    body._embedded = { ...body._embedded, 'list-rows': rows.map((row) => catalogCompatibleRow(row.body)) };
   }
   return body;
 }
@@ -336,8 +347,12 @@ async function patchRows(store: SandboxTransaction, list: SandboxResource, rows:
     if (!Number.isInteger(row.position) || row.position < 1 || positions.has(row.position))
       throw new SandboxHttpError(400, 'Invalid row ordering');
     positions.add(row.position);
+    if (row._embedded && 'source-list' in row._embedded && row._embedded['source-list']?.id !== list.id)
+      throw new SandboxHttpError(409, 'Row belongs to another list');
+    if (!existing && (row.type === 'media-item' || row.type === 'list') && row.method === undefined)
+      throw new SandboxHttpError(400, 'New list rows require a method');
     const body = {
-      ...(existing?.body ?? {}),
+      ...(existing ? catalogCompatibleRow(existing.body) : {}),
       ...row,
       _embedded: { ...(existing?.body._embedded ?? {}), ...(row._embedded ?? {}), 'source-list': { id: list.id } },
     };

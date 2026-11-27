@@ -10,6 +10,14 @@ export interface DomainStepResult {
   result?: Record<string, unknown>;
   cancelOnly?: boolean;
 }
+export const isRetryingDomainStep = (code?: string): boolean =>
+  [
+    'PUBLISHING_AUDIO_PROCESSING',
+    'PUBLISHING_TRANSIENT',
+    'PUBLISHING_PROVIDER_ALLOCATION_PENDING',
+    'PUBLISHING_LIST_RESOURCE_BUSY',
+    'PUBLISHING_DELETION_SETTLEMENT_PENDING',
+  ].includes(code ?? '');
 /** A source-certified stop finishes recovery, without claiming the desired deletion completed. */
 export function createStoppedRepairProjection(
   job: Pick<DurableJob, 'revision' | 'result' | 'steps'>,
@@ -50,12 +58,9 @@ export function createDomainAttentionProjection(
   id: string,
   result: DomainStepResult
 ): DurableJobPatch {
-  const temporary = [
-    'PUBLISHING_AUDIO_PROCESSING',
-    'PUBLISHING_TRANSIENT',
-    'PUBLISHING_PROVIDER_ALLOCATION_PENDING',
-    'PUBLISHING_DELETION_SETTLEMENT_PENDING',
-  ].includes(result.code ?? '');
+  const temporary = isRetryingDomainStep(result.code);
+  const listDependency = result.code === 'PUBLISHING_LIST_RESOURCE_REVIEW_REQUIRED' && id === 'lists';
+  const listDependencyMessage = 'Another publishing task still holds these lists. Review that task before continuing.';
   const blockedByJob =
     result.blockingJobId && /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(result.blockingJobId)
       ? { blockingJobId: result.blockingJobId }
@@ -79,7 +84,7 @@ export function createDomainAttentionProjection(
   if (
     !result.cancelOnly &&
     job.state === 'needs_attention' &&
-    ((temporary && job.attention?.stepId !== id) ||
+    (((temporary || listDependency) && job.attention?.stepId !== id) ||
       (soundCloudReconnect && job.attention?.kind === 'external_result_unknown'))
   ) {
     // A retry in another destination cannot hide an unresolved provider receipt.
@@ -160,7 +165,7 @@ export function createDomainAttentionProjection(
         ? []
         : graphChangedUnsent || allocationSourceChanged || metadataDestinationsChanged
         ? ['cancel']
-        : temporary
+        : temporary || listDependency
         ? ['cancel']
         : account
         ? unknownAccountAccess || (result.receiptId && result.state === 'needs_review')
@@ -172,7 +177,9 @@ export function createDomainAttentionProjection(
     ...(!temporary
       ? {
           attention: {
-            kind: graphChangedUnsent
+            kind: listDependency
+              ? 'provider_dependency'
+              : graphChangedUnsent
               ? 'remote_drift'
               : unknownAccountAccess || allocationReview || mutableUnresolved || result.state === 'needs_review'
               ? 'external_result_unknown'
@@ -185,7 +192,9 @@ export function createDomainAttentionProjection(
               ? { acknowledgementId: result.acknowledgementId }
               : {}),
             ...(result.receiptId ? { receiptId: result.receiptId } : {}),
-            message: metadataDestinationsChanged
+            message: listDependency
+              ? listDependencyMessage
+              : metadataDestinationsChanged
               ? 'The selected destinations changed during this task. Cancel it to review any original update, then refresh and submit a new task.'
               : allocationSourceChanged
               ? 'The source changed while its destination result was being prepared. Cancel this task to review its original result, then refresh and submit a new task.'
@@ -210,7 +219,9 @@ export function createDomainAttentionProjection(
       : {}),
     error: {
       code: /^[A-Z0-9_]{1,100}$/.test(result.code ?? '') ? result.code! : 'DOMAIN_REVIEW_REQUIRED',
-      message: metadataDestinationsChanged
+      message: listDependency
+        ? listDependencyMessage
+        : metadataDestinationsChanged
         ? 'The selected destinations changed during this task. Cancel it to review any original update, then refresh and submit a new task.'
         : allocationSourceChanged
         ? 'The source changed while its destination result was being prepared. Cancel this task to review its original result, then refresh and submit a new task.'
@@ -222,6 +233,8 @@ export function createDomainAttentionProjection(
         ? 'The destination response could not be safely recorded. Tracking needs review before this task can continue.'
         : mutableUnresolved
         ? 'The original provider request may still arrive. Its outcome must be verified before this task can continue.'
+        : result.code === 'PUBLISHING_LIST_RESOURCE_BUSY'
+        ? 'Waiting for another publishing task to release the selected lists.'
         : result.code === 'PUBLISHING_PROVIDER_ALLOCATION_PENDING'
         ? 'Waiting for another publishing task to finish or be reviewed.'
         : result.code === 'PUBLISHING_DELETION_SETTLEMENT_PENDING'

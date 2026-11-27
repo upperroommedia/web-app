@@ -5,6 +5,7 @@ import {
   createRuntimeYouTubeRenderAuthentication,
 } from './hetzner-media';
 import { createReviewedCreateActivities } from './reviewed-create';
+import { readSandboxListStopHandoff, requestSandboxListNativeCancellation } from './sandbox-list-stop-handoff';
 import { beginClaimedPublishingStep } from './activity-step-start';
 import { readAuthoritativeCriticalRepairStepIds } from '../../../../functions/src/temporal/publishing/criticalRepairStepAuthority';
 import {
@@ -27,6 +28,7 @@ import {
   createDomainAttentionProjection,
   createDomainSuccessProjection,
   createStoppedRepairProjection,
+  isRetryingDomainStep,
   type DomainStepResult,
 } from './domain-projection';
 import type { WorkerWitness } from './worker-witness';
@@ -265,12 +267,7 @@ export function createRuntimeActivities(
   };
   const domainStep = async (ref: DurableJobRef, id: string, result: DomainStepResult) => {
     const success = result.state === 'completed';
-    const temporary = [
-      'PUBLISHING_AUDIO_PROCESSING',
-      'PUBLISHING_TRANSIENT',
-      'PUBLISHING_PROVIDER_ALLOCATION_PENDING',
-      'PUBLISHING_DELETION_SETTLEMENT_PENDING',
-    ].includes(result.code ?? '');
+    const temporary = isRetryingDomainStep(result.code);
     await recordStep(ref, {
       id,
       label: id === 'delete-plan' ? 'Prepare deletion' : id.replace(/-/g, ' '),
@@ -780,6 +777,8 @@ export function createRuntimeActivities(
     'urm-orchestration': () =>
       protect({
         repairPublishingCritical: async (ref: DurableJobRef, certificateId: string) => {
+          const simulatorStop = await readSandboxListStopHandoff(db, ref, certificateId, store.assertCurrentInTransaction);
+          if (simulatorStop) return simulatorStop;
           const certificate = await criticalRepair.loadCertificate(ref, certificateId);
           const affectedSteps = await readAuthoritativeCriticalRepairStepIds(ref, certificate, db);
           const result = await executions.withRepairSteps(ref, affectedSteps, async () => {
@@ -933,7 +932,17 @@ export function createRuntimeActivities(
         ...select(bundleActivities, bundleControlNames),
         ...createCriticalRepairCompilationActivities(db, store, projectId),
         ...createReviewedCreateActivities(db, store, projectId),
-        ...createLifecycleActivities(store, { authorizeCriticalRepair: criticalRepair.loadCertificate }),
+        requestSandboxListNativeCancellation: async (ref: DurableJobRef, certificateId: string) => {
+          if (!client) throw new Error('SANDBOX_LIST_NATIVE_CANCELLATION_UNAVAILABLE');
+          await requestSandboxListNativeCancellation(
+            db, client, ref, certificateId, executions.current(), store.assertCurrentInTransaction
+          );
+        },
+        ...createLifecycleActivities(store, {
+          authorizeCriticalRepair: async (ref, certificateId) =>
+            (await readSandboxListStopHandoff(db, ref, certificateId, store.assertCurrentInTransaction)) ??
+            criticalRepair.loadCertificate(ref, certificateId),
+        }),
         ...createEmailControlActivities({ db, store, projectId }),
         ...createImageControlActivities({
           imagesBucket: getFirebaseImagesBucket(),

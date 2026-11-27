@@ -21,6 +21,7 @@ function activityMocks(trace: string[] = []) {
     cleanupCancelledPublishing: jest.fn().mockResolvedValue({ state: 'completed', cancelOnly: true }),
     releasePublishingAudio: jest.fn().mockResolvedValue({ released: true }),
     repairPublishingCritical: jest.fn().mockResolvedValue(complete()),
+    requestSandboxListNativeCancellation: jest.fn().mockResolvedValue(undefined),
     savePublishingCreateReviewCheckpoint: jest.fn().mockResolvedValue(undefined),
     loadPublishingCreateReviewContinuation: jest.fn().mockResolvedValue(undefined),
     compilePublishingCriticalRepairEvidence: jest.fn().mockResolvedValue({ state: 'ready' }),
@@ -225,6 +226,37 @@ describe('native publishing workflows', () => {
         },
         await handle.fetchHistory()
       );
+    });
+  });
+  it('rechecks foreign list ownership without replaying completed provider stages', async () => {
+    const activities = activityMocks();
+    activities.applyPublishingLists.mockResolvedValueOnce({
+      state: 'blocked',
+      code: 'PUBLISHING_LIST_RESOURCE_BUSY',
+      mutationSessionId: 'a'.repeat(64),
+    });
+    const replay = {
+      workflowsPath: require.resolve('./index'),
+      interceptors: { workflowModules: [require.resolve('./fastTimers.testFixture')] },
+    };
+    const worker = await Worker.create({
+      ...replay,
+      connection: environment.nativeConnection,
+      taskQueue: 'urm-orchestration',
+      activities,
+    });
+    await withControls(activities, worker, environment, async () => {
+      const handle = await environment.client.workflow.start(publishingWorkflow, {
+        workflowId: 'publish-after-foreign-list-lock',
+        taskQueue: 'urm-orchestration',
+        args: [ref],
+      });
+      await expect(handle.result()).resolves.toEqual(complete());
+      expect(activities.applyPublishingLists).toHaveBeenCalledTimes(2);
+      expect(activities.ensurePublishingMedia).toHaveBeenCalledTimes(1);
+      expect(activities.ensurePublishingSoundCloud).toHaveBeenCalledTimes(1);
+      expect(activities.compilePublishingCriticalRepairEvidence).not.toHaveBeenCalled();
+      await Worker.runReplayHistory(replay, await handle.fetchHistory());
     });
   });
   it('does not automatically repeat an ambiguous create and resumes only after signal', async () => {
@@ -643,6 +675,77 @@ describe('native publishing workflows', () => {
       expect(activities.commitPublishingProjection).not.toHaveBeenCalled();
     });
   });
+
+  it('closes an observed sandbox list partial stop without retrying the original list mutation', async () => {
+    const activities = activityMocks();
+    const certificateId = '6'.repeat(64);
+    activities.requestSandboxListNativeCancellation.mockImplementation(async () => {
+      const { namespace, workflowExecution } = Context.current().info;
+      await environment.client.workflowService.requestCancelWorkflowExecution({
+        namespace,
+        workflowExecution,
+        identity: 'urm-staging-sandbox-list-settlement',
+        requestId: 'controlled-sandbox-list-native-cancellation',
+      });
+    });
+    activities.applyPublishingLists.mockResolvedValue({
+      state: 'blocked',
+      code: 'PROVIDER_MUTATION_UNRESOLVED',
+      mutationSessionId: '7'.repeat(64),
+    });
+    activities.repairPublishingCritical.mockResolvedValue({
+      state: 'completed',
+      mode: 'partial_stop',
+      contentPreserved: true,
+      providerEffects: 'partial',
+      nativeCancellationRequired: true,
+    } as any);
+    const worker = await Worker.create({
+      connection: environment.nativeConnection,
+      taskQueue: 'urm-orchestration',
+      workflowsPath: require.resolve('./index'),
+      activities,
+      interceptors: { workflowModules: [require.resolve('./fastTimers.testFixture')] },
+    });
+    await withControls(activities, worker, environment, async () => {
+      const handle = await environment.client.workflow.start(publishingWorkflow, {
+        workflowId: 'publish-observed-sandbox-list-partial-stop',
+        taskQueue: 'urm-orchestration',
+        args: [ref],
+      });
+      let waiting = false;
+      for (let count = 0; count < 100; count++) {
+        const status = await handle.query(publishingStatus);
+        waiting = status.step === 'lists' && status.state === 'blocked';
+        if (waiting) break;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      expect(waiting).toBe(true);
+      await handle.signal(publishingCriticalRepair, { certificateId });
+      await expect(handle.result()).rejects.toBeInstanceOf(WorkflowFailedError);
+      expect((await handle.describe()).status.name).toBe('CANCELLED');
+      expect(activities.repairPublishingCritical).toHaveBeenCalledTimes(1);
+      expect(activities.repairPublishingCritical).toHaveBeenCalledWith(ref, certificateId);
+      expect(activities.requestSandboxListNativeCancellation).toHaveBeenCalledTimes(1);
+      expect(activities.requestSandboxListNativeCancellation).toHaveBeenCalledWith(ref, certificateId);
+      expect(activities.applyPublishingLists).toHaveBeenCalledTimes(1);
+      expect(activities.cleanupCancelledPublishing).not.toHaveBeenCalled();
+      expect(activities.releasePublishingAudio).not.toHaveBeenCalled();
+      expect(activities.commitPublishingProjection).not.toHaveBeenCalled();
+      expect(activities.finishDurableJob).toHaveBeenCalledWith(ref, 'cancelled');
+      const history = await handle.fetchHistory();
+      expect(history.events?.filter((event) =>
+        event.workflowExecutionCancelRequestedEventAttributes?.identity === 'urm-staging-sandbox-list-settlement'
+      )).toHaveLength(1);
+      await Worker.runReplayHistory(
+        {
+          workflowsPath: require.resolve('./index'),
+          interceptors: { workflowModules: [require.resolve('./fastTimers.testFixture')] },
+        },
+        history
+      );
+    });
+  });
   it('late original response wakes only the private evidence compiler', async () => {
     const activities = activityMocks();
     activities.ensurePublishingMedia.mockResolvedValue({
@@ -753,6 +856,47 @@ describe('native publishing workflows', () => {
         'projection',
         'PUBLISHING_DELETION_SETTLEMENT_REVIEW_REQUIRED',
         undefined
+      );
+      expect(activities.finishDurableJob).not.toHaveBeenCalled();
+      await handle.cancel();
+      await expect(wait).rejects.toBeInstanceOf(WorkflowFailedError);
+    });
+  });
+
+  it('caps foreign list retries and retains the exact holder in the review activity', async () => {
+    const activities = activityMocks();
+    const holder = 'a'.repeat(64);
+    activities.applyPublishingLists.mockResolvedValue({
+      state: 'blocked',
+      code: 'PUBLISHING_LIST_RESOURCE_BUSY',
+      mutationSessionId: holder,
+    });
+    const worker = await Worker.create({
+      connection: environment.nativeConnection,
+      taskQueue: 'urm-orchestration',
+      workflowsPath: require.resolve('./index'),
+      activities,
+      interceptors: { workflowModules: [require.resolve('./fastTimers.testFixture')] },
+    });
+    await withControls(activities, worker, environment, async () => {
+      const handle = await environment.client.workflow.start(publishingWorkflow, {
+        workflowId: 'publish-foreign-list-lock-budget',
+        taskQueue: 'urm-orchestration',
+        args: [ref],
+      });
+      const wait = handle.result();
+      wait.catch(() => {});
+      for (let i = 0; i < 300 && !activities.projectPublishingAttention.mock.calls.length; i++)
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(activities.applyPublishingLists).toHaveBeenCalledTimes(121);
+      expect(activities.ensurePublishingMedia).toHaveBeenCalledTimes(1);
+      expect(activities.ensurePublishingSoundCloud).toHaveBeenCalledTimes(1);
+      expect(activities.projectPublishingAttention).toHaveBeenCalledWith(
+        ref,
+        'lists',
+        'PUBLISHING_LIST_RESOURCE_REVIEW_REQUIRED',
+        undefined,
+        holder
       );
       expect(activities.finishDurableJob).not.toHaveBeenCalled();
       await handle.cancel();

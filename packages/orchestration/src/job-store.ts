@@ -569,6 +569,7 @@ function validatePatch(patch: DurableJobPatch, job: DurableJob): void {
         'remote_drift',
         'source_unavailable',
         'permission_changed',
+        'provider_dependency',
       ].includes(attention.kind)
     )
       invalid('Invalid attention');

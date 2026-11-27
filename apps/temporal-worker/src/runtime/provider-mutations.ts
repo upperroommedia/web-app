@@ -226,6 +226,7 @@ export function createProviderMutationRegistry(options: {
         payload: { target: request.target, body: request.payload },
         executionId: identity(),
         prepareEvidenceWakeup: options.prepareEvidenceWakeup,
+        normalizeAcknowledgement: request.normalizeAcknowledgement,
         assertCurrentInTransaction: async (tx) => {
           await options.assertCurrentInTransaction(tx, ref);
           await options.assertNewProviderEffectInTransaction?.(tx, ref);

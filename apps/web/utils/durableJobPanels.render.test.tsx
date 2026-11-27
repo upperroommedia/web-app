@@ -11,6 +11,7 @@ const collectionDataMock = jest.fn();
 const documentDataMock = jest.fn();
 const providerEnvironmentMock = jest.fn();
 let admin = true;
+let mockRuntimeProject = 'urm-app';
 // This render suite consumes verified provider status; callable initialization and status loading
 // belong to the provider context's integration boundary, not the panel's Firebase fixtures.
 jest.mock('../context/provider/ProviderEnvironmentContext', () => ({
@@ -31,7 +32,11 @@ jest.mock('../utils/durableJobs', () => ({
   DurableAdmissionUnknownError: class extends Error {},
 }));
 jest.mock('../components/AvatarWithDefaultImage', () => ({ __esModule: true, default: () => null }));
-jest.mock('../firebase/firebase', () => ({ isDevelopment: false }));
+jest.mock('../firebase/firebase', () => ({
+  __esModule: true,
+  isDevelopment: false,
+  default: { get options() { return { projectId: mockRuntimeProject }; } },
+}));
 jest.mock('../firebase/firestore', () => ({
   __esModule: true,
   default: {},
@@ -112,6 +117,7 @@ const buttonMarkup = (html: string, label: string) =>
 
 beforeEach(() => {
   admin = true;
+  mockRuntimeProject = 'urm-app';
   jest.clearAllMocks();
   providerEnvironmentMock.mockReturnValue({
     status: {
@@ -142,6 +148,25 @@ beforeEach(() => {
 });
 
 describe('rendered durable job tracking', () => {
+  it('offers simulator list review only to a staging administrator for the matching sandbox publish', () => {
+    const stopped = job({
+      projectId: 'urm-app-staging',
+      kind: 'sermon.publish',
+      state: 'needs_attention',
+      actions: ['resolve'],
+      attention: {
+        kind: 'external_result_unknown', stepId: 'lists', resolutionKind: 'critical_repair',
+        certificateId: 'a'.repeat(64), message: 'Review required.',
+      },
+      providerExecution: { mode: 'sandbox', profileId: 'urm-app-staging-publishing-v1', version: 1, scenario: 'success' },
+    });
+    expect(renderToStaticMarkup(<JobStatusPanel job={stopped} />)).not.toContain('Review simulated list change');
+    mockRuntimeProject = 'urm-app-staging';
+    expect(renderToStaticMarkup(<JobStatusPanel job={stopped} />)).toContain('Review simulated list change');
+    expect(renderToStaticMarkup(<JobStatusPanel job={stopped} />)).not.toContain('Keep committed change and stop remaining work');
+    admin = false;
+    expect(renderToStaticMarkup(<JobStatusPanel job={stopped} />)).not.toContain('Review simulated list change');
+  });
   it('exposes the advanced configuration disclosure state and its controlled content', () => {
     const closed = renderToStaticMarkup(<SermonPublishPanel sermon={sermon} />);
     expect(buttonMarkup(closed, 'Advanced publish config')[0]).toContain('aria-expanded="false"');

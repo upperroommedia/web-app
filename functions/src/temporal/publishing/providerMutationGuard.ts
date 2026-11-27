@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { isTerminalSandboxListPartialStop } from './retainedSandboxListTerminal';
 import type { Firestore, Transaction } from 'firebase-admin/firestore';
 
 /** Private, non-expiring: a provider RPC can outlive every local lease and worker. */
@@ -49,7 +50,7 @@ interface SessionRecord {
   scope: ProviderMutationScope;
   resourceKeys: string[];
   resources: ProviderMutationResource[];
-  state: 'active' | 'committed' | 'aborted';
+  state: 'active' | 'committed' | 'aborted' | 'sandbox_partial_stop';
   createdAtMillis: number;
   effectsClosed?: boolean;
 }
@@ -128,6 +129,7 @@ const validate = (value: string): void => {
 };
 const resourceKey = (scope: ProviderMutationScope, resource: ProviderMutationResource): string =>
   providerMutationFingerprint([scope.projectId, resource.provider, resource.account, resource.resourceId]);
+export { resourceKey as providerMutationResourceKey };
 export class ProviderMutationGuardError extends Error {
   readonly code: string;
   readonly mutationSessionId?: string;
@@ -138,6 +140,8 @@ export class ProviderMutationGuardError extends Error {
     if (sessionId && /^[a-f0-9]{64}$/.test(sessionId)) this.mutationSessionId = sessionId;
   }
 }
+// Keep the default classification for callers that cannot safely retry a preflight.
+export class ForeignProviderMutationLockError extends ProviderMutationGuardError {}
 const blocked = (sessionId?: string): ProviderMutationGuardError =>
   new ProviderMutationGuardError('PROVIDER_MUTATION_UNRESOLVED', sessionId);
 /** Firestore limits are bytes, not resource counts. Leave room for protobuf/index overhead and fence writes.
@@ -286,6 +290,7 @@ export async function acquireProviderMutationSession(options: {
       return;
     }
     const previousOwners = await readLockOwners(tx, options.db, locks);
+    let foreignSessionId: string | undefined;
     for (const lock of locks) {
       if (!lock.exists) continue;
       if (lock.get('state') !== 'held') throw blocked();
@@ -300,8 +305,41 @@ export async function acquireProviderMutationSession(options: {
         !owner.get('resourceKeys').includes(lock.id)
       )
         throw blocked(ownerId);
-      if (!['committed', 'aborted'].includes(owner.get('state'))) throw blocked(ownerId);
+      if (['committed', 'aborted'].includes(owner.get('state'))) continue;
+      if (owner.get('state') === 'sandbox_partial_stop') {
+        if (!(await isTerminalSandboxListPartialStop(tx, options.db, options.scope.projectId, owner, lock)))
+          throw blocked(ownerId);
+        continue;
+      }
+      const holder = owner.get('scope') as ProviderMutationScope | undefined;
+      const heldResources = owner.get('resources') as ProviderMutationResource[] | undefined;
+      const heldKeys = owner.get('resourceKeys') as string[];
+      if (
+        owner.get('state') !== 'active' ||
+        holder?.projectId !== options.scope.projectId ||
+        lock.get('schemaVersion') !== 1 ||
+        lock.get('projectId') !== holder.projectId ||
+        typeof holder.jobId !== 'string' ||
+        !/^[A-Za-z0-9_-]{1,256}$/.test(holder.jobId) ||
+        holder.jobId === options.scope.jobId ||
+        lock.get('jobId') !== holder.jobId ||
+        !Array.isArray(heldResources) ||
+        heldResources.length !== heldKeys.length ||
+        !heldResources.every(
+          (resource, index) =>
+            resource &&
+            ['subsplash', 'soundcloud'].includes(resource.provider) &&
+            [resource.account, resource.resourceType, resource.resourceId].every(
+              (value) =>
+                typeof value === 'string' && Boolean(value.trim()) && value.length <= 1024 && !/[\r\n]/.test(value)
+            ) &&
+            resourceKey(holder, resource) === heldKeys[index]
+        )
+      )
+        throw blocked(ownerId);
+      foreignSessionId ??= ownerId;
     }
+    if (foreignSessionId) throw new ForeignProviderMutationLockError('PROVIDER_MUTATION_UNRESOLVED', foreignSessionId);
     tx.create(ref, record);
     locks.forEach((lock) => tx.set(lock.ref, lockRecord));
   });
@@ -371,6 +409,7 @@ export async function executeProviderMutationOnce<T>(options: {
   assertCurrentInTransaction?: ProviderMutationFence;
   transactionRunner?: ProviderMutationTransactionRunner;
   prepareEvidenceWakeup?: PrepareProviderMutationEvidenceWakeup;
+  normalizeAcknowledgement?: (result: T) => T;
   send: () => Promise<ProviderMutationCompletion<T>>;
 }): Promise<T> {
   validate(options.step);
@@ -422,8 +461,18 @@ export async function executeProviderMutationOnce<T>(options: {
   if (previous) return previous.result as T;
   try {
     const completion = await options.send();
-    const normalized =
-      completion.completion === 'acknowledged' ? boundedAcknowledgementResult(completion.result) : undefined;
+    let acknowledged: { result: T; normalized: ReturnType<typeof boundedAcknowledgementResult> } | undefined;
+    if (completion.completion === 'acknowledged') {
+      try {
+        const result = options.normalizeAcknowledgement
+          ? options.normalizeAcknowledgement(completion.result)
+          : completion.result;
+        acknowledged = { result, normalized: boundedAcknowledgementResult(result) };
+      } catch {
+        // A malformed result cannot erase the original synchronous acknowledgement.
+      }
+    }
+    const normalized = acknowledged?.normalized;
     if (
       completion.completion === 'rejected_no_effect' &&
       (completion.evidence.transport !== 'original_http_response' ||
@@ -479,11 +528,11 @@ export async function executeProviderMutationOnce<T>(options: {
       });
       wake?.();
     });
-    if (completion.completion === 'acknowledged' && !normalized?.valid)
-      throw new ProviderMutationGuardError('PROVIDER_MUTATION_RESULT_REPAIR_REQUIRED', session.id);
     if (completion.completion === 'rejected_no_effect')
       throw new ProviderMutationGuardError('PROVIDER_MUTATION_REJECTED_NO_EFFECT', session.id);
-    return completion.result;
+    if (!acknowledged || !acknowledged.normalized.valid)
+      throw new ProviderMutationGuardError('PROVIDER_MUTATION_RESULT_REPAIR_REQUIRED', session.id);
+    return acknowledged.result;
   } catch (error) {
     await session.db
       .runTransaction(async (tx) => {
@@ -894,7 +943,8 @@ export async function assertProviderMutationResourcesSettled(options: {
         providerMutationFingerprint(owner.get('scope')) !== lock.get('sessionId') ||
         !Array.isArray(owner.get('resourceKeys')) ||
         !owner.get('resourceKeys').includes(lock.id) ||
-        !['committed', 'aborted'].includes(owner.get('state'))
+        (!['committed', 'aborted'].includes(owner.get('state')) &&
+          !(await isTerminalSandboxListPartialStop(tx, options.db, options.projectId, owner, lock)))
       )
         throw blocked(lock.get('sessionId'));
     }
@@ -929,6 +979,11 @@ export async function assertProviderMutationResourcesHaveNoUnknownRequests(optio
         !session.get('resourceKeys').includes(lock.id)
       )
         throw blocked(sessionId);
+      if (session.get('state') === 'sandbox_partial_stop') {
+        if (!(await isTerminalSandboxListPartialStop(tx, options.db, options.projectId, session, lock)))
+          throw blocked(sessionId);
+        continue;
+      }
       if (inspectedOwners.has(sessionId)) continue;
       inspectedOwners.add(sessionId);
       if (['committed', 'aborted'].includes(session.get('state'))) continue;

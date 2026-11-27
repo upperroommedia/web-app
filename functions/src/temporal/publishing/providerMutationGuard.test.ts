@@ -7,6 +7,10 @@ import {
   PROVIDER_MUTATION_DOCUMENT_BYTE_BUDGET,
   PROVIDER_MUTATION_REQUEST_BYTE_BUDGET,
   acquireProviderMutationSession,
+  ForeignProviderMutationLockError,
+  ProviderMutationGuardError,
+  PROVIDER_MUTATION_SESSIONS,
+  PROVIDER_MUTATION_LOCKS,
   prepareProviderMutationEffectsClosed,
   prepareZeroEffectsProviderMutationAbort,
   assertProviderMutationZeroEffectsProof,
@@ -199,6 +203,80 @@ describe('provider mutation original completion batching', () => {
     expect(runTransaction).not.toHaveBeenCalled();
   });
 
+  test.each([
+    ['foreign holder', 'earlier', 'test', 1, 'list', ForeignProviderMutationLockError],
+    ['same job', 'candidate', 'test', 1, 'list', ProviderMutationGuardError],
+    ['mismatched lock project', 'earlier', 'wrong-project', 1, 'list', ProviderMutationGuardError],
+    ['invalid lock schema', 'earlier', 'test', 0, 'list', ProviderMutationGuardError],
+    ['mismatched resource', 'earlier', 'test', 1, 'other-list', ProviderMutationGuardError],
+  ] as const)(
+    'classifies an active %s before writing the new session',
+    async (_, holderJob, lockProject, schemaVersion, heldResourceId, ErrorType) => {
+      const scope = { projectId: 'test', jobId: 'candidate', operation: 'lists' };
+      const holder = { projectId: 'test', jobId: holderJob, operation: 'prior-lists' };
+      const holderId = providerMutationFingerprint(holder);
+      const resource = {
+        provider: 'subsplash' as const,
+        account: 'app:9XTSHD',
+        resourceType: 'list',
+        resourceId: 'list',
+      };
+      const lockId = providerMutationFingerprint([
+        scope.projectId,
+        resource.provider,
+        resource.account,
+        resource.resourceId,
+      ]);
+      const rows = new Map<string, Record<string, unknown>>([
+        [
+          `${PROVIDER_MUTATION_SESSIONS}/${holderId}`,
+          {
+            schemaVersion: 1,
+            scope: holder,
+            state: 'active',
+            resourceKeys: [lockId],
+            resources: [{ ...resource, resourceId: heldResourceId }],
+          },
+        ],
+        [
+          `${PROVIDER_MUTATION_LOCKS}/${lockId}`,
+          {
+            schemaVersion,
+            state: 'held',
+            sessionId: holderId,
+            projectId: lockProject,
+            jobId: holderJob,
+          },
+        ],
+      ]);
+      const snap = ({ path, id }: { path: string; id: string }) => ({
+        id,
+        exists: rows.has(path),
+        get: (field: string) => rows.get(path)?.[field],
+      });
+      const tx = {
+        get: jest.fn(async (ref) => snap(ref)),
+        getAll: jest.fn(async (...refs) => refs.map(snap)),
+        create: jest.fn(),
+        set: jest.fn(),
+      };
+      const db = {
+        collection: (name: string) => ({ doc: (id: string) => ({ id, path: `${name}/${id}` }) }),
+        runTransaction: async (read: (transaction: typeof tx) => unknown) => read(tx),
+      } as unknown as Firestore;
+      const err: unknown = await acquireProviderMutationSession({
+        db,
+        scope,
+        resources: [resource],
+        assertCurrentInTransaction: async () => {},
+      }).catch((error: unknown) => error);
+      expect((err as Error).constructor).toBe(ErrorType);
+      expect(err).toMatchObject({ code: 'PROVIDER_MUTATION_UNRESOLVED', mutationSessionId: holderId });
+      expect(tx.create).not.toHaveBeenCalled();
+      expect(tx.set).not.toHaveBeenCalled();
+    }
+  );
+
   function closureFixture() {
     const scope = { projectId: 'test', jobId: 'job', operation: 'delete' },
       resource = { provider: 'subsplash' as const, account: 'app:9XTSHD', resourceType: 'media', resourceId: 'media' },
@@ -265,7 +343,7 @@ describe('provider mutation original completion batching', () => {
     expect(f.update).not.toHaveBeenCalled();
   });
 
-  test('evidence wake preparation reads before writes and publishes only with the original completion', async () => {
+  test.each([false, true])('original completion and wake persist when normalization fails: %s', async (malformed) => {
     type Stored = Record<string, unknown>;
     const records = new Map<string, Stored>(),
       scope = { projectId: 'test', jobId: 'job', operation: 'metadata' },
@@ -352,14 +430,19 @@ describe('provider mutation original completion batching', () => {
     const session: ProviderMutationSession = { db, id, scope, resources: [resource] },
       fence = jest.fn(async () => {});
     let evidenceId: string | undefined;
-    await executeProviderMutationOnce({
+    const send = jest.fn(async () => ({ completion: 'acknowledged' as const, result: 'remote' }));
+    const request: Parameters<typeof executeProviderMutationOnce<string>>[0] = {
       session,
       step: 'patch',
       method: 'PATCH',
       payload: {},
       executionId: 'execution',
       assertCurrentInTransaction: fence,
-      send: async () => ({ completion: 'acknowledged', result: 'remote' }),
+      send,
+      normalizeAcknowledgement: (value: string) => {
+        if (malformed) throw new Error('SUBSPLASH_MUTATION_ACK_INVALID');
+        return value;
+      },
       prepareEvidenceWakeup: async (tx, _session, fact) => {
         evidenceId = fact.factId;
         expect((await tx.get(db.doc('routing/current'))).get('generation')).toBe(1);
@@ -367,13 +450,26 @@ describe('provider mutation original completion batching', () => {
           tx.create(reference('wake/current'), { factId: fact.factId, signal: 'publishingEvidenceAvailable' });
         };
       },
-    });
+    };
+    if (malformed)
+      await expect(executeProviderMutationOnce(request)).rejects.toMatchObject({
+        code: 'PROVIDER_MUTATION_RESULT_REPAIR_REQUIRED',
+      });
+    else await expect(executeProviderMutationOnce(request)).resolves.toBe('remote');
     expect(fence).toHaveBeenCalledTimes(1);
-    expect(records.get(`temporalProviderMutationFacts/${evidenceId}`)?.completion).toBe('acknowledged');
+    const fact = records.get(`temporalProviderMutationFacts/${evidenceId}`);
+    expect(fact?.completion).toBe('acknowledged');
+    if (malformed) {
+      expect(fact).toMatchObject({ resultUnavailable: true });
+      expect(fact).not.toHaveProperty('result');
+    }
     expect(
       records.get(`temporalProviderMutationSessions/${id}/requests/${providerMutationFingerprint('patch')}`)?.state
-    ).toBe('acknowledged');
+    ).toBe(malformed ? 'acknowledged_unprojectable' : 'acknowledged');
     expect(records.get('wake/current')).toEqual({ factId: evidenceId, signal: 'publishingEvidenceAvailable' });
+    if (malformed) await expect(executeProviderMutationOnce(request)).rejects.toThrow('PROVIDER_MUTATION_UNRESOLVED');
+    else await expect(executeProviderMutationOnce(request)).resolves.toBe('remote');
+    expect(send).toHaveBeenCalledTimes(1);
   });
 
   function boundedFixture() {

@@ -38,6 +38,7 @@ export interface PublishingMutationRequest<T> {
   step: string;
   method: 'POST' | 'PATCH' | 'PUT' | 'DELETE';
   payload: unknown;
+  normalizeAcknowledgement?: (result: T) => T;
   send: () => Promise<ProviderMutationCompletion<T>>;
 }
 export interface PublishingAcknowledgedProjectionPlan {
@@ -173,7 +174,7 @@ export async function runPublishingProviderMutation<T>(request: PublishingMutati
   if (!scope) {
     const result = await request.send();
     if (result.completion !== 'acknowledged') throw new Error('PROVIDER_MUTATION_REJECTED_NO_EFFECT');
-    return result.result;
+    return request.normalizeAcknowledgement ? request.normalizeAcknowledgement(result.result) : result.result;
   }
   if (
     scope.purpose === 'critical_repair' ||

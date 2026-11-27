@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { Firestore, Query, QueryDocumentSnapshot } from 'firebase-admin/firestore';
+import type { Firestore, Query, QueryDocumentSnapshot, Transaction } from 'firebase-admin/firestore';
 import type { DurableJobRef } from '@upperroom/contracts/temporal';
 import type { PrivatePublishingIntent } from './types';
 import type { PublishingEntityIntent } from './entityMutations';
@@ -60,13 +60,18 @@ const fingerprint = (value: unknown): string =>
     .update(JSON.stringify(canonical(value)))
     .digest('hex');
 
-export function firestoreMutationCanonicalReader(db: Firestore): MutationCanonicalReader {
+export function firestoreMutationCanonicalReader(db: Firestore, transaction?: Transaction): MutationCanonicalReader {
   const convert = (doc: QueryDocumentSnapshot): MutationCanonicalDocument => ({
     path: doc.ref.path,
     id: doc.id,
     data: doc.data(),
   });
   const all = async (query: Query): Promise<MutationCanonicalDocument[]> => {
+    if (transaction) {
+      const result = await transaction.get(query.limit(401));
+      if (result.size > 400) return invalid('PROVIDER_MUTATION_CANONICAL_QUERY_TOO_LARGE');
+      return result.docs.map(convert);
+    }
     const result: MutationCanonicalDocument[] = [];
     let cursor: QueryDocumentSnapshot | undefined;
     for (;;) {
@@ -80,7 +85,8 @@ export function firestoreMutationCanonicalReader(db: Firestore): MutationCanonic
   };
   return {
     async read(path) {
-      const doc = await db.doc(path).get();
+      const ref = db.doc(path);
+      const doc = transaction ? await transaction.get(ref) : await ref.get();
       return doc.exists ? { path: doc.ref.path, id: doc.id, data: doc.data()! } : undefined;
     },
     collection: (path) => all(db.collection(path)),
